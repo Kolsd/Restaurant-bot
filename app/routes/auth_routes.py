@@ -43,11 +43,11 @@ class LoginRequest(BaseModel):
 
 _ADMIN_ROLES = {"owner", "admin", "gerente"}
 _ROLE_REDIRECT = {
-    "mesero":       "/mesero",   "waiter":   "/mesero",
-    "cocina":       "/cocina",   "cook":     "/cocina",   "cocinero": "/cocina",
-    "caja":         "/caja",     "cashier":  "/caja",     "cajero":   "/caja",
+    "mesero":       "/waiter",   "waiter":   "/waiter",
+    "cocina":       "/kitchen",  "cook":     "/kitchen",  "cocinero": "/kitchen",
+    "caja":         "/cashier",  "cashier":  "/cashier",  "cajero":   "/cashier",
     "bar":          "/bar",
-    "domiciliario": "/domiciliario", "delivery": "/domiciliario",
+    "domiciliario": "/courier",  "delivery": "/courier",
 }
 
 

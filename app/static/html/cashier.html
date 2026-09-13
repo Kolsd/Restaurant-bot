@@ -6,7 +6,7 @@
 <title>Mesio — Caja v2</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link rel="stylesheet" href="/static/css/tokens.css">
-<link rel="stylesheet" href="/static/css/pages/caja.css">
+<link rel="stylesheet" href="/static/css/pages/cashier.css">
 <style>
 /* ── v2 dark POS shell ───────────────────────────────── */
 body { background: #0b0d12; color: #E8EAEE; overflow: hidden; height: 100vh; font-family: var(--font-body); }
@@ -241,17 +241,17 @@ body { background: #0b0d12; color: #E8EAEE; overflow: hidden; height: 100vh; fon
       </svg>
     </a>
     <div class="rail-sep"></div>
-    <a href="/caja" class="rail-link active" title="Caja">
+    <a href="/cashier" class="rail-link active" title="Caja">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
         <rect x="2" y="4" width="12" height="9" rx="1"/><path d="M2 7h12"/><circle cx="5" cy="10" r="0.8" fill="currentColor"/>
       </svg>
     </a>
-    <a href="/cocina" class="rail-link" title="Cocina">
+    <a href="/kitchen" class="rail-link" title="Cocina">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M3 2v6a5 5 0 0010 0V2M3 5h10M8 13v2"/>
       </svg>
     </a>
-    <a href="/mesero" class="rail-link" title="Mesero">
+    <a href="/waiter" class="rail-link" title="Mesero">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
         <rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 5h12"/>
         <circle cx="4" cy="3.5" r="0.5" fill="currentColor"/>
@@ -420,7 +420,7 @@ body { background: #0b0d12; color: #E8EAEE; overflow: hidden; height: 100vh; fon
 
 </div><!-- /.caja-v2 -->
 
-<!-- ── Pay modal (preserved from caja.html) ── -->
+<!-- ── Pay modal (preserved from cashier.html) ── -->
 <div id="pay-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;align-items:center;justify-content:center;">
   <div style="background:#1a1d26;border-radius:16px;width:480px;max-width:95vw;max-height:85vh;overflow-y:auto;padding:28px;box-shadow:0 24px 64px rgba(0,0,0,0.5);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
@@ -442,7 +442,7 @@ body { background: #0b0d12; color: #E8EAEE; overflow: hidden; height: 100vh; fon
   </div>
 </div>
 
-<!-- ── Quick invoice screen (preserved from caja.html) ── -->
+<!-- ── Quick invoice screen (preserved from cashier.html) ── -->
 <div id="quick-invoice-screen" style="display:none;position:fixed;inset:0;background:#111827;z-index:2000;flex-direction:column;">
   <div style="padding:16px 20px;border-bottom:1px solid #1a1d26;display:flex;align-items:center;justify-content:space-between;background:#0a0c10;">
     <div style="font-weight:700;font-size:15px;color:#E8EAEE;">🧾 Nueva Factura</div>
@@ -483,7 +483,7 @@ body { background: #0b0d12; color: #E8EAEE; overflow: hidden; height: 100vh; fon
 </style>
 
 <script src="/static/js/mesio-utils.js"></script>
-<script src="/static/js/pages/caja.js" defer></script>
+<script src="/static/js/pages/cashier.js" defer></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   // Populate staff name and branch from localStorage

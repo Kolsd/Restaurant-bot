@@ -14,11 +14,11 @@ Script auto-invocado como pytest test. Seis checks:
 3. **FETCH** — cada `fetch('/api/…')` contra rutas FastAPI registradas (segment-match soporta `{param}` + string concat `'/api/x/' + id`)
 4. **HTML-SEED (nombres)** — nombres españoles hardcoded en admin HTML (`María`, `Carlos`, etc.)
 5. **HTML-SEED (dinero)** — literales `$X.YM` / `$Nk` en contenido HTML admin
-6. **PAGE-CONTRACTS** — botones de acción load-bearing + fetches obligatorios por página operacional. Catches "página renderiza plana sin botones" (regresión real 2026-05-05 en `domiciliario.html`).
+6. **PAGE-CONTRACTS** — botones de acción load-bearing + fetches obligatorios por página operacional. Catches "página renderiza plana sin botones" (regresión real 2026-05-05 en `courier.html`).
 
 Supresión con `// lint-allow: razón` (JS) o `<!-- lint-allow: razón -->` (HTML). **PAGE-CONTRACTS NO permite supresión** — si renombrás un botón hay que actualizar el contrato, no silenciarlo.
 
-Contratos declarados en `PAGE_CONTRACTS` dict en `scripts/lint_frontend.py`. Páginas cubiertas: `domiciliario.html`, `mesero.html`, `caja.html`, `kitchen.html`, `bar.html`, `staff-hq.html`. Si agregás una página operacional nueva, agregar su contrato.
+Contratos declarados en `PAGE_CONTRACTS` dict en `scripts/lint_frontend.py`. Páginas cubiertas: `courier.html`, `waiter.html`, `cashier.html`, `kitchen.html`, `bar.html`, `staff-hq.html`. Si agregás una página operacional nueva, agregar su contrato.
 
 Correr: `python scripts/lint_frontend.py` o `pytest tests/test_frontend_lint.py`. CI debe fallar si hay regresión.
 

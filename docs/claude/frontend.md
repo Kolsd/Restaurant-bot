@@ -6,9 +6,9 @@
 
 **Chrome compartido**: `app/static/css/tokens.css` + `shared.css` + `pages/<page>.css`. JS: `mesio-utils.js` → `pages/sidebar.js` → `pages/<page>.js`.
 
-**Admin (servidos via `app/routes/dashboard.py`)**: `/dashboard`, `/pedidos`, `/reservaciones`, `/menu-admin`, `/menu-engineering`, `/nps`, `/fidelizacion`, `/clientes-riesgo`, `/nomina`, `/sucursales`, `/floorplan`, `/equipo`, `/settings`, `/billing`, `/staff-hq` (alias `/staff-clock`).
+**Admin (servidos via `app/routes/dashboard.py`)**: `/dashboard`, `/orders`, `/reservations`, `/menu-admin`, `/menu-engineering`, `/nps`, `/loyalty`, `/customers-at-risk`, `/payroll`, `/locations`, `/floorplan`, `/team`, `/settings`, `/billing`, `/staff-hq` (alias `/staff-clock`).
 
-**Operacionales (dark theme)**: `/caja` (POS), `/kitchen` (KDS), `/bar` (KDS variante), `/mesero` (tablet grid), `/domiciliario` (mobile).
+**Operacionales (dark theme)**: `/cashier` (POS), `/kitchen` (KDS), `/bar` (KDS variante), `/waiter` (tablet grid), `/courier` (mobile).
 
 **Públicas**: `/login.html`, `/menu.html` (QR público), `/demo`, `/dashboard-demo`, `/chat/{table_id}` (canal web del comensal: `diner-chat.html` + `pages/diner-chat.js` + `diner-session.js`).
 

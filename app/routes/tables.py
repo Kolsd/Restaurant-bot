@@ -1064,7 +1064,7 @@ async def update_order_status(request: Request, order_id: str):
 
     return {"success": True, "order_id": order_id, "status": status}
 
-@router.get("/cocina", response_class=HTMLResponse)
+@router.get("/kitchen", response_class=HTMLResponse)
 async def kitchen_display():
     return HTMLResponse((STATIC / "html" / "kitchen.html").read_text(encoding="utf-8"))
 
@@ -1183,7 +1183,7 @@ async def get_tables_status(request: Request):
 
 # ── Capa 3: Anti-impostor validation endpoints ────────────────────────────────
 
-@router.post("/api/mesero/tables/{table_id}/confirm-real")
+@router.post("/api/waiter/tables/{table_id}/confirm-real")
 async def confirm_table_real(request: Request, table_id: str):
     """Waiter confirms the customer is real at this table.
 
@@ -1226,7 +1226,7 @@ async def confirm_table_real(request: Request, table_id: str):
     }
 
 
-@router.post("/api/mesero/tables/{table_id}/mark-ghost")
+@router.post("/api/waiter/tables/{table_id}/mark-ghost")
 async def mark_table_ghost(request: Request, table_id: str):
     """Waiter marks this table as a ghost (no real customer present).
 
@@ -1936,7 +1936,7 @@ async def attach_checkout_proof(
 async def list_checkout_proposals(request: Request):
     """
     Lista mesas con propuestas de pago bot activas (pending/awaiting_proof/proof_received).
-    Para el tab 'Por Confirmar' en caja.html.
+    Para el tab 'Por Confirmar' en cashier.html.
     """
     restaurant = await get_current_restaurant(request)
     branch_header = request.headers.get("X-Branch-ID", "")
@@ -2144,7 +2144,7 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
 
 # ── CAJA: Customer lookup ─────────────────────────────────────────────────────
 
-@router.get("/api/caja/customer/{phone}")
+@router.get("/api/cashier/customer/{phone}")
 async def get_caja_customer(
     phone: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
@@ -2256,7 +2256,7 @@ async def _get_recent_orders_for_phone(org_id: int, phone: str, limit: int = 5) 
 
 # ── CAJA: Recent NPS feed ─────────────────────────────────────────────────────
 
-@router.get("/api/caja/recent-nps")
+@router.get("/api/cashier/recent-nps")
 async def get_caja_recent_nps(
     limit: int = 10,
     restaurant: dict = Depends(get_current_restaurant_scoped),

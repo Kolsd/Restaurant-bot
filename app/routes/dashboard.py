@@ -125,13 +125,13 @@ async def staff_portal_redirect(request: Request):
     target = f"/login?r={r}" if r else "/login"
     return RedirectResponse(url=target, status_code=302)
 
-@router.get("/mesero", response_class=HTMLResponse)
+@router.get("/waiter", response_class=HTMLResponse)
 async def mesero_page():
-    return (STATIC / "html" / "mesero.html").read_text(encoding="utf-8")
+    return (STATIC / "html" / "waiter.html").read_text(encoding="utf-8")
 
-@router.get("/caja", response_class=HTMLResponse)
+@router.get("/cashier", response_class=HTMLResponse)
 async def caja_page():
-    p = STATIC / "html" / "caja.html"
+    p = STATIC / "html" / "cashier.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Caja no disponible</h1>")
 
 @router.get("/crm", response_class=HTMLResponse)
@@ -165,22 +165,22 @@ async def diner_chat_page(table_id: str):
     p = STATIC / "html" / "diner-chat.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Chat no disponible</h1>", status_code=404)
 
-@router.get("/privacidad", response_class=HTMLResponse)
+@router.get("/privacy", response_class=HTMLResponse)
 async def privacidad_page():
-    return (STATIC / "html" / "privacidad.html").read_text(encoding="utf-8")
+    return (STATIC / "html" / "privacy.html").read_text(encoding="utf-8")
 
-@router.get("/terminos", response_class=HTMLResponse)
+@router.get("/terms", response_class=HTMLResponse)
 async def terminos_page():
-    return (STATIC / "html" / "terminos.html").read_text(encoding="utf-8")
+    return (STATIC / "html" / "terms.html").read_text(encoding="utf-8")
 
 @router.get("/billing", response_class=HTMLResponse)
 async def billing_page():
     p = STATIC / "html" / "billing.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Billing no disponible</h1>")
 
-@router.get("/domiciliario", response_class=HTMLResponse)
+@router.get("/courier", response_class=HTMLResponse)
 async def domiciliario_page():
-    p = STATIC / "html" / "domiciliario.html"
+    p = STATIC / "html" / "courier.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no encontrada</h1>", status_code=404)
 
 @router.get("/staff-hq", response_class=HTMLResponse)
@@ -204,19 +204,19 @@ async def floorplan_page():
     p = STATIC / "html" / "floorplan.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Floorplan no disponible</h1>", status_code=404)
 
-@router.get("/equipo", response_class=HTMLResponse)
+@router.get("/team", response_class=HTMLResponse)
 async def equipo_page():
-    p = STATIC / "html" / "equipo.html"
+    p = STATIC / "html" / "team.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Equipo no disponible</h1>", status_code=404)
 
-@router.get("/pedidos", response_class=HTMLResponse)
+@router.get("/orders", response_class=HTMLResponse)
 async def pedidos_page():
-    p = STATIC / "html" / "pedidos.html"
+    p = STATIC / "html" / "orders.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Pedidos no disponible</h1>", status_code=404)
 
-@router.get("/reservaciones", response_class=HTMLResponse)
+@router.get("/reservations", response_class=HTMLResponse)
 async def reservaciones_page():
-    p = STATIC / "html" / "reservaciones.html"
+    p = STATIC / "html" / "reservations.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Reservaciones no disponible</h1>", status_code=404)
 
 @router.get("/menu-admin", response_class=HTMLResponse)
@@ -234,24 +234,24 @@ async def nps_page():
     p = STATIC / "html" / "nps.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>NPS no disponible</h1>", status_code=404)
 
-@router.get("/fidelizacion", response_class=HTMLResponse)
+@router.get("/loyalty", response_class=HTMLResponse)
 async def fidelizacion_page():
-    p = STATIC / "html" / "fidelizacion.html"
+    p = STATIC / "html" / "loyalty.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Fidelización no disponible</h1>", status_code=404)
 
-@router.get("/clientes-riesgo", response_class=HTMLResponse)
+@router.get("/customers-at-risk", response_class=HTMLResponse)
 async def clientes_riesgo_page():
-    p = STATIC / "html" / "clientes-riesgo.html"
+    p = STATIC / "html" / "customers-at-risk.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Clientes en riesgo no disponible</h1>", status_code=404)
 
-@router.get("/nomina", response_class=HTMLResponse)
+@router.get("/payroll", response_class=HTMLResponse)
 async def nomina_page():
-    p = STATIC / "html" / "nomina.html"
+    p = STATIC / "html" / "payroll.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Nómina no disponible</h1>", status_code=404)
 
-@router.get("/sucursales", response_class=HTMLResponse)
+@router.get("/locations", response_class=HTMLResponse)
 async def sucursales_page():
-    p = STATIC / "html" / "sucursales.html"
+    p = STATIC / "html" / "locations.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Sucursales no disponible</h1>", status_code=404)
 
 

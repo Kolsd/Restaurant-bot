@@ -287,7 +287,7 @@ async def test_mesero_table_session_renders(
     log.info("e2e.mesero.order_delivered")
 
     # ── Step 8: POST /api/table-orders/{id}/checks/single/pay ───────────────────
-    # This is the "Cobrar mesa completa" button on the caja/mesero page.
+    # This is the "Cobrar mesa completa" button on the cashier/waiter page.
     pay_resp = await e2e_app.post(
         f"/api/table-orders/{order_id}/checks/single/pay",
         json={

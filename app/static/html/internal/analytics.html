@@ -895,7 +895,7 @@
   }
 
   function loadPedidosRescatados() {
-    return apiGet('/api/internal/analytics/pedidos-rescatados?period=mtd').then(data => {
+    return apiGet('/api/internal/analytics/orders-rescued?period=mtd').then(data => {
       const totalEl = document.getElementById('kpi-rescatados-total');
       if (totalEl) {
         totalEl.classList.remove('skeleton', 'skel-kpi');

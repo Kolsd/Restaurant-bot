@@ -21,10 +21,10 @@ let _periodEnd   = '';
   const roles   = rawRole.split(',').map(r => r.trim()).filter(Boolean);
   const isAdmin = roles.some(r => ['owner', 'admin', 'gerente'].includes(r));
   if (!isAdmin) {
-    if (roles.includes('mesero'))    { location.href = '/mesero';   return; }
-    if (roles.includes('cocina'))    { location.href = '/cocina';   return; }
+    if (roles.includes('mesero'))    { location.href = '/waiter';   return; }
+    if (roles.includes('cocina'))    { location.href = '/kitchen';  return; }
     if (roles.includes('bar'))       { location.href = '/bar';      return; }
-    if (roles.includes('caja'))      { location.href = '/caja';     return; }
+    if (roles.includes('caja'))      { location.href = '/cashier';  return; }
     location.href = '/staff-hq';
   }
 })();
@@ -205,7 +205,7 @@ async function loadPedidosRescatados() {
   const deltaEl = document.getElementById('m-rescatados-delta');
   if (!countEl) return;
   try {
-    const data = await _apiFetch('/api/dashboard/pedidos-rescatados?period=mtd');
+    const data = await _apiFetch('/api/dashboard/orders-rescued?period=mtd');
     countEl.textContent = (data.count ?? 0).toLocaleString('es-CO');
     if (deltaEl && data.delta_pct != null) {
       const up = data.delta_pct >= 0;

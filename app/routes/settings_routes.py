@@ -939,7 +939,7 @@ async def get_dashboard_menu(request: Request):
     return {"menu": menu}
 
 
-@router.get("/api/dashboard/pedidos-rescatados")
+@router.get("/api/dashboard/orders-rescued")
 async def get_pedidos_rescatados(
     request: Request,
     period: str = "mtd",

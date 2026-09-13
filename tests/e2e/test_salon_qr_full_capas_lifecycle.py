@@ -13,12 +13,12 @@ Covers:
   Test 2 — test_capa3_first_order_pending_then_mesero_confirms
     First order in an unverified session lands with pending_table_validation=true.
     KDS query sees the order as held (pending_table_validation=true).
-    POST /api/mesero/tables/{id}/confirm-real releases it and verifies the session.
+    POST /api/waiter/tables/{id}/confirm-real releases it and verifies the session.
     Second order goes straight to kitchen (pending_table_validation=false).
 
   Test 3 — test_capa3_ghost_table_blocks_phone
     First order pending validation.
-    POST /api/mesero/tables/{id}/mark-ghost cancels order, closes session,
+    POST /api/waiter/tables/{id}/mark-ghost cancels order, closes session,
     blocks phone for 24h.
     Bot sends rejection message to blocked phone; no new table_session created.
 
@@ -540,7 +540,7 @@ async def test_capa3_first_order_pending_then_mesero_confirms(
       4.  Phone C orders + confirms.
       5.  ASSERT: table_orders row has pending_table_validation=true.
       6.  ASSERT: GET /api/table-orders for this table includes order with pending_table_validation=true.
-      7.  POST /api/mesero/tables/{table_id}/confirm-real with admin auth.
+      7.  POST /api/waiter/tables/{table_id}/confirm-real with admin auth.
       8.  ASSERT: table_orders.pending_table_validation=false.
       9.  ASSERT: table_sessions.verified=true for Phone C.
       10. Phone C: second order + confirm.
@@ -699,13 +699,13 @@ async def test_capa3_first_order_pending_then_mesero_confirms(
     )
     assert order_in_api.get("pending_table_validation") is True, (
         "CAPA 3: GET /api/table-orders must expose pending_table_validation=true "
-        "so the /mesero and /floorplan pages can show the badge. "
+        "so the /waiter and /floorplan pages can show the badge. "
         "Check that db_get_table_orders_for_branch includes the column in SELECT *."
     )
 
     # ── Etapa 7: Mesero confirms real ──────────────────────────────────────────
     confirm_resp = await client.post(
-        f"/api/mesero/tables/{table_id}/confirm-real",
+        f"/api/waiter/tables/{table_id}/confirm-real",
         headers=auth_headers,
     )
     assert confirm_resp.status_code == 200, (
@@ -840,7 +840,7 @@ async def test_capa3_ghost_table_blocks_phone(
       2.  Create table.
       3.  Phone Y: QR claim + first message → session + pending order.
       4.  ASSERT: table_orders.pending_table_validation=true.
-      5.  POST /api/mesero/tables/{table_id}/mark-ghost.
+      5.  POST /api/waiter/tables/{table_id}/mark-ghost.
       6.  ASSERT: order status='cancelado'.
       7.  ASSERT: session status='ghost_blocked'.
       8.  ASSERT: phone_blocklist has Phone Y blocked.
@@ -982,7 +982,7 @@ async def test_capa3_ghost_table_blocks_phone(
 
     # ── Etapa 5: Mesero marks ghost ────────────────────────────────────────────
     ghost_resp = await client.post(
-        f"/api/mesero/tables/{table_id}/mark-ghost",
+        f"/api/waiter/tables/{table_id}/mark-ghost",
         headers=auth_headers,
     )
     assert ghost_resp.status_code == 200, (

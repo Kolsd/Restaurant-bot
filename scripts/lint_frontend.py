@@ -73,8 +73,8 @@ HTML_SEED_EXEMPT = {
     "landing.html",
     "demo.html",
     "dashboard-demo.html",
-    "privacidad.html",
-    "terminos.html",
+    "privacy.html",
+    "terms.html",
     "menu.html",  # public QR menu — restaurants edit content via admin
     "dish_page.html",  # public dish deep-link
 }
@@ -397,8 +397,8 @@ def check_html_seed_money(path: Path, source: str) -> list[Violation]:
 #   - When you add a new page, add a contract here.  When you rename a button,
 #     update the contract.
 PAGE_CONTRACTS: dict[str, dict] = {
-    "domiciliario.html": {
-        "js": "pages/domiciliario.js",
+    "courier.html": {
+        "js": "pages/courier.js",
         "required_button_labels": [
             "Salir a entregar",
             "Llegué",
@@ -410,8 +410,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/status",
         ],
     },
-    "mesero.html": {
-        "js": "pages/mesero.js",
+    "waiter.html": {
+        "js": "pages/waiter.js",
         "required_button_labels": [
             "Cobrar mesa",
             "Mandar a caja",
@@ -424,8 +424,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/waiter-alerts",
         ],
     },
-    "caja.html": {
-        "js": "pages/caja.js",
+    "cashier.html": {
+        "js": "pages/cashier.js",
         "required_button_labels": [
             "Cobrar total completo",
             "Cobrar este check",
@@ -485,8 +485,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/settings",
         ],
     },
-    "equipo.html": {
-        "js": "pages/equipo.js",
+    "team.html": {
+        "js": "pages/team.js",
         # Labels are JS identifier strings that must exist to prove wiring:
         # inviteBtn = Invitar miembro handler; membersTbody = team roster render target
         "required_button_labels": [
@@ -498,8 +498,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/staff/schedules",
         ],
     },
-    "fidelizacion.html": {
-        "js": "pages/fidelizacion.js",
+    "loyalty.html": {
+        "js": "pages/loyalty.js",
         # Labels are JS getElementById strings that must exist to prove handler wiring:
         # btn-new-campaign = Nueva campaña; btn-configure = Configurar programa; campaigns-list = render target
         "required_button_labels": [
@@ -540,7 +540,7 @@ def check_page_contracts(violations: list[Violation]) -> None:
     simple substring search for each required button label and fetch URL.  A
     missing anchor means the page almost certainly renders flat or broken for
     the role that depends on it — exactly the class of bug that escaped CI when
-    domiciliario.html was deployed with its render code gutted.
+    courier.html was deployed with its render code gutted.
 
     Violations are appended to the provided list in-place.  Error format:
         PAGE-CONTRACTS [<html>]: missing required button label '<label>'
@@ -551,7 +551,7 @@ def check_page_contracts(violations: list[Violation]) -> None:
     js_root = JS_DIR  # app/static/js/
 
     for html_name, contract in PAGE_CONTRACTS.items():
-        js_rel = contract["js"]          # e.g. "pages/domiciliario.js"
+        js_rel = contract["js"]          # e.g. "pages/courier.js"
         js_path = js_root / js_rel
         if not js_path.exists():
             violations.append(Violation(

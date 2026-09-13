@@ -1,5 +1,5 @@
 """
-Unit tests for GET /api/caja/customer/{phone}.
+Unit tests for GET /api/cashier/customer/{phone}.
 
 All external I/O is mocked — no live DB or network required.
 """
@@ -87,7 +87,7 @@ class TestCajaCustomerKnown:
         ):
             client = TestClient(app)
             resp = client.get(
-                "/api/caja/customer/%2B57300111222",
+                "/api/cashier/customer/%2B57300111222",
                 headers={"Authorization": "Bearer test_token"},
             )
 
@@ -120,7 +120,7 @@ class TestCajaCustomerUnknown:
         ):
             client = TestClient(app)
             resp = client.get(
-                "/api/caja/customer/%2B57999000000",
+                "/api/cashier/customer/%2B57999000000",
                 headers={"Authorization": "Bearer test_token"},
             )
 
@@ -157,7 +157,7 @@ class TestCajaCustomerLoyaltyDisabled:
         ):
             client = TestClient(app)
             resp = client.get(
-                "/api/caja/customer/%2B57300111222",
+                "/api/cashier/customer/%2B57300111222",
                 headers={"Authorization": "Bearer test_token"},
             )
 
@@ -191,7 +191,7 @@ class TestCajaCustomerLoyaltyError:
         ):
             client = TestClient(app)
             resp = client.get(
-                "/api/caja/customer/%2B57300111222",
+                "/api/cashier/customer/%2B57300111222",
                 headers={"Authorization": "Bearer test_token"},
             )
 
@@ -218,7 +218,7 @@ class TestCajaCustomerPhoneNormalization:
         with patch("app.repositories.customer_profiles_repo.get_profile", _mock_profile):
             client = TestClient(app)
             resp = client.get(
-                "/api/caja/customer/%2B57300111222",
+                "/api/cashier/customer/%2B57300111222",
                 headers={"Authorization": "Bearer test_token"},
             )
 

@@ -756,7 +756,7 @@ async def analytics_mrr(_: None = Depends(verify_superadmin)):
 
 # ── North-star: Pedidos Rescatados ────────────────────────────────────────────
 
-@router.get("/api/internal/analytics/pedidos-rescatados")
+@router.get("/api/internal/analytics/orders-rescued")
 async def analytics_pedidos_rescatados(
     period: str = "mtd",
     _: None = Depends(verify_superadmin),

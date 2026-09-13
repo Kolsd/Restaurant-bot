@@ -408,7 +408,7 @@
 
   // ── KPI: pedidos rescatados ───────────────────────────────────────────────────
   function _loadRescatados() {
-    return _apiGet('/api/internal/analytics/pedidos-rescatados?period=mtd')
+    return _apiGet('/api/internal/analytics/orders-rescued?period=mtd')
       .then(data => {
         const total = data.total != null ? (data.total).toLocaleString('es-CO') : '—';
         _setSkel('kpi-rescued-skel', 'kpi-rescued', total, 'brand');

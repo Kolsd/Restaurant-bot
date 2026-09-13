@@ -249,10 +249,10 @@ def require_module(module_name: str) -> Callable:
 # Al final del archivo, después de las funciones existentes
 
 ROLE_PAGE_MAP = {
-    "/mesero":      {"mesero"},
-    "/caja":        {"caja", "cashier"},
-    "/domiciliario":{"domiciliario", "delivery"},
-    "/cocina":      {"cocina"},
+    "/waiter":      {"mesero"},
+    "/cashier":     {"caja", "cashier"},
+    "/courier":     {"domiciliario", "delivery"},
+    "/kitchen":     {"cocina"},
     "/bar":         {"bar"},
     "/dashboard":   {"owner", "admin", "gerente"},
     "/settings":    {"owner", "admin", "gerente"},

@@ -36,11 +36,11 @@ function doStaffLogout() {
 
     function _buildRoleNav() {
         const ROLE_META = {
-            mesero:       { icon: '🍽️', label: 'Mesero',    url: '/mesero'       },
-            cocina:       { icon: '👨‍🍳', label: 'Cocina',     url: '/cocina'       },
+            mesero:       { icon: '🍽️', label: 'Mesero',    url: '/waiter'       },
+            cocina:       { icon: '👨‍🍳', label: 'Cocina',     url: '/kitchen'      },
             bar:          { icon: '🍹', label: 'Bar',         url: '/bar'          },
-            caja:         { icon: '💰', label: 'Caja',        url: '/caja'         },
-            domiciliario: { icon: '🛵', label: 'Domicilios',  url: '/domiciliario' },
+            caja:         { icon: '💰', label: 'Caja',        url: '/cashier'      },
+            domiciliario: { icon: '🛵', label: 'Domicilios',  url: '/courier'      },
         };
     
         const rawRole = localStorage.getItem('rb_role') || '';
@@ -63,9 +63,9 @@ function doStaffLogout() {
         if (roles.includes('owner') || roles.includes('admin')) {
             const active = (p) => currentPath === p ? 'active' : '';
             navEl.innerHTML += `<a href="/dashboard" class="role-btn ${active('/dashboard')}">📊 Dashboard</a>`;
-            navEl.innerHTML += `<a href="/mesero" class="role-btn ${active('/mesero')}">🍽️ Mesero</a>`;
-            navEl.innerHTML += `<a href="/caja" class="role-btn ${active('/caja')}">💰 Caja</a>`;
-            navEl.innerHTML += `<a href="/cocina" class="role-btn ${active('/cocina')}">👨‍🍳 Cocina</a>`;
+            navEl.innerHTML += `<a href="/waiter" class="role-btn ${active('/waiter')}">🍽️ Mesero</a>`;
+            navEl.innerHTML += `<a href="/cashier" class="role-btn ${active('/cashier')}">💰 Caja</a>`;
+            navEl.innerHTML += `<a href="/kitchen" class="role-btn ${active('/kitchen')}">👨‍🍳 Cocina</a>`;
             navEl.innerHTML += `<a href="/bar" class="role-btn ${active('/bar')}">🍹 Bar</a>`;
             return;
         }

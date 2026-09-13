@@ -14,17 +14,17 @@
  *
  * Route mapping (.html → production URL):
  *   dashboard.html          → /dashboard
- *   pedidos.html            → /caja
- *   reservaciones.html      → /reservaciones
+ *   orders.html             → /orders
+ *   reservations.html       → /reservations
  *   floorplan.html          → /floorplan
  *   menu-admin.html         → /menu-admin
  *   menu-engineering.html   → /menu-engineering
  *   nps.html                → /nps
- *   fidelizacion.html       → /fidelizacion
- *   clientes-riesgo.html    → /clientes-riesgo
+ *   loyalty.html            → /loyalty
+ *   customers-at-risk.html  → /customers-at-risk
  *   staff-hq.html           → /staff-hq   (employee portal — Agent B)
- *   nomina.html             → /nomina
- *   sucursales.html         → /sucursales
+ *   payroll.html            → /payroll
+ *   locations.html          → /locations
  *   settings.html           → /settings
  *   billing.html            → /billing
  */
@@ -54,12 +54,12 @@
         Resumen
         <span class="kbd">R</span>
       </a>
-      <a class="sb-item" data-key="pedidos" href="/pedidos">
+      <a class="sb-item" data-key="pedidos" href="/orders">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l5-3 5 3v6l-5 3-5-3V5z"/><path d="M3 5l5 3 5-3M8 8v6"/></svg>
         Pedidos
         <span class="badge" id="sb-live-orders-badge" style="display:none;"></span>
       </a>
-      <a class="sb-item" data-key="reservaciones" href="/reservaciones">
+      <a class="sb-item" data-key="reservaciones" href="/reservations">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M5 3V1M11 3V1M2 6h12"/></svg>
         Reservaciones
       </a>
@@ -92,11 +92,11 @@
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5l1.8 4.2 4.5.4-3.4 3 1 4.4L8 11.2 4.1 13.5l1-4.4-3.4-3 4.5-.4z"/></svg>
         NPS &amp; Reseñas
       </a>
-      <a class="sb-item" data-key="fidelizacion" href="/fidelizacion">
+      <a class="sb-item" data-key="fidelizacion" href="/loyalty">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="12" height="9" rx="1"/><path d="M2 8h12M8 5V2M5 5v-.5a1 1 0 011-1h4a1 1 0 011 1V5"/></svg>
         Fidelización
       </a>
-      <a class="sb-item" data-key="riesgo" href="/clientes-riesgo">
+      <a class="sb-item" data-key="riesgo" href="/customers-at-risk">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5.5" cy="5" r="2.5"/><path d="M1.5 13c0-2.2 1.8-4 4-4s4 1.8 4 4"/><circle cx="11.5" cy="6" r="2"/><path d="M9.5 13c0-1.6 1-3 2-3"/></svg>
         Clientes en riesgo
         <span class="badge" id="sb-risk-badge" style="display:none;background:var(--warning-light,#fef3c7);color:var(--warning-text,#92400e);"></span>
@@ -105,15 +105,15 @@
 
     <div class="sb-group">
       <div class="sb-group-label">Equipo</div>
-      <a class="sb-item" data-key="staff" href="/equipo">
+      <a class="sb-item" data-key="staff" href="/team">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>
         Equipo
       </a>
-      <a class="sb-item" data-key="nomina" href="/nomina">
+      <a class="sb-item" data-key="nomina" href="/payroll">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l2.5 1.5"/></svg>
         Nómina
       </a>
-      <a class="sb-item" data-key="sucursales" href="/sucursales">
+      <a class="sb-item" data-key="sucursales" href="/locations">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13V6l6-4 6 4v7"/><path d="M2 13h12M6 13V9h4v4"/></svg>
         Sucursales
       </a>
@@ -121,11 +121,11 @@
 
     <div class="sb-group" id="sb-ops-group" style="display:none;">
       <div class="sb-group-label">Mi área</div>
-      <a class="sb-item" data-key="ops-caja" href="/pedidos" style="display:none;">
+      <a class="sb-item" data-key="ops-caja" href="/orders" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1"/><path d="M2 7h12M5 10h2M9 10h2"/></svg>
         Caja
       </a>
-      <a class="sb-item" data-key="ops-mesero" href="/mesero" style="display:none;">
+      <a class="sb-item" data-key="ops-mesero" href="/waiter" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>
         Mesero
       </a>
@@ -137,7 +137,7 @@
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2h6l2 5H3L5 2z"/><path d="M3 7v7h10V7"/><path d="M7 10v4M9 10v4"/></svg>
         Bar
       </a>
-      <a class="sb-item" data-key="ops-domiciliario" href="/domiciliario" style="display:none;">
+      <a class="sb-item" data-key="ops-domiciliario" href="/courier" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><path d="M1 3h2l2 7h6l2-5H5"/></svg>
         Domicilios
       </a>

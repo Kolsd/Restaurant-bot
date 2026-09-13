@@ -215,7 +215,7 @@ function _renderCustomerCard(card) {
 async function fetchCustomerCard(phone) {
   if (!phone) return;
   try {
-    const res = await fetch(`/api/caja/customer/${encodeURIComponent(phone)}`, { headers: mesioHeaders() });
+    const res = await fetch(`/api/cashier/customer/${encodeURIComponent(phone)}`, { headers: mesioHeaders() });
     if (!res.ok) return;
     _customerCard = await res.json();
     _renderCustomerCard(_customerCard);
@@ -1608,7 +1608,7 @@ async function loadRecentNpsTab() {
   loading.textContent = 'Cargando…';
   el.appendChild(loading);
   try {
-    const res = await fetch('/api/caja/recent-nps?limit=10', { headers: mesioHeaders() });
+    const res = await fetch('/api/cashier/recent-nps?limit=10', { headers: mesioHeaders() });
     if (!res.ok) {
       el.textContent = '';
       const fallback = document.createElement('div');
@@ -1762,7 +1762,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   _initSearch();
   _enterMesaGrid();
 
-  // Auto-select table when navigated from /mesero via ?tableId=X or sessionStorage caja_open_table
+  // Auto-select table when navigated from /waiter via ?tableId=X or sessionStorage caja_open_table
   const urlParams = new URLSearchParams(window.location.search);
   const targetTableId = urlParams.get('tableId');
   let targetMeta = null;

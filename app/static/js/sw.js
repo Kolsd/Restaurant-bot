@@ -10,7 +10,7 @@
  * Cache busting: increment CACHE_VERSION on every deploy that changes static assets.
  */
 
-const CACHE_VERSION  = 'v45';
+const CACHE_VERSION  = 'v46';
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
@@ -24,12 +24,12 @@ const SHELL_ASSETS = [
   '/static/js/pages/sidebar.js',
   '/static/js/pages/dashboard.js',
   '/static/js/pages/menu-admin.js',
-  '/static/js/pages/nomina.js',
-  '/static/js/pages/equipo.js',
-  '/static/js/pages/reservaciones.js',
+  '/static/js/pages/payroll.js',
+  '/static/js/pages/team.js',
+  '/static/js/pages/reservations.js',
   '/static/js/pages/nps.js',
-  '/static/js/pages/fidelizacion.js',
-  '/static/js/pages/sucursales.js',
+  '/static/js/pages/loyalty.js',
+  '/static/js/pages/locations.js',
   '/static/js/pages/settings.js',
   '/static/js/pages/billing.js',
   '/static/img/logo.png',
@@ -83,7 +83,7 @@ self.addEventListener('fetch', event => {
   }
 
   // Páginas de staff: siempre network-first, sin fallback a caché.
-  const staffPages = ['/mesero', '/caja', '/bar', '/cocina', '/domiciliario'];
+  const staffPages = ['/waiter', '/cashier', '/bar', '/kitchen', '/courier'];
   if (staffPages.includes(url.pathname)) {
     event.respondWith(fetch(request));
     return;

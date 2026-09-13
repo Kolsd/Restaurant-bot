@@ -1,17 +1,17 @@
 """
-tests/e2e/test_domiciliario_page_renders_buttons.py — E2E test: domiciliario operational page.
+tests/e2e/test_courier_page_renders_buttons.py — E2E test: domiciliario operational page.
 
 This test caught the "flat page without buttons" regression described by the user.
 
 Goal:
-  Prove the /domiciliario admin page renders required action buttons WHEN real data
+  Prove the /courier admin page renders required action buttons WHEN real data
   is seeded.  The "render proof" is: the API returns an order in a status that the
   JS uses to render "Salir a entregar", "Llegué" and "Entregado" buttons.
 
 Steps:
   a. Seed org + location + delivery order in status 'confirmado'
   b. Authenticate as admin
-  c. GET /domiciliario → assert it's HTML (not a 404 or redirect)
+  c. GET /courier → assert it's HTML (not a 404 or redirect)
   d. GET /api/delivery/orders → assert seeded order is present with required fields
   e. Assert the response includes an order whose status allows the delivery buttons
   f. PATCH status to 'en_camino' → assert 2xx AND DB change
@@ -77,7 +77,7 @@ async def test_domiciliario_page_renders_buttons(
     Full domiciliario operational dashboard test.
 
     Proves that:
-    - /domiciliario HTML page is reachable (not 404 or empty)
+    - /courier HTML page is reachable (not 404 or empty)
     - /api/delivery/orders returns seeded order with required fields for the JS
       to render the action buttons
     - Status transitions (confirmado → en_camino → en_puerta → entregado) all
@@ -130,22 +130,22 @@ async def test_domiciliario_page_renders_buttons(
     admin_token = await create_admin_token(pool, owner_email)
     auth_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    # ── Step c: GET /domiciliario → HTML ─────────────────────────────────────────
-    page_resp = await e2e_app.get("/domiciliario", headers=auth_headers)
+    # ── Step c: GET /courier → HTML ─────────────────────────────────────────
+    page_resp = await e2e_app.get("/courier", headers=auth_headers)
     assert page_resp.status_code == 200, (
-        f"GET /domiciliario returned {page_resp.status_code}. "
+        f"GET /courier returned {page_resp.status_code}. "
         "The page must serve the domiciliario HTML — if it's 404, the route is missing."
     )
     content_type = page_resp.headers.get("content-type", "")
     assert "html" in content_type, (
-        f"GET /domiciliario returned content-type={content_type!r} instead of HTML. "
+        f"GET /courier returned content-type={content_type!r} instead of HTML. "
         "The page is not rendering HTML — check dashboard.py route."
     )
     html_body = page_resp.text
     # The page must have some structure — a completely empty page means the template is broken
     assert len(html_body) > 200, (
-        f"GET /domiciliario returned only {len(html_body)} chars — page appears empty. "
-        "Check that domiciliario.html exists and is properly served."
+        f"GET /courier returned only {len(html_body)} chars — page appears empty. "
+        "Check that courier.html exists and is properly served."
     )
     log.info("e2e.domiciliario.page_ok", content_length=len(html_body))
 
@@ -189,7 +189,7 @@ async def test_domiciliario_page_renders_buttons(
     assert our_order.get("total") is not None, "Order is missing 'total' field — JS shows blank amount"
 
     # LOAD-BEARING: assert the order's status is one that the JS will render buttons for.
-    # The domiciliario.html renders "Salir a entregar" only for 'confirmado'/'en_preparacion'.
+    # The courier.html renders "Salir a entregar" only for 'confirmado'/'en_preparacion'.
     assert our_order["status"] in ("confirmado", "en_preparacion", "listo"), (
         f"Order status is '{our_order['status']}' — not in the set that renders buttons. "
         "The page would show the order but with no actionable buttons."

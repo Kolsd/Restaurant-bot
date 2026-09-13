@@ -142,7 +142,7 @@ function _renderTables(tables) {
 }
 
 // ── Open table → in-page modal with active orders + delivery actions ──
-// Mesero stays on /mesero. Previously this redirected to /caja, but caja
+// Mesero stays on /waiter. Previously this redirected to /cashier, but caja
 // is a different role's view (cashier) and the mesero couldn't mark
 // orders as 'entregado' from there. Backend already accepts mesero role
 // for the 'entregado' status transition (see _STATUS_ROLE_MAP in tables.py).
@@ -368,7 +368,7 @@ async function _confirmTableReal(tableId, parentModal) {
     if (!ok) return;
   }
   try {
-    const res = await fetch('/api/mesero/tables/' + encodeURIComponent(tableId) + '/confirm-real', {
+    const res = await fetch('/api/waiter/tables/' + encodeURIComponent(tableId) + '/confirm-real', {
       method: 'POST',
       headers: _hdr(),
     });
@@ -394,7 +394,7 @@ async function _markTableGhost(tableId, parentModal) {
     if (!ok) return;
   }
   try {
-    const res = await fetch('/api/mesero/tables/' + encodeURIComponent(tableId) + '/mark-ghost', {
+    const res = await fetch('/api/waiter/tables/' + encodeURIComponent(tableId) + '/mark-ghost', {
       method: 'POST',
       headers: _hdr(),
     });

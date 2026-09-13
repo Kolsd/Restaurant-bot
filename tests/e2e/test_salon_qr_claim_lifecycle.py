@@ -475,7 +475,7 @@ async def test_salon_qr_claim_full_lifecycle(
     # so the mesero assigned to that table knows the food is ready at the pass.
     # Currently, status transitions in POST /api/table-orders/{id}/status do NOT
     # create any waiter_alert when status='listo'. The mesero has to check the
-    # /mesero screen manually (poll-based, not push-based).
+    # /waiter screen manually (poll-based, not push-based).
     #
     # Expected alert_type: 'ready' or 'listo' or 'food_ready' — whichever is
     # implemented. We check for any waiter_alert for this table created after

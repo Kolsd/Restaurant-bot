@@ -1118,12 +1118,12 @@ function bindAll() {
 
   var btnInvoice = el('btnInvoice');
   if (btnInvoice) btnInvoice.addEventListener('click', function () {
-    if (_selectedTableId) window.location.href = '/caja?table=' + _selectedTableId;
+    if (_selectedTableId) window.location.href = '/cashier?table=' + _selectedTableId;
   });
 
   var btnAddItem = el('btnAddItem');
   if (btnAddItem) btnAddItem.addEventListener('click', function () {
-    if (_selectedTableId) window.location.href = '/caja?table=' + _selectedTableId + '&action=add';
+    if (_selectedTableId) window.location.href = '/cashier?table=' + _selectedTableId + '&action=add';
   });
 
   // Editar mesa (capacidad, tipo, zona) — abre el modal de propiedades

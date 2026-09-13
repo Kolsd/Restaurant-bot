@@ -1,7 +1,7 @@
 /**
- * equipo-comms.js — Admin UI for staff announcements and task checklist.
+ * team-comms.js — Admin UI for staff announcements and task checklist.
  *
- * Wires the two new sections added to equipo.html:
+ * Wires the two new sections added to team.html:
  *   • Anuncios del equipo  — CRUD via /api/staff/announcements
  *   • Tareas del turno     — CRUD via /api/staff/tasks + completions modal
  *

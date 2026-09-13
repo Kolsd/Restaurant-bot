@@ -486,7 +486,7 @@ async def preview_tip_distribution(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Preview how a single tip would be distributed across staff currently
-    on shift. Used by /caja during pay-check entry to give the cashier a
+    on shift. Used by /cashier during pay-check entry to give the cashier a
     real-time breakdown.
 
     Args:

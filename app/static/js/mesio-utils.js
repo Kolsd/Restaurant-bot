@@ -535,7 +535,7 @@ function mesioDateTime(isoStr) { return mesioDate(isoStr, { format: 'short' }); 
 (function _mesioSupportButton() {
   // URL patterns where the button should NOT appear
   var SKIP_PATHS = [
-    '/caja', '/cocina', '/bar', '/mesero', '/domiciliario', '/staff-hq',
+    '/cashier', '/kitchen', '/bar', '/waiter', '/courier', '/staff-hq',
     '/landing', '/menu', '/login', '/signup', '/demo', '/dashboard-demo',
     '/r/',   // public QR menu routes
   ];
@@ -546,14 +546,14 @@ function mesioDateTime(isoStr) { return mesioDate(isoStr, { format: 'short' }); 
       if (p === SKIP_PATHS[i] || p.startsWith(SKIP_PATHS[i] + '/') || p.startsWith(SKIP_PATHS[i] + '?')) {
         return false;
       }
-      // Exact match for paths like '/caja' that may not have trailing slash
+      // Exact match for paths like '/cashier' that may not have trailing slash
       if (p.replace(/\/$/, '') === SKIP_PATHS[i].replace(/\/$/, '')) return false;
     }
     // Only show on known admin paths — don't show on public menu.html etc.
     var ADMIN_PATHS = [
-      '/dashboard', '/pedidos', '/reservaciones', '/menu-admin', '/menu-engineering',
-      '/nps', '/fidelizacion', '/clientes-riesgo', '/nomina', '/sucursales',
-      '/floorplan', '/equipo', '/settings', '/billing', '/stats',
+      '/dashboard', '/orders', '/reservations', '/menu-admin', '/menu-engineering',
+      '/nps', '/loyalty', '/customers-at-risk', '/payroll', '/locations',
+      '/floorplan', '/team', '/settings', '/billing', '/stats',
       '/internal/analytics', '/internal/monitoring', '/internal/superadmin', '/internal/crm',
     ];
     for (var j = 0; j < ADMIN_PATHS.length; j++) {

@@ -66,11 +66,11 @@ if (!SC_TOKEN) {
 }
 
 const SC_ROLE_META = {
-  mesero:       { label: 'Mesero',     url: '/mesero',       svg: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 1v7"/></svg>' },
-  cocina:       { label: 'Cocina',     url: '/cocina',       svg: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 12h8M6 6a2 2 0 104 0V4H6v2z"/></svg>' },
+  mesero:       { label: 'Mesero',     url: '/waiter',       svg: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 1v7"/></svg>' },
+  cocina:       { label: 'Cocina',     url: '/kitchen',      svg: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 12h8M6 6a2 2 0 104 0V4H6v2z"/></svg>' },
   bar:          { label: 'Bar',        url: '/bar',          svg: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2h6l-2 5h2l-4 7-4-7h2L5 2z"/></svg>' },
-  caja:         { label: 'Caja',       url: '/caja',         svg: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2 6h12M5 9h3"/></svg>' },
-  domiciliario: { label: 'Domicilios', url: '/domiciliario', svg: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="12" r="1.5"/><circle cx="11" cy="12" r="1.5"/><path d="M1 4h10l2 5H1z"/></svg>' },
+  caja:         { label: 'Caja',       url: '/cashier',      svg: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2 6h12M5 9h3"/></svg>' },
+  domiciliario: { label: 'Domicilios', url: '/courier',      svg: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="12" r="1.5"/><circle cx="11" cy="12" r="1.5"/><path d="M1 4h10l2 5H1z"/></svg>' },
 };
 
 /* ── Profile state ─────────────────────────────────────────────── */
