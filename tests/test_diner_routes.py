@@ -350,6 +350,45 @@ def test_chat_unknown_category_falls_through_without_500(client, seed_org, monke
     assert resp.json()["message"] == "no entendí eso"
 
 
+def test_chat_free_text_routes_through_shared_agent_chat(client, seed_org, monkeypatch):
+    """Regression (real-LLM run 2026-09-13): the web diner channel
+    (POST /api/diner/chat) sends free-text messages through the EXACT SAME
+    app.services.agent.chat() used by the WhatsApp bot — it is not a separate
+    reimplementation. This means the Pattern 1 (empty reply on confirmation,
+    see tests/test_feature3_dining_polish.py::test_C5_*) and CATEGORY A
+    (see tests/test_agent_action_announcement.py) fixes automatically cover
+    this channel too, as long as diner.py keeps relaying agent.chat()'s
+    "message" unchanged rather than adding its own empty-reply handling that
+    could reintroduce the same bug on this channel alone.
+    """
+    import app.routes.diner as diner_mod
+
+    captured_kwargs = {}
+
+    async def _fake_chat(**kwargs):
+        captured_kwargs.update(kwargs)
+        # Simulates the POST-FIX behavior: a real, non-empty confirmation
+        # even though nothing here would have produced text on its own.
+        return {"message": "¡Listo! Tu pedido ya está en la cocina.", "blocks": []}
+
+    monkeypatch.setattr(diner_mod, "agent_chat", _fake_chat)
+
+    session = _open_session(client, seed_org["table_id"])
+    resp = _post(client,
+        "/api/diner/chat",
+        json={"token": session["token"], "message": "sip"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    # diner.py must relay the message VERBATIM — never blank it, never swap
+    # in its own fallback text.
+    assert data["message"] == "¡Listo! Tu pedido ya está en la cocina."
+    assert data["message"].strip() != ""
+    # And it must have actually gone through agent.chat() (not some
+    # category-chip shortcut or dead code path).
+    assert captured_kwargs.get("user_message", "").startswith("sip")
+
+
 def test_chat_unknown_token_returns_404(client):
     resp = _post(client, 
         "/api/diner/chat",

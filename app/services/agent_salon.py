@@ -920,14 +920,15 @@ async def execute_salon_action(
             tag = f"adicional #{sub_number}" if sub_number > 1 else "orden inicial"
             log.info("table_order_created", order_id=locals().get("order_id", base_order_id), tag=tag, summary=items_summary)
 
-        # Append receipt card for diner (skip on duplicates — dup path must stay silent)
-        if not _is_duplicate_order and reply:
+        # Append receipt card for diner (skip on duplicates — dup path must stay silent).
+        if not _is_duplicate_order:
             if _needs_validation:
                 # Capa 3: order is held — do NOT show the standard receipt with
                 # ETA.  Natural message so customer doesn't know they're being
                 # validated (Rule 4 of MESA_QR_ARCHITECTURE.md §Capa 3).
                 reply = "Listo, ya envié tu pedido. El mesero pasará en un momento a confirmarte."
-            else:
+            elif reply:
+                # Claude gave us text to attach the receipt card to.
                 try:
                     eta_min = 20
                     try:
@@ -953,12 +954,77 @@ async def execute_salon_action(
                     reply = reply + receipt
                 except Exception:
                     log.exception("salon_receipt_append_failed", order_id=locals().get("order_id"))
+            else:
+                # Claude sometimes answers a confirmation turn ("sip") with a
+                # tool_use call and no text block at all (`reply == ""`),
+                # especially on Haiku. The order still committed successfully
+                # above — returning "" here would make `execute_action` bubble
+                # up an empty string, tripping the top-level empty-reply
+                # fallback ("Disculpa, no te entendí bien...") which lies to
+                # the customer about an order that DID go through. Give a
+                # plain confirmation instead (no receipt card — an orphan
+                # receipt with no framing text reads oddly in chat; see
+                # tests/test_feature3_dining_polish.py::test_C4_*).
+                reply = "¡Listo! Tu pedido ya está en la cocina."
 
         return reply
 
     if action == "bill":
         table_id   = table_context["id"]
         table_name = table_context["name"]
+
+        # Rule #17: notify staff the INSTANT the customer asks for the bill —
+        # a hint, not a commitment — even if the guard below blocks starting
+        # the checkout state machine (order not delivered yet), or the
+        # state-machine setup below fails. Look up the subtotal up front
+        # (best-effort) so the single alert we send always includes it when
+        # available, matching the message shape locked by
+        # tests/test_agent_salon_bill_alert.py. `_bill_alert_fired` stops the
+        # fallback path at the bottom from double-notifying the waiter.
+        base_order_id = None
+        total: float | None = None
+        all_items: list = []
+        try:
+            base_order_id = await db.db_get_base_order_id(table_id)
+            if base_order_id:
+                async with _tenant_conn() as conn:
+                    all_rows = await conn.fetch(
+                        "SELECT total, items FROM table_orders WHERE base_order_id=$1",
+                        base_order_id,
+                    )
+                if all_rows:
+                    total = float(money_sum(to_decimal(r["total"]) for r in all_rows))  # JSON boundary
+                    for r in all_rows:
+                        raw = r["items"]
+                        lst = raw if isinstance(raw, list) else json.loads(raw or "[]")
+                        all_items.extend(lst)
+        except Exception:
+            log.exception(
+                "bill_alert_total_lookup_failed",
+                phone=_ofuscar_phone(phone),
+                bot_number=bot_number,
+            )
+
+        _bill_alert_fired = False
+        _immediate_bill_msg = (
+            f"La mesa {table_name} pidió la cuenta (subtotal: {_fmt_cop(total)})."
+            if total is not None
+            else f"La mesa {table_name} pidió la cuenta."
+        )
+        try:
+            await db.db_create_waiter_alert(
+                phone=phone, bot_number=bot_number, alert_type="bill",
+                message=_immediate_bill_msg, table_id=table_id, table_name=table_name,
+                location_id=(table_context or {}).get("location_id"),
+            )
+            blocks.push_block(blocks.build_waiter_ack_block("bill", _immediate_bill_msg))
+            _bill_alert_fired = True
+        except Exception:
+            log.exception(
+                "bill_alert_immediate_failed",
+                phone=_ofuscar_phone(phone),
+                bot_number=bot_number,
+            )
 
         # Guard: don't start checkout if the order hasn't been delivered yet.
         # Customers sometimes say "la cuenta" right after ordering (excitement /
@@ -977,149 +1043,116 @@ async def execute_salon_action(
 
         # Iniciar flujo de checkout conversacional
         try:
-            base_order_id = await db.db_get_base_order_id(table_id)
-            if base_order_id:
-                async with _tenant_conn() as conn:
-                    all_rows = await conn.fetch(
-                        "SELECT total, items FROM table_orders WHERE base_order_id=$1",
-                        base_order_id,
-                    )
-                if all_rows:
-                    total = float(money_sum(to_decimal(r["total"]) for r in all_rows))  # JSON boundary
-                    all_items: list = []
-                    for r in all_rows:
-                        raw = r["items"]
-                        lst = raw if isinstance(raw, list) else json.loads(raw or "[]")
-                        all_items.extend(lst)
-                    _orig_msg = message.lower() if message else ""
-                    _wants_fac = any(w in _orig_msg for w in ("factura", "boleta", "recibo fiscal", "nit", "a nombre de"))
-                    _predetected_method = _detect_payment_method(_orig_msg)
-                    _predetected_single = _detect_single_split(_orig_msg)
-                    _predetected_split_n = _detect_split_count(_orig_msg)
+            if base_order_id and total is not None:
+                _orig_msg = message.lower() if message else ""
+                _wants_fac = any(w in _orig_msg for w in ("factura", "boleta", "recibo fiscal", "nit", "a nombre de"))
+                _predetected_method = _detect_payment_method(_orig_msg)
+                _predetected_single = _detect_single_split(_orig_msg)
+                _predetected_split_n = _detect_split_count(_orig_msg)
 
-                    # Start state at asking_split; then advance below if customer
-                    # already provided split intent and/or payment method in same message.
-                    _checkout_state: dict = {
-                        "step": "asking_split",
-                        "base_order_id": base_order_id,
-                        "subtotal": str(quantize_money(to_decimal(total))),  # JSON boundary: Decimal→str
-                        "items": all_items,
-                        "split_count": 1,
-                        "payments": [],
-                        "tip_amount": "0",  # JSON boundary: stored as str, read via to_decimal()
-                        "requires_proof": False,
-                        "wants_factura": _wants_fac,
-                        "factura_name": "",
-                        "factura_nit": "",
-                    }
+                # Start state at asking_split; then advance below if customer
+                # already provided split intent and/or payment method in same message.
+                _checkout_state: dict = {
+                    "step": "asking_split",
+                    "base_order_id": base_order_id,
+                    "subtotal": str(quantize_money(to_decimal(total))),  # JSON boundary: Decimal→str
+                    "items": all_items,
+                    "split_count": 1,
+                    "payments": [],
+                    "tip_amount": "0",  # JSON boundary: stored as str, read via to_decimal()
+                    "requires_proof": False,
+                    "wants_factura": _wants_fac,
+                    "factura_name": "",
+                    "factura_nit": "",
+                }
 
-                    # Pre-advance: if customer stated split intent (e.g. "por separado, somos 3"),
-                    # skip asking_split entirely and advance to asking_tip with the given N.
-                    if _predetected_split_n:
-                        _checkout_state["split_count"] = _predetected_split_n
-                        _checkout_state["check_amounts"] = None
-                        _checkout_state["payments"] = [[] for _ in range(_predetected_split_n)]
-                        _checkout_state["step"] = "asking_tip"
-                        _checkout_state["current_check_idx"] = 0
+                # Pre-advance: if customer stated split intent (e.g. "por separado, somos 3"),
+                # skip asking_split entirely and advance to asking_tip with the given N.
+                if _predetected_split_n:
+                    _checkout_state["split_count"] = _predetected_split_n
+                    _checkout_state["check_amounts"] = None
+                    _checkout_state["payments"] = [[] for _ in range(_predetected_split_n)]
+                    _checkout_state["step"] = "asking_tip"
+                    _checkout_state["current_check_idx"] = 0
 
-                    # Pre-advance: if customer already said "todos juntos" / single, resolve split=1
-                    elif _predetected_single or _predetected_method:
-                        # Resolve split as 1 (customer implied no splitting)
-                        _checkout_state["split_count"] = 1
-                        _checkout_state["check_amounts"] = None
-                        _checkout_state["payments"] = [[]]
+                # Pre-advance: if customer already said "todos juntos" / single, resolve split=1
+                elif _predetected_single or _predetected_method:
+                    # Resolve split as 1 (customer implied no splitting)
+                    _checkout_state["split_count"] = 1
+                    _checkout_state["check_amounts"] = None
+                    _checkout_state["payments"] = [[]]
 
-                        # Pre-advance: if payment method was also given, skip asking_split
-                        # AND skip asking_tip (go straight to asking_tip to preserve tip UX),
-                        # then jump to asking_payment_0 right away.
-                        # We advance to asking_tip and let handle_checkout_flow finish normally.
-                        _checkout_state["step"] = "asking_tip"
-                        _checkout_state["current_check_idx"] = 0
+                    # Pre-advance: if payment method was also given, skip asking_split
+                    # AND skip asking_tip (go straight to asking_tip to preserve tip UX),
+                    # then jump to asking_payment_0 right away.
+                    # We advance to asking_tip and let handle_checkout_flow finish normally.
+                    _checkout_state["step"] = "asking_tip"
+                    _checkout_state["current_check_idx"] = 0
 
-                    await state_store.checkout_set(phone, bot_number, _checkout_state)
-                    log.info(
-                        "checkout_started",
-                        table=table_name,
-                        base_order_id=base_order_id,
-                        total=total,
-                        factura=_wants_fac,
-                        predetected_method=_predetected_method,
-                        predetected_single=_predetected_single,
-                        predetected_split_n=_predetected_split_n,
-                        step=_checkout_state["step"],
-                    )
+                await state_store.checkout_set(phone, bot_number, _checkout_state)
+                log.info(
+                    "checkout_started",
+                    table=table_name,
+                    base_order_id=base_order_id,
+                    total=total,
+                    factura=_wants_fac,
+                    predetected_method=_predetected_method,
+                    predetected_single=_predetected_single,
+                    predetected_split_n=_predetected_split_n,
+                    step=_checkout_state["step"],
+                )
 
-                    # Notify staff that the customer asked for the bill.
-                    # This is a hint (not a commitment) — staff sees "mesa X
-                    # pidió la cuenta" even if the checkout flow is still
-                    # collecting tip/method/factura from the customer.
-                    try:
-                        _bill_alert_msg = f"La mesa {table_name} pidió la cuenta (subtotal: {_fmt_cop(total)})."
-                        await db.db_create_waiter_alert(
-                            phone=phone,
-                            bot_number=bot_number,
-                            alert_type="bill",
-                            message=_bill_alert_msg,
-                            table_id=table_id,
-                            table_name=table_name,
-                            location_id=(table_context or {}).get("location_id"),
+                if _checkout_state["step"] == "asking_tip":
+                    # Customer already answered the split question — show tip menu
+                    subtotal_d = to_decimal(total)
+                    tip_10 = _resolve_tip("percent", 10, subtotal_d)
+                    tip_15 = _resolve_tip("percent", 15, subtotal_d)
+                    tip_20 = _resolve_tip("percent", 20, subtotal_d)
+                    split_n = _checkout_state.get("split_count", 1) or 1
+                    header = "¡Claro! Vamos a procesar tu cuenta."
+                    if split_n and split_n > 1:
+                        per_check = quantize_money(to_decimal(total) / to_decimal(split_n))
+                        header = (
+                            f"¡Perfecto! Dividimos la cuenta en {split_n} partes iguales "
+                            f"de {_fmt_cop(float(per_check))} cada una."
                         )
-                        blocks.push_block(blocks.build_waiter_ack_block("bill", _bill_alert_msg))
-                    except Exception:
-                        log.exception(
-                            "checkout_start_bill_alert_failed",
-                            phone=_ofuscar_phone(phone),
-                            bot_number=bot_number,
-                        )
+                    lines = [
+                        header,
+                        f"Subtotal: {_fmt_cop(total)}",
+                        "¿Deseas agregar una propina?",
+                        f"  1) 10% → {_fmt_cop(tip_10)}",
+                        f"  2) 15% → {_fmt_cop(tip_15)}  ⭐ sugerida",
+                        f"  3) 20% → {_fmt_cop(tip_20)}",
+                        "  4) Otro valor",
+                        "  5) Ninguna",
+                    ]
+                    return "\n".join(lines)
 
-                    if _checkout_state["step"] == "asking_tip":
-                        # Customer already answered the split question — show tip menu
-                        subtotal_d = to_decimal(total)
-                        tip_10 = _resolve_tip("percent", 10, subtotal_d)
-                        tip_15 = _resolve_tip("percent", 15, subtotal_d)
-                        tip_20 = _resolve_tip("percent", 20, subtotal_d)
-                        split_n = _checkout_state.get("split_count", 1) or 1
-                        header = "¡Claro! Vamos a procesar tu cuenta."
-                        if split_n and split_n > 1:
-                            per_check = quantize_money(to_decimal(total) / to_decimal(split_n))
-                            header = (
-                                f"¡Perfecto! Dividimos la cuenta en {split_n} partes iguales "
-                                f"de {_fmt_cop(float(per_check))} cada una."
-                            )
-                        lines = [
-                            header,
-                            f"Subtotal: {_fmt_cop(total)}",
-                            "¿Deseas agregar una propina?",
-                            f"  1) 10% → {_fmt_cop(tip_10)}",
-                            f"  2) 15% → {_fmt_cop(tip_15)}  ⭐ sugerida",
-                            f"  3) 20% → {_fmt_cop(tip_20)}",
-                            "  4) Otro valor",
-                            "  5) Ninguna",
-                        ]
-                        return "\n".join(lines)
-
-                    return "¡Claro! ¿Cómo van a pagar hoy? ¿Todo junto o lo dividimos en varias partes?"
+                return "¡Claro! ¿Cómo van a pagar hoy? ¿Todo junto o lo dividimos en varias partes?"
         except Exception:
             log.exception("checkout_start_failed_fallback_waiter", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
-        # Fallback: waiter_alert — best-effort, must not crash checkout
-        payment_info = parsed.get("payment_method", "") or parsed.get("notes", "")
-        payment_str  = f" Método de pago: {payment_info}." if payment_info else ""
-        alert_message = f"La mesa {table_name} necesita la cuenta.{payment_str}"
-        try:
-            await db.db_create_waiter_alert(
-                phone=phone, bot_number=bot_number, alert_type="bill",
-                message=alert_message, table_id=table_id, table_name=table_name,
-                location_id=(table_context or {}).get("location_id"),
-            )
-            log.info("waiter_alert_bill", table=table_name)
-            blocks.push_block(blocks.build_waiter_ack_block("bill", alert_message))
-        except Exception:
-            log.exception(
-                "waiter_alert.fallback_failed",
-                restaurant_id=parsed.get("restaurant_id"),
-                table_id=table_id,
-            )
+        # Fallback: waiter_alert — best-effort, must not crash checkout.
+        # Rule #17 alert already fired above in the common case; only send
+        # this one if that earlier attempt didn't go through.
+        if not _bill_alert_fired:
+            payment_info = parsed.get("payment_method", "") or parsed.get("notes", "")
+            payment_str  = f" Método de pago: {payment_info}." if payment_info else ""
+            alert_message = f"La mesa {table_name} necesita la cuenta.{payment_str}"
+            try:
+                await db.db_create_waiter_alert(
+                    phone=phone, bot_number=bot_number, alert_type="bill",
+                    message=alert_message, table_id=table_id, table_name=table_name,
+                    location_id=(table_context or {}).get("location_id"),
+                )
+                log.info("waiter_alert_bill", table=table_name)
+                blocks.push_block(blocks.build_waiter_ack_block("bill", alert_message))
+            except Exception:
+                log.exception(
+                    "waiter_alert.fallback_failed",
+                    restaurant_id=parsed.get("restaurant_id"),
+                    table_id=table_id,
+                )
         return reply
 
     if action == "waiter":

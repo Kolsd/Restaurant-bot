@@ -341,6 +341,45 @@ class TestFeature3DiningPolish:
         assert "━━━" not in (reply or "")
         assert "🧾 Pedido #" not in (reply or "")
 
+    def test_C5_empty_llm_reply_still_confirms_order_bug_regression(self, monkeypatch):
+        """Regression (real-LLM run 2026-09-13, mesa_01/02/03/05): Claude sometimes
+        answers a confirmation turn ("sip") with a tool_use call and NO text block,
+        so `parsed["reply"]` is "". Before the fix, `execute_salon_action` returned
+        that same empty string once the order committed, which `call_llm_and_execute`
+        (app/services/agent.py ~2667) then replaced with the misleading top-level
+        fallback "Disculpa, no te entendí bien..." — even though the order DID go
+        through (table_order_created fired, cart cleared). The customer had no way
+        to tell their order succeeded. Rule #8 requires the bot never silence the
+        customer; a wrong "I didn't understand" is arguably worse than silence.
+        """
+        from app.services.agent_salon import execute_salon_action
+
+        cart_items = [
+            {"name": "Tamal", "quantity": 1, "price": 8000, "subtotal": 8000, "category": "food"},
+        ]
+        self._patch_salon_order_deps(monkeypatch, cart_items=cart_items, cart_total=8000)
+
+        parsed = {"action": "order", "reply": "", "items": cart_items}
+        table_context = {"id": "T4", "name": "Mesa 4", "branch_id": None}
+        restaurant_obj = self._make_restaurant_obj(eta=20)
+
+        reply = _run(execute_salon_action(
+            parsed=parsed,
+            phone="+57300",
+            bot_number="+57999",
+            table_context=table_context,
+            session_state={"has_order": False, "active": True},
+            full_history=[{"role": "assistant", "content": "¿Confirmas tu pedido de 1x Tamal?"},
+                          {"role": "user", "content": "sip"}],
+            restaurant_obj=restaurant_obj,
+            message="sip",
+        ))
+
+        # The order committed (see test_C4's identical setup/db_save_table_order
+        # mock) — the reply must be a real, non-empty confirmation, never "".
+        assert reply is not None
+        assert reply.strip() != ""
+
     # ─────────────────────────────────────────────────────────────────────────
     # Block D — "Listo" WA notification in update_order_status route
     # ─────────────────────────────────────────────────────────────────────────

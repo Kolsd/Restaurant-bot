@@ -26,6 +26,18 @@ _RESERVATION_INPUT = {
     "phone": "+573001234567",
 }
 
+# Round 2 (2026-09-13): agent.py gained guard 3c, a confirmation-word gate for
+# make_reservation mirroring the one order tools already had (see
+# tests/test_agent_reservation_confirmation_guard.py for its dedicated
+# coverage). In real traffic make_reservation is only ever called after the
+# customer has already confirmed ("Use make_reservation only after customer
+# confirms ALL details" — agent_external.py/agent_salon.py system prompts),
+# so every call in THIS file (which is testing the separate dedup guard, 3d)
+# must supply that confirmation in full_history — otherwise guard 3c would
+# intercept first and none of these tests would ever reach the dedup logic
+# they exist to test.
+_CONFIRMED_HISTORY = [{"role": "user", "content": "sí, confirmo la reserva"}]
+
 
 @pytest.mark.asyncio
 async def test_first_make_reservation_passes(monkeypatch):
@@ -41,6 +53,7 @@ async def test_first_make_reservation_passes(monkeypatch):
         table_context=None,
         bot_number="+57888",
         phone="+573001234567",
+        full_history=_CONFIRMED_HISTORY,
     )
 
     # First call — should not be downgraded by dedup.
@@ -62,6 +75,7 @@ async def test_duplicate_make_reservation_blocked(monkeypatch):
         table_context=None,
         bot_number="+57888",
         phone="+573001234567",
+        full_history=_CONFIRMED_HISTORY,
     )
 
     assert tool_name is None, "Duplicate reservation must downgrade tool to None"
@@ -99,6 +113,7 @@ async def test_different_reservation_params_not_blocked(monkeypatch):
         table_context=None,
         bot_number="+57888",
         phone="+573001234567",
+        full_history=_CONFIRMED_HISTORY,
     )
     # Second reservation: 9 PM — different fingerprint
     await _validate_tool_call(
@@ -108,6 +123,7 @@ async def test_different_reservation_params_not_blocked(monkeypatch):
         table_context=None,
         bot_number="+57888",
         phone="+573001234567",
+        full_history=_CONFIRMED_HISTORY,
     )
 
     res_keys = [k for k in seen_keys if k.startswith("reservation_dedup:")]

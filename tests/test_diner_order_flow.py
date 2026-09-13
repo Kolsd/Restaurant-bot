@@ -32,7 +32,7 @@ import asyncio
 import json
 import os
 import uuid
-from datetime import date
+from datetime import datetime
 
 import asyncpg
 import pytest
@@ -267,7 +267,16 @@ def _kitchen_rows(org_id: int) -> list:
 async def _rescatados_async(org_id: int) -> dict:
     from app.repositories import north_star_repo
     from app.services.tenant_context import tenant_scope
-    today = date.today()
+    # north_star_repo compares against `created_at` (TIMESTAMP WITHOUT TIME
+    # ZONE, stored in UTC — see docs/claude/testing.md "asyncpg + tz" gotcha
+    # and the DB-wide `ALTER DATABASE ... SET timezone TO 'UTC'" convention).
+    # date.today() reads the MACHINE's local clock; on a Colombia-local dev
+    # box (UTC-5) that clock is still "today" for 5 more hours after UTC has
+    # already rolled to "tomorrow", so after ~19:00 local this test would
+    # look for rows dated one day earlier than where they actually landed —
+    # the same class of bug CLAUDE.md documents for other tests ("Fechas en
+    # tests: comparar siempre en el mismo reloj (UTC)"). Compare on UTC.
+    today = datetime.utcnow().date()
     with tenant_scope(org_id):
         return await north_star_repo.db_count_pedidos_rescatados(today, today)
 

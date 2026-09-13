@@ -258,6 +258,41 @@ _ACTION_ANNOUNCEMENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# "Listo, vamos con tu pedido..." / "Resumen:" phrasing: Claude sometimes
+# presents a finalized-looking order recap (real-LLM run 2026-09-13,
+# delivery/pickup funnels) WITHOUT actually calling the order tool that turn.
+# BUT this same phrasing is also what STEP 5 of agent_external.py's system
+# prompt explicitly instructs the model to produce BEFORE confirmation
+# ("Summarize order, address, payment. Ask explicit confirmation."), so on
+# its own it is NOT a reliable signal — a real pre-confirmation recap always
+# also asks the customer something. These two patterns only count as a false
+# "already done" announcement when the reply does NOT also seek confirmation
+# (see _CONFIRMATION_SEEKING_RE + _is_false_action_announcement below).
+_FINALIZED_RECAP_RE = re.compile(
+    r'(listo,?\s+vamos\s+con\b'
+    r'|\bresumen:\s)',
+    re.IGNORECASE,
+)
+_CONFIRMATION_SEEKING_RE = re.compile(
+    r'(\?|confirma[rs]?\b|correcto\b|todo\s+bien\b|est[aá]\s+bien\s+as[ií]\b)',
+    re.IGNORECASE,
+)
+
+
+def _is_false_action_announcement(reply: str) -> bool:
+    """CATEGORY A detector: True if `reply` sounds like the bot already
+    executed an action, without the corresponding tool actually firing this
+    turn. Callers must separately check `tool_name not in
+    _ANNOUNCED_ACTION_TOOLS` — this function only looks at the TEXT.
+    """
+    if not reply:
+        return False
+    if _ACTION_ANNOUNCEMENT_RE.search(reply):
+        return True
+    if _FINALIZED_RECAP_RE.search(reply) and not _CONFIRMATION_SEEKING_RE.search(reply):
+        return True
+    return False
+
 # Actions that MUST have a corresponding tool call when announced
 _ANNOUNCED_ACTION_TOOLS = frozenset({
     "place_order", "create_delivery_order", "create_pickup_order", "make_reservation",
@@ -1476,7 +1511,47 @@ async def _validate_tool_call(
             log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=_ofuscar_phone(phone), fingerprint=item_key)
             return None, "Tu pedido ya está siendo procesado. En un momento te confirmo.", {}
 
-    # 3c. Duplicate reservation detection — money path with Wompi deposits.
+    # 3c. Confirmation guard for make_reservation on first attempt — mirrors
+    # guard #3 for order tools above (same rationale for running BEFORE the
+    # dedup guard just below: an "awaiting confirmation" response must not
+    # burn the dedup/rate-limit window, or the customer's REAL confirmation
+    # a moment later would get blocked as a "duplicate" of a reservation that
+    # was never actually created).
+    #
+    # Real-LLM run 2026-09-13 (ai_sim mesa_05_reserva_fecha_relativa): Claude
+    # called make_reservation with a provisional/guessed date on an early
+    # turn — BEFORE the customer ever said "sí"/"confirmo" — then called it
+    # again with the corrected date after the customer's real confirmation.
+    # Because the two calls carried DIFFERENT reservation data, the
+    # fingerprint-based dedup guard below (3d) did NOT treat them as
+    # duplicates (different date = different fingerprint) — BOTH
+    # reservations were created for one customer intent.
+    #
+    # Only enforced once name/date/time are all present — if any is missing,
+    # fall through to guard #6 below, which asks for the specific missing
+    # field(s) instead of a nonsensical "¿confirmas la reserva para  a las ?"
+    if tool_name == "make_reservation":
+        _res_fields_present = all(
+            str(tool_input.get(f, "")).strip() for f in ("name", "date", "time")
+        )
+        if _res_fields_present:
+            _hist = list(full_history or [])
+            if user_message:
+                _hist.append({"role": "user", "content": user_message})
+            if not _last_messages_have_confirmation(_hist):
+                log.info(
+                    "guard.reservation_awaiting_confirmation",
+                    phone=_ofuscar_phone(phone),
+                    date=tool_input.get("date"),
+                    time=tool_input.get("time"),
+                )
+                return None, (
+                    f"¿Confirmas tu reserva para el {tool_input.get('date', '')} a las "
+                    f"{tool_input.get('time', '')} para {tool_input.get('guests', 1)} personas "
+                    f"a nombre de {tool_input.get('name', '')}? 😊"
+                ), {}
+
+    # 3d. Duplicate reservation detection — money path with Wompi deposits.
     # Without this, an LLM retry or network glitch fires make_reservation twice
     # in 30s → two reservation rows + two Wompi links + (if customer paid both)
     # double deposit charged. The customer almost never wants two reservations
@@ -2071,6 +2146,19 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                             log.exception("reservation.cleanup_failed", id=reservation["id"])
                         reply += "\n\nHubo un problema asignando la mesa. Por favor intenta de nuevo."
                         return reply
+                    # Claude sometimes answers a reservation-confirmation turn (e.g.
+                    # "sí confirmo") with a tool_use call and NO text block at all
+                    # (`reply == ""`) — real-LLM run 2026-09-13, ai_sim
+                    # mesa_05_reserva_fecha_relativa. The reservation still commits
+                    # below regardless — if we let an empty `reply` fall through to
+                    # the top-level empty-reply fallback ("Disculpa, no te
+                    # entendí..."), the customer is told the bot didn't understand
+                    # them even though their reservation DID succeed. Build a plain
+                    # confirmation to fall back on in that case.
+                    _base_confirm_msg = (
+                        f"¡Listo, {rv['name']}! Tu reserva para {guests} personas quedó "
+                        f"registrada para el {rv['date']} a las {rv['time']}."
+                    )
                     if needs_deposit:
                         from app.services.reservation_payments import generate_deposit_link  # noqa: PLC0415
                         try:
@@ -2090,7 +2178,11 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                         log.info("reservation.created_pending",
                                  id=reservation["id"], table=table["id"],
                                  phone=phone, bot_number=bot_number)
-                        reply += f"\n\nPara confirmar tu reserva, necesitamos un depósito de ${int(deposit_amount):,}. Paga aquí: {payment_url}"
+                        _deposit_note = (
+                            f"Para confirmar tu reserva, necesitamos un depósito de "
+                            f"${int(deposit_amount):,}. Paga aquí: {payment_url}"
+                        )
+                        reply = f"{reply}\n\n{_deposit_note}" if reply else _deposit_note
                         log.info("reservation.deposit_link_sent",
                                  id=reservation["id"], amount=str(deposit_amount))
                     elif auto_confirm:
@@ -2098,10 +2190,14 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                         log.info("reservation.auto_confirmed",
                                  id=reservation["id"], table=table["id"],
                                  phone=phone, bot_number=bot_number)
+                        if not reply:
+                            reply = _base_confirm_msg
                     else:
                         log.info("reservation.created_pending",
                                  id=reservation["id"], table=table["id"],
                                  phone=phone, bot_number=bot_number)
+                        if not reply:
+                            reply = _base_confirm_msg
 
         # ── Cancel reservation (shared, both flows) ───────────────────────
         elif action == "cancel_reservation":
@@ -2641,8 +2737,7 @@ async def _call_llm_and_execute(
     # gets another chance to actually fire the tool on the next turn.
     if (
         tool_name not in _ANNOUNCED_ACTION_TOOLS
-        and reply
-        and _ACTION_ANNOUNCEMENT_RE.search(reply)
+        and _is_false_action_announcement(reply)
     ):
         log.warning(
             "action_announcement_without_tool",
