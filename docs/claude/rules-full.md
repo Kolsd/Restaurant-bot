@@ -1,44 +1,43 @@
-# Versión completa de reglas de estilo e instrucciones críticas
+# Full style rules and critical instructions
 
-> Movido verbatim desde CLAUDE.md (2026-09-12) para no cargarlo en cada turno.
+> Moved verbatim from CLAUDE.md (2026-09-12) so it isn't loaded on every turn.
 
-## Reglas de Seguridad y Estilo
+## Security and Style Rules
 
-- **SQL**: PROHIBIDO f-strings para inyectar valores. Siempre `$1, $2, ...` posicionales. Excepción aceptada: f-string solo para construir cláusulas `SET col=$n` dinámicas en updates (ver `db_update_deduction_item`), nunca para valores de usuario.
-- **Auth**: JWT 72h. Passwords bcrypt. Usuarios (email/pass) vs Staff (nombre+PIN). Staff token = `staff:<uuid>`. Sesiones admin almacenadas como SHA-256 hash.
-- **XSS**: En JS usar `textContent` para datos de usuario, nunca `innerHTML`. `innerHTML` solo para strings estáticos sin datos externos.
-- **JSONB**: asyncpg auto-codifica. No usar `json.dumps()` excepto donde el driver lo requiera explícitamente (e.g. pasar un dict como `$n::jsonb`).
-- **NULL en SQL**: `IS NULL` / `IS NOT NULL`. Nunca `WHERE col = NULL`.
-- **Fetch en JS**: Usar siempre `_staffFetch(path, method, body)` o `mesioHeaders()` en lugar de `fetch()` raw.
-- **AI API**: PROHIBIDO llamar a Anthropic/OpenAI desde el browser. Usar proxy `POST /api/ai/proxy` (auth requerido, server-side).
-- **Logging**: PROHIBIDO `except Exception: pass`. Usar `from app.services.logging import get_logger; log = get_logger(__name__)`. Catch tipado + `log.exception("contexto.evento", **ctx)`. Si afecta consistencia de datos/dinero → re-raise tras loguear.
-- **Money**: PROHIBIDO `float` en aritmética financiera. Usar `Decimal` + helpers de `services/money.py`. `float(...)` solo en el borde JSON con comentario `# JSON boundary`.
-- **Prompt injection**: Cualquier nuevo punto donde se inyecte texto del usuario al LLM debe pasar por `_wrap_user_message(...)`.
-- **Multi-tenant RLS (Fase 1)**: PROHIBIDO `pool.acquire()` / `get_pool()` directo en repos nuevos — usá `async with tenant_connection() as conn:`. El call site debe entrar en `tenant_scope(rid)` (rutas admin/staff via deps `_scoped`) o en `bypass_tenant_scope("reason")` (internal/scheduler/inbox pre-resolve). PROHIBIDO capturar `TenantNotSetError` (es señal de call site sin scope). Nueva tabla con `restaurant_id NOT NULL` DEBE agregarse a `_RLS_TABLES` en una migración que habilite + force RLS.
-- **DB URLs**: app runtime conecta como `mesio_app` (non-superuser) via `DATABASE_URL`. Alembic corre con `DATABASE_URL_ADMIN` (postgres superuser). PROHIBIDO apuntar la app runtime a una URL superuser — invalida el enforcement de RLS.
+- **SQL**: f-strings to inject values are FORBIDDEN. Always positional `$1, $2, ...`. Accepted exception: f-strings only to build dynamic `SET col=$n` clauses in updates (see `db_update_deduction_item`), never for user values.
+- **Auth**: JWT 72h. Bcrypt passwords. Users (email/pass) vs Staff (name+PIN). Staff token = `staff:<uuid>`. Admin sessions stored as a SHA-256 hash.
+- **XSS**: In JS use `textContent` for user data, never `innerHTML`. `innerHTML` only for static strings with no external data.
+- **JSONB**: asyncpg auto-encodes. Don't use `json.dumps()` except where the driver explicitly requires it (e.g. passing a dict as `$n::jsonb`).
+- **NULL in SQL**: `IS NULL` / `IS NOT NULL`. Never `WHERE col = NULL`.
+- **Fetch in JS**: Always use `_staffFetch(path, method, body)` or `mesioHeaders()` instead of raw `fetch()`.
+- **AI API**: Calling Anthropic/OpenAI from the browser is FORBIDDEN. Use the `POST /api/ai/proxy` proxy (auth required, server-side).
+- **Logging**: `except Exception: pass` is FORBIDDEN. Use `from app.services.logging import get_logger; log = get_logger(__name__)`. Typed catch + `log.exception("context.event", **ctx)`. If it affects data/money consistency → re-raise after logging.
+- **Money**: `float` in financial arithmetic is FORBIDDEN. Use `Decimal` + the helpers in `services/money.py`. `float(...)` only at the JSON edge with the comment `# JSON boundary`.
+- **Prompt injection**: Any new place where user text gets injected into the LLM must go through `_wrap_user_message(...)`.
+- **Multi-tenant RLS (Phase 1)**: `pool.acquire()` / `get_pool()` directly in new repos is FORBIDDEN — use `async with tenant_connection() as conn:`. The call site must enter `tenant_scope(rid)` (admin/staff routes via `_scoped` deps) or `bypass_tenant_scope("reason")` (internal/scheduler/inbox pre-resolve). Catching `TenantNotSetError` is FORBIDDEN (it's the signal for a call site missing scope). A new table with `restaurant_id NOT NULL` MUST be added to `_RLS_TABLES` in a migration that enables + forces RLS.
+- **DB URLs**: the runtime app connects as `mesio_app` (non-superuser) via `DATABASE_URL`. Alembic runs with `DATABASE_URL_ADMIN` (postgres superuser). Pointing the runtime app at a superuser URL is FORBIDDEN — it invalidates RLS enforcement.
 
-## Instrucciones Críticas para Claude Code
-- **No Vaguedad**: Ante una duda técnica, pregunta antes de proponer cambios masivos que consuman tokens.
-- **Aislamiento Multi-Worker**: Al modificar estados (`NPS`, `checkout`), asume siempre que hay 4 workers y usa `state_store` (Redis).
-- **Patrón Repositorio**: Prohibido SQL en `app/routes/` y `app/services/` (excepto `billing.py` fiscal). Todo SQL nuevo va en `app/repositories/`.
-- **Multi-tenant RLS (v11.0)**: Todo repo nuevo que toque una tabla con `restaurant_id` DEBE usar `async with tenant_connection() as conn:` y ser llamado desde un call site con `tenant_scope(rid)` activo (o `bypass_tenant_scope("reason")` si es genuinamente cross-tenant). LEE la sección "Blindaje Multi-tenant RLS" antes de tocar repos, deps, bot runtime, o alembic. El estado ha sido verificado empíricamente — no lo rompas con "silent fails" o catches genéricos.
-- **Precisión Financiera**: Prohibido usar `float` para dinero. Usa `Decimal` y los helpers en `app/services/money.py`.
-- **Logging Estricto**: Usa `structlog` vía `get_logger(__name__)`. Prohibido el uso de `print()` o bloques `except Exception: pass`.
-- **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle. Alembic corre con `DATABASE_URL_ADMIN` (superuser); la app runtime conecta con `DATABASE_URL` (mesio_app non-superuser).
-- **Patrones Alembic (3 footguns que rompieron prod 2026-05-06)**:
-  1. **Multiple heads**: si dos sprints paralelos crean migraciones con el mismo `down_revision`, `alembic upgrade head` falla con "Multiple head revisions are present". ANTES de mergear a main, correr `alembic heads` — debe retornar 1 línea. Si retorna 2+, crear merge migration no-op (ver `0072_merge_plan_limits_demo_seed.py` como patrón) con `down_revision = ("rev_a", "rev_b")` y `upgrade/downgrade` vacíos.
-  2. **`conn.execute("string")` no funciona en SQLAlchemy 2.0**. Usar `import sqlalchemy as sa` + `conn.execute(sa.text("..."))`. `op.execute("string")` SÍ acepta strings raw (alembic los convierte) pero `op.get_bind().execute(...)` no — son APIs distintas. Patrón canónico del repo: `0034_create_organizations_locations.py`.
-  3. **`:param::tipo` rompe con `sa.text()` bound params**. El regex de SQLAlchemy se confunde con el `::` (cast operator) y deja `:param` literal en la query final → `psycopg2.errors.SyntaxError`. Usar `CAST(:param AS tipo)` en su lugar. Ej.: `INSERT ... VALUES (CAST(:menu AS jsonb))` ✅, NO `:menu::jsonb` ❌.
-- **Bot Intocable**: LEER la sección "Reglas del Bot — NO ROMPER" ANTES de tocar cualquier archivo del bot. Cada regla existe por un bug real que afectó a clientes.
-- **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`.
-  - **Con `TEST_DATABASE_URL` exportada** (DB en UTC, migrada a head): **1741 passed / 0 failed / 6 skipped** en ~2.5 min (sin e2e).
-  - **Sin `TEST_DATABASE_URL`**: **1400 passed / 0 failed** (~350 skipped: los tests con DB). Nunca tomar este número como prueba de salud: no ejercita la DB.
-  - **E2E tests (`tests/e2e/`)**: requieren `TEST_DATABASE_URL` + `ANTHROPIC_API_KEY` (los `e2e_no_llm` solo DB). Correr serial — son lentos por seed real + Anthropic real.
-  - Cualquier failure nuevo es regresión real — no merguear hasta resolverla.
-- **Claim-then-ack**: NUNCA revertir inbox_worker a transacción larga. El patrón de 3 fases existe para evitar pool deadlock.
-- **Frontend Lint ("No-v2" sprint)**: Antes de mergear cualquier cambio que toque `app/static/js/**` o `app/static/html/**`, correr `python scripts/lint_frontend.py` — CI falla si encuentra mock/TODO/dead-fetch/seed-data. Supresión legítima via `// lint-allow: razón` (JS) o `<!-- lint-allow: razón -->` (HTML). PROHIBIDO suprimir sin razón explícita.
-- **Tests Verídicos**: Nuevos tests integration contra `TEST_DATABASE_URL` DEBEN probar correctness de agregados (seed data → assert valor exacto), tenant isolation (org A vs org B), y caso vacío (sin 500). Prohibidos: `assert status_code == 200` como única aserción, mock del repo completo, `assert "key" in data` sin checkear valor. Ver fixture de referencia en `tests/test_loyalty_aggregates.py` ("No-v2" sprint).
-- **Tool Use Nativo**: El bot usa Claude tool_use API. NUNCA volver a JSON-in-prompt. `_validate_tool_call()` es la barrera de seguridad.
-- **Checkout State Machine**: Antes de modificar `handle_checkout_flow`, dibujar mentalmente todos los steps y verificar que cada uno tiene branch. Un step sin branch = checkout roto.
-- **Regla "Si lo ves, lo arreglás" (PM 2026-04-29)**: Si durante una sesión encontrás algo roto, raro o sospechoso — aunque sea pre-existente, aunque no esté en el scope literal de la tarea — NO escribís en el reporte "es pre-existente", "no es mío", "fuera de scope", "deuda histórica". Lo arreglás o, si requiere decisión de producto (no técnica), preguntás al PM antes. Cada problema visto y no arreglado es deuda que reaparece. Excepción legítima: si arreglarlo expande el scope >50% del trabajo original, anotalo como sub-tarea concreta con archivo/líneas (no como handwave) y preguntás al PM si seguimos.
-
+## Critical Instructions for Claude Code
+- **No vagueness**: When in technical doubt, ask before proposing massive token-consuming changes.
+- **Multi-worker isolation**: When modifying state (`NPS`, `checkout`), always assume there are 4 workers and use `state_store` (Redis).
+- **Repository pattern**: SQL is forbidden in `app/routes/` and `app/services/` (except `billing.py` for fiscal). All new SQL goes in `app/repositories/`.
+- **Multi-tenant RLS (v11.0)**: Any new repo touching a table with `restaurant_id` MUST use `async with tenant_connection() as conn:` and be called from a call site with an active `tenant_scope(rid)` (or `bypass_tenant_scope("reason")` if it's genuinely cross-tenant). READ the "Multi-tenant RLS hardening" section before touching repos, deps, bot runtime, or alembic. This state has been empirically verified — don't break it with "silent fails" or generic catches.
+- **Financial precision**: Using `float` for money is forbidden. Use `Decimal` and the helpers in `app/services/money.py`.
+- **Strict logging**: Use `structlog` via `get_logger(__name__)`. `print()` and bare `except Exception: pass` blocks are forbidden.
+- **Migrations**: Always use `IF NOT EXISTS` so Railway's start command never fails. Alembic runs with `DATABASE_URL_ADMIN` (superuser); the runtime app connects with `DATABASE_URL` (mesio_app non-superuser).
+- **Alembic patterns (3 footguns that broke prod on 2026-05-06)**:
+  1. **Multiple heads**: if two parallel sprints create migrations with the same `down_revision`, `alembic upgrade head` fails with "Multiple head revisions are present". BEFORE merging to main, run `alembic heads` — it must return 1 line. If it returns 2+, create a no-op merge migration (see `0072_merge_plan_limits_demo_seed.py` as the pattern) with `down_revision = ("rev_a", "rev_b")` and empty `upgrade`/`downgrade`.
+  2. **`conn.execute("string")` doesn't work in SQLAlchemy 2.0**. Use `import sqlalchemy as sa` + `conn.execute(sa.text("..."))`. `op.execute("string")` DOES accept raw strings (alembic converts them) but `op.get_bind().execute(...)` doesn't — they're different APIs. Canonical pattern in the repo: `0034_create_organizations_locations.py`.
+  3. **`:param::type` breaks with `sa.text()` bound params**. SQLAlchemy's regex gets confused by the `::` (cast operator) and leaves `:param` literal in the final query → `psycopg2.errors.SyntaxError`. Use `CAST(:param AS type)` instead. E.g.: `INSERT ... VALUES (CAST(:menu AS jsonb))` ✅, NOT `:menu::jsonb` ❌.
+- **Bot is Untouchable**: READ the "Bot Rules — DO NOT BREAK" section BEFORE touching any bot file. Every rule exists because of a real bug that hit customers.
+- **Mandatory Tests**: After any change to bot files, run `pytest tests/ --ignore=tests/ai_sim`.
+  - **With `TEST_DATABASE_URL` exported** (DB in UTC, migrated to head): **1741 passed / 0 failed / 6 skipped** in ~2.5 min (no e2e).
+  - **Without `TEST_DATABASE_URL`**: **1400 passed / 0 failed** (~350 skipped: the DB tests). Never take this number as proof of health: it doesn't exercise the DB.
+  - **E2E tests (`tests/e2e/`)**: require `TEST_DATABASE_URL` + `ANTHROPIC_API_KEY` (the `e2e_no_llm` ones only need the DB). Run them serially — they're slow due to real seeding + real Anthropic calls.
+  - Any new failure is a real regression — don't merge until it's resolved.
+- **Claim-then-ack**: NEVER revert inbox_worker to a long transaction. The 3-phase pattern exists to prevent pool deadlock.
+- **Frontend Lint ("No-v2" sprint)**: Before merging any change touching `app/static/js/**` or `app/static/html/**`, run `python scripts/lint_frontend.py` — CI fails if it finds mock/TODO/dead-fetch/seed-data. Legitimate suppression via `// lint-allow: reason` (JS) or `<!-- lint-allow: reason -->` (HTML). Suppressing without an explicit reason is FORBIDDEN.
+- **Truthful Tests**: New integration tests against `TEST_DATABASE_URL` MUST test aggregate correctness (seed data → assert the exact value), tenant isolation (org A vs org B), and the empty case (no 500). Forbidden: `assert status_code == 200` as the only assertion, mocking the whole repo, `assert "key" in data` without checking the value. See the reference fixture in `tests/test_loyalty_aggregates.py` ("No-v2" sprint).
+- **Native Tool Use**: The bot uses Claude's tool_use API. NEVER go back to JSON-in-prompt. `_validate_tool_call()` is the safety barrier.
+- **Checkout State Machine**: Before modifying `handle_checkout_flow`, mentally draw out every step and verify each one has a branch. A step without a branch = broken checkout.
+- **"If you see it, you fix it" rule (PM 2026-04-29)**: If during a session you find something broken, odd or suspicious — even if pre-existing, even if it's not literally in the task's scope — you do NOT write in the report "it's pre-existing", "not mine", "out of scope", "historical debt". You fix it, or if it requires a product decision (not a technical one), you ask the PM first. Every problem seen and not fixed is debt that resurfaces. Legitimate exception: if fixing it would expand the scope by >50% of the original work, note it as a concrete sub-task with file/lines (not a handwave) and ask the PM whether to proceed.

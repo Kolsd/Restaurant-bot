@@ -1,57 +1,56 @@
-# Estado actual, decisiones de producto cerradas y siguiente sesión
+# Current state, closed product decisions and next session
 
-> Movido verbatim desde CLAUDE.md (2026-09-12) para no cargarlo en cada turno.
+> Moved verbatim from CLAUDE.md (2026-09-12) so it isn't loaded on every turn.
 
-## ▶ ESTADO ACTUAL Y SIGUIENTE SESIÓN — leer primero (actualizado 2026-09-12)
+## ▶ CURRENT STATE AND NEXT SESSION — read first (updated 2026-09-12)
 
-### Qué pasó (sesiones 2026-09-10 → 12, 20 commits `0ab1641..ad8dca1`)
-- **La suite mentía.** Los "1368 tests verdes" venían de un subconjunto mockeado: `alembic upgrade head` no construía una DB desde cero, nadie corría los tests con DB y 260 se saltaban en silencio. Arreglado: la cadena de migraciones construye desde vacío (0079), los tests con DB corren y pasan, dependencias de test pinneadas.
-- **Pivote de producto: canal web propio en lugar de WhatsApp.** El bot sigue siendo el producto (chat-first). QR → `/chat/{table_id}` → el bot da la carta como tarjetas.
-- **Flujo de mesa completo, sin WhatsApp y sin LLM:** el escaneo abre la mesa y muestra un código → los amigos se unen con ese código → carrito determinista con nota por plato → "Enviar pedido" llega a cocina con la nota en la comanda → vista de mesa ("Tú" / "Otro comensal") → "Pedir la cuenta" (lo mío / toda la mesa, tarjeta / efectivo) → el mesero cobra con su datáfono → caja `pay_check` → NPS de 1 a 5 en el chat.
-- **P0 cerrados:** el cobro de mesa daba 500 siempre; `db_get_restaurant_by_id` devolvía OTRO restaurante cuando un id de sede coincidía con un id de organización (eliminada; `users.org_id`/`location_id` en 0081); el superadmin escribía sobre el cliente equivocado (endpoints legacy eliminados); "descartar aviso" hacía DELETE; el control de stock nunca funcionaba (doble `json.dumps`); cinco endpoints con RLS mal cableado; tres tests que fallaban solo de noche por zona horaria. El test estrella e2e ya no es intermitente: su "intermitencia" era la colisión de ids.
-- **Email transaccional** (`EMAIL_BACKEND=console|resend`) para reset de clave, reporte semanal y bienvenida del CRM, para poder retirar WhatsApp sin dejar dueños bloqueados.
+### What happened (sessions 2026-09-10 → 12, 20 commits `0ab1641..ad8dca1`)
+- **The suite was lying.** The "1368 green tests" came from a mocked subset: `alembic upgrade head` didn't build a DB from scratch, nobody ran the tests with a real DB, and 260 were silently skipped. Fixed: the migration chain builds from empty (0079), the DB tests run and pass, test dependencies are pinned.
+- **Product pivot: own web channel instead of WhatsApp.** The bot is still the product (chat-first). QR → `/chat/{table_id}` → the bot presents the menu as cards.
+- **Full table flow, no WhatsApp and no LLM:** scanning opens the table and shows a code → friends join with that code → deterministic cart with a per-dish note → "Send order" reaches the kitchen with the note on the ticket → table view ("You" / "Another diner") → "Ask for the bill" (mine / the whole table, card / cash) → the waiter charges on their card reader → cashier `pay_check` → NPS from 1 to 5 in the chat.
+- **P0s closed:** table checkout always returned 500; `db_get_restaurant_by_id` returned ANOTHER restaurant when a location id collided with an organization id (removed; `users.org_id`/`location_id` in 0081); the superadmin was writing to the wrong customer (legacy endpoints removed); "dismiss alert" issued a DELETE; stock control never worked (double `json.dumps`); five endpoints with RLS wired wrong; three tests that failed only at night because of timezone. The flagship e2e test is no longer flaky: its "flakiness" was the id collision.
+- **Transactional email** (`EMAIL_BACKEND=console|resend`) for password reset, weekly report and CRM welcome, so WhatsApp can be retired without locking out owners.
 
-### Decisiones de producto cerradas (no re-discutir)
-1. Comensal anónimo (`web:<uuid4>`); nombre y teléfono opcionales, solo al pagar.
-2. El pedido va directo a cocina; el mesero recibe aviso, no aprueba.
-3. Botón de mesero flotante, siempre visible, que pregunta el motivo (cuenta / cubiertos / servilletas / otra cosa).
-4. Chat-first: el bot da la carta en tarjetas con foto y "+"; el primer mensaje saluda y muestra categorías; "Ver carta completa" abre un panel.
-5. Nota libre por plato, sin modificadores con precio.
-6. Mesa compartida: quien llega después se une con el código que ve el primero.
-7. Cobro al lanzamiento POR EL MESERO, sin pasarela: "pago lo mío" o "pago toda la mesa" (= saldo restante).
-8. NPS al terminar el servicio (al cobrar), dentro del chat.
-9. Wompi OFF (webhook roto, ver sección Wompi). Bold diferido como primera pasarela (ver sección Bold).
-10. WhatsApp se retira. Push web fuera de alcance hasta construir domicilios.
-11. El superadmin edita solo datos del negocio (organización); los datos de cada sede los edita el restaurante.
-12. Enganche comercial = 8 días gratis sobre el plan básico usando `comp_until` (NO un `plan_code='free'`). NO implementado; falta confirmar si es Pulso o Restaurante.
+### Closed product decisions (do not re-discuss)
+1. Anonymous diner (`web:<uuid4>`); name and phone optional, only when paying.
+2. The order goes straight to the kitchen; the waiter gets notified, doesn't approve.
+3. Floating waiter button, always visible, that asks the reason (bill / cutlery / napkins / something else).
+4. Chat-first: the bot presents the menu as cards with photo and "+"; the first message greets and shows categories; "View full menu" opens a panel.
+5. Free-text note per dish, no priced modifiers.
+6. Shared table: whoever arrives later joins with the code the first person sees.
+7. Checkout at launch BY THE WAITER, no gateway: "pay mine" or "pay for the whole table" (= remaining balance).
+8. NPS at the end of service (at checkout), inside the chat.
+9. Wompi OFF (webhook broken, see Wompi section). Bold deferred as the first gateway (see Bold section).
+10. WhatsApp is being retired. Web push is out of scope until delivery is built.
+11. The superadmin edits only business (organization) data; each location's data is edited by the restaurant.
+12. Sales hook = 8 free days on top of the basic plan using `comp_until` (NOT a `plan_code='free'`). NOT implemented; still need to confirm whether it's Pulso or Restaurante.
 
-### Siguiente sesión — en este orden
-1. **Validar el bot con el LLM real — bloqueante.** Todo lo verificado corrió SIN `ANTHROPIC_API_KEY`. El PM carga la clave; correr `pytest tests/e2e` completo (44 tests con LLM) y `python run_ai_sim.py` (~$2-5). Revisar: la tool `add_to_cart` crea líneas con `line_id`, el carrito entra al contexto con notas sanitizadas, NPS y checkout escritos por chat web.
-2. **Tiempo real:** SSE (+ Redis pub/sub, por los 4 workers) en kitchen / bar / mesero / caja y en el estado del comensal; sonido en KDS. Hoy todo es polling de 6 a 30 s.
-3. **Primer cliente:** trial de 8 días (`comp_until`) en el alta del CRM; verificar que el alta deja menú, mesas, QR y staff listos para operar.
-4. **Multi-sede:** la pantalla del mesero no filtra avisos por sede (el login de staff no guarda `location_id`). Obligatorio antes de vender a cadenas.
-5. Barrer el patrón `json.dumps()` pasado a `$n::jsonb` (doble codificación) en el resto del código.
-6. Apagar WhatsApp: migrar primero `tests/e2e/conftest.py` y `test_happy_path_full_flow` al canal web; nunca borrar antes de tener el harness equivalente.
-7. Antes de reactivar Wompi: arreglar el webhook (sección Wompi).
-- **Ops (Railway):** confirmar que `WOMPI_*` NO estén seteadas, que `REDIS_URL` y `DATABASE_URL_ADMIN` sí lo estén, y aplicar `alembic upgrade head` (0079-0081).
+### Next session — in this order
+1. **Validate the bot with the real LLM — blocking.** Everything verified ran WITHOUT `ANTHROPIC_API_KEY`. The PM loads the key; run the full `pytest tests/e2e` (44 tests with LLM) and `python run_ai_sim.py` (~$2-5). Check: the `add_to_cart` tool creates lines with `line_id`, the cart enters context with sanitized notes, NPS and checkout written via web chat.
+2. **Real time:** SSE (+ Redis pub/sub, for the 4 workers) in kitchen / bar / waiter / cashier and in diner state; sound in the KDS. Today everything is 6-30s polling.
+3. **First customer:** 8-day trial (`comp_until`) at CRM signup; verify signup leaves menu, tables, QR and staff ready to operate.
+4. **Multi-location:** the waiter screen doesn't filter alerts by location (staff login doesn't store `location_id`). Mandatory before selling to chains.
+5. Sweep the `json.dumps()` passed to `$n::jsonb` pattern (double encoding) in the rest of the code.
+6. Turn off WhatsApp: first migrate `tests/e2e/conftest.py` and `test_happy_path_full_flow` to the web channel; never delete before having the equivalent harness.
+7. Before reactivating Wompi: fix the webhook (Wompi section).
+- **Ops (Railway):** confirm `WOMPI_*` are NOT set, that `REDIS_URL` and `DATABASE_URL_ADMIN` ARE set, and apply `alembic upgrade head` (0079-0081).
 
-### Estado verificado al cierre
-- Head `0081_users_org_location`, un solo head, construye desde una DB vacía.
-- `pytest tests/ --ignore=tests/e2e --ignore=tests/ai_sim`: **1741 passed / 0 failed** con DB · **1400 passed** sin DB.
-- `pytest tests/e2e -m e2e_no_llm`: **15/15**, 11 corridas seguidas limpias. `scripts/lint_frontend.py`: 0 violaciones. `sw.js` `CACHE_VERSION = 'v45'`.
+### Verified state at close
+- Head `0081_users_org_location`, a single head, builds from an empty DB.
+- `pytest tests/ --ignore=tests/e2e --ignore=tests/ai_sim`: **1741 passed / 0 failed** with DB · **1400 passed** without DB.
+- `pytest tests/e2e -m e2e_no_llm`: **15/15**, 11 clean runs in a row. `scripts/lint_frontend.py`: 0 violations. `sw.js` `CACHE_VERSION = 'v45'`.
 
-### Entorno local (Windows)
-- Python 3.12 en `.venv` · Postgres 16 local (superuser `postgres` / `mesio_local_dev`; rol `mesio_app` / `mesio_app_pw`) · sin Redis (fallback in-process).
-- DBs: `mesio_tests` (suite), `mesio_test` (e2e), `mesio_fresh` (scratch aislada). Todas con `ALTER DATABASE <db> SET timezone TO 'UTC'` — obligatorio.
-- Pins obligatorios: `pytest==8.4.2`, `pytest-asyncio==0.24.0` (la 1.x rompe ~94 tests con "coroutine was never awaited").
-- Para correr tests: `TEST_DATABASE_URL`, `DATABASE_URL` y `DATABASE_URL_ADMIN` apuntando a la DB; `DISABLE_META_SIGNATURE_VERIFY=1` para e2e.
-- Servidor local: `uvicorn` no está en el PATH y `.claude/launch.json` es un archivo versionado con 3 configuraciones — NO sobrescribirlo; usar un launcher propio que setee `DATABASE_URL`.
+### Local environment (Windows)
+- Python 3.12 in `.venv` · local Postgres 16 (superuser `postgres` / `mesio_local_dev`; role `mesio_app` / `mesio_app_pw`) · no Redis (in-process fallback).
+- DBs: `mesio_tests` (suite), `mesio_test` (e2e), `mesio_fresh` (isolated scratch). All with `ALTER DATABASE <db> SET timezone TO 'UTC'` — mandatory.
+- Mandatory pins: `pytest==8.4.2`, `pytest-asyncio==0.24.0` (1.x breaks ~94 tests with "coroutine was never awaited").
+- To run tests: `TEST_DATABASE_URL`, `DATABASE_URL` and `DATABASE_URL_ADMIN` pointing at the DB; `DISABLE_META_SIGNATURE_VERIFY=1` for e2e.
+- Local server: `uvicorn` is not on the PATH and `.claude/launch.json` is a versioned file with 3 configurations — do NOT overwrite it; use your own launcher that sets `DATABASE_URL`.
 
-### Reglas aprendidas en estas sesiones
-- **Un test que se salta en silencio es un test que miente.** Los tests con DB deben correr contra una DB real.
-- **Colisión de ids organización/sede:** nunca pasar un id de tipo dudoso a una búsqueda. Todo test de tenant debe sembrar ids que choquen A PROPÓSITO; los tests previos pasaban solo porque no chocaban.
-- **Firmas de pasarelas:** probar contra la documentación o un evento real, nunca contra una firma generada por nuestro propio código.
-- **Commit con archivos estáticos → subir `CACHE_VERSION` de `sw.js` en ese mismo commit**, y correr `test_sw_cache_version` después de commitear (solo mira el último commit).
-- **Fechas en tests:** comparar siempre en el mismo reloj (UTC). `date.today()` contra `utcnow()` rompió tres tests después de las 19:00.
-- **Agentes:** darles el porqué, exigir verificación en navegador y en DB, prohibir debilitar tests, y verificar cada reporte antes de commitear — varios diagnósticos iniciales (propios y de agentes) fueron incorrectos.
-
+### Rules learned in these sessions
+- **A silently-skipped test is a test that lies.** Tests with DB must run against a real DB.
+- **Organization/location id collision:** never pass an id of ambiguous type to a lookup. Every tenant test must seed ids that collide ON PURPOSE; previous tests only passed because they didn't collide.
+- **Gateway signatures:** test against the documentation or a real event, never against a signature generated by our own code.
+- **Commit with static files → bump `sw.js`'s `CACHE_VERSION` in that same commit**, and run `test_sw_cache_version` after committing (it only looks at the latest commit).
+- **Dates in tests:** always compare on the same clock (UTC). `date.today()` vs. `utcnow()` broke three tests after 19:00.
+- **Agents:** give them the why, require browser and DB verification, forbid weakening tests, and verify every report before committing — several initial diagnoses (both mine and agents') were wrong.

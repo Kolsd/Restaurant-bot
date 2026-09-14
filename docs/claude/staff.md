@@ -1,43 +1,43 @@
-# Staff HQ, dashboard admin, endpoints staff, POS
+# Staff HQ, admin dashboard, staff endpoints, POS
 
-> Movido verbatim desde CLAUDE.md (2026-09-12) para no cargarlo en cada turno.
+> Moved verbatim from CLAUDE.md (2026-09-12) so it isn't loaded on every turn.
 
-## Módulo Staff HQ (`/staff-hq`)
+## Staff HQ Module (`/staff-hq`)
 
-Portal operativo unificado para todo el staff no-admin. Reemplaza las páginas de rol separadas.
+Unified operational portal for all non-admin staff. Replaces the separate per-role pages.
 
-- **Login unificado**: `login.html` con 3 vistas: formulario login, selector restaurante, selector rol. `?r=X` para staff PIN login. `staff-portal.html` eliminado (redirect server-side).
-- **Usernames**: Staff usa `nombre.apellido` (auto-generado en creación). Duplicados resueltos con sufijo numérico. Login acepta username o nombre completo.
-- **Auth token**: JWT con claim `staff:<uuid>`. Se almacena en `localStorage` como `rb_staff_token` y también como alias `rb_token`. Sesiones via SHA-256 hash (`sessions_repo`).
-- **Secciones**: Clock card (entrada/salida/break), Timecard semanal con badges de deducción, Biometría (registro/gestión credenciales FIDO2).
+- **Unified login**: `login.html` with 3 views: login form, restaurant selector, role selector. `?r=X` for staff PIN login. `staff-portal.html` was removed (server-side redirect).
+- **Usernames**: staff use `firstname.lastname` (auto-generated at creation). Duplicates resolved with a numeric suffix. Login accepts username or full name.
+- **Auth token**: JWT with claim `staff:<uuid>`. Stored in `localStorage` as `rb_staff_token` and also aliased as `rb_token`. Sessions via a SHA-256 hash (`sessions_repo`).
+- **Sections**: Clock card (clock-in/out/break), weekly timecard with deduction badges, Biometrics (register/manage FIDO2 credentials).
 
-### Biometría WebAuthn (`staff_webauthn.py`)
-- Registro: requiere Bearer token de staff → `POST /api/staff/webauthn/register-options` + `register-complete`.
-- Clock-in/out biométrico (kiosco público): `POST /api/staff/webauthn/auth-options` + `auth-complete`.
-- `auth-complete` acepta `action: clock_in | clock_out | break` — incluye lógica de break toggle.
-- `RP_ID` se lee de `APP_DOMAIN` env var o del hostname del request.
+### WebAuthn Biometrics (`staff_webauthn.py`)
+- Registration: requires a staff Bearer token → `POST /api/staff/webauthn/register-options` + `register-complete`.
+- Biometric clock-in/out (public kiosk): `POST /api/staff/webauthn/auth-options` + `auth-complete`.
+- `auth-complete` accepts `action: clock_in | clock_out | break` — includes break-toggle logic.
+- `RP_ID` is read from the `APP_DOMAIN` env var or from the request hostname.
 
-## Dashboard Admin (`/dashboard`)
+## Admin Dashboard (`/dashboard`)
 
-### Navegación principal
-| Sección | Nav key | Loader |
+### Main navigation
+| Section | Nav key | Loader |
 |---------|---------|--------|
-| Equipo | `staff` | `loadStaffSection()` |
-| Nómina y Propinas | `payroll` | `loadPayrollSection()` |
-| Menú | `menu` | — |
-| Estadísticas | `stats` | — |
+| Team | `staff` | `loadStaffSection()` |
+| Payroll and Tips | `payroll` | `loadPayrollSection()` |
+| Menu | `menu` | — |
+| Stats | `stats` | — |
 | ... | ... | ... |
 
-### Sección Equipo — sub-tabs
-- **Equipo**: roster con búsqueda, filtros por rol, cards estado activo/en turno.
-- **Turnos**: editor visual semanal `_renderShiftsEditor`. Click celda → modal crear/editar. Selección múltiple → modal masivo. Botón "Copiar semana anterior" → `POST /api/staff/schedules/bulk`. Badges cumplimiento: ✓ / ⚠ / ✗.
+### Team section — sub-tabs
+- **Team**: roster with search, role filters, active/on-shift status cards.
+- **Shifts**: visual weekly editor `_renderShiftsEditor`. Click a cell → create/edit modal. Multi-select → bulk modal. "Copy previous week" button → `POST /api/staff/schedules/bulk`. Compliance badges: ✓ / ⚠ / ✗.
 
-### Sección Nómina — sub-tabs
-- **Nómina**: período + presets → `GET /api/staff/payroll/calculate`. Tabla por empleado. Config % propinas por rol (`PATCH /api/staff/tip-distribution`). Card de propinas automáticas (`GET /api/staff/tips/auto`). Guardar borrador / aprobar run.
-- **Overtime**: lista pendientes con Aprobar/Rechazar (`PATCH /api/staff/payroll/overtime/{id}`).
-- **Contratos**: CRUD plantillas. Campos monetarios en `Decimal` Pydantic.
+### Payroll section — sub-tabs
+- **Payroll**: period + presets → `GET /api/staff/payroll/calculate`. Per-employee table. Per-role tip % config (`PATCH /api/staff/tip-distribution`). Automatic tips card (`GET /api/staff/tips/auto`). Save draft / approve run.
+- **Overtime**: pending list with Approve/Reject (`PATCH /api/staff/payroll/overtime/{id}`).
+- **Contracts**: template CRUD. Monetary fields as `Decimal` in Pydantic.
 
-## Endpoints Staff (`/api/staff/...`)
+## Staff Endpoints (`/api/staff/...`)
 
 ```
 # Roster
@@ -54,7 +54,7 @@ POST   /api/staff/self/break-start
 POST   /api/staff/self/break-end
 GET    /api/staff/self/timecard          → ?week_start=YYYY-MM-DD
 
-# Turnos y horarios
+# Shifts and schedules
 GET    /api/staff/open-shifts
 GET    /api/staff/shifts                 → ?date_from=&date_to=
 POST   /api/staff/clock-in              → admin (body: staff_id)
@@ -64,18 +64,18 @@ POST   /api/staff/schedules
 POST   /api/staff/schedules/bulk        → body: {entries: [{staff_id, day_of_week, start_time, end_time}]}
 DELETE /api/staff/schedules/{id}
 
-# Propinas
+# Tips
 GET    /api/staff/tips/auto             → ?period_start=&period_end=&branch_id=
-PATCH  /api/staff/tip-distribution      → body: {config: {rol: pct}}
-GET    /api/staff/tip-distributions     → histórico (legacy)
+PATCH  /api/staff/tip-distribution      → body: {config: {role: pct}}
+GET    /api/staff/tip-distributions     → history (legacy)
 
-# Deducciones manuales
+# Manual deductions
 GET    /api/staff/{id}/deductions
 POST   /api/staff/{id}/deductions
 PATCH  /api/staff/deductions/{item_id}
 DELETE /api/staff/deductions/{item_id}
 
-# Nómina
+# Payroll
 GET    /api/staff/payroll/calculate     → ?period_start=&period_end=
 POST   /api/staff/payroll/runs          → body: {period_start, period_end, snapshot, ...}
 GET    /api/staff/payroll/runs
@@ -89,7 +89,7 @@ PATCH  /api/staff/payroll/contracts/{id}
 DELETE /api/staff/payroll/contracts/{id}
 PATCH  /api/staff/{id}/contract         → body: {template_id, overrides, contract_start}
 
-# WebAuthn biométrico
+# Biometric WebAuthn
 POST   /api/staff/webauthn/register-options
 POST   /api/staff/webauthn/register-complete
 POST   /api/staff/webauthn/auth-options    → body: {restaurant_id, action}
@@ -98,12 +98,11 @@ GET    /api/staff/webauthn/credentials
 DELETE /api/staff/webauthn/credentials/{id}
 ```
 
-## Staff, POS y Operaciones
+## Staff, POS and Operations
 
-- **Roles válidos**: `owner`, `admin`, `gerente`, `mesero`, `caja`, `cocina`, `bar`, `domiciliario`, `otro`.
-- **Caja (Súper Caja)**: 3 vistas: Mesas (POS local), Domicilios Pendientes, Chats (validar comprobantes).
-- **Split Checks**: `table_checks` permite pagos mixtos. Toda la matemática en `Decimal`. Mesa completa → `factura_entregada` cuando todos los checks están en `invoiced/cancelled`.
-- **Propinas en checks**: `table_checks.tip_amount` validado: `tip_amount <= money_mul(check_total, Decimal("0.5"))`.
-- **Turnos**: partial unique index garantiza 1 fila abierta por staff.
-- **Overtime**: comparando `billable_minutes` vs `contract_templates.weekly_hours`. Status `pending` para aprobación.
-
+- **Valid roles**: `owner`, `admin`, `gerente` (manager), `mesero` (waiter), `caja` (cashier), `cocina` (kitchen), `bar`, `domiciliario` (courier), `otro` (other).
+- **Cashier (Super Caja)**: 3 views: Tables (local POS), Pending Deliveries, Chats (verify proof of payment).
+- **Split Checks**: `table_checks` allows mixed payments. All math in `Decimal`. A table is fully closed → `factura_entregada` (bill delivered) once every check is `invoiced`/`cancelled`.
+- **Tips on checks**: `table_checks.tip_amount` validated: `tip_amount <= money_mul(check_total, Decimal("0.5"))`.
+- **Shifts**: a partial unique index guarantees 1 open row per staff member.
+- **Overtime**: compares `billable_minutes` against `contract_templates.weekly_hours`. Status `pending` for approval.

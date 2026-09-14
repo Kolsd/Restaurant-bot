@@ -1,94 +1,94 @@
-# Frontend: páginas, patrones JS, catálogo visual v2
+# Frontend: pages, JS patterns, visual catalog v2
 
-> Movido verbatim desde CLAUDE.md (2026-09-12) para no cargarlo en cada turno.
+> Moved verbatim from CLAUDE.md (2026-09-12) so it isn't loaded on every turn.
 
-## Frontend — Pages servidas
+## Frontend — Served pages
 
-**Chrome compartido**: `app/static/css/tokens.css` + `shared.css` + `pages/<page>.css`. JS: `mesio-utils.js` → `pages/sidebar.js` → `pages/<page>.js`.
+**Shared chrome**: `app/static/css/tokens.css` + `shared.css` + `pages/<page>.css`. JS: `mesio-utils.js` → `pages/sidebar.js` → `pages/<page>.js`.
 
-**Admin (servidos via `app/routes/dashboard.py`)**: `/dashboard`, `/orders`, `/reservations`, `/menu-admin`, `/menu-engineering`, `/nps`, `/loyalty`, `/customers-at-risk`, `/payroll`, `/locations`, `/floorplan`, `/team`, `/settings`, `/billing`, `/staff-hq` (alias `/staff-clock`).
+**Admin (served via `app/routes/dashboard.py`)**: `/dashboard`, `/orders`, `/reservations`, `/menu-admin`, `/menu-engineering`, `/nps`, `/loyalty`, `/customers-at-risk`, `/payroll`, `/locations`, `/floorplan`, `/team`, `/settings`, `/billing`, `/staff-hq` (alias `/staff-clock`).
 
-**Operacionales (dark theme)**: `/cashier` (POS), `/kitchen` (KDS), `/bar` (KDS variante), `/waiter` (tablet grid), `/courier` (mobile).
+**Operational (dark theme)**: `/cashier` (POS), `/kitchen` (KDS), `/bar` (KDS variant), `/waiter` (tablet grid), `/courier` (mobile).
 
-**Públicas**: `/login.html`, `/menu.html` (QR público), `/demo`, `/dashboard-demo`, `/chat/{table_id}` (canal web del comensal: `diner-chat.html` + `pages/diner-chat.js` + `diner-session.js`).
+**Public**: `/login.html`, `/menu.html` (public QR), `/demo`, `/dashboard-demo`, `/chat/{table_id}` (diner's web channel: `diner-chat.html` + `pages/diner-chat.js` + `diner-session.js`).
 
-Detalle de sprints A-W del rediseño en [docs/history/sprints.md](docs/history/sprints.md). Para "lo que quedó para después" ver "Pendientes de calendario" arriba.
+Sprint A-W redesign detail in [docs/history/sprints.md](docs/history/sprints.md). For "what got deferred" see "Calendar pending items" above.
 
-## Catálogo Visual v2 — Endpoints de Imagen (`/api/menu/image/...`)
+## Visual Catalog v2 — Image Endpoints (`/api/menu/image/...`)
 
-Permiten al editor admin subir y borrar imágenes de platos directamente en Cloudinary desde el browser. El backend solo firma — los bytes nunca pasan por nuestro servidor.
+Let the admin editor upload and delete dish images directly on Cloudinary from the browser. The backend only signs — the bytes never pass through our server.
 
 ```
 POST   /api/menu/image/sign
-  Auth:      Bearer token de admin/owner (get_current_restaurant)
-  Body:      {"folder_suffix": "menu"}  (opcional, default "menu")
+  Auth:      Admin/owner Bearer token (get_current_restaurant)
+  Body:      {"folder_suffix": "menu"}  (optional, default "menu")
   Response:  {signature, timestamp, api_key, cloud_name, folder, public_id_prefix}
-  Rate limit: 30 req/min por restaurante via state_store.rate_limit_check (Redis cross-worker)
-  503 si CLOUDINARY_* env vars no están configuradas
-  429 si se supera el rate limit
+  Rate limit: 30 req/min per restaurant via state_store.rate_limit_check (Redis, cross-worker)
+  503 if the CLOUDINARY_* env vars aren't configured
+  429 if the rate limit is exceeded
 
 DELETE /api/menu/image
-  Auth:      Bearer token de admin/owner (get_current_restaurant)
+  Auth:      Admin/owner Bearer token (get_current_restaurant)
   Body:      {"public_id": "mesio/r_{id}/menu/dish_abc"}
   Response:  {"success": true, "public_id": "..."}
-  403 si public_id no pertenece al restaurante autenticado (cross-tenant check)
-  200 siempre que ownership sea válida — idempotente (imagen ya borrada → 200)
-  Implementación: app/routes/settings_routes.py | image_host: app/services/image_host.py
+  403 if public_id doesn't belong to the authenticated restaurant (cross-tenant check)
+  200 whenever ownership is valid — idempotent (image already deleted → 200)
+  Implementation: app/routes/settings_routes.py | image_host: app/services/image_host.py
 ```
 
-Feature flags relacionados:
-- `bot_visual_menu` (opt-in, default false) — activa envío de fotos desde el bot (Fase 4)
-- `catalog_v2_enabled` (opt-out, default true) — kill-switch global del catálogo visual
+Related feature flags:
+- `bot_visual_menu` (opt-in, default false) — enables sending photos from the bot (Phase 4)
+- `catalog_v2_enabled` (opt-out, default true) — global kill-switch for the visual catalog
 
-## Frontend — Patrones y Convenciones
+## Frontend — Patterns and Conventions
 
 ### Design System (`tokens.css`)
-Fuente única de verdad para tokens de diseño: `--brand: #1D9E75`, superficies, texto, semánticos, spacing (8pt grid), radii, sombras, transiciones. Incluye sistema unificado de botones (`.m-btn`), modals, toasts, skeletons, badges de conexión.
+Single source of truth for design tokens: `--brand: #1D9E75`, surfaces, text, semantic colors, spacing (8pt grid), radii, shadows, transitions. Includes a unified button system (`.m-btn`), modals, toasts, skeletons, connection badges.
 
 ### Shared Utilities (`mesio-utils.js`)
-Cargado antes de scripts de página. Provee:
-- `_escHtml(s)` — prevención XSS
-- `mesioFmt(n)` — formato moneda (COP zero-decimal)
-- `mesioHeaders()` — auth + branch headers (reemplaza `_apiHeaders()` duplicados)
-- `mesioLogout()` — logout centralizado
-- `mesioToast(msg, type, duration)` — notificaciones accesibles
-- `mesioConfirm(msg, opts)` — reemplaza `window.confirm`
-- `mesioTrackFetch(ok)` — monitor de conexión
-- `mesioInterval(fn, ms)` — setInterval visibility-aware
-- `mesioDate(iso)` — formato fecha locale-aware
+Loaded before page scripts. Provides:
+- `_escHtml(s)` — XSS prevention
+- `mesioFmt(n)` — currency formatting (COP zero-decimal)
+- `mesioHeaders()` — auth + branch headers (replaces duplicated `_apiHeaders()`)
+- `mesioLogout()` — centralized logout
+- `mesioToast(msg, type, duration)` — accessible notifications
+- `mesioConfirm(msg, opts)` — replaces `window.confirm`
+- `mesioTrackFetch(ok)` — connection monitor
+- `mesioInterval(fn, ms)` — visibility-aware setInterval
+- `mesioDate(iso)` — locale-aware date formatting
 
 ### `_staffFetch(path, method='GET', body=null)`
-Wrapper sobre `fetch` que:
-- Prefija `/api/staff` al path.
-- Usa `mesioHeaders()` (lee token de `localStorage.rb_token` y branch ID del selector global).
-- Lanza `Error(detail || 'HTTP NNN')` si la respuesta no es 2xx.
+Wrapper over `fetch` that:
+- Prefixes `/api/staff` to the path.
+- Uses `mesioHeaders()` (reads the token from `localStorage.rb_token` and the branch ID from the global selector).
+- Throws `Error(detail || 'HTTP NNN')` if the response isn't 2xx.
 
 ### MesioComponent
-Factory para componentes con estado reactivo. Patrón:
+Factory for components with reactive state. Pattern:
 ```javascript
-const MiComponent = MesioComponent({
+const MyComponent = MesioComponent({
   state: { loading: true, data: [] },
   render(state, el) { ... },
   async onMount(self) { ... },
 });
-MiComponent.mount('#selector');
+MyComponent.mount('#selector');
 ```
 
-### `_staffFmt(n)` y moneda
-Formateador universal que lee `rb_restaurant` de localStorage para obtener `locale` y `currency`. Soporta monedas sin decimales (COP, CLP).
+### `_staffFmt(n)` and currency
+Universal formatter that reads `rb_restaurant` from localStorage to get `locale` and `currency`. Supports currencies without decimals (COP, CLP).
 
-### Días de semana
-`day_of_week`: 0=Lunes, 1=Martes, ..., 6=Domingo. JS: `(d.getDay() + 6) % 7`.
+### Days of the week
+`day_of_week`: 0=Monday, 1=Tuesday, ..., 6=Sunday. JS: `(d.getDay() + 6) % 7`.
 
-## Catálogo Visual v2 — Shape extendido del plato JSONB
+## Visual Catalog v2 — Extended dish JSONB shape
 
-### Schema completo (catálogo v2, backward-compatible)
+### Full schema (catalog v2, backward-compatible)
 
-Cada plato en `restaurants.menu` es un JSON object dentro de una lista por categoría:
+Each dish in `restaurants.menu` is a JSON object inside a per-category list:
 ```json
 {
   "name":            "Bandeja Paisa",
-  "description":     "Fríjoles, chicharrón, carne molida, chorizo, arepa, aguacate y arroz",
+  "description":     "Beans, pork rind, ground beef, chorizo, corn arepa, avocado and rice",
   "price":           28000,
   "image_url":       "https://res.cloudinary.com/mesio/image/upload/c_fill,w_600,h_450/v1/mesio/r_42/dish_abc.webp",
   "image_public_id": "mesio/r_42/dish_abc",
@@ -103,33 +103,32 @@ Cada plato en `restaurants.menu` es un JSON object dentro de una lista por categ
 }
 ```
 
-### Campos
-| Campo | Tipo | Default | Notas |
+### Fields
+| Field | Type | Default | Notes |
 |---|---|---|---|
-| `name` | str | — | Requerido |
+| `name` | str | — | Required |
 | `description` | str | `""` | |
-| `price` | Decimal/int | — | Requerido. NUNCA float en cálculos |
-| `image_url` | str\|None | `null` | URL completa Cloudinary |
-| `image_public_id` | str\|None | `null` | `mesio/r_{id}/...` — scoped al restaurante |
-| `tags` | list[str] | `[]` | Slugs estables: `vegan`, `gluten_free`, `spicy`, `popular` |
+| `price` | Decimal/int | — | Required. NEVER float in calculations |
+| `image_url` | str\|None | `null` | Full Cloudinary URL |
+| `image_public_id` | str\|None | `null` | `mesio/r_{id}/...` — scoped to the restaurant |
+| `tags` | list[str] | `[]` | Stable slugs: `vegan`, `gluten_free`, `spicy`, `popular` |
 | `badges` | list[str] | `[]` | `chef_pick`, `new`, `popular` |
-| `allergens` | list[str] | `[]` | `gluten`, `lacteos`, `nueces`, etc. |
-| `featured` | bool | `false` | Aparece en hero carousel |
-| `sort_order` | int | `999` | Orden dentro de la categoría (menor = primero) |
+| `allergens` | list[str] | `[]` | `gluten`, `lacteos` (dairy), `nueces` (nuts), etc. |
+| `featured` | bool | `false` | Appears in the hero carousel |
+| `sort_order` | int | `999` | Order within the category (lower = first) |
 | `calories` | int\|None | `null` | |
 | `prep_time_min` | int\|None | `null` | |
-| `active` | bool | `true` | `false` = oculto en catálogo público |
+| `active` | bool | `true` | `false` = hidden from the public catalog |
 
 ### Backward compatibility
-Los platos viejos (`{name, description, price}`) siguen funcionando. `normalize_dish_shape(dish)` en `app/repositories/restaurant_repo.py` aplica todos los defaults en lectura (`db_get_menu`, `db_get_public_menu_data`) y escritura (`db_update_menu`). Nunca se pierden keys en downstream.
+Old-style dishes (`{name, description, price}`) keep working. `normalize_dish_shape(dish)` in `app/repositories/restaurant_repo.py` applies all defaults on read (`db_get_menu`, `db_get_public_menu_data`) and write (`db_update_menu`). No keys are ever lost downstream.
 
-### Seguridad multi-tenant
-`validate_dish_image_ownership(dish, restaurant_id)` en `restaurant_repo.py` verifica que `image_public_id` empiece con `mesio/r_{restaurant_id}/`. `db_update_menu` lanza `ValueError` si hay una imagen de otro restaurante. `image_host.delete_image(public_id, restaurant_id)` hace la misma validación antes de llamar a Cloudinary.
+### Multi-tenant security
+`validate_dish_image_ownership(dish, restaurant_id)` in `restaurant_repo.py` verifies that `image_public_id` starts with `mesio/r_{restaurant_id}/`. `db_update_menu` raises `ValueError` if there's an image from another restaurant. `image_host.delete_image(public_id, restaurant_id)` performs the same validation before calling Cloudinary.
 
 ### `app/services/image_host.py`
-Wrapper Cloudinary. Funciones clave:
-- `sign_upload_params(restaurant_id, folder_suffix="menu")` → params para upload directo browser→Cloudinary
-- `delete_image(public_id, restaurant_id)` → borra con validación ownership
-- `build_transform_url(url, variant)` → variantes `"thumb"` (300×300), `"card"` (600×450), `"hero"` (1200×900)
+Cloudinary wrapper. Key functions:
+- `sign_upload_params(restaurant_id, folder_suffix="menu")` → params for a direct browser→Cloudinary upload
+- `delete_image(public_id, restaurant_id)` → deletes with ownership validation
+- `build_transform_url(url, variant)` → variants `"thumb"` (300×300), `"card"` (600×450), `"hero"` (1200×900)
 - `is_cloudinary_url(url)` → bool
-

@@ -1,54 +1,53 @@
-# Comandos y variables de entorno
+# Commands and environment variables
 
-> Movido verbatim desde CLAUDE.md (2026-09-12) para no cargarlo en cada turno.
+> Moved verbatim from CLAUDE.md (2026-09-12) so it isn't loaded on every turn.
 
-## Entorno y Comandos
+## Environment and Commands
 
 ```bash
 Server:  uvicorn app.main:app --reload --port 8000
-Migrate: alembic upgrade head          # SIEMPRE antes de arrancar en producción
+Migrate: alembic upgrade head          # ALWAYS before starting in production
 Tests:   pytest | pytest tests/test_file.py -v
-Sim:     python run_ai_sim.py          # Real E2E: Postgres + Anthropic reales, 20 escenarios multi-turno
+Sim:     python run_ai_sim.py          # Real E2E: real Postgres + Anthropic, 20 multi-turn scenarios
 Deploy:  Railway — railway.toml conditional start (web vs inbox worker)
 Worker:  WORKER_MODE=inbox → python scripts/run_inbox_worker.py (Railway separate service)
 
-Variables de entorno críticas:
-  DATABASE_URL,                 # RUNTIME: conecta como mesio_app (non-superuser). RLS enforce automático.
-  DATABASE_URL_ADMIN,           # (Fase 1 RLS) URL superuser SOLO para migraciones Alembic.
-                                #   Si no se setea, alembic cae a DATABASE_URL (backward-compat).
-                                #   En prod: NUNCA apuntar la app aquí.
+Critical environment variables:
+  DATABASE_URL,                 # RUNTIME: connects as mesio_app (non-superuser). RLS enforced automatically.
+  DATABASE_URL_ADMIN,           # (RLS Phase 1) Superuser URL, ONLY for Alembic migrations.
+                                #   If unset, alembic falls back to DATABASE_URL (backward-compat).
+                                #   In prod: NEVER point the app here.
   ANTHROPIC_API_KEY, META_APP_SECRET, ADMIN_KEY,
   META_ACCESS_TOKEN,
-  WOMPI_PUBLIC_KEY,             # LEGACY/FALLBACK — see "Configuración Wompi per-restaurant" below
-  WOMPI_INTEGRITY_SECRET,       # LEGACY/FALLBACK — see "Configuración Wompi per-restaurant" below
+  WOMPI_PUBLIC_KEY,             # LEGACY/FALLBACK — see "Per-restaurant Wompi configuration" below
+  WOMPI_INTEGRITY_SECRET,       # LEGACY/FALLBACK — see "Per-restaurant Wompi configuration" below
   APP_DOMAIN,
-  REDIS_URL,                    # Estado compartido entre 4 workers (NPS, checkout, cooldowns)
-  ALERT_WEBHOOK_URL,            # (opcional) Webhook para alertas operativas (Slack/Discord)
-  DISABLE_EMBEDDED_WORKER,      # "1" para desactivar inbox worker embebido en web service
-  WORKER_MODE,                  # "inbox" para Railway worker service separado
-  INBOX_BATCH_SIZE,             # (opcional, default 10) filas por poll del inbox worker
-  INBOX_POLL_INTERVAL_EMPTY,    # (opcional, default 1.0) sleep en segundos cuando batch viene vacío
-  INBOX_DISPATCH_TIMEOUT_S,     # (opcional, default 120) timeout por mensaje dispatcheado
-  INBOX_BACKOFF_SECONDS,        # (opcional, default "30,120,600,3600,21600") schedule de retries CSV
-  INBOX_CLAIM_WINDOW_MINUTES,   # (opcional, default 3) ventana antes de que un row claimed sea visible de nuevo si crashea el worker
-  BOT_MAX_TOKENS,               # (opcional, default 2048) max_tokens ceiling para respuestas del LLM
-  BOT_MAX_TOKENS_SHORT,         # (opcional, default 768) max_tokens para replies normales
-  BOT_MODEL_FAST,               # (opcional) override modelo rápido de Anthropic
-  BOT_MODEL_PRECISE,            # (opcional) override modelo preciso de Anthropic
-  OPENAI_API_KEY,               # (opcional) Para transcripción de voice notes (Whisper API). Sin esto, audios reciben fallback amigable.
-  SENTRY_DSN,                   # (opcional) Activa Sentry error tracking. Sin esto, init es no-op silencioso.
-  SENTRY_ENVIRONMENT,           # (opcional, default "production") Distingue prod/staging/dev en Sentry UI.
-  SENTRY_RELEASE,               # (opcional) Versión/commit SHA. Útil para tracking de deploys.
-  SENTRY_TRACES_SAMPLE_RATE,    # (opcional, default 0.1) Sampling de transacciones APM. 1.0 = 100%, 0 = off.
-  CLOUDINARY_CLOUD_NAME,        # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
-  CLOUDINARY_API_KEY,           # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
-  CLOUDINARY_API_SECRET,        # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
+  REDIS_URL,                    # Shared state across the 4 workers (NPS, checkout, cooldowns)
+  ALERT_WEBHOOK_URL,            # (optional) Webhook for operational alerts (Slack/Discord)
+  DISABLE_EMBEDDED_WORKER,      # "1" to disable the inbox worker embedded in the web service
+  WORKER_MODE,                  # "inbox" for a separate Railway worker service
+  INBOX_BATCH_SIZE,             # (optional, default 10) rows per inbox worker poll
+  INBOX_POLL_INTERVAL_EMPTY,    # (optional, default 1.0) sleep in seconds when a batch comes back empty
+  INBOX_DISPATCH_TIMEOUT_S,     # (optional, default 120) timeout per dispatched message
+  INBOX_BACKOFF_SECONDS,        # (optional, default "30,120,600,3600,21600") CSV retry schedule
+  INBOX_CLAIM_WINDOW_MINUTES,   # (optional, default 3) window before a claimed row becomes visible again if the worker crashes
+  BOT_MAX_TOKENS,               # (optional, default 2048) max_tokens ceiling for LLM responses
+  BOT_MAX_TOKENS_SHORT,         # (optional, default 768) max_tokens for normal replies
+  BOT_MODEL_FAST,               # (optional) override for Anthropic's fast model
+  BOT_MODEL_PRECISE,            # (optional) override for Anthropic's precise model
+  OPENAI_API_KEY,               # (optional) For voice note transcription (Whisper API). Without it, audio gets a friendly fallback.
+  SENTRY_DSN,                   # (optional) Enables Sentry error tracking. Without it, init is a silent no-op.
+  SENTRY_ENVIRONMENT,           # (optional, default "production") Distinguishes prod/staging/dev in the Sentry UI.
+  SENTRY_RELEASE,               # (optional) Version/commit SHA. Useful for tracking deploys.
+  SENTRY_TRACES_SAMPLE_RATE,    # (optional, default 0.1) APM transaction sampling. 1.0 = 100%, 0 = off.
+  CLOUDINARY_CLOUD_NAME,        # Visual catalog v2 — Phase 1. MVP uses the free 25 GB tier.
+  CLOUDINARY_API_KEY,           # Visual catalog v2 — Phase 1. MVP uses the free 25 GB tier.
+  CLOUDINARY_API_SECRET,        # Visual catalog v2 — Phase 1. MVP uses the free 25 GB tier.
   CRM_PHONE_NUMBER_ID,          # Meta Cloud API phone ID for the CRM support number (3144914554). Without it, inbound WA messages on the support number are NOT auto-captured into prospects. Startup logs WARN if unset.
-  OTP_PEPPER,                   # Server-side pepper prepended to OTP before SHA-256. Without it, password-reset OTPs are brute-forceable offline if the DB leaks. Must be 32+ chars random.
-  APP_DOMAIN,                   # Used as WebAuthn RP_ID. Production startup logs CRITICAL if unset (WebAuthn fallback to Host header is spoofable).
+  OTP_PEPPER,                   # Server-side pepper prepended to the OTP before SHA-256. Without it, password-reset OTPs are brute-forceable offline if the DB leaks. Must be 32+ random chars.
+  APP_DOMAIN,                   # Used as the WebAuthn RP_ID. Production startup logs CRITICAL if unset (WebAuthn fallback to the Host header is spoofable).
   ADMIN_KEY,                    # Internal /api/internal/* gate. Must be ≥ 32 chars (startup warns if shorter).
-  EMAIL_BACKEND,                # (opcional, default console) console|resend. console loguea sin enviar; resend sin RESEND_API_KEY cae a console con warning.
-  RESEND_API_KEY,               # (opcional) Proveedor de email transaccional (reset de clave, reporte semanal, bienvenida CRM).
-  EMAIL_FROM,                   # (opcional) Remitente de los emails transaccionales.
+  EMAIL_BACKEND,                # (optional, default console) console|resend. console logs without sending; resend without RESEND_API_KEY falls back to console with a warning.
+  RESEND_API_KEY,               # (optional) Transactional email provider (password reset, weekly report, CRM welcome).
+  EMAIL_FROM,                   # (optional) Sender for transactional emails.
 ```
-

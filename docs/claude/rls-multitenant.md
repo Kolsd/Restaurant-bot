@@ -1,196 +1,195 @@
-# Multi-tenant: roles Postgres, RLS, Wave 2 org/location, sucursales
+# Multi-tenant: Postgres roles, RLS, Wave 2 org/location, branches
 
-> Movido verbatim desde CLAUDE.md (2026-09-12) para no cargarlo en cada turno.
+> Moved verbatim from CLAUDE.md (2026-09-12) so it isn't loaded on every turn.
 
-## Roles Postgres (Fase 1 RLS)
+## Postgres roles (RLS Phase 1)
 
-- **`postgres`** (superuser) — usado SOLO por Alembic vía `DATABASE_URL_ADMIN`. Bypass implícito de RLS.
-- **`mesio_app`** (non-superuser, LOGIN) — conexión de la app en runtime. RLS se aplica normalmente. Tiene DML + sequences + execute + `mesio_superadmin` granted.
-- **`mesio_superadmin`** (BYPASSRLS, NOINHERIT, no LOGIN) — activado via `SET LOCAL ROLE mesio_superadmin` dentro de `bypass_tenant_scope()`. Para rutas internas, scheduler leader tick, inbox worker pre-resolución, y analytics cross-tenant.
+- **`postgres`** (superuser) — used ONLY by Alembic via `DATABASE_URL_ADMIN`. Implicit RLS bypass.
+- **`mesio_app`** (non-superuser, LOGIN) — the app's runtime connection. RLS applies normally. Has DML + sequences + execute + `mesio_superadmin` granted.
+- **`mesio_superadmin`** (BYPASSRLS, NOINHERIT, no LOGIN) — activated via `SET LOCAL ROLE mesio_superadmin` inside `bypass_tenant_scope()`. Used for internal routes, the scheduler leader tick, inbox worker pre-resolution, and cross-tenant analytics.
 
-## Blindaje Multi-tenant RLS — Fase 1 Security Roadmap (v11.0)
+## Multi-tenant RLS hardening — Security Roadmap Phase 1 (v11.0)
 
-**Objetivo:** imposible filtrar datos cross-tenant aunque un dev olvide `WHERE restaurant_id = $1`. El enforcement real vive en Postgres RLS; el Python es la plomería que alimenta el GUC.
+**Goal:** make it impossible to leak cross-tenant data even if a dev forgets `WHERE restaurant_id = $1`. The real enforcement lives in Postgres RLS; Python is just the plumbing that feeds the GUC.
 
-### Estado actual: 100% aplicado
+### Current state: 100% applied
 
-| Capa | Mecanismo | Archivo/migración |
+| Layer | Mechanism | File/migration |
 |---|---|---|
-| App fail-fast | `TenantNotSetError` si llamás `tenant_connection()` sin scope | `app/services/tenant_context.py` |
-| App→DB | `SET LOCAL app.restaurant_id = $1` en cada `tenant_connection` | `app/services/tenant_db.py` |
-| DB lectura | `USING (restaurant_id = NULLIF(current_setting('app.restaurant_id', true), '')::int)` | Alembic 0029 |
-| DB escritura | `WITH CHECK (...)` — bloquea spoofing de restaurant_id en INSERT/UPDATE | Alembic 0029 |
+| App fail-fast | `TenantNotSetError` if you call `tenant_connection()` without a scope | `app/services/tenant_context.py` |
+| App→DB | `SET LOCAL app.restaurant_id = $1` on every `tenant_connection` | `app/services/tenant_db.py` |
+| DB read | `USING (restaurant_id = NULLIF(current_setting('app.restaurant_id', true), '')::int)` | Alembic 0029 |
+| DB write | `WITH CHECK (...)` — blocks spoofing restaurant_id on INSERT/UPDATE | Alembic 0029 |
 | Owner lockdown | `ALTER TABLE ... FORCE ROW LEVEL SECURITY` | Alembic 0030 |
-| Runtime non-superuser | App conecta como `mesio_app` (DML-only), RLS se aplica | `.env` + `alembic/env.py` |
+| Non-superuser runtime | The app connects as `mesio_app` (DML-only), RLS applies | `.env` + `alembic/env.py` |
 | Admin escape hatch | `bypass_tenant_scope("reason")` → `SET LOCAL ROLE mesio_superadmin` (BYPASSRLS) | `app/services/tenant_context.py` |
 
-**Prueba empírica (en la DB actual, probada en sesión 2026-04-15):**
+**Empirical proof (on the current DB, tested in session 2026-04-15):**
 ```
-mesio_app + scope=8  → orders=4   (solo ese tenant)
+mesio_app + scope=8  → orders=4   (only that tenant)
 mesio_app + scope=19 → orders=11
 mesio_app + no_scope → orders=0   (fail-closed)
-INSERT sin scope     → InsufficientPrivilegeError (WITH CHECK dispara)
-INSERT cross-tenant  → InsufficientPrivilegeError (scope=8 intentando restaurant_id=19)
-bypass_tenant_scope  → orders=15 (todo)
+INSERT without scope     → InsufficientPrivilegeError (WITH CHECK fires)
+INSERT cross-tenant  → InsufficientPrivilegeError (scope=8 trying restaurant_id=19)
+bypass_tenant_scope  → orders=15 (everything)
 ```
 
-### Modelo Wave-2: NO existe Matriz como entidad. Tampoco "primary".
+### Wave-2 model: there is NO Matriz (head-office) entity. No "primary" either.
 
-Post-Wave-2 el schema canónico es `organizations` + `locations`. **Cada location es un peer del resto** — no hay "matriz", no hay "principal". Un org tiene N locations, todas equivalentes operacionalmente.
+Post-Wave-2 the canonical schema is `organizations` + `locations`. **Every location is a peer of the others** — there's no "head office", no "main one". An org has N locations, all operationally equivalent.
 
-`locations.is_primary` existe en el schema **solo como scaffold de migración** (para mapear "qué location vieja era el matriz" durante el backfill 0034). **Es vestigial. NO usar en código nuevo.**
+`locations.is_primary` exists in the schema **only as migration scaffolding** (to map "which old location was the head office" during the 0034 backfill). **It's vestigial. Do NOT use it in new code.**
 
-#### Reglas para código nuevo
+#### Rules for new code
 
-1. **Enumerar negocios** → `db_get_all_orgs()` (devuelve org rows). NO `db_get_all_restaurants()` que filtra por `is_primary=true` y perpetúa el modelo viejo.
-2. **Enumerar sedes de un negocio** → `db_get_org_locations(org_id)` (todas las locations, no solo "primary").
-3. **NUNCA filtrar por `is_primary = true`** para encontrar "el restaurante principal". Esa pregunta no tiene sentido en el modelo nuevo. Si necesitás un default determinístico (ej. "primera location del org"), usar `ORDER BY id ASC LIMIT 1` — no es "la primary", es solo "una determinística".
-4. **NUNCA depender de la "Matriz invariant"** (`org_id == matriz_location_id`). Solo es cierta para orgs migradas por 0034 (existentes al deploy de Wave-2). Para orgs creadas POST-deploy, `org_id` y `location_id` son enteros independientes (auto-incrementados por separado).
-5. **NUNCA asumir que `restaurant.get("location_id") or org_id` es un fallback válido.** Es la "Matriz invariant trick" disfrazada — da el answer equivocado para orgs nuevas.
-6. **Resolución correcta** de location_id cuando se necesita la sede:
-   - Si el dict viene de `db_get_restaurant_by_id` o `db_get_all_restaurants` → usar `restaurant["location_id"]` (siempre populado post-Paso 7).
-   - Si no se tiene un dict → query `SELECT id FROM locations WHERE org_id = $1 ORDER BY id ASC LIMIT 1` (cualquier sede, sin valor judgement de "primary").
-7. **`parent_restaurant_id IS NULL` es legacy emulation.** El VIEW `restaurants` lo expone para backwards compat de código viejo. Para queries nuevas, usar `db_get_all_orgs()` directamente.
-8. **`is_main_restaurant` parameter es vestigial.** No introducir en código nuevo.
-9. **`X-Branch-ID` header SIEMPRE carga un `location_id`**. Si una ruta lo recibe, NO mezclar con `restaurant["id"]` (= org_id) — son dos integers distintos. Ver Paso 5 commits da08f5e + Paso 6 commit c442bba.
+1. **Enumerating businesses** → `db_get_all_orgs()` (returns org rows). NOT `db_get_all_restaurants()`, which filters by `is_primary=true` and perpetuates the old model.
+2. **Enumerating a business's locations** → `db_get_org_locations(org_id)` (all locations, not just "primary").
+3. **NEVER filter by `is_primary = true`** to find "the main restaurant". That question doesn't make sense in the new model. If you need a deterministic default (e.g. "the org's first location"), use `ORDER BY id ASC LIMIT 1` — it's not "the primary", it's just "a deterministic one".
+4. **NEVER rely on the "Matriz invariant"** (`org_id == matriz_location_id`). It only holds for orgs migrated by 0034 (existing at Wave-2 deploy time). For orgs created AFTER the deploy, `org_id` and `location_id` are independent integers (auto-incremented separately).
+5. **NEVER assume `restaurant.get("location_id") or org_id` is a valid fallback.** It's the "Matriz invariant trick" in disguise — it gives the wrong answer for new orgs.
+6. **Correct resolution** of location_id when you need the location:
+   - If the dict came from `db_get_restaurant_by_id` or `db_get_all_restaurants` → use `restaurant["location_id"]` (always populated post-Step 7).
+   - If you don't have a dict → query `SELECT id FROM locations WHERE org_id = $1 ORDER BY id ASC LIMIT 1` (any location, no "primary" value judgment).
+7. **`parent_restaurant_id IS NULL` is legacy emulation.** The `restaurants` VIEW exposes it for backwards compat with old code. For new queries, use `db_get_all_orgs()` directly.
+8. **The `is_main_restaurant` parameter is vestigial.** Do not introduce it in new code.
+9. **`X-Branch-ID` header ALWAYS carries a `location_id`**. If a route receives it, do NOT mix it with `restaurant["id"]` (= org_id) — they're two distinct integers. See Step 5 commits da08f5e + Step 6 commit c442bba.
 
-#### Deprecation status (vivo)
+#### Deprecation status (live)
 
 | Symbol | Status | Replacement |
 |---|---|---|
-| `db_get_all_restaurants()` | DEPRECATED for "list businesses" semantic | `db_get_all_orgs()` |
-| `locations.is_primary` (column) | VESTIGIAL — only for migration backfill | (nothing — sedes are peers) |
+| `db_get_all_restaurants()` | DEPRECATED for the "list businesses" semantic | `db_get_all_orgs()` |
+| `locations.is_primary` (column) | VESTIGIAL — only for migration backfill | (nothing — locations are peers) |
 | `parent_restaurant_id IS NULL` filter | LEGACY EMULATION (via VIEW) | `db_get_all_orgs()` |
 | `is_main_restaurant` parameter | VESTIGIAL | (drop) |
-| "Matriz invariant" fallback | REMOVED (Paso 7) | Explicit `restaurant["location_id"]` |
-| `db_get_restaurant_by_id()` | **DELETED 2026-09-11** — aceptaba location_id U org_id y en colisión devolvía OTRO restaurante (P0 cross-tenant) | `db_get_restaurant_by_location_id()` / `db_get_restaurant_by_org_id()` — elegir por intención, nunca adivinar. Guardia: `tests/test_no_ambiguous_restaurant_lookup.py` |
-| `users.branch_id` | AMBIGUO (sin FK; unos writers guardaban org_id, otros location_id) | `users.org_id` + `users.location_id` (migración 0081, con FK). Auth DENIEGA si `org_id` no se pudo resolver — nunca fallback |
-| `db_update_restaurant_fields()` / `db_update_subscription()` y `POST /api/internal/admin/update-restaurant` + `/set-subscription` | **DELETED 2026-09-12** — resolvían la organización por subconsulta de sede; con colisión de ids escribían sobre OTRO cliente | `PATCH /api/internal/admin/organizations/{org_id}`. Guardia: `tests/test_no_legacy_restaurant_field_writes.py` |
+| "Matriz invariant" fallback | REMOVED (Step 7) | Explicit `restaurant["location_id"]` |
+| `db_get_restaurant_by_id()` | **DELETED 2026-09-11** — accepted EITHER location_id OR org_id and on collision returned a DIFFERENT restaurant (cross-tenant P0) | `db_get_restaurant_by_location_id()` / `db_get_restaurant_by_org_id()` — pick by intent, never guess. Guard: `tests/test_no_ambiguous_restaurant_lookup.py` |
+| `users.branch_id` | AMBIGUOUS (no FK; some writers stored org_id, others location_id) | `users.org_id` + `users.location_id` (migration 0081, with FK). Auth DENIES access if `org_id` couldn't be resolved — never a fallback |
+| `db_update_restaurant_fields()` / `db_update_subscription()` and `POST /api/internal/admin/update-restaurant` + `/set-subscription` | **DELETED 2026-09-12** — resolved the organization via a location subquery; on id collision they wrote to a DIFFERENT customer | `PATCH /api/internal/admin/organizations/{org_id}`. Guard: `tests/test_no_legacy_restaurant_field_writes.py` |
 
-### Patrón de uso
+### Usage pattern
 
-**En rutas FastAPI (admin/staff autenticado):**
+**In FastAPI routes (authenticated admin/staff):**
 ```python
-# Restaurante admin (owner/gerente) — scope desde el dict del restaurante
+# Restaurant admin (owner/manager) — scope from the restaurant dict
 @router.get("/api/loyalty/balance")
 async def get_balance(
     phone: str,
-    restaurant: dict = Depends(get_current_restaurant_scoped),  # ← yield-based, entra en tenant_scope
+    restaurant: dict = Depends(get_current_restaurant_scoped),  # ← yield-based, enters tenant_scope
 ):
     return await db.db_get_loyalty_balance(restaurant["id"], phone)
 
-# Staff autenticado con JWT "staff:<uuid>" — scope desde user["restaurant_id"]
+# Staff authenticated with a "staff:<uuid>" JWT — scope from user["restaurant_id"]
 @router.get("/api/staff/self/timecard")
 async def my_timecard(user: dict = Depends(get_current_user_scoped)):
     return await db.db_get_staff_timecard_rows(user["restaurant_id"])
 ```
 
-**En bot runtime (webhook Meta):**
+**In the bot runtime (Meta webhook):**
 ```python
-# inbox_worker._handle_meta_whatsapp — después de resolver restaurant desde bot_number
+# inbox_worker._handle_meta_whatsapp — after resolving the restaurant from bot_number
 if _tenant_id is not None:
     with tenant_scope(_tenant_id):
         await _process_message(...)
 ```
 
-**En rutas/servicios cross-tenant (internal, scheduler, analytics):**
+**In cross-tenant routes/services (internal, scheduler, analytics):**
 ```python
-# app/routes/internal/admin.py — superadmin Mesio
+# app/routes/internal/admin.py — Mesio superadmin
 with bypass_tenant_scope("internal_admin_restaurants_list"):
     return await db.db_get_all_restaurants()
 
-# scheduler leader tick — enumera restaurantes, luego scope por cada uno
+# scheduler leader tick — enumerates restaurants, then scopes per one
 with bypass_tenant_scope("scheduler_leader_tick"):
     restaurants = await db_get_all_restaurants()
     for r in restaurants:
         with tenant_scope(r["id"]):
             await _per_restaurant_task(r)
 
-# chat.py webhook Meta — enqueue es pre-tenant
+# chat.py Meta webhook — enqueue happens pre-tenant
 with bypass_tenant_scope("webhook_enqueue_cross_tenant"):
     await inbox_repo.enqueue(...)
 ```
 
-### Clasificación de repos
+### Repo classification
 
-| Repo | Tipo | Notas |
+| Repo | Type | Notes |
 |---|---|---|
-| `loyalty_repo`, `fiscal_repo`, `discounts_repo`, `customer_profiles_repo` | Tenant-scoped 100% | `_get_pool` eliminado |
-| `orders_repo`, `conversations_repo`, `inventory_repo`, `reviews_repo`, `reservations_repo`, `reservation_deposits_repo`, `weekly_reports_repo`, `menu_analytics_repo` | Tenant-scoped 100% | `_get_pool` eliminado |
-| `staff_repo`, `tables_repo` | Tenant-scoped con `bypass_tenant_scope` interno en ~20 funciones | 🚧 deuda: auditar cada bypass interno (kiosco público vs. cuestionables) |
-| `marketing_repo` | MIXED: `marketing_messages_log` tenant; `prospects`/CRM GLOBAL | Mantiene `_get_pool` para GLOBAL |
-| `restaurant_repo` | MIXED: 14 tenant (config por restaurant_id), 38 GLOBAL (users, enumeración, pre-resolución bot) | Mantiene `_get_pool` para GLOBAL |
-| `sessions_repo` | GLOBAL | `sessions` no tiene `restaurant_id` (auth cross-tenant). NO MIGRAR. |
-| `inbox_repo` | GLOBAL | `webhook_inbox` es pre-resolución por diseño. NO MIGRAR. |
-| `crm_repo` (`app/repositories/internal/`) | GLOBAL | Herramientas internas Mesio. NO MIGRAR. |
+| `loyalty_repo`, `fiscal_repo`, `discounts_repo`, `customer_profiles_repo` | 100% tenant-scoped | `_get_pool` removed |
+| `orders_repo`, `conversations_repo`, `inventory_repo`, `reviews_repo`, `reservations_repo`, `reservation_deposits_repo`, `weekly_reports_repo`, `menu_analytics_repo` | 100% tenant-scoped | `_get_pool` removed |
+| `staff_repo`, `tables_repo` | Tenant-scoped with internal `bypass_tenant_scope` in ~20 functions | 🚧 debt: audit each internal bypass (public kiosk vs. questionable) |
+| `marketing_repo` | MIXED: `marketing_messages_log` tenant; `prospects`/CRM GLOBAL | Keeps `_get_pool` for GLOBAL |
+| `restaurant_repo` | MIXED: 14 tenant (per-restaurant config), 38 GLOBAL (users, enumeration, bot pre-resolution) | Keeps `_get_pool` for GLOBAL |
+| `sessions_repo` | GLOBAL | `sessions` has no `restaurant_id` (cross-tenant auth). DO NOT MIGRATE. |
+| `inbox_repo` | GLOBAL | `webhook_inbox` is pre-resolution by design. DO NOT MIGRATE. |
+| `crm_repo` (`app/repositories/internal/`) | GLOBAL | Internal Mesio tooling. DO NOT MIGRATE. |
 
-### Reglas que cualquier cambio futuro DEBE respetar
+### Rules any future change MUST respect
 
-1. **Nunca uses `get_pool()` / `pool.acquire()` directo en código nuevo de repos.** Usá `tenant_connection()` + `tenant_scope(rid)` en el call site.
-2. **Nunca catches `TenantNotSetError`.** Es la señal de diseño — si salta, hay un call site sin scope.
-3. **Toda tabla nueva con `restaurant_id NOT NULL` DEBE agregarse a `_RLS_TABLES` en una nueva migración** que habilite RLS + FORCE. Si la olvidás, la tabla queda sin protección.
-4. **Los parámetros de `set_config` son posicionales, nunca f-string.** `SET LOCAL` vía `SELECT set_config('app.restaurant_id', $1, true)`.
-5. **Migraciones Alembic corren con `DATABASE_URL_ADMIN` (superuser).** La app runtime JAMÁS debe apuntarse a una URL superuser.
-6. **Tests nuevos mockean `app.services.database.get_pool`** + wrappean en `tenant_scope(N)`. El patrón viejo (`monkeypatch.setattr(repo, "_get_pool", ...)`) rompe porque `_get_pool` se eliminó de los repos migrados. Referencia: `tests/test_loyalty_repo_tenant.py`.
-7. **`bypass_tenant_scope` SIEMPRE con reason ≥ 8 chars.** Se loguea para auditoría. Reservado para: rutas `/api/internal/*`, scheduler leader tick, inbox worker pre-resolución, agent.py lookups cross-tenant pre-scope, endpoints de kiosco público (WebAuthn).
+1. **Never use `get_pool()` / `pool.acquire()` directly in new repo code.** Use `tenant_connection()` + `tenant_scope(rid)` at the call site.
+2. **Never catch `TenantNotSetError`.** It's the design signal — if it fires, there's a call site missing scope.
+3. **Every new table with `restaurant_id NOT NULL` MUST be added to `_RLS_TABLES` in a new migration** that enables RLS + FORCE. If you forget, the table stays unprotected.
+4. **`set_config` parameters are always positional, never f-string.** `SET LOCAL` via `SELECT set_config('app.restaurant_id', $1, true)`.
+5. **Alembic migrations run with `DATABASE_URL_ADMIN` (superuser).** The runtime app must NEVER point at a superuser URL.
+6. **New tests mock `app.services.database.get_pool`** and wrap in `tenant_scope(N)`. The old pattern (`monkeypatch.setattr(repo, "_get_pool", ...)`) breaks because `_get_pool` was removed from migrated repos. Reference: `tests/test_loyalty_repo_tenant.py`.
+7. **`bypass_tenant_scope` ALWAYS with a reason ≥ 8 chars.** It's logged for audit. Reserved for: `/api/internal/*` routes, the scheduler leader tick, inbox worker pre-resolution, agent.py cross-tenant pre-scope lookups, public kiosk endpoints (WebAuthn).
 
-### Deuda pendiente (no bloqueante)
+### Pending debt (non-blocking)
 
-- Auditar los ~20 `bypass_tenant_scope` internos en `staff_repo.py` — varios son cuestionables (breaks, self-profile) y se pueden apretar a `tenant_connection()` si el call site siempre entra con scope.
-- ~~17 integration tests + 26 más en otros archivos~~ — **CERRADO 2026-04-19**: refactorizados con `_ConnProxy` pattern (workaround `asyncpg.Connection.__slots__`) + INSERTs vía `organizations + locations` (no más `restaurants` VIEW write) + columnas `org_id` (no más `restaurant_id`). 46 tests passing post-refactor contra TEST_DATABASE_URL.
-- ~~6 X-Branch-ID conflation sites pendientes en `staff.py`~~ — **CERRADO en Paso 10**. Los 6 sitios fueron migrados al fix template: org_id consistente para queries org-level, location_id propagado al param opcional `branch_id` de `db_calculate_payroll` para tip scoping per-sede.
-- Fase 2 (integridad/concurrencia) y Fase 3 (desacoplamiento IA + middlewares) — ✅ shipped 2026-04-17. El plan original se eliminó del repo cuando se cerró el último item.
+- Audit the ~20 internal `bypass_tenant_scope` calls in `staff_repo.py` — several are questionable (breaks, self-profile) and could be tightened to `tenant_connection()` if the call site always enters with a scope.
+- ~~17 integration tests + 26 more in other files~~ — **CLOSED 2026-04-19**: refactored with the `_ConnProxy` pattern (workaround for `asyncpg.Connection.__slots__`) + INSERTs via `organizations + locations` (no more writing to the `restaurants` VIEW) + `org_id` columns (no more `restaurant_id`). 46 tests passing post-refactor against TEST_DATABASE_URL.
+- ~~6 pending X-Branch-ID conflation sites in `staff.py`~~ — **CLOSED in Step 10**. All 6 sites were migrated to the fix template: consistent org_id for org-level queries, location_id propagated to `db_calculate_payroll`'s optional `branch_id` param for per-location tip scoping.
+- Phase 2 (integrity/concurrency) and Phase 3 (AI decoupling + middleware) — ✅ shipped 2026-04-17. The original plan was removed from the repo once the last item closed.
 
-## Contexto Multi-Sucursal
+## Multi-Branch Context
 
-- Header `X-Branch-ID` dicta qué datos leer. Si es `"all"`, retornar Matriz + Sucursales.
-- `get_current_restaurant` en `deps.py` resuelve el restaurante del token JWT admin.
-- Para staff operativo: `restaurant_id` viene del propio registro de staff en BD.
-- `db_calculate_tips_by_attendance` y `db_calculate_payroll` respetan `branch_id` via `ANY($n::int[])`.
+- The `X-Branch-ID` header dictates which data to read. If it's `"all"`, return Matriz + branches.
+- `get_current_restaurant` in `deps.py` resolves the restaurant from the admin JWT token.
+- For operational staff: `restaurant_id` comes from the staff member's own DB record.
+- `db_calculate_tips_by_attendance` and `db_calculate_payroll` respect `branch_id` via `ANY($n::int[])`.
 
-## Jerarquía de Sucursales
+## Branch Hierarchy
 
-- Matriz: `parent_restaurant_id IS NULL`.
-- Sucursal: `parent_restaurant_id` apunta a la Matriz.
-- WhatsApp: sucursales usan sufijo `_b[TIMESTAMP]` en `whatsapp_number` para evitar colisiones.
+- Matriz (head office): `parent_restaurant_id IS NULL`.
+- Branch: `parent_restaurant_id` points to the Matriz.
+- WhatsApp: branches use a `_b[TIMESTAMP]` suffix on `whatsapp_number` to avoid collisions.
 
-## Wave 2 (Org/Location) — Resumen post-deploy
+## Wave 2 (Org/Location) — Post-deploy summary
 
-**Aplicado a prod 2026-04-18.** Estado actual y aprendizajes detallados en [docs/history/wave2_lessons.md](docs/history/wave2_lessons.md). Queries defensivas para auditar drift en [docs/history/wave2_monitoring_queries.md](docs/history/wave2_monitoring_queries.md). Lo importante para código nuevo:
+**Applied to prod on 2026-04-18.** Current state and lessons learned are detailed in [docs/history/wave2_lessons.md](docs/history/wave2_lessons.md). Defensive queries for auditing drift are in [docs/history/wave2_monitoring_queries.md](docs/history/wave2_monitoring_queries.md). What matters for new code:
 
-### Estado actual del schema (resumen, post-0038)
+### Current schema state (summary, post-0038)
 
-- **Tablas canónicas:** `organizations` (tenant) + `locations` (sede). `restaurants` es VIEW read-only sobre `locations JOIN organizations`. `id` de la VIEW == `location_id`.
-- **`org_id` + `location_id`** son las columnas canónicas. `org_id` es el tenant key.
-- **`restaurant_id` column** — DROPPED de las 33 tablas RLS en 0037.
-- **RLS:** policy `org_isolation` (por `org_id`) activa en 33 tablas + FORCE RLS.
-- **Triggers auto-populate:** DROPPED en 0037. App code debe setear `org_id` y `location_id` explícitamente en INSERTs.
-- **`location_id` nullable** en 17 tablas operativas (post-0054).
-- Symbols dropeados con forward-guard tests: `parent_restaurant_id`, `is_primary`, `restaurants_deprecated`, `_migration_restaurant_to_location`. Ver `tests/test_no_parent_restaurant_id_sql.py`, `tests/test_no_is_primary_sql.py`, `tests/test_no_branch_id_legacy_sql.py`.
+- **Canonical tables:** `organizations` (tenant) + `locations` (branch). `restaurants` is a read-only VIEW over `locations JOIN organizations`. The VIEW's `id` == `location_id`.
+- **`org_id` + `location_id`** are the canonical columns. `org_id` is the tenant key.
+- **`restaurant_id` column** — DROPPED from the 33 RLS tables in 0037.
+- **RLS:** the `org_isolation` policy (by `org_id`) is active on 33 tables + FORCE RLS.
+- **Auto-populate triggers:** DROPPED in 0037. App code must set `org_id` and `location_id` explicitly on INSERTs.
+- **`location_id` nullable** on 17 operational tables (post-0054).
+- Symbols dropped with forward-guard tests: `parent_restaurant_id`, `is_primary`, `restaurants_deprecated`, `_migration_restaurant_to_location`. See `tests/test_no_parent_restaurant_id_sql.py`, `tests/test_no_is_primary_sql.py`, `tests/test_no_branch_id_legacy_sql.py`.
 
-### Patrón obligatorio post-Wave-2 para SQL nuevo
+### Mandatory pattern for new SQL post-Wave-2
 
-- **Reads:** `FROM restaurants` SIGUE funcionando (VIEW). Retorna shape idéntico al viejo. `WHERE id = $1` se interpreta como filtrado por `location_id`.
-- **Writes a restaurants:** PROHIBIDAS. Routear UPDATE/INSERT/DELETE al `organizations` + `locations` apropiado. Ejemplos en `app/repositories/restaurant_repo.py` (`db_update_restaurant_fields`, `db_create_restaurant`).
-- **Queries en tablas operativas:** usar `org_id` (no `restaurant_id`). RLS filtra via `app.org_id` GUC.
-- **`app.restaurant_id` GUC:** LEGACY (seteado por compat, NO usar en queries nuevas). Usar `current_setting('app.org_id', true)`.
-- **INSERTs en tablas Location-level** (orders, staff, inventory, etc.): setear `org_id` + `location_id` explícitamente.
-- **`features` como dict:** puede venir como str JSON o dict según driver/VIEW. Normalizar con helper `_features_dict()`.
+- **Reads:** `FROM restaurants` STILL works (VIEW). Returns the same shape as before. `WHERE id = $1` is interpreted as filtering by `location_id`.
+- **Writes to restaurants:** FORBIDDEN. Route UPDATE/INSERT/DELETE to the appropriate `organizations` + `locations`. Examples in `app/repositories/restaurant_repo.py` (`db_update_restaurant_fields`, `db_create_restaurant`).
+- **Queries on operational tables:** use `org_id` (not `restaurant_id`). RLS filters via the `app.org_id` GUC.
+- **`app.restaurant_id` GUC:** LEGACY (set for compat, do NOT use in new queries). Use `current_setting('app.org_id', true)`.
+- **INSERTs on Location-level tables** (orders, staff, inventory, etc.): set `org_id` + `location_id` explicitly.
+- **`features` as a dict:** can come back as a JSON string or a dict depending on driver/VIEW. Normalize with the `_features_dict()` helper.
 
-### Variables de entorno
+### Environment variables
 
-| Variable | Uso |
+| Variable | Use |
 |---|---|
-| `DATABASE_URL` | Runtime app (postgres o mesio_app) |
-| `PROD_DATABASE_URL` | Alias explícito para prod (rehearsal) |
-| `TEST_DATABASE_URL` | Postgres Test de Railway |
-| `DATABASE_URL_ADMIN` | Superuser URL para migraciones (cae a DATABASE_URL si no se setea) |
-| `ANTHROPIC_API_KEY` | Requerido por bot + AI sim |
-| `REDIS_URL` | Estado compartido multi-worker |
-| `AI_SIM_ASSUME_YES=1` | Skip prompt interactivo del sim |
-| `AI_SIM_ARGS` | Args extra para run_ai_sim.py |
+| `DATABASE_URL` | Runtime app (postgres or mesio_app) |
+| `PROD_DATABASE_URL` | Explicit alias for prod (rehearsal) |
+| `TEST_DATABASE_URL` | Railway Test Postgres |
+| `DATABASE_URL_ADMIN` | Superuser URL for migrations (falls back to DATABASE_URL if unset) |
+| `ANTHROPIC_API_KEY` | Required by the bot + AI sim |
+| `REDIS_URL` | Shared multi-worker state |
+| `AI_SIM_ASSUME_YES=1` | Skip the sim's interactive prompt |
+| `AI_SIM_ARGS` | Extra args for run_ai_sim.py |
 
-**`REHEARSAL_MODE` y `AI_SIM_MODE` fueron removidos de Railway**: si los reintroducís para validar destructiva via pg_dump, recordá DESACTIVARLOS después o prod queda caído.
+**`REHEARSAL_MODE` and `AI_SIM_MODE` were removed from Railway**: if you reintroduce them to validate destructive pg_dump runs, remember to TURN THEM OFF afterward or prod stays down.
 
-14 errores recurrentes ya vistos (Alembic varchar(32), `SET LOCAL ROLE` sin tx, pg_dump v17, multiple heads, `conn.execute(str)` SA 2.0, `:p::tipo` cast, etc.) y la "lección estratégica principal" están en [docs/history/wave2_lessons.md](docs/history/wave2_lessons.md). Consultá ese archivo antes de tocar migraciones grandes.
-
+14 recurring errors already seen (Alembic varchar(32), `SET LOCAL ROLE` without a tx, pg_dump v17, multiple heads, `conn.execute(str)` SA 2.0, `:p::type` cast, etc.) and the main "strategic lesson" are in [docs/history/wave2_lessons.md](docs/history/wave2_lessons.md). Check that file before touching large migrations.

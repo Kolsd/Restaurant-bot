@@ -1,59 +1,61 @@
-# Mesio Restaurant Bot — v13.0 (head `0081_users_org_location`; 1741 tests con DB)
+# Mesio Restaurant Bot — v13.0 (head `0081_users_org_location`; 1772 tests with DB)
 
-SaaS multi-tenant para restaurantes (FastAPI + Postgres RLS + Redis + Claude tool_use). Producto: canal web propio del comensal (QR → `/chat/{table_id}`); WhatsApp se retira.
+Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_use). Product: the diner's own web channel (QR → `/chat/{table_id}`); WhatsApp is being retired.
 
-## Uso de tokens — reglas de trabajo (PM 2026-09-12)
-- Este archivo se carga en CADA turno: mantenerlo corto. El detalle vive en `docs/claude/*.md` y se lee SOLO cuando la tarea toca ese tema.
-- Actualizar docs = editar la sección puntual con Edit. Nunca releer ni reescribir un archivo completo para un cambio pequeño.
-- Leer archivos por rango/función (Grep → Read con offset/limit). No leer carpetas ni archivos grandes enteros.
-- Tests: correr solo los archivos afectados con `-q`; la suite completa solo antes de commitear cambios de bot/repos. Nunca volcar salida completa (`-q --tb=short`, `| Select-Object -Last 30`).
-- Sin agentes/subagentes salvo que el PM lo pida. Sin resúmenes largos: reportar en pocas líneas.
-- Sugerir `/clear` al cambiar de tarea.
+## Token usage — working rules (PM 2026-09-12)
+- This file loads on EVERY turn: keep it short. Detail lives in `docs/claude/*.md`, read ONLY when the task touches that topic.
+- Updating docs = edit the specific section with Edit. Never re-read or rewrite a whole file for a small change.
+- Read files by range/function (Grep → Read with offset/limit). Don't read whole folders or large files.
+- Tests: run only the affected files with `-q`; the full suite only before committing bot/repo changes. Never dump full output (`-q --tb=short`, `| Select-Object -Last 30`).
+- No agents/subagents unless the PM asks. No long summaries: report in a few lines.
+- Suggest `/clear` when switching tasks.
 
-## Leer antes de tocar (índice de `docs/claude/`)
-| Si vas a tocar… | Leer |
+## Read before touching (index of `docs/claude/`)
+| If you're touching… | Read |
 |---|---|
-| Estado, decisiones de producto cerradas, siguiente sesión | `status.md` |
-| Variables de entorno, comandos | `env.md` |
-| `agent*.py`, `orders.py`, `orders_repo.py`, `inbox_worker.py`, `state_store.py`, `chat.py` | `bot-rules.md` (OBLIGATORIO) |
-| Repos, deps, tenant scope, alembic, org/location, sucursales | `rls-multitenant.md` |
-| Estructura, DB, webhook/inbox, Redis, scheduler, Decimal, feature flags | `architecture.md` |
-| Wompi / Bold / cobro | `payments.md` |
-| Tests nuevos, fixtures con DB, lint frontend | `testing.md` |
-| `app/static/**`, catálogo visual | `frontend.md` |
-| Staff, nómina, turnos, POS | `staff.md` |
+| State, closed product decisions, next session | `status.md` |
+| Env vars, commands | `env.md` |
+| `agent*.py`, `orders.py`, `orders_repo.py`, `inbox_worker.py`, `state_store.py`, `chat.py` | `bot-rules.md` (MANDATORY) |
+| Repos, deps, tenant scope, alembic, org/location, branches | `rls-multitenant.md` |
+| Structure, DB, webhook/inbox, Redis, scheduler, Decimal, feature flags | `architecture.md` |
+| Wompi / Bold / payments | `payments.md` |
+| New tests, DB fixtures, frontend lint | `testing.md` |
+| `app/static/**`, visual catalog | `frontend.md` |
+| Staff, payroll, shifts, POS | `staff.md` |
 | `/internal/*`, HQ, CRM, superadmin | `internal-hq.md` |
-| Reglas de estilo completas | `rules-full.md` |
-| Historial de sprints | `docs/history/` |
+| Full style rules | `rules-full.md` |
+| Sprint history | `docs/history/` |
 
-## Siguiente sesión (orden)
-1. ~~Validar bot con LLM real~~ (2026-09-12: e2e 55/59, sim 12/20). Arreglos SIN COMMIT (suite 1772/0, e2e_no_llm 15/15, sim 15/20 con asserts de DB en verde): confirmación con reply vacío (pedido y reserva), alerta `bill` antes del guard de entrega, prompt de recoger, guard de confirmación en `make_reservation`, anuncio falso acotado. Falta re-verificar con LLM (sin crédito Anthropic) y el sim no resetea el tope de conversaciones del org de prueba. Clave en `.env` local.
-2. Tiempo real SSE + Redis pub/sub (kitchen/bar/mesero/caja/comensal) — requisito del mapa en vivo y del chat con staff.
-3. Ola domicilio web (decisiones cerradas 2026-09-12): link por organización + GPS asigna sede, Turnstile, recoger + domicilio, caja acepta primero, mapa en vivo (Mapbox), chat en vivo con caja, staff con `location_id`, apagar domicilio por WhatsApp.
-4. Primer cliente: trial 8 días vía `comp_until`.
-5. Barrer `json.dumps()` pasado a `$n::jsonb`.
-6. Apagar WhatsApp restante (migrar harness e2e primero).
-7. Arreglar webhook Wompi antes de reactivarlo (su test e2e falla: firma inválida → 200, espera 401).
-Decisiones de producto cerradas: ver `status.md` — no re-discutir.
+## Next session (order)
+1. ~~Validate bot with real LLM~~ (2026-09-12: e2e 55/59, sim 12/20 → 15/20 after fixes, commit fefa800). Pending when there is Anthropic credit: one sim run + `test_reservation_lifecycle.py`; the sim doesn't reset the test org's conversation cap. Key in local `.env`.
+1b. ~~English codebase~~ (2026-09-13/14: files+URLs 78a2aee, identifiers+comments 5f81d3a, docs). User-facing text stays Spanish; DB columns/values and DOM ids/classes still Spanish (later wave).
+1c. IN PROGRESS: unified staff app `/staff` (admin-dashboard shell, sections per role: cashier, waiter, kitchen, bar, courier, my shift; old role pages removed).
+2. Real-time SSE + Redis pub/sub (kitchen/bar/waiter/cashier/diner) — required for the live map and staff chat.
+3. Web delivery wave (decisions closed 2026-09-12): per-organization link + GPS assigns location, Turnstile, pickup + delivery, cashier accepts first, live map (Mapbox), live chat with cashier, staff with `location_id`, turn off delivery via WhatsApp.
+4. First customer: 8-day trial via `comp_until`.
+5. Sweep `json.dumps()` passed to `$n::jsonb`.
+6. Turn off remaining WhatsApp (migrate e2e harness first).
+7. Fix the Wompi webhook before reactivating it (its e2e test fails: invalid signature → 200, expects 401).
+Closed product decisions: see `status.md` — do not re-discuss.
 
-## Comandos
+## Commands
 ```bash
-uvicorn app.main:app --reload --port 8000   # local: usar launcher propio, NO sobrescribir .claude/launch.json
-alembic upgrade head                        # un solo head siempre (`alembic heads`)
-pytest tests/<archivo>.py -q                # con TEST_DATABASE_URL/DATABASE_URL/DATABASE_URL_ADMIN a la DB de test
-python scripts/lint_frontend.py             # antes de commitear static
+uvicorn app.main:app --reload --port 8000   # local: use your own launcher, do NOT overwrite .claude/launch.json
+alembic upgrade head                        # always a single head (`alembic heads`)
+pytest tests/<file>.py -q                   # with TEST_DATABASE_URL/DATABASE_URL/DATABASE_URL_ADMIN pointed at the test DB
+python scripts/lint_frontend.py             # before committing static
 ```
-Entorno local Windows: `.venv` Py 3.12, Postgres 16 (`postgres`/`mesio_local_dev`; `mesio_app`/`mesio_app_pw`), DBs `mesio_tests`/`mesio_test`/`mesio_fresh` en UTC, sin Redis. Pins: `pytest==8.4.2`, `pytest-asyncio==0.24.0`.
+Local Windows environment: `.venv` Py 3.12, Postgres 16 (`postgres`/`mesio_local_dev`; `mesio_app`/`mesio_app_pw`), DBs `mesio_tests`/`mesio_test`/`mesio_fresh` in UTC, no Redis. Pins: `pytest==8.4.2`, `pytest-asyncio==0.24.0`.
 
-## Reglas no negociables (resumen; detalle en los docs)
-- **SQL** solo en `app/repositories/`, parámetros `$n`, nunca f-string con valores.
-- **RLS**: `async with tenant_connection()` + `tenant_scope(org_id)`; cross-tenant solo con `bypass_tenant_scope("razón≥8")`. Nunca `get_pool()` directo en repos nuevos, nunca capturar `TenantNotSetError`. Tabla nueva tenant → RLS ENABLE+FORCE en migración.
-- **Org vs sede**: `org_id` y `location_id` son enteros distintos; nunca adivinar ni usar fallback entre ellos. `db_get_restaurant_by_location_id` / `_by_org_id` según intención. Tests de tenant siembran ids que choquen a propósito.
-- **Dinero**: `Decimal` + `services/money.py`; `float` solo en borde JSON (`# JSON boundary`). Nunca Decimal en `state_store`.
-- **4 workers**: estado mutable por `state_store` (Redis). Inbox worker claim-then-ack, nunca transacción larga.
-- **Logging**: `get_logger(__name__)`, catch tipado, sin `except Exception: pass`, sin `print`, `mask_phone()` en logs.
-- **Frontend**: `textContent` para datos de usuario; `mesioHeaders()`/`_staffFetch`; commit con static → subir `CACHE_VERSION` en `sw.js` en el mismo commit.
-- **Alembic**: rev id ≤ 32 chars; `sa.text()` + `CAST(:p AS tipo)`; `IF NOT EXISTS`.
-- **Tests verídicos**: nada de tests que se saltan en silencio, `status_code == 200` como única aserción, ni mockear el repo entero. Fechas en UTC. Pasarelas: firmas contra doc/evento real.
-- **Si lo ves, lo arreglás** (o preguntás si es decisión de producto / expande >50% el scope).
-- **LLM del bot = siempre Haiku 4.5** (decisión PM 2026-09-12). Los fallos del bot se arreglan en código/guards/prompts, nunca subiendo de modelo.
+## Non-negotiable rules (summary; detail in the docs)
+- **SQL** only in `app/repositories/`, `$n` parameters, never f-string with values.
+- **RLS**: `async with tenant_connection()` + `tenant_scope(org_id)`; cross-tenant only via `bypass_tenant_scope("reason≥8")`. Never `get_pool()` directly in new repos, never catch `TenantNotSetError`. New tenant table → RLS ENABLE+FORCE in the migration.
+- **Org vs location**: `org_id` and `location_id` are distinct integers; never guess or fall back between them. `db_get_restaurant_by_location_id` / `_by_org_id` per intent. Tenant tests seed ids that collide on purpose.
+- **Money**: `Decimal` + `services/money.py`; `float` only at the JSON edge (`# JSON boundary`). Never Decimal in `state_store`.
+- **4 workers**: mutable state via `state_store` (Redis). Inbox worker claim-then-ack, never a long transaction.
+- **Logging**: `get_logger(__name__)`, typed catch, no `except Exception: pass`, no `print`, `mask_phone()` in logs.
+- **Frontend**: `textContent` for user data; `mesioHeaders()`/`_staffFetch`; a commit touching static → bump `CACHE_VERSION` in `sw.js` in the same commit.
+- **Alembic**: rev id ≤ 32 chars; `sa.text()` + `CAST(:p AS type)`; `IF NOT EXISTS`.
+- **Truthful tests**: no silently-skipped tests, no `status_code == 200` as the only assertion, no mocking the whole repo. Dates in UTC. Gateways: signatures checked against the real doc/event.
+- **If you see it, you fix it** (or ask if it's a product decision / expands scope by >50%).
+- **Bot LLM = always Haiku 4.5** (PM decision 2026-09-12). Bot failures get fixed in code/guards/prompts, never by upgrading the model.
