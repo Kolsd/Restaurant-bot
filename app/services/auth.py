@@ -50,10 +50,10 @@ _INVALID_CREDS = "Credenciales inválidas"
 
 
 async def login(username: str, password: str) -> dict:
-    # ── Intento 1: tabla users (admin / gerente / owner) ──────────────────────
+    # ── Attempt 1: users table (admin / manager / owner) ──────────────────────
     user = await db.db_get_user(username)
     if not user:
-        # ── Intento 2: tabla staff (operativos con contraseña) ────────────────
+        # ── Attempt 2: staff table (operators with a password) ────────────────
         candidates = await db.db_get_staff_candidates_by_name(username)
         member = next((c for c in candidates if verify_password(password, c["pin"], c.get("name", ""))), None)
         if not member:

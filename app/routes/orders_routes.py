@@ -24,7 +24,7 @@ META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
 router = APIRouter()
 
-# Sin contraseñas por defecto por seguridad
+# No default passwords, for security
 WOMPI_EVENTS_SECRET = os.getenv("WOMPI_EVENTS_SECRET")
 
 
@@ -282,10 +282,10 @@ class UpdateOrderStatusRequest(BaseModel):
         "en_camino", "en_puerta", "entregado", "cancelado"
     ]
 
-# --- FUNCIONES Y ENDPOINTS DEL DOMICILIARIO ---
+# --- COURIER FUNCTIONS AND ENDPOINTS ---
 
 async def send_delivery_notification(phone: str, status: str, bot_number: str = "", order_type: str = "domicilio"):
-    """Envía un mensaje automático de WhatsApp según el estado del pedido"""
+    """Sends an automatic WhatsApp message based on the order's status"""
     log.info("orders.delivery_notification", status=status, phone=phone, bot_number=bot_number)
 
     # Fetch restaurant credentials first (restaurant-specific phone_id takes priority)
@@ -331,11 +331,11 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
 
     is_pickup = order_type == "recoger"
 
-    # Statuses válidos según tipo de orden
+    # Valid statuses depend on the order type
     if is_pickup and status not in ('listo', 'entregado'):
-        return  # Para recoger solo notificamos cuando está listo y cuando se recoge
+        return  # For pickup we only notify when ready and when picked up
     if not is_pickup and status not in ('en_camino', 'en_puerta', 'entregado'):
-        return  # Para domicilio notificamos despacho, llegada y entrega
+        return  # For delivery we notify dispatch, arrival and delivery
 
     clean_phone = phone.replace("+", "").replace(" ", "")
 
@@ -628,7 +628,7 @@ async def set_delivery_eta(order_id: str, body: SetEtaRequest, request: Request)
 async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, request: Request):
     user = await get_current_user(request)
 
-    # 1. Buscamos el pedido original en la base de datos para obtener el número del cliente.
+    # 1. We look up the original order in the database to get the customer's number.
     #    Bypass to resolve order → restaurant_id first; then re-enter tenant_scope for the update.
     with bypass_tenant_scope("update_delivery_status: pre-resolve order tenant before scope"):
         order = await db.db_get_order(order_id)
@@ -648,7 +648,7 @@ async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, r
     if not scope_rid:
         raise HTTPException(status_code=500, detail="No se pudo resolver tenant de la orden")
 
-    # 2. Actualizamos el estado dentro del scope del tenant — db_update_order_status
+    # 2. We update the status within the tenant scope — db_update_order_status
     #    returns None on no-op (status already set or order modified concurrently). Return 409
     #    so the frontend can inform the operator instead of silently ignoring the race.
     with tenant_scope(scope_rid):

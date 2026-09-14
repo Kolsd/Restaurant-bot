@@ -10,7 +10,7 @@
  * Cache busting: increment CACHE_VERSION on every deploy that changes static assets.
  */
 
-const CACHE_VERSION  = 'v46';
+const CACHE_VERSION  = 'v47';
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
@@ -64,7 +64,7 @@ self.addEventListener('fetch', event => {
 
   if (url.origin !== self.location.origin) return;
 
-  // API calls: siempre network-only.
+  // API calls: always network-only.
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(fetch(request));
     return;
@@ -76,13 +76,13 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // roles.js: siempre network-only, nunca cachear.
+  // roles.js: always network-only, never cache.
   if (url.pathname === '/static/js/roles.js') {
     event.respondWith(fetch(request));
     return;
   }
 
-  // Páginas de staff: siempre network-first, sin fallback a caché.
+  // Staff pages: always network-first, no cache fallback.
   const staffPages = ['/waiter', '/cashier', '/bar', '/kitchen', '/courier'];
   if (staffPages.includes(url.pathname)) {
     event.respondWith(fetch(request));
@@ -103,7 +103,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // HTML pages: network-first, fallback a caché.
+  // HTML pages: network-first, fallback to cache.
   // caches.match() returns undefined (not null) on miss — must guard to avoid
   // "Failed to convert value to 'Response'" crash in event.respondWith().
   event.respondWith(

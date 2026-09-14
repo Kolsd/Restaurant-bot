@@ -779,8 +779,8 @@ async def db_get_branches(org_id: int) -> list[dict]:
     """Return all locations (peers) for a given org.
 
     Post-Wave-2: caller passes org_id (the tenant key). Every location in the
-    org is returned — no "matriz" vs "sucursal" distinction (Wave-2 model:
-    all sedes are peers). The caller decides whether to exclude the current
+    org is returned — no "matriz" vs "branch" distinction (Wave-2 model:
+    all locations are peers). The caller decides whether to exclude the current
     location from the dropdown UI.
 
     Historical implementation assumed the param was a location_id and did a
@@ -1285,11 +1285,11 @@ async def db_sync_menu_to_branches(parent_restaurant_id: int) -> int:
 
 async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
     """
-    Sobrescribe el JSON del menú para un restaurante específico.
+    Overwrites the menu JSON for a specific restaurant.
 
-    Catálogo v2: antes de guardar, cada plato pasa por normalize_dish_shape y se
-    valida que image_public_id pertenezca a este restaurante.  Lanza ValueError si
-    algún plato tiene una imagen de otro tenant.
+    Catalog v2: before saving, each dish goes through normalize_dish_shape and
+    is validated so image_public_id belongs to this restaurant. Raises ValueError if
+    any dish has an image from another tenant.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -1576,7 +1576,7 @@ async def db_get_nps_responses(bot_number: str, period: str = "month", limit: in
             return result
 
 
-async def db_get_recent_nps_for_caja(limit: int = 10) -> list[dict]:
+async def db_get_recent_nps_for_cashier(limit: int = 10) -> list[dict]:
     """Return the most recent NPS responses for the current tenant.
 
     RLS-scoped via app.org_id GUC — caller must be inside tenant_scope().
@@ -1623,7 +1623,7 @@ async def _ensure_usage_table() -> None:
 
 
 async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
-    """Suma `tokens` al contador diario del restaurante (upsert atómico).
+    """Adds `tokens` to the restaurant's daily counter (atomic upsert).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -1647,7 +1647,7 @@ async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
 
 
 async def db_increment_invoice_usage(restaurant_id: int) -> None:
-    """Incrementa en 1 el contador de facturas diarias del restaurante (upsert atómico).
+    """Increments the restaurant's daily invoice counter by 1 (atomic upsert).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -1665,17 +1665,17 @@ async def db_increment_invoice_usage(restaurant_id: int) -> None:
 
 async def db_check_usage_limits(restaurant_id: int) -> None:
     """
-    Verifica que el restaurante no haya superado sus límites diarios.
-    Lee restaurants.features.plan_limits → { daily_tokens, daily_invoices }.
-    Si plan_limits está ausente, no se aplica ningún límite.
-    Lanza UsageLimitExceeded si se superó algún límite.
+    Verifies that the restaurant hasn't exceeded its daily limits.
+    Reads restaurants.features.plan_limits → { daily_tokens, daily_invoices }.
+    If plan_limits is absent, no limit is applied.
+    Raises UsageLimitExceeded if any limit was exceeded.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     from app.services.database import UsageLimitExceeded  # noqa: PLC0415
     await _ensure_usage_table()
     async with _tenant_connection() as conn:
-        # Leer límites del plan desde features
+        # Read plan limits from features
         row = await conn.fetchrow(
             "SELECT features FROM restaurants WHERE id = $1", restaurant_id
         )
@@ -1689,9 +1689,9 @@ async def db_check_usage_limits(restaurant_id: int) -> None:
                 feats = {}
         limits = feats.get("plan_limits") if isinstance(feats, dict) else None
         if not limits:
-            return  # sin límites configurados → acceso libre
+            return  # no limits configured → unrestricted access
 
-        # Leer consumo del día actual
+        # Read the current day's usage
         usage = await conn.fetchrow(
             """SELECT total_tokens, total_invoices
                FROM subscription_usage

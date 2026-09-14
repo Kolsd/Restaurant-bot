@@ -203,10 +203,10 @@ async def test_login_returns_org_and_locations_for_owner():
         assert result["default_location_id"] == primary_ids[0]
 
 
-# ── test_login_returns_staff_scoped_locations_for_mesero ─────────────────────
+# ── test_login_returns_staff_scoped_locations_for_waiter ─────────────────────
 
 
-async def test_login_returns_staff_scoped_locations_for_mesero():
+async def test_login_returns_staff_scoped_locations_for_waiter():
     """Staff login returns only the Location(s) that staff belongs to."""
     with (
         patch("app.services.auth.db.db_get_user", AsyncMock(return_value=None)),

@@ -1,7 +1,7 @@
 """
-Tests para FASE 2: Enrutamiento multi-estación Cocina / Bar.
-Cubre: filtro ?station= en GET /api/table-orders, ruta /bar,
-       station en db_save_table_order, lógica de split en agent.execute_action.
+Tests for PHASE 2: Multi-station Kitchen / Bar routing.
+Covers: ?station= filter on GET /api/table-orders, /bar route,
+       station in db_save_table_order, split logic in agent.execute_action.
 """
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -9,7 +9,7 @@ import app.routes.tables as tables_routes
 import app.services.agent as agent_module
 
 
-# ── Fixtures compartidos ──────────────────────────────────────────────
+# ── Shared fixtures ──────────────────────────────────────────────
 
 @pytest.fixture
 def mock_auth(monkeypatch):
@@ -29,11 +29,11 @@ SAMPLE_ORDERS = [
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 1. Filtro ?station= en GET /api/table-orders
+# 1. ?station= filter on GET /api/table-orders
 # ══════════════════════════════════════════════════════════════════════
 
-def test_table_orders_sin_filtro_devuelve_todos(client, mock_auth, monkeypatch):
-    """/api/table-orders sin ?station devuelve todas las órdenes (para Caja)."""
+def test_table_orders_without_filter_returns_all(client, mock_auth, monkeypatch):
+    """/api/table-orders without ?station returns all orders (for the Cashier)."""
     async def mock_fetch(*args, **kwargs):
         class FakeConn:
             async def fetch(self, *a, **k):
@@ -62,18 +62,18 @@ def test_table_orders_sin_filtro_devuelve_todos(client, mock_auth, monkeypatch):
             return FakeConn()
         async def __aexit__(self, *a): pass
 
-    # Mock directo del pool y la consulta
+    # Direct mock of the pool and the query
     monkeypatch.setattr(tables_routes.db, "get_pool", AsyncMock(return_value=FakePool()))
 
     headers = {"Authorization": "Bearer token"}
     response = client.get("/api/table-orders", headers=headers)
-    # Sin DB real solo verificamos que el endpoint responde y tiene la key "orders"
+    # Without a real DB we just verify the endpoint responds and has the "orders" key
     assert response.status_code == 200
     assert "orders" in response.json()
 
 
 def _make_pool_with_orders(orders: list):
-    """Crea un mock de pool que devuelve las órdenes dadas como dicts con atributos."""
+    """Creates a pool mock that returns the given orders as dicts with attributes."""
     class FakeRow(dict):
         def keys(self): return super().keys()
         def __iter__(self): return iter(self.items())
@@ -98,8 +98,8 @@ def _make_pool_with_orders(orders: list):
     return FakePool()
 
 
-def test_filtro_station_kitchen_excluye_bar(client, mock_auth, monkeypatch):
-    """?station=kitchen debe devolver solo station='kitchen' y station='all'."""
+def test_filter_station_kitchen_excludes_bar(client, mock_auth, monkeypatch):
+    """?station=kitchen must return only station='kitchen' and station='all'."""
     monkeypatch.setattr(tables_routes.db, "get_pool", AsyncMock(return_value=_make_pool_with_orders(SAMPLE_ORDERS)))
     headers = {"Authorization": "Bearer token"}
     response = client.get("/api/table-orders?station=kitchen", headers=headers)
@@ -114,8 +114,8 @@ def test_filtro_station_kitchen_excluye_bar(client, mock_auth, monkeypatch):
     assert "MESA-B1" not in ids
 
 
-def test_filtro_station_bar_excluye_kitchen(client, mock_auth, monkeypatch):
-    """?station=bar debe devolver solo station='bar' y station='all'."""
+def test_filter_station_bar_excludes_kitchen(client, mock_auth, monkeypatch):
+    """?station=bar must return only station='bar' and station='all'."""
     monkeypatch.setattr(tables_routes.db, "get_pool", AsyncMock(return_value=_make_pool_with_orders(SAMPLE_ORDERS)))
     headers = {"Authorization": "Bearer token"}
     response = client.get("/api/table-orders?station=bar", headers=headers)
@@ -131,8 +131,8 @@ def test_filtro_station_bar_excluye_kitchen(client, mock_auth, monkeypatch):
     assert "MESA-K2" not in ids
 
 
-def test_filtro_station_all_devuelve_todos(client, mock_auth, monkeypatch):
-    """Sin ?station= todos los registros pasan el filtro."""
+def test_filter_station_all_returns_all(client, mock_auth, monkeypatch):
+    """Without ?station= all records pass the filter."""
     monkeypatch.setattr(tables_routes.db, "get_pool", AsyncMock(return_value=_make_pool_with_orders(SAMPLE_ORDERS)))
     headers = {"Authorization": "Bearer token"}
     response = client.get("/api/table-orders", headers=headers)
@@ -142,15 +142,15 @@ def test_filtro_station_all_devuelve_todos(client, mock_auth, monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 2. Ruta /bar sirve bar.html
+# 2. /bar route serves bar.html
 # ══════════════════════════════════════════════════════════════════════
 
-def test_ruta_bar_devuelve_html(client):
-    """/bar debe devolver 200 con contenido HTML del KDS de Bar."""
+def test_bar_route_returns_html(client):
+    """/bar must return 200 with the Bar KDS HTML content."""
     response = client.get("/bar")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    # Verificar que es el KDS del bar y no otro HTML
+    # Verify it's the bar KDS and not some other HTML
     body = response.text
     assert "Bar" in body
     # Post-redesign: station=bar fetch moved from inline script to external bar.js
@@ -158,8 +158,8 @@ def test_ruta_bar_devuelve_html(client):
     assert "Mesio" in body
 
 
-def test_ruta_cocina_sigue_funcionando(client, monkeypatch):
-    """/kitchen debe seguir devolviendo 200 tras los cambios (requires valid kitchen role)."""
+def test_kitchen_route_still_works(client, monkeypatch):
+    """/kitchen must keep returning 200 after the changes (requires valid kitchen role)."""
     from unittest.mock import AsyncMock
     # /kitchen now validates the user role — mock auth so a kitchen user passes
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="cocina_user"))
@@ -183,11 +183,11 @@ def test_ruta_cocina_sigue_funcionando(client, monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 3. ManualOrderRequest acepta station y lo pasa a DB
+# 3. ManualOrderRequest accepts station and passes it to DB
 # ══════════════════════════════════════════════════════════════════════
 
 def test_pos_order_station_default_all(client, monkeypatch):
-    """POST /api/pos/order sin station= debe usar station='all'."""
+    """POST /api/pos/order without station= must use station='all'."""
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "role": "owner"}))
@@ -202,7 +202,7 @@ def test_pos_order_station_default_all(client, monkeypatch):
         "items":      [{"name": "Pizza", "price": 35000, "quantity": 1}],
         "total":      35000,
         "notes":      "",
-        # station no especificado → debe usar 'all'
+        # station not specified → must use 'all'
     }
     response = client.post("/api/pos/order", json=payload, headers={"Authorization": "Bearer token"})
     assert response.status_code == 200
@@ -212,7 +212,7 @@ def test_pos_order_station_default_all(client, monkeypatch):
 
 
 def test_pos_order_station_bar(client, monkeypatch):
-    """POST /api/pos/order con station='bar' debe guardarlo como 'bar'."""
+    """POST /api/pos/order with station='bar' must save it as 'bar'."""
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "role": "owner"}))
@@ -236,8 +236,8 @@ def test_pos_order_station_bar(client, monkeypatch):
     assert saved["station"] == "bar"
 
 
-def test_pos_order_station_kitchen_mensaje(client, monkeypatch):
-    """POST /api/pos/order con station='kitchen' da mensaje de cocina."""
+def test_pos_order_station_kitchen_message(client, monkeypatch):
+    """POST /api/pos/order with station='kitchen' gives a kitchen message."""
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "role": "owner"}))
@@ -258,7 +258,7 @@ def test_pos_order_station_kitchen_mensaje(client, monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 4. Lógica de split en execute_action (agent.py)
+# 4. Split logic in execute_action (agent.py)
 # ══════════════════════════════════════════════════════════════════════
 
 MOCK_CART_MIXED = {
@@ -286,8 +286,8 @@ MOCK_TABLE = {"id": "mesa-1", "name": "Mesa 1"}
 
 
 @pytest.mark.asyncio
-async def test_execute_action_split_kitchen_y_bar():
-    """Con bar_enabled=True items mixtos crean dos sub-orders: kitchen y bar."""
+async def test_execute_action_split_kitchen_and_bar():
+    """With bar_enabled=True, mixed items create two sub-orders: kitchen and bar."""
     saved_orders = []
 
     async def fake_save(order):
@@ -319,34 +319,34 @@ async def test_execute_action_split_kitchen_y_bar():
             session_state={"has_order": False, "order_delivered": False, "active": True},
         )
 
-    assert len(saved_orders) == 2, f"Esperaba 2 órdenes (kitchen+bar), obtuve {len(saved_orders)}"
+    assert len(saved_orders) == 2, f"Expected 2 orders (kitchen+bar), got {len(saved_orders)}"
 
     stations = {o["station"] for o in saved_orders}
-    assert "kitchen" in stations, "Debe haber una orden de kitchen"
-    assert "bar" in stations, "Debe haber una orden de bar"
+    assert "kitchen" in stations, "There must be a kitchen order"
+    assert "bar" in stations, "There must be a bar order"
 
     kitchen_order = next(o for o in saved_orders if o["station"] == "kitchen")
     bar_order     = next(o for o in saved_orders if o["station"] == "bar")
 
-    # Kitchen: solo "Pizza" (category="Comidas", no en bar_categories)
+    # Kitchen: only "Pizza" (category="Comidas", not in bar_categories)
     kitchen_names = {i["name"] for i in kitchen_order["items"]}
     assert "Pizza" in kitchen_names
     assert "Mojito" not in kitchen_names
 
-    # Bar: "Mojito" y "Agua" (category="Bebidas", en bar_categories)
+    # Bar: "Mojito" and "Agua" (category="Bebidas", in bar_categories)
     bar_names = {i["name"] for i in bar_order["items"]}
     assert "Mojito" in bar_names
     assert "Agua" in bar_names
     assert "Pizza" not in bar_names
 
-    # Totales correctos
+    # Correct totals
     assert kitchen_order["total"] == 35000
     assert bar_order["total"] == 35000  # 25000 + 10000
 
 
 @pytest.mark.asyncio
-async def test_execute_action_sin_bar_usa_station_all():
-    """Con bar_enabled=False toda la orden va a station='all' (cocina, comportamiento original)."""
+async def test_execute_action_without_bar_uses_station_all():
+    """With bar_enabled=False the whole order goes to station='all' (kitchen, original behavior)."""
     saved_orders = []
 
     with (
@@ -374,15 +374,15 @@ async def test_execute_action_sin_bar_usa_station_all():
             session_state={"has_order": False, "order_delivered": False, "active": True},
         )
 
-    assert len(saved_orders) == 1, "Sin bar activo debe crear solo UNA orden"
+    assert len(saved_orders) == 1, "Without bar active it must create only ONE order"
     assert saved_orders[0]["station"] == "all"
-    assert len(saved_orders[0]["items"]) == 3  # todos los ítems juntos
+    assert len(saved_orders[0]["items"]) == 3  # all items together
 
 
 @pytest.mark.asyncio
-async def test_execute_action_solo_bebidas_usa_bar():
-    """Si todos los ítems son bebidas (solo bar), se crea UNA orden de bar station='all'."""
-    cart_solo_bebidas = {
+async def test_execute_action_drinks_only_uses_bar():
+    """If all items are drinks (bar only), it creates ONE bar order with station='all'."""
+    cart_drinks_only = {
         "items": [
             {"name": "Mojito",     "price": 25000, "quantity": 1, "subtotal": 25000, "category": "Bebidas"},
             {"name": "Cerveza IPA","price": 18000, "quantity": 2, "subtotal": 36000, "category": "Bebidas"},
@@ -391,7 +391,7 @@ async def test_execute_action_solo_bebidas_usa_bar():
     saved_orders = []
 
     with (
-        patch.object(agent_module.db, "db_get_cart", AsyncMock(return_value=cart_solo_bebidas)),
+        patch.object(agent_module.db, "db_get_cart", AsyncMock(return_value=cart_drinks_only)),
         patch.object(agent_module.orders, "get_cart_total", AsyncMock(return_value=61000)),
         patch.object(agent_module.db, "db_get_base_order_id", AsyncMock(return_value=None)),
         patch.object(agent_module.db, "db_get_restaurant_by_bot_number", AsyncMock(return_value=MOCK_RESTAURANT_BAR)),
@@ -415,7 +415,7 @@ async def test_execute_action_solo_bebidas_usa_bar():
             session_state={"has_order": False, "order_delivered": False, "active": True},
         )
 
-    # Solo bebidas → kitchen_items vacío → solo se crea la orden de kitchen con station='all'
-    # (has_split=False porque kitchen_items está vacío)
+    # Drinks only → kitchen_items empty → only the kitchen order with station='all' is created
+    # (has_split=False because kitchen_items is empty)
     assert len(saved_orders) == 1
     assert saved_orders[0]["station"] == "all"

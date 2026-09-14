@@ -12,13 +12,13 @@ log = get_logger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════
-# EXCEPCIONES DE NEGOCIO
+# BUSINESS EXCEPTIONS
 # ══════════════════════════════════════════════════════════════════════
 
 class UsageLimitExceeded(Exception):
     """
-    Se lanza cuando un restaurante supera su límite diario de tokens o facturas.
-    Los límites se configuran en restaurants.features.plan_limits:
+    Raised when a restaurant exceeds its daily token or invoice limit.
+    Limits are configured in restaurants.features.plan_limits:
       { "daily_tokens": 100000, "daily_invoices": 50 }
     """
     def __init__(self, resource: str, used: int, limit: int):
@@ -144,7 +144,7 @@ def get_circuit_state() -> dict:
 
 _pool = None
 
-SESSION_TTL_HOURS = 72  # V-06: tokens expiran en 72 horas
+SESSION_TTL_HOURS = 72  # V-06: tokens expire in 72 hours
 
 def _normalize_phone(number: str) -> str:
     if not number: return ""
@@ -336,7 +336,7 @@ from app.repositories.restaurant_repo import (
     db_sync_batch,
     db_get_nps_stats,
     db_get_nps_responses,
-    db_get_recent_nps_for_caja,
+    db_get_recent_nps_for_cashier,
     db_increment_token_usage,
     db_increment_invoice_usage,
     db_check_usage_limits,
@@ -391,7 +391,7 @@ from app.repositories.tables_repo import (
     db_get_next_sub_number,
     db_get_table_bill,
     db_close_table_bill,
-    db_mark_factura_generada,
+    db_mark_invoice_generated,
     db_get_first_table_order,
     db_cleanup_after_checkout,
     db_get_open_session_by_phone,

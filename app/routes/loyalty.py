@@ -1,15 +1,15 @@
 """
 app/routes/loyalty.py
 =====================
-Endpoints REST del módulo de Fidelización (Loyalty).
+REST endpoints for the Loyalty module.
 
-Todos los endpoints requieren:
-  - Bearer token válido   (via get_current_restaurant)
-  - Módulo 'loyalty' activo en el restaurante (via require_module)
+All endpoints require:
+  - A valid Bearer token   (via get_current_restaurant)
+  - The 'loyalty' module active on the restaurant (via require_module)
 
-Diseño orientado a mínimos tokens:
+Designed for minimal token usage:
   GET /api/loyalty/balance   → {"puntos_actuales": N, "equivalencia_cop": N*val}
-  El bot consume este endpoint como herramienta — respuesta de < 60 bytes JSON.
+  The bot consumes this endpoint as a tool — response is < 60 bytes of JSON.
 
 Aggregate endpoints (dashboard):
   GET /api/loyalty/aggregates  → headline KPIs
@@ -85,9 +85,9 @@ async def get_loyalty_balance(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """
-    Herramienta ultra-ligera para el bot y el POS.
-    Respuesta O(1) desde loyalty_customers (sin joins, sin historial).
-    Retorna 404 si el cliente aún no tiene registro de fidelización.
+    Ultra-lightweight tool for the bot and the POS.
+    O(1) response from loyalty_customers (no joins, no history).
+    Returns 404 if the customer doesn't have a loyalty record yet.
     """
     # Synthetic diner web-chat identities ("web:<uuid4>", see diner_sessions_repo)
     # are NOT phone numbers. Reject them explicitly instead of letting the
@@ -118,7 +118,7 @@ async def get_loyalty_ledger(
     limit:      int  = Query(default=50, ge=1, le=200),
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Historial de movimientos de un cliente (para dashboard / POS)."""
+    """History of a customer's movements (for dashboard / POS)."""
     # See get_loyalty_balance above — web:<uuid4> diner identities are not phones.
     # max_length=60 (not 15) so this explicit check is reachable for a ~40-char
     # "web:<uuid4>" token instead of being shadowed by Pydantic's own length gate.
@@ -137,7 +137,7 @@ async def get_loyalty_stats(
     limit:      int  = Query(default=100, ge=1, le=500),
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Top clientes por saldo de puntos (para dashboard de fidelización)."""
+    """Top customers by points balance (for the loyalty dashboard)."""
     rows = await db.db_get_loyalty_stats(restaurant["id"], limit)
     return {"customers": rows, "total": len(rows)}
 
@@ -148,8 +148,8 @@ async def redeem_loyalty_points(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """
-    Canjea puntos en el POS al momento del pago.
-    Retorna el descuento en COP y el nuevo saldo.
+    Redeems points at the POS at payment time.
+    Returns the discount in COP and the new balance.
     """
     try:
         result = await db.db_redeem_loyalty_points(

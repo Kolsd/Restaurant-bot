@@ -121,7 +121,7 @@ async def create_prospect(body: ProspectCreate, _: None = Depends(verify_superad
 
 @router.get("/check-updates")
 async def check_updates(_: None = Depends(verify_superadmin)):
-    """Devuelve únicamente la fecha del último cambio en toda la tabla."""
+    """Returns only the date of the last change across the whole table."""
     latest = await crm_repo.db_get_prospects_last_updated()
     return {"latest": latest}
 
@@ -599,7 +599,7 @@ async def send_manual_message(body: SendMessagePayload, _: None = Depends(verify
         status    = "no_credentials"
         error_msg = "Configura CRM_PHONE_NUMBER_ID en Railway con el ID del número de prospectos"
 
-    # Registrar la interacción SOLO si se envió con éxito
+    # Log the interaction ONLY if it was sent successfully
     if status == "sent":
         await crm_repo.db_record_outbound_interaction(
             body.prospect_id, content=body.message, wa_message_id=wa_msg_id
@@ -700,7 +700,7 @@ async def send_template(body: SendTemplatePayload, _: None = Depends(verify_supe
             status    = "no_credentials"
             error_msg = "Credenciales Meta no configuradas"
 
-        # Construir preview reemplazando parámetros con valores del prospecto
+        # Build the preview by replacing parameters with the prospect's values
         preview = tpl["body"]
         for p_name in tpl_param_names:
             field    = _PROSPECT_FIELDS.get(p_name)
@@ -708,7 +708,7 @@ async def send_template(body: SendTemplatePayload, _: None = Depends(verify_supe
             if resolved:
                 preview = preview.replace("{{" + p_name + "}}", resolved)
 
-        # Registrar en la base de datos SOLO si se envió con éxito
+        # Log to the database ONLY if it was sent successfully
         if status == "sent":
             await crm_repo.db_record_outbound_interaction(
                 pid, content=preview, template_name=tpl["wa_name"], wa_message_id=wa_msg_id
@@ -829,11 +829,11 @@ async def crm_page():
         return HTMLResponse(p.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>crm.html no encontrado en static/</h1>", status_code=404)
 
-# ── INBOUND WEBHOOK HOOK — registra respuestas de prospectos ─────────
+# ── INBOUND WEBHOOK HOOK — logs prospect replies ─────────
 async def register_inbound_from_prospect(phone: str, message: str, wa_message_id: str = ""):
     """
-    Llamado desde chat.py cuando llega un mensaje de WhatsApp.
-    Si el número no existe, lo crea. Si existe, registra la interacción.
+    Called from chat.py when a WhatsApp message arrives.
+    If the number doesn't exist, creates it. If it exists, logs the interaction.
     Delegates all SQL to crm_repo.db_record_inbound_interaction.
     """
     await crm_repo.db_record_inbound_interaction(phone, message, wa_message_id)

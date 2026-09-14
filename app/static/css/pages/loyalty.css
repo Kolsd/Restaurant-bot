@@ -1,4 +1,4 @@
-/* ── Fidelización page ───────────────────────────────────────────── */
+/* ── Loyalty page ───────────────────────────────────────────────── */
 .tier-card { position: relative; border-radius: 12px; padding: 18px 20px; color: #fff; overflow: hidden; min-height: 160px; display: flex; flex-direction: column; }
 .tier-card.bronze { background: linear-gradient(135deg, #A97442, #6B4226); }
 .tier-card.silver { background: linear-gradient(135deg, #9CA3AF, #4B5563); }

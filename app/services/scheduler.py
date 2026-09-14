@@ -102,7 +102,7 @@ async def _create_inactivity_alert(session: dict):
 
 
 async def _process_stale_session(session: dict):
-    """Procesa una sesión individual con semáforo para limitar concurrencia."""
+    """Processes a single session with a semaphore to limit concurrency."""
     async with _scheduler_semaphore:
         phone      = session["phone"]
         bot_number = session["bot_number"]
@@ -111,8 +111,8 @@ async def _process_stale_session(session: dict):
         has_order       = session.get("has_order", False)
         db_phone_id     = session.get("meta_phone_id")
 
-        # 🛡️ FIX MULTI-WORKER: Intentamos marcar la sesión en la base de datos PRIMERO.
-        # Si retorna False, significa que otro worker ya lo hizo en el mismo milisegundo.
+        # 🛡️ MULTI-WORKER FIX: Try to mark the session in the database FIRST.
+        # If it returns False, another worker already did it in the same millisecond.
         warned = await db.db_mark_session_warned(session["id"])
         if not warned:
             return
@@ -140,7 +140,7 @@ async def _process_stale_session(session: dict):
 
 
 async def _process_closeable_session(session: dict):
-    """Cierra una sesión inactiva con semáforo."""
+    """Closes an inactive session with a semaphore."""
     async with _scheduler_semaphore:
         phone      = session["phone"]
         bot_number = session["bot_number"]

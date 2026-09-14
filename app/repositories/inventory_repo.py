@@ -35,7 +35,7 @@ def _serialize(d: dict) -> dict:
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 async def _sync_dish_availability_conn(conn, dish_names: list, available: bool, restaurant_id: int):
-    """Activa o desactiva platos usando una conexión existente (dentro de transacción)."""
+    """Enables or disables dishes using an existing connection (inside a transaction)."""
     for name in dish_names:
         await conn.execute(
             """INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
@@ -47,7 +47,7 @@ async def _sync_dish_availability_conn(conn, dish_names: list, available: bool, 
 
 
 async def _sync_dish_availability(dish_names: list, available: bool, restaurant_id: int):
-    """Activa o desactiva platos en menu_availability según el stock."""
+    """Enables or disables dishes in menu_availability based on stock."""
     if not dish_names:
         return
     async with _tenant_connection() as conn:
@@ -58,24 +58,24 @@ async def _sync_ingredient_dishes_conn(
     conn, ingredient_id: int, new_stock: float, min_stock: float, restaurant_id: int
 ) -> None:
     """
-    Cuando un ingrediente baja a <= min_stock, busca TODOS los platos que lo usan
-    vía dish_recipes y los marca unavailable en menu_availability.
-    También sincroniza linked_dishes legacy del mismo ingrediente.
+    When an ingredient drops to <= min_stock, finds ALL dishes that use it
+    via dish_recipes and marks them unavailable in menu_availability.
+    Also syncs legacy linked_dishes for the same ingredient.
 
-    Llamar dentro de una transacción abierta (conn ya tiene lock sobre el ingrediente).
-    No falla silenciosamente: si hay error en el INSERT de menu_availability,
-    se propagará al caller para que la transacción haga rollback.
+    Call within an open transaction (conn already holds a lock on the ingredient).
+    Does not fail silently: if the menu_availability INSERT errors,
+    it propagates to the caller so the transaction rolls back.
     """
     from app.services.logging import get_logger
     log = get_logger(__name__)
 
     if new_stock > min_stock:
-        # Stock repuesto — re-evaluar platos afectados para marcarlos available
-        # Solo si TODOS sus otros ingredientes también tienen stock > min_stock.
+        # Stock replenished — re-evaluate affected dishes to mark them available
+        # Only if ALL their other ingredients also have stock > min_stock.
         await _recheck_dishes_for_ingredient_conn(conn, ingredient_id, restaurant_id)
         return
 
-    # Stock agotado o en mínimo — marcar platos como no disponibles
+    # Stock depleted or at minimum — mark dishes as unavailable
     recipe_rows = await conn.fetch(
         "SELECT dish_name FROM dish_recipes WHERE ingredient_id = $1 AND org_id = $2",
         ingredient_id, restaurant_id,
@@ -97,8 +97,8 @@ async def _recheck_dishes_for_ingredient_conn(
     conn, ingredient_id: int, restaurant_id: int
 ) -> None:
     """
-    Tras reponer stock, re-evalúa cada plato que usa este ingrediente.
-    Un plato vuelve a estar disponible solo si TODOS sus ingredientes tienen
+    After restocking, re-evaluates each dish that uses this ingredient.
+    A dish becomes available again only if ALL its ingredients have
     current_stock > min_stock.
     """
     from app.services.logging import get_logger
@@ -110,7 +110,7 @@ async def _recheck_dishes_for_ingredient_conn(
     )
     for row in recipe_rows:
         dish_name = row["dish_name"]
-        # Contar ingredientes totales vs ingredientes con stock OK
+        # Count total ingredients vs ingredients with OK stock
         total = await conn.fetchval(
             "SELECT COUNT(*) FROM dish_recipes WHERE dish_name = $1 AND org_id = $2",
             dish_name, restaurant_id,
@@ -255,7 +255,7 @@ async def db_adjust_inventory_stock(item_id: int, quantity_delta: float,
 
 
 async def db_get_inventory_item(item_id: int) -> dict | None:
-    """Obtiene un item de inventario por ID. Tenant-scoped via RLS."""
+    """Gets an inventory item by ID. Tenant-scoped via RLS."""
     async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT id, org_id, name, unit, current_stock, min_stock, "
@@ -291,18 +291,18 @@ async def db_get_inventory_alerts(restaurant_id: int) -> list:
 
 async def db_deduct_inventory_for_order(bot_number: str, items: list):
     """
-    Descuenta stock por cada plato pedido, con soporte para escandallos (dish_recipes).
+    Deducts stock for each ordered dish, with support for recipes (dish_recipes).
     items = [{"name": "Hamburguesa Clásica", "quantity": 2}, ...]
-    Usa SELECT FOR UPDATE dentro de una transacción para evitar race conditions
-    con los 4 workers de Railway.
-    Si no hay receta definida, cae al comportamiento legacy de linked_dishes.
+    Uses SELECT FOR UPDATE inside a transaction to avoid race conditions
+    across Railway's 4 workers.
+    If no recipe is defined, falls back to legacy linked_dishes behavior.
 
-    NOTA: Para órdenes de domicilio/recoger, usar commit_order_transaction en
-    app.repositories.orders_repo, que envuelve esto junto con db_save_order y
-    la limpieza del carrito en una sola transacción.
+    NOTE: For delivery/pickup orders, use commit_order_transaction in
+    app.repositories.orders_repo, which wraps this together with db_save_order and
+    cart cleanup in a single transaction.
 
     Raises:
-        InsufficientStockError: si el stock de un ingrediente es insuficiente.
+        InsufficientStockError: if an ingredient's stock is insufficient.
     """
     # Lazy import to avoid circular dependency:
     # database.py imports inventory_repo (via re-export), inventory_repo imports
@@ -332,7 +332,7 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                 )
 
                 if recipe_rows:
-                    # Bloquear las filas de ingredientes antes de modificar
+                    # Lock the ingredient rows before modifying
                     ingredient_ids = [r["ingredient_id"] for r in recipe_rows]
                     locked = await conn.fetch(
                         """SELECT id, current_stock, min_stock, linked_dishes
@@ -435,18 +435,18 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                             await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
 
 
-# ── Escandallos / Recipes ─────────────────────────────────────────────────────
+# ── Recipes ─────────────────────────────────────────────────────
 
 async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list) -> list:
     """
-    Reemplaza el escandallo completo de un plato.
+    Replaces a dish's full recipe.
     lines = [{"ingredient_id": int, "quantity": float}, ...]
-    Pasar lines=[] para eliminar la receta (plato vuelve a estar available).
+    Pass lines=[] to remove the recipe (dish becomes available again).
 
-    Tras guardar, re-evalúa la disponibilidad del plato en menu_availability
-    comprobando si algún ingrediente nuevo tiene stock <= min_stock (Fase 5c).
-    Si el escandallo se elimina (lines=[]), el plato se marca available porque
-    sin receta no hay restricción de stock.
+    After saving, re-evaluates the dish's availability in menu_availability
+    by checking whether any new ingredient has stock <= min_stock (Phase 5c).
+    If the recipe is deleted (lines=[]), the dish is marked available because
+    without a recipe there is no stock constraint.
     """
     from app.services.logging import get_logger
     log = get_logger(__name__)
@@ -465,7 +465,7 @@ async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list)
                     int(line["ingredient_id"]), float(line["quantity"])
                 )
 
-            # Re-evaluate availability after recipe change (Fase 5c)
+            # Re-evaluate availability after recipe change (Phase 5c)
             if not lines:
                 # No recipe → no stock constraint → mark available
                 await _sync_dish_availability_conn(conn, [dish_name], True, restaurant_id)
@@ -494,7 +494,7 @@ async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list)
 
 
 async def db_get_dish_recipe(restaurant_id: int, dish_name: str) -> list:
-    """Devuelve las líneas de ingredientes de un plato, con costo por línea."""
+    """Returns a dish's ingredient lines, with per-line cost."""
     async with _tenant_connection() as conn:
         rows = await conn.fetch("""
             SELECT r.id, r.ingredient_id, r.quantity,
@@ -509,7 +509,7 @@ async def db_get_dish_recipe(restaurant_id: int, dish_name: str) -> list:
 
 
 async def db_get_all_recipes(restaurant_id: int) -> list:
-    """Lista todos los escandallos con food cost total por plato."""
+    """Lists all recipes with total food cost per dish."""
     async with _tenant_connection() as conn:
         rows = await conn.fetch("""
             SELECT r.dish_name,
@@ -525,7 +525,7 @@ async def db_get_all_recipes(restaurant_id: int) -> list:
 
 
 async def db_delete_dish_recipe(restaurant_id: int, dish_name: str):
-    """Elimina todos los ingredientes del escandallo de un plato."""
+    """Deletes all ingredients from a dish's recipe."""
     async with _tenant_connection() as conn:
         await conn.execute(
             "DELETE FROM dish_recipes WHERE org_id=$1 AND dish_name=$2",
@@ -535,8 +535,8 @@ async def db_delete_dish_recipe(restaurant_id: int, dish_name: str):
 
 async def db_get_food_costs(restaurant_id: int) -> list:
     """
-    Devuelve el Food Cost de cada plato que tiene escandallo definido.
-    Incluye desglose por ingrediente para que el dueño vea de dónde viene el costo.
+    Returns the Food Cost of each dish that has a recipe defined.
+    Includes a per-ingredient breakdown so the owner can see where the cost comes from.
     """
     async with _tenant_connection() as conn:
         rows = await conn.fetch("""

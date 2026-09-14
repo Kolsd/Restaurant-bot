@@ -33,8 +33,8 @@ async def _ensure_loyalty_tables() -> None:
 
 async def _loyalty_cfg(conn, restaurant_id: int) -> dict:
     """
-    Lee loyalty_points_per_1k y loyalty_point_value_cop de restaurants.features.
-    Devuelve defaults seguros si no están configurados.
+    Reads loyalty_points_per_1k and loyalty_point_value_cop from restaurants.features.
+    Returns safe defaults if not configured.
     """
     row = await conn.fetchrow(
         "SELECT features FROM restaurants WHERE id=$1", restaurant_id
@@ -53,9 +53,9 @@ async def _loyalty_cfg(conn, restaurant_id: int) -> dict:
 
 async def db_get_loyalty_balance(restaurant_id: int, phone: str) -> dict | None:
     """
-    Consulta O(1) del saldo. El bot la consume como herramienta ultra-ligera.
-    Retorna {"puntos_actuales": N, "equivalencia_cop": N*point_value} o None si
-    el cliente no tiene registro de fidelización.
+    O(1) balance lookup. The bot consumes it as an ultra-lightweight tool.
+    Returns {"puntos_actuales": N, "equivalencia_cop": N*point_value} or None if
+    the customer has no loyalty record.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -79,14 +79,14 @@ async def db_accrue_loyalty_points(
     total_cop: Union[Decimal, int, float, str],
 ) -> int:
     """
-    Calcula y acumula puntos por una compra pagada. Idempotente a nivel DB:
-    UNIQUE INDEX parcial on (org_id, order_id) WHERE delta > 0 (migración 0055)
-    + ON CONFLICT DO NOTHING + RETURNING. Si una segunda llamada concurrente
-    con el mismo order_id pierde la carrera, fetchrow() retorna None y la
-    función retorna 0 sin tocar loyalty_customers (el contador solo refleja
-    el primer accrual).
+    Calculates and accrues points for a paid purchase. Idempotent at the DB level:
+    partial UNIQUE INDEX on (org_id, order_id) WHERE delta > 0 (migration 0055)
+    + ON CONFLICT DO NOTHING + RETURNING. If a second concurrent call
+    with the same order_id loses the race, fetchrow() returns None and the
+    function returns 0 without touching loyalty_customers (the counter only
+    reflects the first accrual).
 
-    Retorna los puntos acumulados, o 0 si ya estaba procesado.
+    Returns the accrued points, or 0 if it was already processed.
 
     Type contract:
       total_cop accepts Decimal/int/float/str — coerced internally via
@@ -142,10 +142,10 @@ async def db_redeem_loyalty_points(
     order_id: str,
 ) -> dict:
     """
-    Canjea puntos contra una compra. Bloquea la fila con FOR UPDATE para
-    evitar race conditions en entornos multi-worker.
-    Retorna {"redeemed": N, "cop_discount": N*point_value, "new_balance": M}.
-    Lanza ValueError si el saldo es insuficiente.
+    Redeems points against a purchase. Locks the row with FOR UPDATE to
+    avoid race conditions in multi-worker environments.
+    Returns {"redeemed": N, "cop_discount": N*point_value, "new_balance": M}.
+    Raises ValueError if the balance is insufficient.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -234,8 +234,8 @@ async def db_apply_redemption_to_table_check(
     """
     Equivalent of db_apply_redemption_to_order but for dine-in table_checks.
 
-    The bot calls this AFTER db_redeem_loyalty_points succeeded so caja sees
-    the discount when cobrando the cuenta. We do NOT mutate `total` here —
+    The bot calls this AFTER db_redeem_loyalty_points succeeded so the cashier sees
+    the discount when charging the bill. We do NOT mutate `total` here —
     caja's UI subtracts the displayed discount when computing what the
     customer actually owes; the original total is preserved for audit / DIAN.
 
@@ -317,7 +317,7 @@ async def db_get_loyalty_ledger(
     phone: str,
     limit: int = 50,
 ) -> list[dict]:
-    """Historial de movimientos de un cliente (para dashboard / POS).
+    """History of a customer's movements (for dashboard / POS).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -336,7 +336,7 @@ async def db_get_loyalty_ledger(
 
 
 async def db_get_loyalty_stats(restaurant_id: int, limit: int = 100) -> list[dict]:
-    """Top clientes ordenados por saldo (para dashboard de fidelización).
+    """Top customers ordered by balance (for the loyalty dashboard).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -764,9 +764,9 @@ async def db_get_loyalty_funnel(org_id: int) -> list[dict]:
 
 async def db_get_phone_for_base_order(base_order_id: str) -> str | None:
     """
-    Obtiene el teléfono del cliente asociado a un ticket de mesa.
-    Busca en table_orders por id directo o por base_order_id de sub-órdenes.
-    Usado por el background task de acumulación de loyalty en caja.
+    Gets the phone of the customer associated with a table ticket.
+    Looks up table_orders by direct id or by base_order_id of sub-orders.
+    Used by the background task that accrues loyalty at the register.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """

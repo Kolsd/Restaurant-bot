@@ -8,10 +8,10 @@ if (typeof _escHtml === 'undefined') {
   function _escHtml(s) { if(s==null)return''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 }
 
-// ── MENÚ ─────────────────────────────────────────────────────────────
+// ── MENU ─────────────────────────────────────────────────────────────
 let menuAvailability = {};
 let MENU_ITEMS = [];
-let editorMenuState = []; // 🛡️ FIX: Declarado al inicio para evitar errores de TDZ
+let editorMenuState = []; // 🛡️ FIX: Declared up front to avoid TDZ errors
 
 async function loadMenu() {
   const h = window._dashHeaders;
@@ -35,7 +35,7 @@ async function loadMenu() {
             // (app/services/orders.py::resolve_dish_for_cart) — must
             // round-trip through the editor or a re-save silently wipes it.
             sku:             d.sku             || null,
-            // Extended shape (catálogo v2)
+            // Extended shape (catalog v2)
             image_url:       d.image_url       || null,
             image_public_id: d.image_public_id || null,
             tags:            d.tags            || [],
@@ -52,7 +52,7 @@ async function loadMenu() {
     }
   } catch(e) { console.error('loadMenu:', e); }
   
-  // Lógica de visibilidad de botones exclusivos de Matriz
+  // Visibility logic for buttons exclusive to the main branch (Matriz)
   const role = localStorage.getItem('rb_role') || '';
   const branchVal = window._dashHeaders['X-Branch-ID'];
   const isMatriz = (!branchVal || branchVal === 'matriz');
@@ -66,7 +66,7 @@ async function loadMenu() {
   renderMenu();
 }
 
-// 🛡️ Memoria global para recordar qué pestañas del menú dejamos abiertas
+// 🛡️ Global memory to remember which menu tabs we left open
 window._openMenuCats = window._openMenuCats || new Set();
 
 function renderMenu() {
@@ -78,7 +78,7 @@ function renderMenu() {
   }
   const cats = [...new Set(MENU_ITEMS.map(m => m.cat))];
   
-  // Si es la primera vez que carga y no hay nada abierto, abrimos la primera categoría por defecto
+  // If this is the first load and nothing is open, open the first category by default
   if (window._openMenuCats.size === 0 && cats.length > 0) {
     const firstCat = /\p{Emoji}/u.test(cats[0]) ? cats[0] : `🍽️ ${cats[0]}`;
     window._openMenuCats.add(firstCat);
@@ -91,7 +91,7 @@ function renderMenu() {
     const hasEmoji = /\p{Emoji}/u.test(cat);
     const displayCat = hasEmoji ? cat : `🍽️ ${cat}`;
     
-    // 🛡️ FIX: Leemos la memoria para saber si debe estar abierto o cerrado
+    // 🛡️ FIX: Read the memory to know whether it should be open or closed
     const isOpen = window._openMenuCats.has(displayCat);
 
     return `<div class="menu-category">
@@ -123,7 +123,7 @@ function toggleCat(header) {
   body.classList.toggle('open');
   arrow.classList.toggle('open');
   
-  // 🛡️ FIX: Actualizamos la memoria cuando el usuario hace clic
+  // 🛡️ FIX: Update the memory when the user clicks
   if (body.classList.contains('open')) {
     window._openMenuCats.add(catName);
   } else {
@@ -173,7 +173,7 @@ async function syncMenuToBranches() {
   }
 }
 
-// ── EDITOR DE MENÚ v2 — Catálogo visual (Fase 2) ──
+// ── MENU EDITOR v2 — Visual catalog (Phase 2) ──
 
 // ── i18n: slug → Spanish label ──────────────────────────────────────
 const DISH_LABELS = {
@@ -1294,7 +1294,7 @@ async function saveMenuEditor() {
   }
 }
 
-// ── MESAS & QR ────────────────────────────────────────────────────────
+// ── TABLES & QR ────────────────────────────────────────────────────────
 async function loadTables() {
   const h = window._dashHeaders;
   const rest = window._dashRestaurant;
@@ -1328,7 +1328,7 @@ async function loadTables() {
           
           if (!botNum) {
               console.error("No se encontró el número de WhatsApp para este restaurante.");
-              return; // Detiene la generación del QR para esta mesa y evita enlaces rotos
+              return; // Stops QR generation for this table and avoids broken links
           }
 
           const catalogUrl = window.location.origin + '/catalog?bot=' + encodeURIComponent(botNum) + '&mesa=' + encodeURIComponent(t.name) + '&table_id=' + encodeURIComponent(t.id);
@@ -1353,22 +1353,22 @@ async function loadTables() {
 async function createTable() {
   const h = window._dashHeaders;
   
-  // Ya no leemos inputs manuales, el backend asigna el ID inteligentemente
+  // We no longer read manual inputs, the backend assigns the ID intelligently
   try {
     const r = await fetch('/api/tables', {
-      method: 'POST', 
+      method: 'POST',
       headers: { ...h, 'Content-Type': 'application/json' }
-      // Hemos eliminado el body. El backend sabe quién es el usuario y qué sucursal es.
+      // We removed the body. The backend knows who the user is and which branch it is.
     });
-    
+
     if (r.ok) {
-      // Si los inputs viejos siguen en tu HTML (dashboard.html), los limpiamos y ocultamos para no confundir
+      // If the old inputs are still in your HTML (dashboard.html), clear and hide them to avoid confusion
       const inputNum = document.getElementById('new-table-num');
       const inputName = document.getElementById('new-table-name');
       if (inputNum) { inputNum.value = ''; inputNum.style.display = 'none'; }
       if (inputName) { inputName.value = ''; inputName.style.display = 'none'; }
-      
-      loadTables(); // Refresca la cuadrícula de mesas con la nueva ya creada
+
+      loadTables(); // Refresh the table grid with the one just created
     } else {
       const err = await r.json().catch(() => ({}));
       alert('Error al crear mesa: ' + (err.detail || r.status));
@@ -1393,10 +1393,10 @@ async function deleteTable(tableId) {
   }
 }
 
-// ── MI EQUIPO ─────────────────────────────────────────────────────────
+// ── MY TEAM ─────────────────────────────────────────────────────────
 let allBranches = [];
 let currentBranchId = null;
-let selectedRoles = new Set(['mesero']); // Set para guardar los multiroles
+let selectedRoles = new Set(['mesero']); // Set to store the multi-roles
 
 async function loadBranches() {
   const h = window._dashHeaders;
@@ -1426,7 +1426,7 @@ function renderBranches(branches) {
   if (!branches.length) { container.innerHTML = '<div class="empty-state">No hay sucursales.</div>'; return; }
   
   container.innerHTML = branches.map(b => {
-    // 🛡️ FIX VISUAL: Cortamos el identificador interno (_b...) para que solo se vea el número
+    // 🛡️ VISUAL FIX: Trim the internal identifier (_b...) so only the number shows
     const cleanWa = (b.whatsapp_number || 'N/A').split('_b')[0];
     
     return `
@@ -1502,8 +1502,8 @@ async function loadBranchUsers(branchId) {
   } catch(e) {}
 }
 
-// 🗺️ LÓGICA DEL MAPA INTERACTIVO
-// 🗺️ LÓGICA DEL MAPA INTERACTIVO (MEJORADA)
+// 🗺️ INTERACTIVE MAP LOGIC
+// 🗺️ INTERACTIVE MAP LOGIC (IMPROVED)
 let locationMap = null;
 let locationMarker = null;
 
@@ -1512,7 +1512,7 @@ function showCreateBranch() {
   document.getElementById('branch-name').focus();
   
   if (!locationMap) {
-      // Centramos por defecto en Colombia (Bogotá)
+      // Default center on Colombia (Bogotá)
       const defaultLat = 4.6097; 
       const defaultLon = -74.0817;
       
@@ -1523,12 +1523,12 @@ function showCreateBranch() {
 
       locationMarker = L.marker([defaultLat, defaultLon], { draggable: true }).addTo(locationMap);
 
-      // 1. Cuando se arrastra el pin
+      // 1. When the pin is dragged
       locationMarker.on('dragend', function (e) {
           updatePinLocation(locationMarker.getLatLng());
       });
 
-      // 2. Mover el pin con solo hacer CLIC en el mapa
+      // 2. Move the pin with just a CLICK on the map
       locationMap.on('click', function(e) {
           locationMarker.setLatLng(e.latlng);
           updatePinLocation(e.latlng);
@@ -1538,13 +1538,13 @@ function showCreateBranch() {
   }
 }
 
-// 🪄 Función que traduce la coordenada a una dirección CORTA y limpia
+// 🪄 Function that translates the coordinate into a SHORT, clean address
 async function updatePinLocation(latlng) {
   document.getElementById('branch-lat').value = latlng.lat;
   document.getElementById('branch-lon').value = latlng.lng;
-  
+
   try {
-      // Usamos el proxy interno /api/geocode/reverse — nunca llamamos Nominatim directamente desde el browser
+      // We use the internal proxy /api/geocode/reverse — we never call Nominatim directly from the browser
       const res = await fetch(`/api/geocode/reverse?lat=${latlng.lat}&lon=${latlng.lng}`, { headers: window._dashHeaders });
       if (res.ok) {
           const data = await res.json();
@@ -1557,7 +1557,7 @@ async function updatePinLocation(latlng) {
   }
 }
 
-// 🔍 Buscador de texto directo a OpenStreetMap (Más robusto)
+// 🔍 Direct text search against OpenStreetMap (more robust)
 async function validateAddress() {
   const addressInput = document.getElementById('branch-address').value.trim();
   if (!addressInput) { alert('Ingresa una dirección primero'); return; }
@@ -1567,7 +1567,7 @@ async function validateAddress() {
   btn.textContent = 'Buscando...'; btn.disabled = true;
   
   try {
-    // Usamos el proxy interno /api/geocode — nunca llamamos Nominatim directamente desde el browser
+    // We use the internal proxy /api/geocode — we never call Nominatim directly from the browser
     const r = await fetch(`/api/geocode?address=${encodeURIComponent(addressInput)}`, { headers: window._dashHeaders });
     if (r.ok) {
       const data = await r.json();
@@ -1612,7 +1612,7 @@ function applyManualCoords() {
   }
 }
 
-// 🚀 CREAR SUCURSAL (VERSIÓN LIMPIA)
+// 🚀 CREATE BRANCH (CLEAN VERSION)
 async function createBranch() {
   const h = window._dashHeaders;
   const name    = document.getElementById('branch-name').value.trim();
@@ -1637,15 +1637,15 @@ async function createBranch() {
     });
     
     if (r.ok) {
-      // 1. Ocultamos el formulario
+      // 1. Hide the form
       document.getElementById('create-branch-form').style.display = 'none';
-      
-      // 2. Limpiamos los campos
-      ['branch-name','branch-address','branch-lat','branch-lon'].forEach(id => { 
-          document.getElementById(id).value = ''; 
+
+      // 2. Clear the fields
+      ['branch-name','branch-address','branch-lat','branch-lon'].forEach(id => {
+          document.getElementById(id).value = '';
       });
-      
-      // 3. Recargamos la vista de sucursales
+
+      // 3. Reload the branches view
       loadBranches();
       if (typeof loadGlobalBranches === 'function') loadGlobalBranches();
       
@@ -1659,31 +1659,31 @@ async function createBranch() {
   }
 }
 
-// ── LÓGICA MULTIROL ──
+// ── MULTI-ROLE LOGIC ──
 function toggleRole(role, el) {
   const isAdminRole = role === 'admin' || role === 'gerente';
   const pwdField = document.getElementById('invite-password');
   const pinField = document.getElementById('invite-pin');
 
   if (isAdminRole) {
-    // Admin exclusivo: limpia todos y selecciona solo admin
+    // Admin is exclusive: clear all and select only admin
     selectedRoles = new Set(['admin']);
     document.querySelectorAll('#modal-invite .role-card').forEach(c => c.classList.remove('active'));
     el.classList.add('active');
-    // Admin requiere contraseña, no PIN
+    // Admin requires a password, not a PIN
     if (pwdField) pwdField.style.display = '';
     if (pinField) pinField.style.display = 'none';
   } else {
-    // Si admin estaba activo, se desmarca al elegir rol operativo
+    // If admin was active, deselect it when choosing an operational role
     if (selectedRoles.has('admin')) {
       selectedRoles.delete('admin');
       const adminCard = document.querySelector('#modal-invite .role-card[data-role="admin"]');
       if (adminCard) adminCard.classList.remove('active');
     }
 
-    // Toggle para roles operativos (multi-rol)
+    // Toggle for operational roles (multi-role)
     if (selectedRoles.has(role)) {
-      if (selectedRoles.size === 1) return; // Al menos un rol siempre
+      if (selectedRoles.size === 1) return; // Always keep at least one role
       selectedRoles.delete(role);
       el.classList.remove('active');
     } else {
@@ -1691,7 +1691,7 @@ function toggleRole(role, el) {
       el.classList.add('active');
     }
 
-    // Roles operativos usan PIN
+    // Operational roles use a PIN
     if (pwdField) pwdField.style.display = 'none';
     if (pinField) pinField.style.display = '';
   }
@@ -1763,7 +1763,7 @@ async function deleteUser(userId) {
   } catch(e) {}
 }
 
-// ── SESIONES DE MESA ──────────────────────────────────────────────────
+// ── TABLE SESSIONS ──────────────────────────────────────────────────
 let _sesionHours  = 24;
 let _currentSesId = null;
 
@@ -1782,7 +1782,7 @@ function reasonBadge(r) {
 
 function fmtDur(a, b) {
   if (!a||!b) return '—';
-  // Añadimos la Z para asegurar que la matemática del tiempo sea exacta
+  // Add the Z to ensure the time math is exact
   const zA = a.endsWith('Z') ? a : a + 'Z';
   const zB = b.endsWith('Z') ? b : b + 'Z';
   const m = Math.round((new Date(zB) - new Date(zA)) / 60000);
@@ -1999,7 +1999,7 @@ async function alertWaiterFromModal() {
   } catch(e) { showSesFeedback('Error de conexión.', false); }
 }
 
-// ── POS CON IA ───────────────────────────────────────────────────────
+// ── POS WITH AI ───────────────────────────────────────────────────────
 const posCache = { data: null, timestamp: 0, orderCount: 0 };
 const CACHE_TTL = 8 * 60 * 60 * 1000;
 
@@ -2022,7 +2022,7 @@ async function loadPOSData(forceRefresh = false) {
 
 function renderPOSFromCache() {
   if (!posCache.data) return;
-  const { mainText, stockText, upsells, horaCounts, avgTicket, topPlato, topHora } = posCache.data;
+  const { mainText, stockText, upsells, hourCounts, avgTicket, topDish, topHour } = posCache.data;
   const mainEl = document.getElementById('ai-main-text');
   mainEl.textContent = mainText || '';
   if (mainText) {
@@ -2033,11 +2033,11 @@ function renderPOSFromCache() {
   }
   document.getElementById('ai-stock-text').textContent = stockText || '';
   if (upsells) _renderUpsells(upsells);
-  if (topHora) document.getElementById('pos-hora-pico').textContent = topHora[0] + 'h';
+  if (topHour) document.getElementById('pos-hora-pico').textContent = topHour[0] + 'h';
   if (avgTicket) document.getElementById('pos-ticket').textContent = mesioFmt(avgTicket);
-  if (topPlato) { document.getElementById('pos-top-plato').textContent = topPlato[0]; document.getElementById('pos-top-sub').textContent = topPlato[1] + ' pedidos'; }
-  renderHoraDist(horaCounts || {});
-  renderDemandBars(horaCounts || {});
+  if (topDish) { document.getElementById('pos-top-plato').textContent = topDish[0]; document.getElementById('pos-top-sub').textContent = topDish[1] + ' pedidos'; }
+  renderHourDist(hourCounts || {});
+  renderDemandBars(hourCounts || {});
 }
 
 async function loadPOSDataFresh() {
@@ -2052,7 +2052,7 @@ async function loadPOSDataFresh() {
     document.getElementById('pos-ticket').textContent = avgTicket > 0 ? mesioFmt(avgTicket) : '—';
     document.getElementById('pos-ticket-trend').textContent = paid.length + ' pedidos pagados esta semana';
 
-    const platoCounts = {};
+    const dishCounts = {};
     orders.forEach(o => {
       let items = [];
       if (!o.items) return;
@@ -2060,60 +2060,60 @@ async function loadPOSDataFresh() {
         try { items = JSON.parse(o.items).map(i => (i.quantity||1)+'x '+(i.name||'')); } catch(e) { items = o.items.split(', '); }
       } else if (Array.isArray(o.items)) { items = o.items.map(i => (i.quantity||1)+'x '+(i.name||'')); }
       else { items = o.items.split(', '); }
-      items.forEach(item => { const name = item.replace(/^\d+x\s+/, '').trim(); if (name) platoCounts[name] = (platoCounts[name]||0) + 1; });
+      items.forEach(item => { const name = item.replace(/^\d+x\s+/, '').trim(); if (name) dishCounts[name] = (dishCounts[name]||0) + 1; });
     });
-    const topPlato = Object.entries(platoCounts).sort((a,b) => b[1]-a[1])[0];
-    if (topPlato) { document.getElementById('pos-top-plato').textContent = topPlato[0]; document.getElementById('pos-top-sub').textContent = topPlato[1] + ' pedidos esta semana'; }
+    const topDish = Object.entries(dishCounts).sort((a,b) => b[1]-a[1])[0];
+    if (topDish) { document.getElementById('pos-top-plato').textContent = topDish[0]; document.getElementById('pos-top-sub').textContent = topDish[1] + ' pedidos esta semana'; }
 
-    const horaCounts = {};
-    orders.forEach(o => { if (o.time) { const hora = o.time.split(':')[0]+':00'; horaCounts[hora] = (horaCounts[hora]||0)+1; } });
-    const topHora = Object.entries(horaCounts).sort((a,b) => b[1]-a[1])[0];
-    document.getElementById('pos-hora-pico').textContent = topHora ? topHora[0]+'h' : 'N/D';
+    const hourCounts = {};
+    orders.forEach(o => { if (o.time) { const hour = o.time.split(':')[0]+':00'; hourCounts[hour] = (hourCounts[hour]||0)+1; } });
+    const topHour = Object.entries(hourCounts).sort((a,b) => b[1]-a[1])[0];
+    document.getElementById('pos-hora-pico').textContent = topHour ? topHour[0]+'h' : 'N/D';
 
-    renderHoraDist(horaCounts);
-    renderDemandBars(horaCounts);
+    renderHourDist(hourCounts);
+    renderDemandBars(hourCounts);
     if (!posCache.data) posCache.data = {};
-    Object.assign(posCache.data, { horaCounts, avgTicket, topPlato, topHora });
-    await generateAIInsights(orders, avgTicket, topPlato, topHora);
+    Object.assign(posCache.data, { hourCounts, avgTicket, topDish, topHour });
+    await generateAIInsights(orders, avgTicket, topDish, topHour);
   } catch(e) { console.error('POS error:', e); }
 }
 
-function renderHoraDist(horaCounts) {
-  const horas = ['11:00','12:00','13:00','14:00','18:00','19:00','20:00','21:00','22:00'];
-  const maxVal = Math.max(...Object.values(horaCounts), 1);
+function renderHourDist(hourCounts) {
+  const hours = ['11:00','12:00','13:00','14:00','18:00','19:00','20:00','21:00','22:00'];
+  const maxVal = Math.max(...Object.values(hourCounts), 1);
   const container = document.getElementById('hora-dist');
   if (!container) return;
-  container.innerHTML = horas.map(h => {
-    const val = horaCounts[h] || 0;
+  container.innerHTML = hours.map(h => {
+    const val = hourCounts[h] || 0;
     const pct = Math.round(val / maxVal * 100);
     return `<div class="hora-item"><span class="hora-label">${h}</span><div class="hora-bar-wrap"><div class="hora-bar" style="width:${pct}%"></div></div><span class="hora-val">${val} ped</span></div>`;
   }).join('');
 }
 
-function renderDemandBars(horaCounts) {
+function renderDemandBars(hourCounts) {
   const now = new Date().getHours();
-  const maxVal = Math.max(...Object.values(horaCounts), 1);
+  const maxVal = Math.max(...Object.values(hourCounts), 1);
   const container = document.getElementById('demand-bars');
   if (!container) return;
   container.innerHTML = [now+1, now+2, now+3].map(h => {
-    const hora = String(h%24).padStart(2,'0') + ':00';
-    const base = horaCounts[hora] || 0;
+    const hour = String(h%24).padStart(2,'0') + ':00';
+    const base = hourCounts[hour] || 0;
     const predicted = Math.max(1, Math.round(base * (0.8 + Math.random() * 0.4)));
     const pct = Math.min(100, Math.round(predicted / maxVal * 100 + 20));
     const cls = pct > 70 ? '' : pct > 40 ? 'warn' : 'danger';
-    const nivel = pct > 70 ? 'Alta demanda' : pct > 40 ? 'Demanda media' : 'Baja demanda';
-    return `<div class="predict-bar"><div class="predict-label"><span>${hora}h — ${nivel}</span><span>~${predicted} pedidos esperados</span></div><div class="predict-track"><div class="predict-fill ${cls}" style="width:${pct}%"></div></div></div>`;
+    const demandLevel = pct > 70 ? 'Alta demanda' : pct > 40 ? 'Demanda media' : 'Baja demanda';
+    return `<div class="predict-bar"><div class="predict-label"><span>${hour}h — ${demandLevel}</span><span>~${predicted} pedidos esperados</span></div><div class="predict-track"><div class="predict-fill ${cls}" style="width:${pct}%"></div></div></div>`;
   }).join('');
 }
 
-async function generateAIInsights(orders, avgTicket, topPlato, topHora) {
+async function generateAIInsights(orders, avgTicket, topDish, topHour) {
   const rest = window._dashRestaurant;
   const totalRevenue = orders.filter(o => o.paid).reduce((s,o) => s+o.total, 0);
-  const domicilio = orders.filter(o => o.type === 'domicilio').length;
-  const recoger   = orders.filter(o => o.type === 'recoger').length;
-  const dias  = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
-  const hoy   = dias[new Date().getDay()];
-  const ctx   = `Datos semana "${(rest&&rest.name)||'el restaurante'}":\n- Pedidos: ${orders.length} (${domicilio} dom, ${recoger} recoger)\n- Ingresos: $${totalRevenue.toLocaleString('es-CO')}\n- Ticket prom: $${avgTicket.toLocaleString('es-CO')}\n- Top plato: ${topPlato?topPlato[0]+' ('+topPlato[1]+')':'sin datos'}\n- Hora pico: ${topHora?topHora[0]:'sin datos'}\n- Hoy: ${hoy}`;
+  const deliveryCount = orders.filter(o => o.type === 'domicilio').length;
+  const pickupCount   = orders.filter(o => o.type === 'recoger').length;
+  const dayNames = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+  const today    = dayNames[new Date().getDay()];
+  const ctx   = `Datos semana "${(rest&&rest.name)||'el restaurante'}":\n- Pedidos: ${orders.length} (${deliveryCount} dom, ${pickupCount} recoger)\n- Ingresos: $${totalRevenue.toLocaleString('es-CO')}\n- Ticket prom: $${avgTicket.toLocaleString('es-CO')}\n- Top plato: ${topDish?topDish[0]+' ('+topDish[1]+')':'sin datos'}\n- Hora pico: ${topHour?topHour[0]:'sin datos'}\n- Hoy: ${today}`;
 
   // Proxy server-side — the API key never leaves the server.
   const callAI = async (sys, usr) => {
@@ -2141,7 +2141,7 @@ async function generateAIInsights(orders, avgTicket, topPlato, topHora) {
   try {
     const stockText = await callAI(
       'Eres Mesio IA. Español, máx 2 oraciones, enfocado en inventario. Sin HTML.',
-      ctx + '\n\nHoy es ' + hoy + '. ¿Qué ingredientes asegurar con base en el plato top?'
+      ctx + '\n\nHoy es ' + today + '. ¿Qué ingredientes asegurar con base en el plato top?'
     );
     document.getElementById('ai-stock-text').textContent = stockText;
     if (posCache.data) posCache.data.stockText = stockText;
@@ -2152,19 +2152,19 @@ async function generateAIInsights(orders, avgTicket, topPlato, topHora) {
       'Eres Mesio IA. Responde SOLO JSON válido sin markdown: [{"icon":"emoji","texto":"sugerencia","ganancia":"impacto"}]. Máx 3 items.',
       ctx + '\n\nGenera 3 sugerencias de upsell para el bot de WhatsApp.'
     );
-    const sugerencias = JSON.parse(raw.replace(/```json|```/g,'').trim());
-    _renderUpsells(sugerencias);
+    const suggestions = JSON.parse(raw.replace(/```json|```/g,'').trim());
+    _renderUpsells(suggestions);
     // Cache structured data, not HTML — avoids storing LLM-generated markup
-    if (posCache.data) posCache.data.upsells = sugerencias;
+    if (posCache.data) posCache.data.upsells = suggestions;
   } catch(e) { document.getElementById('upsell-container').innerHTML = '<div class="empty-state">Conecta más pedidos.</div>'; }
 }
 
 // Renders upsell suggestions from structured data using textContent — no XSS risk
-function _renderUpsells(sugerencias) {
+function _renderUpsells(suggestions) {
   const container = document.getElementById('upsell-container');
-  if (!container || !Array.isArray(sugerencias)) return;
+  if (!container || !Array.isArray(suggestions)) return;
   container.textContent = '';
-  sugerencias.forEach(s => {
+  suggestions.forEach(s => {
     const card = document.createElement('div');
     card.className = 'upsell-card';
     const icon = document.createElement('span');
@@ -2220,7 +2220,7 @@ async function askMesioAI() {
   btn.textContent = 'Preguntar a Mesio IA →'; btn.disabled = false;
 }
 
-// ── PEDIDOS MESA (dine-in) en sección Pedidos ────────────────────────
+// ── TABLE ORDERS (dine-in) in the Orders section ────────────────────────
 const STATUS_LABEL = {
   recibido:'Recibido', en_preparacion:'En preparación',
   listo:'Listo para servir', entregado:'Entregado',
@@ -2246,35 +2246,35 @@ async function loadTableOrdersSection() {
   if (!container) return;
 
   try {
-    // ── 1. Cargar pedidos de mesa ──
-    const rMesa = await fetch('/api/table-orders', { headers: h });
-    if (!rMesa.ok) { mesioToast('Error cargando pedidos de mesas', 'error'); return; }
-    const { orders: allMesa = [] } = await rMesa.json();
+    // ── 1. Load table orders ──
+    const rTableOrders = await fetch('/api/table-orders', { headers: h });
+    if (!rTableOrders.ok) { mesioToast('Error cargando pedidos de mesas', 'error'); return; }
+    const { orders: allTableOrders = [] } = await rTableOrders.json();
 
     const dNow = new Date();
-    const today = `${dNow.getFullYear()}-${String(dNow.getMonth()+1).padStart(2,'0')}-${String(dNow.getDate()).padStart(2,'0')}`;
-    
-    const visible = allMesa.filter(o => {
+    const todayStr = `${dNow.getFullYear()}-${String(dNow.getMonth()+1).padStart(2,'0')}-${String(dNow.getDate()).padStart(2,'0')}`;
+
+    const visible = allTableOrders.filter(o => {
       const closed = o.status === 'factura_entregada' || o.status === 'cancelado';
       const dOrder = new Date((o.created_at || '') + (o.created_at?.endsWith('Z') ? '' : 'Z'));
       const orderDay = `${dOrder.getFullYear()}-${String(dOrder.getMonth()+1).padStart(2,'0')}-${String(dOrder.getDate()).padStart(2,'0')}`;
-      if (o.status === 'entregado') return orderDay === today;
+      if (o.status === 'entregado') return orderDay === todayStr;
       return !closed;
     });
 
     const active = visible.filter(o => ['recibido','en_preparacion','listo'].includes(o.status));
-    
-    const mesasParaCobrar = new Set();
+
+    const tablesToCharge = new Set();
     visible.forEach(o => {
       if (o.status === 'entregado' || o.status === 'factura_generada') {
-        mesasParaCobrar.add(o.base_order_id || o.id.replace(/-\d+$/, ''));
+        tablesToCharge.add(o.base_order_id || o.id.replace(/-\d+$/, ''));
       }
     });
 
     const billsMap = {};
     visible.forEach(o => {
       const baseId = o.base_order_id || o.id.replace(/-\d+$/, '');
-      if (mesasParaCobrar.has(baseId)) {
+      if (tablesToCharge.has(baseId)) {
         if (!billsMap[baseId]) {
           billsMap[baseId] = { id: baseId, table_name: o.table_name, created_at: o.created_at, items: [], total: 0, status: o.status };
         }
@@ -2286,11 +2286,11 @@ async function loadTableOrdersSection() {
       }
     });
     const groupedBills = Object.values(billsMap);
-    // Almacenar en window para que markTableInvoiced pueda leer el total y los items
+    // Store in window so markTableInvoiced can read the total and the items
     window._billsData = {};
     groupedBills.forEach(b => { window._billsData[b.id] = b; });
 
-    // ── 2. Cargar pedidos de domicilio/recoger ──
+    // ── 2. Load delivery/pickup orders ──
     const localOffset = new Date().getTimezoneOffset();
     const rDom = await fetch(`/api/dashboard/orders?period=today&tz_offset=${localOffset}`, { headers: h });
     const allOrders = rDom.ok ? ((await rDom.json()).orders || []) : [];
@@ -2299,33 +2299,33 @@ async function loadTableOrdersSection() {
       const st = (o.status || '').toLowerCase();
       return !st.includes('entregado') && !st.includes('cancelado');
     });
-    const domEntregados = extOrders.filter(o => (o.status||'').includes('entregado')).length;
+    const deliveredExtCount = extOrders.filter(o => (o.status||'').includes('entregado')).length;
 
     const fmt = n => mesioFmt(n);
 
-    // ── 3. Métricas salón ──
-    const enCocina   = active.filter(o => ['recibido','en_preparacion'].includes(o.status));
-    const conMesero  = active.filter(o => o.status === 'listo');
-    const mesasAtendidas = [...new Set(visible.map(o => o.table_id))].length;
+    // ── 3. Dining-room metrics ──
+    const inKitchen   = active.filter(o => ['recibido','en_preparacion'].includes(o.status));
+    const withWaiter  = active.filter(o => o.status === 'listo');
+    const tablesServed = [...new Set(visible.map(o => o.table_id))].length;
 
     if (mContainer) {
       mContainer.innerHTML = `
-        <div class="metric"><div class="metric-label">Mesas Atendidas</div><div class="metric-value">${mesasAtendidas}</div></div>
-        <div class="metric"><div class="metric-label">En Cocina</div><div class="metric-value" style="color:#BA7517;">${enCocina.length}</div></div>
-        <div class="metric"><div class="metric-label">Con Mesero (Listos)</div><div class="metric-value" style="color:#378ADD;">${conMesero.length}</div></div>
+        <div class="metric"><div class="metric-label">Mesas Atendidas</div><div class="metric-value">${tablesServed}</div></div>
+        <div class="metric"><div class="metric-label">En Cocina</div><div class="metric-value" style="color:#BA7517;">${inKitchen.length}</div></div>
+        <div class="metric"><div class="metric-label">Con Mesero (Listos)</div><div class="metric-value" style="color:#378ADD;">${withWaiter.length}</div></div>
         <div class="metric"><div class="metric-label">En Caja (Por Cobrar)</div><div class="metric-value" style="color:#1D9E75;">${groupedBills.length}</div></div>
       `;
     }
 
-    // ── 4. Monitor domicilios ──
+    // ── 4. Delivery monitor ──
     const rtDomTotal      = document.getElementById('rt-dom-total');
-    const rtDomCocina     = document.getElementById('rt-dom-cocina');
-    const rtDomEntrega    = document.getElementById('rt-dom-entrega');
-    const rtDomEntregados = document.getElementById('rt-dom-entregados');
-    if (rtDomTotal)      rtDomTotal.textContent      = extOrders.length;
-    if (rtDomCocina)     rtDomCocina.textContent     = activeExt.filter(o => !['en_camino','en_entrega'].includes(o.status||'')).length;
-    if (rtDomEntrega)    rtDomEntrega.textContent    = activeExt.filter(o => ['en_camino','en_entrega'].includes(o.status||'')).length;
-    if (rtDomEntregados) rtDomEntregados.textContent = domEntregados;
+    const rtDomKitchen    = document.getElementById('rt-dom-cocina');
+    const rtDomDelivery   = document.getElementById('rt-dom-entrega');
+    const rtDomDelivered  = document.getElementById('rt-dom-entregados');
+    if (rtDomTotal)     rtDomTotal.textContent     = extOrders.length;
+    if (rtDomKitchen)   rtDomKitchen.textContent   = activeExt.filter(o => !['en_camino','en_entrega'].includes(o.status||'')).length;
+    if (rtDomDelivery)  rtDomDelivery.textContent  = activeExt.filter(o => ['en_camino','en_entrega'].includes(o.status||'')).length;
+    if (rtDomDelivered) rtDomDelivered.textContent = deliveredExtCount;
 
     if (domContainer) {
       if (activeExt.length === 0) {
@@ -2356,7 +2356,7 @@ async function loadTableOrdersSection() {
       }
     }
 
-    // ── 5. Monitor salón ──
+    // ── 5. Dining-room monitor ──
     let html = '';
     if (!active.length && !groupedBills.length) {
       container.innerHTML = '<div class="empty-state">No hay mesas con pedidos activos en este momento.</div>';
@@ -2466,7 +2466,7 @@ async function markTableInvoiced(orderId) {
   const bill = window._billsData?.[orderId];
   const subtotal = bill?.total || 0;
 
-  // Construir modal de cobro con toggle de cargo de servicio
+  // Build the checkout modal with a service charge toggle
   const existingModal = document.getElementById('_svc-modal');
   if (existingModal) existingModal.remove();
 
@@ -2541,7 +2541,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(() => { if (document.visibilityState !== 'hidden') loadTableOrdersSection(); }, 15000);
 });
 
-// ── GESTIÓN DE STAFF OPERATIVO (ROSTER) ─────────────────────────────────
+// ── OPERATIONAL STAFF MANAGEMENT (ROSTER) ─────────────────────────────────
 
 
 async function _loadStaffBranchesSelect() {
@@ -2554,7 +2554,7 @@ async function _loadStaffBranchesSelect() {
       const data = await r.json();
       const branches = data.branches || [];
       
-      // Opción por defecto
+      // Default option
       select.innerHTML = '<option value="">— Casa Matriz —</option>';
       
       branches.forEach(b => {
@@ -2572,7 +2572,7 @@ async function _loadStaffBranchesSelect() {
 function openCreateStaffModal() {
   document.getElementById('staff-create-name').value = '';
   document.getElementById('staff-create-pin').value = '';
-  // Resetear checkboxes (dejar solo mesero)
+  // Reset checkboxes (leave only mesero)
   document.querySelectorAll('#staff-create-roles input[type="checkbox"]').forEach(cb => {
     cb.checked = cb.value === 'mesero';
   });
@@ -2588,7 +2588,7 @@ async function submitCreateStaff() {
   const name = document.getElementById('staff-create-name').value.trim();
   const pin = document.getElementById('staff-create-pin').value.trim();
   
-  // Recoger los roles seleccionados
+  // Collect the selected roles
   const selectedRoles = [];
   document.querySelectorAll('#staff-create-roles input[type="checkbox"]:checked').forEach(cb => {
     selectedRoles.push(cb.value);
@@ -2599,7 +2599,7 @@ async function submitCreateStaff() {
   if (pin.length < 4) { alert('El PIN debe tener al menos 4 dígitos.'); return; }
 
   try {
-    // El backend espera el PIN en el campo "password" según tu pydantic model
+    // The backend expects the PIN in the "password" field per your pydantic model
     const payload = {
       name: name,
       roles: selectedRoles,
@@ -2616,7 +2616,7 @@ async function submitCreateStaff() {
 
     if (r.ok) {
       closeCreateStaffModal();
-      loadStaff(); // Recargar el grid
+      loadStaff(); // Reload the grid
     } else {
       const e = await r.json();
       alert('Error al crear empleado: ' + (e.detail || r.statusText));
@@ -2649,7 +2649,7 @@ async function deleteStaff(id, name) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// RESERVACIONES
+// RESERVATIONS
 // ══════════════════════════════════════════════════════════════
 
 let _resData = [];

@@ -1,17 +1,17 @@
 """
-image_host.py — Wrapper sobre Cloudinary SDK para el catálogo visual v2.
+image_host.py — Wrapper over the Cloudinary SDK for visual catalog v2.
 
-Responsabilidades:
-  - sign_upload_params: firma parámetros para upload directo browser→Cloudinary
-  - delete_image:       borra imágenes con validación de ownership multi-tenant
-  - build_transform_url: construye URLs con transformaciones predefinidas
-  - is_cloudinary_url:  helper de detección
+Responsibilities:
+  - sign_upload_params: signs parameters for a direct browser→Cloudinary upload
+  - delete_image:       deletes images with multi-tenant ownership validation
+  - build_transform_url: builds URLs with predefined transformations
+  - is_cloudinary_url:  detection helper
 
-Config requerida (env vars):
+Required config (env vars):
   CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
 
-Si alguna variable falta, las funciones retornan errores manejables (dict con
-"error" key o False) — la app no crashea al arrancar.
+If any variable is missing, the functions return manageable errors (dict with
+an "error" key, or False) — the app doesn't crash on startup.
 """
 
 from __future__ import annotations

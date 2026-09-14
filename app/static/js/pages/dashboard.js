@@ -186,7 +186,7 @@ async function _apiFetch(url) {
 // ── Master load ───────────────────────────────────────────────────────────────
 async function _loadAll() {
   await Promise.allSettled([
-    loadPedidosRescatados(),
+    loadRescuedOrders(),
     loadDailyInsight(),
     loadMetricsRow(),
     loadRevenueChart(),
@@ -199,8 +199,8 @@ async function _loadAll() {
   ]);
 }
 
-// ── 0. North-star: Pedidos rescatados (mes actual) ────────────────────────────
-async function loadPedidosRescatados() {
+// ── 0. North-star: Rescued orders (current month) ────────────────────────────
+async function loadRescuedOrders() {
   const countEl = document.getElementById('m-rescatados');
   const deltaEl = document.getElementById('m-rescatados-delta');
   if (!countEl) return;
@@ -215,7 +215,7 @@ async function loadPedidosRescatados() {
       deltaEl.textContent = '';
     }
   } catch (e) {
-    console.warn('[dashboard] loadPedidosRescatados failed', e);
+    console.warn('[dashboard] loadRescuedOrders failed', e);
     if (countEl) countEl.textContent = '—';
   }
 }

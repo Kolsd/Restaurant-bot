@@ -76,11 +76,11 @@ _matias_token_cache: dict = {"token": None, "expires_at": 0.0}
 
 async def _get_matias_token() -> str:
     """
-    Devuelve el Bearer token para MATIAS API.
-    Si MATIAS_API_TOKEN está definida la retorna directamente (sin ningún HTTP).
-    En caso contrario realiza login dinámico y cachea el resultado 23 h.
+    Returns the Bearer token for the MATIAS API.
+    If MATIAS_API_TOKEN is set, returns it directly (no HTTP call at all).
+    Otherwise performs a dynamic login and caches the result for 23 h.
     """
-    # Token estático del panel — retorno inmediato, cero red
+    # Static token from the panel — immediate return, zero network calls
     static = os.getenv("MATIAS_API_TOKEN", "").strip()
     if static:
         return static
@@ -135,7 +135,7 @@ async def _get_matias_token() -> str:
         )
 
     cache["token"]      = token
-    cache["expires_at"] = time.time() + 82_800  # 23 horas
+    cache["expires_at"] = time.time() + 82_800  # 23 hours
     return token
 
 
@@ -145,7 +145,7 @@ async def _get_matias_token() -> str:
 
 class SiigoClient:
     """
-    Cliente Siigo Cloud API v1
+    Siigo Cloud API v1 client
     Docs: https://siigonube.siigo.com/docs/
     """
     BASE_URL = "https://siigo.com/api"
@@ -257,7 +257,7 @@ class SiigoClient:
 
 class AlegraClient:
     """
-    Cliente Alegra REST API
+    Alegra REST API client
     Docs: https://developer.alegra.com/docs
     """
     BASE_URL = "https://app.alegra.com/api/v1"
@@ -358,7 +358,7 @@ class AlegraClient:
 
 class LoggroClient:
     """
-    Cliente Loggro API
+    Loggro API client
     Docs: https://desarrolladores.loggro.com
     """
     BASE_URL = "https://api.loggro.com/api/v1"
@@ -447,19 +447,19 @@ class LoggroClient:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# PATRÓN ADAPTADOR
+# ADAPTER PATTERN
 # ══════════════════════════════════════════════════════════════════════
 
 class BillingAdapter(ABC):
-    """Contrato único para todos los proveedores de facturación."""
+    """Single contract shared by all billing providers."""
 
     @abstractmethod
     async def create_invoice(self, order: dict, config: dict) -> dict:
-        """Emite la factura y devuelve el resultado del proveedor."""
+        """Issues the invoice and returns the provider's result."""
 
     @abstractmethod
     async def test_connection(self, config: dict) -> dict:
-        """Valida las credenciales/configuración sin emitir factura real."""
+        """Validates credentials/configuration without issuing a real invoice."""
 
 
 class SiigoAdapter(BillingAdapter):
@@ -497,17 +497,17 @@ class LoggroAdapter(BillingAdapter):
 
 class MesioNativeAdapter(BillingAdapter):
     """
-    Proveedor nativo de Facturación Electrónica DIAN (Colombia).
-    Arquitectura: calcula CUFE/CUDS, arma un payload JSON limpio y hace
-    HTTP POST al API REST de un Proveedor Tecnológico certificado (marca blanca).
-    La firma XMLDSig y la transmisión SOAP a la DIAN las gestiona el proveedor.
-    Si provider_api_url no está configurado, opera en modo mock (desarrollo/pruebas).
+    Native DIAN Electronic Invoicing provider (Colombia).
+    Architecture: calculates CUFE/CUDS, builds a clean JSON payload and makes an
+    HTTP POST to a certified Technology Provider's REST API (white-label).
+    The provider handles XMLDSig signing and SOAP transmission to the DIAN.
+    If provider_api_url isn't configured, it operates in mock mode (dev/testing).
     """
 
     # ── CUFE / CUDS ───────────────────────────────────────────────────
 
     @staticmethod
-    def _calcular_cufe(
+    def _calculate_cufe(
         num_fac: str, fec_fac: str, hor_fac: str,
         val_fac: str, val_imp1: str, val_imp2: str, val_tot: str,
         nit_ofe: str, num_adq: str, cl_tec: str,
@@ -515,26 +515,26 @@ class MesioNativeAdapter(BillingAdapter):
         val_imp3: str = "0.00",
     ) -> str:
         """
-        Calcula el CUFE según especificación DIAN Anexo Técnico FE v1.9.
-        Parámetros val_* deben tener exactamente 2 decimales, ej: "45000.00".
-        cod_imp1="01"=IVA, cod_imp2="04"=INC, cod_imp3="03"=ICA (generalmente 0).
+        Calculates the CUFE per DIAN Technical Annex FE v1.9 spec.
+        val_* parameters must have exactly 2 decimals, e.g.: "45000.00".
+        cod_imp1="01"=IVA, cod_imp2="04"=INC, cod_imp3="03"=ICA (usually 0).
         """
-        cadena = (
+        raw_string = (
             f"{num_fac}{fec_fac}{hor_fac}{val_fac}"
             f"{cod_imp1}{val_imp1}"
             f"{cod_imp2}{val_imp2}"
             f"{cod_imp3}{val_imp3}"
             f"{val_tot}{nit_ofe}{num_adq}{cl_tec}"
         )
-        return hashlib.sha384(cadena.encode("utf-8")).hexdigest()
+        return hashlib.sha384(raw_string.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _calcular_cuds(software_id: str, pin: str, nit_emisor: str) -> str:
-        """Código único del software (CUDS) = SHA-384(software_id + pin + nit)."""
-        cadena = f"{software_id}{pin}{nit_emisor}"
-        return hashlib.sha384(cadena.encode("utf-8")).hexdigest()
+    def _calculate_cuds(software_id: str, pin: str, nit_emisor: str) -> str:
+        """Unique software code (CUDS) = SHA-384(software_id + pin + nit)."""
+        raw_string = f"{software_id}{pin}{nit_emisor}"
+        return hashlib.sha384(raw_string.encode("utf-8")).hexdigest()
 
-    # ── Payload JSON para el Proveedor Tecnológico ────────────────────
+    # ── JSON payload for the Technology Provider ────────────────────
 
     def _build_provider_payload(
         self,
@@ -558,8 +558,8 @@ class MesioNativeAdapter(BillingAdapter):
         env: str,
     ) -> dict:
         """
-        Arma el payload JSON limpio para el Proveedor Tecnológico certificado.
-        El proveedor se encarga de la firma XMLDSig y la transmisión a la DIAN.
+        Builds the clean JSON payload for the certified Technology Provider.
+        The provider handles XMLDSig signing and transmission to the DIAN.
         """
         items = order.get("items", [])
         if isinstance(items, str):
@@ -627,15 +627,15 @@ class MesioNativeAdapter(BillingAdapter):
 
     async def _call_provider_api(self, payload: dict, config: dict) -> dict:
         """
-        HTTP POST al API REST del Proveedor Tecnológico certificado (marca blanca).
-        Si provider_api_url no está configurado retorna un mock de éxito para
-        permitir desarrollo y pruebas sin conexión al proveedor real.
+        HTTP POST to the certified Technology Provider's REST API (white-label).
+        If provider_api_url isn't configured, returns a success mock to
+        allow development and testing without connecting to the real provider.
         """
         api_url = config.get("provider_api_url", "")
         api_key = config.get("provider_api_key", "")
 
         if not api_url:
-            # MOCK: simula respuesta exitosa del proveedor certificado
+            # MOCK: simulates a successful response from the certified provider
             mock_cufe = hashlib.sha384(
                 f"MOCK-{payload['invoice_number']}-{payload['issue_date']}".encode("utf-8")
             ).hexdigest()
@@ -663,13 +663,13 @@ class MesioNativeAdapter(BillingAdapter):
 
     async def create_invoice(self, order: dict, config: dict) -> dict:
         """
-        Genera la factura electrónica DIAN:
-        1. Obtiene la resolución del restaurante desde DB.
-        2. Reclama el próximo número de factura (atómico en PostgreSQL).
-        3. Calcula IVA o INC sobre el total.
-        4. Calcula CUFE (SHA-384) y CUDS localmente.
-        5. Construye el payload JSON y lo envía al Proveedor Tecnológico.
-        6. Persiste resultado en fiscal_invoices.
+        Generates the DIAN electronic invoice:
+        1. Gets the restaurant's resolution from the DB.
+        2. Claims the next invoice number (atomic in PostgreSQL).
+        3. Calculates IVA or INC on the total.
+        4. Calculates CUFE (SHA-384) and CUDS locally.
+        5. Builds the JSON payload and sends it to the Technology Provider.
+        6. Persists the result in fiscal_invoices.
         """
         restaurant_id = config.get("_restaurant_id")
         if not restaurant_id:
@@ -687,16 +687,16 @@ class MesioNativeAdapter(BillingAdapter):
                 f"La resolución DIAN venció el {valid_to}. Renuévala ante la DIAN."
             )
 
-        # ── Despachar a MATIAS API si está configurado ────────────────
+        # ── Dispatch to the MATIAS API if configured ────────────────
         if os.getenv("MATIAS_API_URL"):
             return await self._create_invoice_matias(
                 order=order, config=config, resolution=resolution,
             )
 
-        # Reclamar número consecutivo (atómico en PostgreSQL)
+        # Claim the consecutive number (atomic in PostgreSQL)
         inv_number = await db.db_claim_next_invoice_number(restaurant_id)
 
-        # Calcular montos fiscales (en centavos para evitar float drift)
+        # Calculate fiscal amounts (in cents to avoid float drift)
         total_raw = float(order.get("total", 0))
         tax_regime = config.get("tax_regime", "iva")
         if tax_regime == "ico":
@@ -704,8 +704,8 @@ class MesioNativeAdapter(BillingAdapter):
         else:
             tax_pct = float(config.get("tax_percentage", 19.0))
 
-        # En Colombia el precio en menú generalmente ya incluye el impuesto.
-        # Extraemos la base gravable: subtotal = total / (1 + pct/100)
+        # In Colombia the menu price generally already includes tax.
+        # We extract the taxable base: subtotal = total / (1 + pct/100)
         if tax_pct > 0:
             subtotal_raw = total_raw / (1 + tax_pct / 100)
         else:
@@ -715,16 +715,16 @@ class MesioNativeAdapter(BillingAdapter):
         tax_cents      = round(total_raw * 100) - subtotal_cents
         total_cents    = subtotal_cents + tax_cents
 
-        # Fechas y hora
+        # Dates and time
         now        = datetime.now(timezone.utc).replace(tzinfo=None)
         issue_date = now.strftime("%Y-%m-%d")
         issue_time = now.strftime("%H:%M:%S")
 
-        # Número completo: prefijo + consecutivo
+        # Full number: prefix + consecutive
         prefix     = resolution.get("prefix", "")
         full_num   = f"{prefix}{inv_number}"
 
-        # Cliente
+        # Customer
         customer_override = order.get("customer", {})
         customer = {
             "nit":     customer_override.get("nit", "222222222"),
@@ -733,20 +733,20 @@ class MesioNativeAdapter(BillingAdapter):
             "id_type": customer_override.get("id_type", "13"),
         }
 
-        # CUDS (identifica el software)
+        # CUDS (identifies the software)
         nit_emisor  = config.get("restaurant_nit", "")
         software_id = resolution.get("software_id") or config.get("software_id", "")
         software_pin = resolution.get("software_pin") or config.get("software_pin", "")
-        cuds = self._calcular_cuds(software_id, software_pin, nit_emisor)
+        cuds = self._calculate_cuds(software_id, software_pin, nit_emisor)
 
-        # CUFE (identifica la factura individual)
+        # CUFE (identifies the individual invoice)
         tech_key    = resolution.get("technical_key", "")
         val_fac_str = f"{subtotal_cents / 100:.2f}"
         tax_str     = f"{tax_cents / 100:.2f}"
         tot_str     = f"{total_cents / 100:.2f}"
 
         if tax_regime == "ico":
-            cufe = self._calcular_cufe(
+            cufe = self._calculate_cufe(
                 num_fac=full_num, fec_fac=issue_date, hor_fac=issue_time + "-05:00",
                 val_fac=val_fac_str,
                 cod_imp1="01", val_imp1="0.00",
@@ -758,7 +758,7 @@ class MesioNativeAdapter(BillingAdapter):
                 cl_tec=tech_key,
             )
         else:
-            cufe = self._calcular_cufe(
+            cufe = self._calculate_cufe(
                 num_fac=full_num, fec_fac=issue_date, hor_fac=issue_time + "-05:00",
                 val_fac=val_fac_str,
                 cod_imp1="01", val_imp1=tax_str,
@@ -770,7 +770,7 @@ class MesioNativeAdapter(BillingAdapter):
                 cl_tec=tech_key,
             )
 
-        # URL de validación DIAN (QR)
+        # DIAN validation URL (QR)
         env = resolution.get("environment", config.get("dian_environment", "test"))
         if env == "production":
             qr_base = "https://catalogo-vpfe.dian.gov.co/document/searchqr"
@@ -778,7 +778,7 @@ class MesioNativeAdapter(BillingAdapter):
             qr_base = "https://catalogo-vpfe-hab.dian.gov.co/document/searchqr"
         qr_url = f"{qr_base}?documentkey={cufe}"
 
-        # Construir payload JSON para el Proveedor Tecnológico
+        # Build the JSON payload for the Technology Provider
         provider_payload = self._build_provider_payload(
             invoice_number=full_num,
             prefix=prefix,
@@ -800,13 +800,13 @@ class MesioNativeAdapter(BillingAdapter):
             env=env,
         )
 
-        # Enviar al Proveedor Tecnológico certificado (o mock si no está configurado)
+        # Send to the certified Technology Provider (or mock if not configured)
         provider_response = await self._call_provider_api(provider_payload, config)
         cufe_final  = provider_response.get("cufe", cufe)
         dian_status = provider_response.get("dian_status", "pending")
         uuid_dian   = provider_response.get("uuid_dian", "")
 
-        # Persistir en fiscal_invoices
+        # Persist in fiscal_invoices
         fiscal_id = await db.db_save_fiscal_invoice({
             "billing_log_id":    None,
             "org_id":            restaurant_id,
@@ -926,8 +926,8 @@ class MesioNativeAdapter(BillingAdapter):
         means_payment_id = means_map.get(order.get("payment_method", "cash"), 10)
 
         return {
-            "type_document_id":    int(7),  # 7 = Factura electrónica de venta (catálogo MATIAS)
-            "operation_type_id":   int(1),  # 1 = Operación estándar
+            "type_document_id":    int(7),  # 7 = Electronic sales invoice (MATIAS catalog)
+            "operation_type_id":   int(1),  # 1 = Standard operation
             "graphic_representation": int(1),
             "send_email":          int(1),
             "prefix":              prefix,
@@ -1049,7 +1049,7 @@ class MesioNativeAdapter(BillingAdapter):
             issue_time=issue_time,
         )
 
-        # Persistir en estado pendiente antes de llamar a MATIAS
+        # Persist in pending state before calling MATIAS
         fiscal_id = await db.db_save_fiscal_invoice({
             "billing_log_id":    None,
             "org_id":            restaurant_id,
@@ -1078,14 +1078,14 @@ class MesioNativeAdapter(BillingAdapter):
             "dian_response":     None,
         })
 
-        # Verificar límite de facturas antes de consumir cuota MATIAS
+        # Check invoice limit before consuming a MATIAS quota
         await db.db_check_usage_limits(restaurant_id)
 
-        # Llamar a MATIAS API
+        # Call the MATIAS API
         bearer_token = await _get_matias_token()
 
-        # MATIAS_API_URL debe apuntar a la base sin /invoice
-        # Ej: https://api-v2.matias-api.com/api/ubl2.1
+        # MATIAS_API_URL must point to the base without /invoice
+        # E.g.: https://api-v2.matias-api.com/api/ubl2.1
         api_base = _validate_matias_url(  # H3: allowlist check
             os.getenv("MATIAS_API_URL", "https://api-v2.matias-api.com/api/ubl2.1"),
             "MATIAS_API_URL",
@@ -1103,11 +1103,11 @@ class MesioNativeAdapter(BillingAdapter):
 
         async with httpx.AsyncClient(
             timeout=30,
-            follow_redirects=False,   # 302 debe ser error visible, no seguido silenciosamente
+            follow_redirects=False,   # a 302 must be a visible error, not followed silently
         ) as client:
             resp = await client.post(endpoint, json=ubl_payload, headers=req_headers)
 
-            # Mostrar respuesta completa si no es 2xx
+            # Show the full response if it's not 2xx
             if resp.status_code not in (200, 201):
                 log.error("billing.matias_invoice_failed",
                           status=resp.status_code,
@@ -1117,7 +1117,7 @@ class MesioNativeAdapter(BillingAdapter):
 
             matias_response = resp.json()
 
-        # Extraer los 3 campos DIAN de la respuesta MATIAS v2
+        # Extract the 3 DIAN fields from the MATIAS v2 response
         resp_data = matias_response.get("data") or {}
         cufe    = resp_data.get("XmlDocumentKey", "")
         qr_data = resp_data.get("qrDian", "")
@@ -1125,7 +1125,7 @@ class MesioNativeAdapter(BillingAdapter):
 
         log.info("billing.matias_invoice_success", cufe=cufe, pdf_url=pdf_url)
 
-        # Actualizar fila con los datos definitivos
+        # Update the row with the final data
         await db.db_update_invoice_dian_data(
             fiscal_invoice_id=fiscal_id,
             cufe=cufe,
@@ -1134,7 +1134,7 @@ class MesioNativeAdapter(BillingAdapter):
             dian_response=matias_response,
         )
 
-        # Registrar consumo de factura del día
+        # Log the day's invoice usage
         await db.db_increment_invoice_usage(restaurant_id)
 
         return {
@@ -1217,15 +1217,15 @@ def get_adapter(provider: str) -> BillingAdapter:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# FÁBRICA / DISPATCHER
+# FACTORY / DISPATCHER
 # ══════════════════════════════════════════════════════════════════════
 
 async def get_billing_config(restaurant_id: int) -> Optional[dict]:
-    """Lee la config de billing del restaurante desde la BD.
+    """Reads the restaurant's billing config from the DB.
 
     Queries `organizations.billing_config` (mirrored from restaurants in 0037c).
     The `restaurant_id` param may be an org_id (Matriz) or a location_id
-    (Sucursal) — both resolve to the same org_id via the locations table.
+    (Branch) — both resolve to the same org_id via the locations table.
     """
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
@@ -1275,9 +1275,9 @@ async def log_billing_event(restaurant_id: int, order_id: str,
 async def emit_invoice(order_id: str, restaurant_id: int,
                        customer_override: Optional[dict] = None) -> dict:
     """
-    Punto de entrada principal.
-    Lee la config del restaurante y emite la factura al proveedor configurado.
-    Soporta consolidación automática de Subórdenes de Mesa.
+    Main entry point.
+    Reads the restaurant's config and issues the invoice via the configured provider.
+    Supports automatic consolidation of table sub-orders.
     """
     config = await get_billing_config(restaurant_id)
     if not config:
@@ -1289,10 +1289,10 @@ async def emit_invoice(order_id: str, restaurant_id: int,
     except ValueError as exc:
         return {"success": False, "error": str(exc)}
 
-    # 1. Intentar cargar como pedido normal de delivery
+    # 1. Try to load it as a normal delivery order
     order = await db.db_get_order(order_id)
 
-    # 2. Si no existe en 'orders', es un pedido de MESA. Consolidar subórdenes.
+    # 2. If it doesn't exist in 'orders', it's a TABLE order. Consolidate sub-orders.
     if not order:
         full_bill = await db.db_get_table_bill(order_id)
         if not full_bill or not full_bill.get("sub_orders"):

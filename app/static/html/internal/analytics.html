@@ -334,7 +334,7 @@
       </div>
     </section>
 
-    <!-- North-star: Pedidos Rescatados -->
+    <!-- North-star: Rescued Orders -->
     <section id="section-north-star">
       <div class="section-title">North-Star Metric</div>
       <div class="kpi-grid" style="margin-bottom:var(--s-4);">
@@ -882,7 +882,7 @@
     });
   }
 
-  // ── North-star: Pedidos Rescatados ─────────────────────────────────────────
+  // ── North-star: Rescued Orders ─────────────────────────────────────────
   function _rankingRow(item) {
     const tr = document.createElement('tr');
     const nameTd = document.createElement('td');
@@ -894,7 +894,7 @@
     return tr;
   }
 
-  function loadPedidosRescatados() {
+  function loadRescuedOrders() {
     return apiGet('/api/internal/analytics/orders-rescued?period=mtd').then(data => {
       const totalEl = document.getElementById('kpi-rescatados-total');
       if (totalEl) {
@@ -920,7 +920,7 @@
         bottom.forEach(item => bottomTbody.appendChild(_rankingRow(item)));
       }
     }).catch(err => {
-      console.warn('[analytics] loadPedidosRescatados failed', err);
+      console.warn('[analytics] loadRescuedOrders failed', err);
       const el = document.getElementById('kpi-rescatados-total');
       if (el) { el.classList.remove('skeleton', 'skel-kpi'); el.className = 'kpi-value'; el.textContent = '—'; }
     });
@@ -935,7 +935,7 @@
   function loadAll() {
     Promise.allSettled([
       loadMrr(),
-      loadPedidosRescatados(),
+      loadRescuedOrders(),
       loadOverview(),
       loadTrends(),
       loadRestaurants(),

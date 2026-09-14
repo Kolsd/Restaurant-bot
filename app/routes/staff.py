@@ -121,15 +121,15 @@ async def list_staff(
     request: Request,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Retorna el staff de la organización del usuario autenticado.
+    """Returns the staff of the authenticated user's organization.
 
-    Wave-2: db_get_staff filtra por org_id. Staff es organization-level —
-    todas las sedes de un org comparten el mismo equipo en el dashboard de
-    administración. El X-Branch-ID header no aplica aquí: pasarlo como
-    branch_id pre-Paso-10 lo convertía en location_id y la query devolvía
-    cero filas en multi-branch (bug enmascarado por Matriz invariant). Si
-    el producto eventualmente quiere "ver staff por sede", agregar un repo
-    method dedicado que filtre staff.location_id en vez de overridear org_id.
+    Wave-2: db_get_staff filters by org_id. Staff is organization-level —
+    all branches of an org share the same team in the admin dashboard. The
+    X-Branch-ID header doesn't apply here: passing it as branch_id pre-Step-10
+    turned it into location_id and the query returned zero rows in
+    multi-branch setups (a bug masked by the Matriz invariant). If the
+    product eventually wants "view staff by branch", add a dedicated repo
+    method that filters staff.location_id instead of overriding org_id.
     """
     org_id = restaurant["id"]
     staff = await db.db_get_staff(org_id)
@@ -142,15 +142,16 @@ async def create_staff(
     body: StaffCreate,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Crea un empleado en la organización del usuario autenticado.
+    """Creates a staff member in the authenticated user's organization.
 
-    Wave-2: db_create_staff INSERTs INTO staff (org_id, ...) — el primer
-    argumento es la TENANT KEY (org_id), no la sede. Pre-Paso-10 el override
-    X-Branch-ID convertía branch_id en location_id y el INSERT escribía
-    org_id = location_id (FK violation o asignación a otro org).
-    El header X-Branch-ID podría usarse a futuro para popular staff.location_id
-    (asignar empleado a sede); por ahora db_create_staff no recibe ese param,
-    así que ignoramos el header para no introducir un parámetro no soportado.
+    Wave-2: db_create_staff INSERTs INTO staff (org_id, ...) — the first
+    argument is the TENANT KEY (org_id), not the branch. Pre-Step-10 the
+    X-Branch-ID override turned branch_id into location_id and the INSERT
+    wrote org_id = location_id (FK violation or assignment to another org).
+    The X-Branch-ID header could be used in the future to populate
+    staff.location_id (assign a staff member to a branch); for now
+    db_create_staff doesn't take that param, so we ignore the header to
+    avoid introducing an unsupported parameter.
     """
     org_id = restaurant["id"]
 
@@ -352,15 +353,15 @@ async def delete_staff(
     staff_id: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Elimina permanentemente un empleado del roster."""
+    """Permanently deletes a staff member from the roster."""
     deleted = await db.db_delete_staff(staff_id, restaurant["id"])
     if not deleted:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
     return {"success": True}
 
 
-# ── Self clock-in / clock-out (para operativos autenticados via token) ────────
-# No necesita get_current_restaurant — resuelve restaurant_id desde la tabla staff.
+# ── Self clock-in / clock-out (for operators authenticated via token) ────────
+# Doesn't need get_current_restaurant — resolves restaurant_id from the staff table.
 
 @router.post("/self/clock-in", status_code=200)
 async def self_clock_in(request: Request):
@@ -574,10 +575,10 @@ async def self_break_end(request: Request):
     return {"break": brk}
 
 
-# ── Self-service endpoints para Staff HQ ─────────────────────────────────────
+# ── Self-service endpoints for Staff HQ ─────────────────────────────────────
 
 async def _resolve_staff_from_token(request: Request) -> dict:
-    """Helper: extrae staff_id desde Bearer token y retorna su fila completa."""
+    """Helper: extracts staff_id from the Bearer token and returns its full row."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     session_key = await sessions_repo.get_session(token)
     if not session_key or not session_key.startswith("staff:"):
@@ -593,7 +594,7 @@ async def _resolve_staff_from_token(request: Request) -> dict:
 
 @router.get("/self/profile", status_code=200)
 async def self_profile(request: Request):
-    """Retorna el perfil completo del operativo autenticado, incluyendo estado de turno y break."""
+    """Returns the authenticated operator's full profile, including shift and break status."""
     member = await _resolve_staff_from_token(request)
     staff_id = member["id"]
     # Wave-2: db_get_staff_profile returns org_id (restaurant_id dropped in 0038).
@@ -619,7 +620,7 @@ async def self_profile(request: Request):
 
 @router.get("/self/timecard", status_code=200)
 async def self_timecard(request: Request, week_start: str = None, week_end: str = None):
-    """Retorna el timecard semanal personal del operativo autenticado."""
+    """Returns the authenticated operator's personal weekly timecard."""
     member = await _resolve_staff_from_token(request)
     staff_id = member["id"]
     # Wave-2: db_get_staff_profile returns org_id (restaurant_id dropped in 0038).
@@ -684,7 +685,7 @@ async def self_timecard(request: Request, week_start: str = None, week_end: str 
 
 @router.get("/self/schedule", status_code=200)
 async def self_schedule(request: Request):
-    """Retorna el horario semanal del operativo autenticado."""
+    """Returns the authenticated operator's weekly schedule."""
     member = await _resolve_staff_from_token(request)
     staff_id = member["id"]
     rows = await staff_repo.db_get_staff_schedule(staff_id)
@@ -923,8 +924,8 @@ async def payroll_calculate(
 ):
     """Calculate payroll for all staff of the org in the given period.
 
-    Wave-2: payroll is org-level (one cálculo por business). The X-Branch-ID
-    header narrows TIP aggregation to a specific sede via db_calculate_payroll's
+    Wave-2: payroll is org-level (one calculation per business). The X-Branch-ID
+    header narrows TIP aggregation to a specific branch via db_calculate_payroll's
     optional branch_id param — staff list (filtered by org_id) stays the same,
     only tip totals get scoped per location_id when requested.
     """

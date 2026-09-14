@@ -278,7 +278,7 @@ async def _rescatados_async(org_id: int) -> dict:
     # tests: comparar siempre en el mismo reloj (UTC)"). Compare on UTC.
     today = datetime.utcnow().date()
     with tenant_scope(org_id):
-        return await north_star_repo.db_count_pedidos_rescatados(today, today)
+        return await north_star_repo.db_count_rescued_orders(today, today)
 
 
 def _rescatados(org_id: int) -> dict:

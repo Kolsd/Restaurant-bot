@@ -36,7 +36,7 @@
 
         <div id="mi-plan-loading" class="mi-plan-skeleton" aria-busy="true" aria-label="Cargando plan"></div>
 
-        <!-- A) Plan actual card -->
+        <!-- A) Current plan card -->
         <div class="card mi-plan-card" id="plan-current-card" style="display:none;">
           <div class="card-head">
             <span class="card-title">Plan actual</span>
@@ -57,7 +57,7 @@
           </div>
         </div>
 
-        <!-- B) Uso del período -->
+        <!-- B) Period usage -->
         <div class="card" id="plan-usage-section-card" style="display:none;">
           <div class="card-head">
             <span class="card-title">Uso del período actual</span>
@@ -67,7 +67,7 @@
           </div>
         </div>
 
-        <!-- C) Auto-recarga -->
+        <!-- C) Auto-recharge -->
         <div class="card" id="plan-autorecharge-card" style="display:none;">
           <div class="card-head">
             <span class="card-title">Auto-recarga de conversaciones</span>
@@ -104,7 +104,7 @@
           </div>
         </div>
 
-        <!-- D) Comprar pack manual -->
+        <!-- D) Manual pack purchase -->
         <div class="card" id="plan-buypack-card" style="display:none;">
           <div class="card-head">
             <span class="card-title">Recarga manual</span>
@@ -120,7 +120,7 @@
           </div>
         </div>
 
-        <!-- E) Bajada de plan programada (shown only when a pending downgrade exists) -->
+        <!-- E) Scheduled plan downgrade (shown only when a pending downgrade exists) -->
         <div class="card" id="plan-downgrade-banner" style="display:none;" role="status" aria-live="polite">
           <div class="card-head">
             <span class="card-title" style="color:var(--warning,#e67e22);">Bajada de plan programada</span>
@@ -131,7 +131,7 @@
           </div>
         </div>
 
-        <!-- F) Cambiar plan (bajar) -->
+        <!-- F) Change plan (downgrade) -->
         <div class="card" id="plan-downgrade-card" style="display:none;">
           <div class="card-head">
             <span class="card-title">Cambiar de plan</span>
@@ -148,7 +148,7 @@
               </select>
             </div>
 
-            <!-- Sucursal picker — shown when downgrade would reduce sede count -->
+            <!-- Branch picker — shown when downgrade would reduce location count -->
             <div id="downgrade-location-picker" style="display:none;">
               <p style="font-size:13px;font-weight:600;margin-bottom:8px;">
                 Elige cuál sucursal conservar activa:
@@ -168,7 +168,7 @@
         </div>
       </section>
 
-      <!-- Modal: cambiar plan -->
+      <!-- Modal: change plan -->
       <div class="m-modal-overlay" id="modal-change-plan" role="dialog" aria-modal="true" aria-labelledby="modal-plan-title">
         <div class="m-modal-box">
           <h3 id="modal-plan-title">Cambiar de plan</h3>
@@ -195,7 +195,7 @@
         <button class="seg-btn" data-tab-target="log">Historial</button>
       </div>
 
-      <!-- ══ TAB: CONFIGURACIÓN ══ -->
+      <!-- ══ TAB: CONFIGURATION ══ -->
       <div id="tab-config" class="tab-section active">
 
         <!-- Status card -->
@@ -318,7 +318,7 @@
 
       </div><!-- /tab-config -->
 
-      <!-- ══ TAB: EMITIR ══ -->
+      <!-- ══ TAB: ISSUE ══ -->
       <div id="tab-emit" class="tab-section">
         <div class="card">
           <div class="card-head">

@@ -103,7 +103,7 @@ function _renderWall(orders) {
 
     // Group items by course (DISCONNECT #6 visual aid). When the menu has
     // course-tagged dishes (item.course = 'entrada' | 'principal' | 'postre'
-    // | 'bebida'), cocina sees them grouped under headers so they can decide
+    // | 'bebida'), the kitchen sees them grouped under headers so they can decide
     // pacing manually. When no items have a course, falls back to the
     // legacy flat render — zero behaviour change.
     const _COURSE_ORDER = ['bebida', 'entrada', 'principal', 'postre', 'sin_curso'];
@@ -284,10 +284,10 @@ async function loadOrders() {
     const tableData = await tableRes.json();
     let orders = (tableData.orders || tableData || []);
 
-    // Capa 3: never show orders that are pending waiter validation.
+    // Layer 3: never show orders that are pending waiter validation.
     orders = orders.filter(o => !o.pending_table_validation);
 
-    // Merge confirmed delivery orders into the wall so kitchen sees domicilio/pickup too.
+    // Merge confirmed delivery orders into the wall so kitchen sees delivery/pickup too.
     if (deliveryRes.ok) {
       const deliveryData = await deliveryRes.json();
       const deliveryOrders = (deliveryData.orders || []).map(o => ({

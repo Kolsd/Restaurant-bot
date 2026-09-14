@@ -68,7 +68,7 @@ async def e2e_app(wa_capture):
 
 @pytest.mark.e2e_no_llm
 @pytest.mark.asyncio
-async def test_domiciliario_page_renders_buttons(
+async def test_courier_page_renders_buttons(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
     wa_capture: WACapture,

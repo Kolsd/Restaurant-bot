@@ -1,4 +1,4 @@
-/* ══ Equipo admin page — team management view ═══════════════════════
+/* ══ Team admin page — team management view ═══════════════════════
    Admin-only view: shift grid, tip distribution, member table.
    Auto-refreshes every 60s. Zero inline onclick.
    ═══════════════════════════════════════════════════════════════════ */
@@ -80,14 +80,14 @@ async function loadAll() {
 
 // ── Metrics row ───────────────────────────────────────────────────
 function renderMetrics() {
-  // Total equipo
+  // Total team
   setMetric('metricTotal', _staff.length, _staff.filter(function (s) { return s.status === 'active'; }).length + ' activos');
 
-  // En turno ahora (clock_in set, clock_out null)
+  // Clocked in now (clock_in set, clock_out null)
   var onShift = _staff.filter(function (s) { return s.clocked_in || s.active_shift; }).length;
   setMetric('metricOnShift', onShift, '');
 
-  // Horas semana
+  // Week hours
   var totalMins = _schedules.reduce(function (acc, s) {
     var start = parseTime(s.start_time || '00:00');
     var end = parseTime(s.end_time || '00:00');
@@ -98,14 +98,14 @@ function renderMetrics() {
   var totalHrs = Math.round(totalMins / 60);
   setMetric('metricHoras', totalHrs + 'h', '');
 
-  // Propinas
+  // Tips
   if (_tipsPool && _tipsPool.pool_total != null) {
     setMetric('metricTips', mesioFmt(_tipsPool.pool_total), 'pool disponible');
   } else {
     setMetric('metricTips', '—', 'sin datos');
   }
 
-  // Costo laboral — placeholder
+  // Labor cost — placeholder
   setMetric('metricCosto', '—', 'próximamente');
 }
 

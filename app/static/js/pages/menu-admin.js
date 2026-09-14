@@ -50,7 +50,7 @@
     });
   }
 
-  // ── Disponibilidad sub-filters ────────────────────────────────────
+  // ── Availability sub-filters ────────────────────────────────────
   // State: 'all' | 'available' | 'unavailable'
   var _menuFilter = 'all';
   var _rawCategories = null; // last full category dict from loadMenu
@@ -423,7 +423,7 @@
     });
   }
 
-  // + Agregar producto button
+  // + Add product button
   var addInvBtn = document.getElementById('btn-add-inventory');
   if (addInvBtn) addInvBtn.addEventListener('click', function () { openInvModal(null); });
 
@@ -838,7 +838,7 @@
     }
   }
 
-  // ── Editar carta — full visual editor ─────────────────────────────
+  // ── Edit menu — full visual editor ─────────────────────────────
   async function openCartaEditor() {
     window._dashHeaders = mesioHeaders();
 
@@ -884,7 +884,7 @@
   var cartaBtn = document.getElementById('btn-edit-carta');
   if (cartaBtn) cartaBtn.addEventListener('click', openCartaEditor);
 
-  // ── Escandallos (recipes) ─────────────────────────────────────────
+  // ── Recipe costing sheets (recipes) ─────────────────────────────────────────
   var _allInventoryForRecipes = []; // populated by loadInventory for the recipe modal select
 
   async function loadRecipes() {
@@ -1156,7 +1156,7 @@
     recipeModalAddLine.addEventListener('click', function () { _addRecipeLine(null, null); });
   }
 
-  // "+ Nuevo escandallo" button
+  // "+ New recipe" button
   var newRecipeBtn = document.getElementById('btn-new-recipe');
   if (newRecipeBtn) {
     newRecipeBtn.addEventListener('click', function () { openRecipeModal(null); });

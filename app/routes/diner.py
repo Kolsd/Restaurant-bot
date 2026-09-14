@@ -4,15 +4,15 @@ app/routes/diner.py
 Mesio-native diner chat surface (WhatsApp retirement wave).
 
 A diner scans a QR at the table, which opens a Mesio-hosted chat page —
-NOT WhatsApp. The bot is the product; the carta is presented INSIDE the
+NOT WhatsApp. The bot is the product; the menu is presented INSIDE the
 conversation via the `blocks` protocol (see app/services/blocks.py), not as
 a separate page. This module is the HTTP surface for that page:
 
     POST /api/diner/session       — QR entry. Resolve table → org/location,
                                      mint a "web:<uuid4>" identity, return the
-                                     bot's opening turn (greeting + carta).
+                                     bot's opening turn (greeting + menu).
     POST /api/diner/chat          — send one message, get {message, blocks}.
-    GET  /api/diner/menu          — full carta for the "Ver carta completa" panel.
+    GET  /api/diner/menu          — full menu for the "Ver carta completa" panel.
     POST /api/diner/waiter-call   — direct waiter ping (bill/cutlery/napkins/other),
                                      bypassing the LLM.
 
@@ -329,7 +329,7 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
     (greeting + category_chips) plus the join_code for the UI to display.
 
     Occupied table (another phone already has an active session): does NOT
-    open a session and does NOT show the greeting/carta — returns
+    open a session and does NOT show the greeting/menu — returns
     requires_join_code=True so the UI asks for the code and calls
     POST /api/diner/join. The diner_sessions row (token) is still created so
     that join call has something to resolve.
@@ -362,7 +362,7 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         if not restaurant or not restaurant.get("whatsapp_number"):
             raise HTTPException(status_code=404, detail="Restaurante no configurado para esta mesa")
 
-        # Strip the "_b<timestamp>" sucursal suffix (see get_table_wa_number
+        # Strip the "_b<timestamp>" branch suffix (see get_table_wa_number
         # in tables.py) so the bot_number matches what the inbox worker uses.
         bot_number = str(restaurant["whatsapp_number"]).split("_b")[0]
         restaurant_name = restaurant.get("name") or "nuestro restaurante"
@@ -598,7 +598,7 @@ async def diner_chat(request: Request, body: DinerChatRequest):
 
 @router.get("/menu")
 async def diner_menu(token: str = Query(..., min_length=1, max_length=200)):
-    """Full carta for the diner UI's 'Ver carta completa' panel."""
+    """Full menu for the diner UI's 'Ver carta completa' panel."""
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
     bot_number = session["bot_number"]

@@ -20,7 +20,7 @@ let _activeCategory = '';
 let _cart = [];
 let _activeTables = [];
 let _activeTableIdx = -1;
-let _mesaGridMode = true;
+let _tableGridMode = true;
 let _billingConfig = null;
 let _customerCard = null;
 let _productHints = [];
@@ -229,12 +229,12 @@ async function loadOpenTables() {
     if (!res.ok) return;
     const data = await res.json();
     _activeTables = data.tables || [];
-    if (_mesaGridMode) _renderMesaGrid();
+    if (_tableGridMode) _renderTableGrid();
     else _renderTableChips();
   } catch (_) {}
 }
-// ── Mesa grid mode helpers ─────────────────────────────
-function _tableStateCaja(t) {
+// ── Table grid mode helpers ─────────────────────────────
+function _tableStateCashier(t) {
   if (t.has_waiter_alert) return { cls: 'alert',   label: 'Llamó al mesero' };
   if (!(t.session_active || t.bot_active)) return { cls: 'free', label: 'Libre' };
   if (t.has_open_check) return { cls: 'billing', label: 'Facturando' };
@@ -255,8 +255,8 @@ function _tableStatusColor(t) {
   return '#1d9e75';
 }
 
-function _enterMesaGrid() {
-  _mesaGridMode = true;
+function _enterTableGrid() {
+  _tableGridMode = true;
   const bar = document.getElementById('caja-table-bar');
   if (bar) { bar.classList.add('mesa-grid-mode'); bar.style.display = ''; }
   const searchRow = document.querySelector('.search-row');
@@ -264,23 +264,23 @@ function _enterMesaGrid() {
   if (searchRow) searchRow.style.display = 'none';
   if (catBar)    catBar.style.display    = 'none';
   document.querySelectorAll('[data-view]').forEach(el => el.style.display = 'none');
-  _renderMesaGrid();
+  _renderTableGrid();
 }
 
-function _exitMesaGrid(idx) {
-  _mesaGridMode = false;
+function _exitTableGrid(idx) {
+  _tableGridMode = false;
   const bar = document.getElementById('caja-table-bar');
   if (bar) bar.classList.remove('mesa-grid-mode');
   const searchRow = document.querySelector('.search-row');
   const catBar    = document.querySelector('.cat-bar');
-  const mesasView = document.querySelector('[data-view="mesas"]');
+  const tablesView = document.querySelector('[data-view="mesas"]');
   if (searchRow) searchRow.style.display = '';
   if (catBar)    catBar.style.display    = '';
-  if (mesasView) mesasView.style.display = 'flex';
+  if (tablesView) tablesView.style.display = 'flex';
   selectTable(idx);
 }
 
-function _renderMesaGrid() {
+function _renderTableGrid() {
   const bar = document.getElementById('caja-table-bar');
   if (!bar) return;
   bar.innerHTML = '';
@@ -295,7 +295,7 @@ function _renderMesaGrid() {
     grid.appendChild(empty);
   } else {
     _activeTables.forEach((t, idx) => {
-      const { cls, label } = _tableStateCaja(t);
+      const { cls, label } = _tableStateCashier(t);
       const tile = document.createElement('div');
       tile.className = 'mesa-tile' + (cls !== 'free' ? ' t-' + (cls === 'alert' ? 'alert' : cls === 'billing' ? 'billing' : 'active') : '');
 
@@ -329,7 +329,7 @@ function _renderMesaGrid() {
         tile.appendChild(guestEl);
       }
 
-      tile.addEventListener('click', () => _exitMesaGrid(idx));
+      tile.addEventListener('click', () => _exitTableGrid(idx));
       grid.appendChild(tile);
     });
   }
@@ -351,7 +351,7 @@ function _renderTableChips() {
     _selectedTableOrder = null;
     _checks = [];
     _renderCart();
-    _enterMesaGrid();
+    _enterTableGrid();
   });
   bar.appendChild(backBtn);
 
@@ -364,7 +364,7 @@ function _renderTableChips() {
     num.textContent = t.name || t.table_name || String(t.id);
     const sub = document.createElement('div');
     sub.className = 'tbl-chip-sub';
-    sub.textContent = _tableStateCaja(t).label;
+    sub.textContent = _tableStateCashier(t).label;
     chip.appendChild(num);
     chip.appendChild(sub);
     bar.appendChild(chip);
@@ -383,11 +383,11 @@ function selectTable(idx) {
   const lbl = document.getElementById('cart-table-label');
   const t = _activeTables[idx];
   if (lbl && t) lbl.textContent = t.name || t.table_name || `Mesa ${t.id}`;
-  // Auto-load the mesa's active order so caja sees what's on the table
+  // Auto-load the table's active order so caja sees what's on the table
   // immediately after selecting it (PM feedback: 'Comanda Sin productos'
   // even when customer had ordered via bot). Read-only preview — F12
   // 'Cobrar' uses _selectedTableOrder.base_order_id to open the pay modal.
-  if (t) _loadActiveOrderForTable(t).catch(e => console.warn('caja: load mesa order failed', e));
+  if (t) _loadActiveOrderForTable(t).catch(e => console.warn('caja: load table order failed', e));
 }
 
 async function _loadActiveOrderForTable(table) {
@@ -402,9 +402,9 @@ async function _loadActiveOrderForTable(table) {
     if (!active) return;
     const items = Array.isArray(active.items) ? active.items : [];
     if (!items.length) return;
-    // Populate _cart from the existing order items so the comanda panel
-    // and totals reflect the real mesa state. Caja can still tweak +/−
-    // if they want to add extras to the current order before cobrar.
+    // Populate _cart from the existing order items so the order panel
+    // and totals reflect the real table state. Caja can still tweak +/−
+    // if they want to add extras to the current order before charging.
     _cart = items.map((it, i) => ({
       id: it.id || ('mesa-' + i),
       name: it.name || '—',
@@ -537,7 +537,7 @@ function switchTab(tabId) {
   const catBar    = document.querySelector('.cat-bar');
   if (tabId === 'mesas') {
     if (bar) bar.style.display = '';
-    if (_mesaGridMode || _activeTableIdx < 0) { _enterMesaGrid(); return; }
+    if (_tableGridMode || _activeTableIdx < 0) { _enterTableGrid(); return; }
     // POS mode — restore product view
     if (searchRow) searchRow.style.display = '';
     if (catBar)    catBar.style.display    = '';
@@ -1325,7 +1325,7 @@ async function _submitSplit(baseOrderId, checks, tableName) {
 }
 
 // ── Pre-cuenta ─────────────────────────────────────────
-async function openPreCuenta() {
+async function openPreBill() {
   const table = _activeTables[_activeTableIdx];
   if (!table) { mesioToast('Selecciona una mesa activa', 'warning'); return; }
 
@@ -1760,7 +1760,7 @@ mesioInterval(() => {
 document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([_loadBillingConfig(), _loadRestaurantSettings(), loadMenu(), loadOpenTables()]);
   _initSearch();
-  _enterMesaGrid();
+  _enterTableGrid();
 
   // Auto-select table when navigated from /waiter via ?tableId=X or sessionStorage caja_open_table
   const urlParams = new URLSearchParams(window.location.search);
@@ -1774,12 +1774,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (targetTableId) {
     const tIdx = (_activeTables || []).findIndex(x => String(x.id) === String(targetTableId));
-    if (tIdx >= 0) _exitMesaGrid(tIdx);
+    if (tIdx >= 0) _exitTableGrid(tIdx);
   }
 
   document.getElementById('btn-send-kitchen')?.addEventListener('click', sendToKitchen);
   document.getElementById('btn-pay')?.addEventListener('click', openPayModal);
-  document.getElementById('btn-pre-cuenta')?.addEventListener('click', openPreCuenta);
+  document.getElementById('btn-pre-cuenta')?.addEventListener('click', openPreBill);
 
   document.querySelectorAll('.seg-btn').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));

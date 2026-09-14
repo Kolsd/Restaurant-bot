@@ -82,8 +82,8 @@ class BillingConfigPayload(BaseModel):
     restaurant_address_dian: Optional[str]   = None  # Dirección fiscal
     tax_regime:              Optional[str]   = None  # "iva" | "ico" (Impuesto al Consumo)
     nit_id_type:             Optional[str]   = None  # "31"=NIT (default) | "13"=CC
-    software_id:             Optional[str]   = None  # ID software habilitado en DIAN
-    software_pin:            Optional[str]   = None  # PIN del software DIAN
+    software_id:             Optional[str]   = None  # Software ID enabled in DIAN
+    software_pin:            Optional[str]   = None  # DIAN software PIN
     dian_environment:        Optional[str]   = None  # "test" | "production"
 
 class EmitInvoicePayload(BaseModel):
@@ -125,7 +125,7 @@ async def set_config(request: Request, payload: BillingConfigPayload):
 
 @router.post("/emit")
 async def emit(request: Request, payload: EmitInvoicePayload):
-    """Emite manualmente una factura para un pedido específico."""
+    """Manually issues an invoice for a specific order."""
     from app.services.database import UsageLimitExceeded  # noqa: PLC0415
 
     user          = await get_current_user(request)

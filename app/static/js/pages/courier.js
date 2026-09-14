@@ -74,7 +74,7 @@ function _renderActive(orders) {
 
   if (!inRoute) {
     // Show first listo order as a "ready to pick up" card so the driver can
-    // grab it. Without this the domiciliario sees an empty active area even
+    // grab it. Without this the courier sees an empty active area even
     // when the kitchen has marked the order as ready.
     const readyOrder = orders.find(o => o.status === 'listo');
     if (!readyOrder) {
@@ -284,8 +284,8 @@ function _renderUpnext(orders) {
   });
 }
 
-// ── Render historial ──────────────────────────────────
-function _renderHistorial(orders) {
+// ── Render history ──────────────────────────────────
+function _renderHistory(orders) {
   const el = document.getElementById('dom-hist-list');
   if (!el) return;
   const done = orders.filter(o => o.status === 'entregado');
@@ -334,7 +334,7 @@ function _render() {
   _renderOrderItems(inRoute || readyOrder || null);
   _renderCustomer(inRoute || readyOrder || null);
   _renderUpnext(_allOrders);
-  _renderHistorial(_allOrders);
+  _renderHistory(_allOrders);
 }
 
 // ── Hash check for efficient polling ─────────────────

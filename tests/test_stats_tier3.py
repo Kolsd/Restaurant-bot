@@ -324,7 +324,7 @@ def test_public_menu_context_table_context_populated(monkeypatch):
     async def _fake_active_session(tid, oid):
         return {"assigned_staff_id": "00000000-0000-0000-0000-000000000042"}
 
-    async def _fake_resolve_mesero(sid, oid):
+    async def _fake_resolve_waiter(sid, oid):
         return {"name": "Valentina Cano", "first_name": "Valentina"}
 
     monkeypatch.setattr("app.routes.tables.db.db_get_table_by_id", _fake_table)
@@ -333,7 +333,7 @@ def test_public_menu_context_table_context_populated(monkeypatch):
     monkeypatch.setattr("app.routes.tables.db.db_get_restaurant_by_bot_number", _fake_restaurant)
     monkeypatch.setattr("app.routes.tables.db.db_get_menu_availability", _fake_availability)
     monkeypatch.setattr("app.routes.tables._get_active_session_for_table", _fake_active_session)
-    monkeypatch.setattr("app.routes.tables._resolve_mesero", _fake_resolve_mesero)
+    monkeypatch.setattr("app.routes.tables._resolve_waiter", _fake_resolve_waiter)
 
     with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
         with patch("app.services.state_store.rate_limit_check", new=AsyncMock(return_value=True)):

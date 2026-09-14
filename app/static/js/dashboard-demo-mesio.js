@@ -101,7 +101,7 @@
     const ordersEl = document.getElementById('orders');
     ordersEl.insertBefore(row, ordersEl.firstChild);
 
-    // Cascade: bump metrics. Ticket promedio drifts subtly with each new
+    // Cascade: bump metrics. Average ticket drifts subtly with each new
     // order (5% blend) instead of recomputing as revenue/orders, which
     // would cause a jarring jump from the seeded value to a different
     // figure on the very first new order.
@@ -128,7 +128,7 @@
       animateNumber(document.getElementById('m-ticket'), oldTicket, state.ticket, fmtMoney);
     }, 680);
 
-    // If mesa, occupy a table
+    // If dine-in, occupy a table
     if (tpl.ch === 'mesa') {
       const free = [];
       for (let i = 1; i <= state.floorTotal; i++) if (!state.floorOccupied.has(i)) free.push(i);

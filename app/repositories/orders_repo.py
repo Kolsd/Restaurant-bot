@@ -466,9 +466,9 @@ async def db_get_all_orders(bot_number: str = None):
         return [_serialize(dict(r)) for r in rows]
 
 async def db_get_delivery_orders(status_list: list, restaurant_id: int | None = None):
-    """Obtiene los pedidos de domicilio filtrados por una lista de estados.
-    Si restaurant_id se provee, filtra exactamente por ese restaurante/sucursal (r.id = restaurant_id).
-    Cada caja ve únicamente sus propios pedidos — sin herencia de sucursales."""
+    """Gets delivery orders filtered by a list of statuses.
+    If restaurant_id is provided, filters exactly by that restaurant/branch (r.id = restaurant_id).
+    Each cashier sees only their own orders — no branch inheritance."""
     async with _tenant_connection() as conn:
         if restaurant_id is not None:
             # Filter directly on orders.org_id — no JOIN needed.
@@ -508,12 +508,12 @@ async def db_update_pending_order_payment_method(phone: str, bot_number: str, pa
 
 async def db_attach_order_proof(phone: str, bot_number: str, media_url: str) -> str | None:
     """
-    Adjunta URL de comprobante al pedido delivery/pickup más reciente NO PAGADO
-    de phone+bot_number. Retorna order_id si se vinculó, None si no hubo match.
+    Attaches a proof URL to the most recent UNPAID delivery/pickup order
+    for phone+bot_number. Returns order_id if linked, None if there was no match.
 
-    Pareja del table_orders db_attach_proof, pero para órdenes externas. Solo
-    toca órdenes paid=false y no-terminales para evitar pisar comprobantes ya
-    validados o adjuntar a órdenes canceladas.
+    Counterpart to table_orders' db_attach_proof, but for external orders. Only
+    touches paid=false, non-terminal orders to avoid overwriting proofs already
+    validated or attaching to cancelled orders.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -535,7 +535,7 @@ async def db_attach_order_proof(phone: str, bot_number: str, media_url: str) -> 
 
 async def db_update_order_status(order_id: str, new_status: str) -> dict | None:
     """
-    Actualiza el estado de un pedido y todas sus sub-órdenes con el mismo base_order_id.
+    Updates the status of an order and all its sub-orders with the same base_order_id.
 
     Returns the updated main-order row dict, or None if the status was already
     the same value (or the order does not exist) — so the caller can detect

@@ -19,7 +19,7 @@ re-export shim added to that module.
 Bypass rationale:
   - Scheduler functions (db_get_stale_sessions, db_get_closeable_sessions,
     db_get_active_session_table_ids) iterate across ALL tenants by design.
-  - Kitchen/delivery views (db_get_delivery_orders_for_caja) are
+  - Kitchen/delivery views (db_get_delivery_orders_for_cashier) are
     tenant-scoped via active tenant_scope() at the call site.
   - db_get_waiter_alerts(bot_number) is tenant-scoped; call site must pass bot_number.
   - db_verify_branch_is_child queries `restaurants` across tenant boundary.
@@ -107,13 +107,13 @@ async def db_create_table(table_id: str, number: int, name: str, branch_id: int 
 
 async def db_auto_create_table(restaurant_id: int) -> dict:
     """
-    Crea una mesa automáticamente buscando el primer número disponible.
-    El nombre será {restaurant_id}-{numero}. (Ej. "1-1", "2-1").
-    Reutiliza automáticamente los números de las mesas que hayan sido borradas.
+    Automatically creates a table by finding the first available number.
+    The name will be {restaurant_id}-{number}. (E.g. "1-1", "2-1").
+    Automatically reuses numbers from tables that have been deleted.
 
-    Wave-2: `restaurant_id` aquí es la location_id de la sede donde se crea
-    la mesa (no el org_id). Naming legacy preservado por backward-compat con
-    el call site, pero la semántica es sede-level.
+    Wave-2: `restaurant_id` here is the location_id of the branch where
+    the table is created (not the org_id). Legacy naming preserved for
+    backward-compat with the call site, but the semantics are branch-level.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -121,21 +121,21 @@ async def db_auto_create_table(restaurant_id: int) -> dict:
     branch_id = restaurant_id
 
     async with tenant_connection() as conn:
-        # 1. Obtener todos los números actualmente en uso (ignorando los borrados)
+        # 1. Get all numbers currently in use (ignoring deleted ones)
         rows = await conn.fetch("SELECT number FROM restaurant_tables WHERE branch_id=$1 AND active=TRUE", branch_id)
 
         used_numbers = {r["number"] for r in rows}
 
-        # 2. Buscar el primer "hueco" disponible (si se borró la 2, la próxima será la 2)
+        # 2. Find the first available "gap" (if table 2 was deleted, the next one will be 2)
         new_number = 1
         while new_number in used_numbers:
             new_number += 1
 
-        # 3. Armar el nombre limpio que verá el usuario y el bot
+        # 3. Build the clean name the user and bot will see
         table_name = f"{restaurant_id}-{new_number}"
         table_id = f"table-{restaurant_id}-{new_number}"
 
-        # 4. Insertar o reactivar si el ID ya existía en la base de datos
+        # 4. Insert or reactivate if the ID already existed in the database
         # Wave-2: same shape as db_create_table — must populate org_id (from GUC)
         # and location_id (mirror of branch_id) explicitly. See db_create_table.
         # branch_id column is INTEGER; location_id is BIGINT.
@@ -371,7 +371,7 @@ async def db_close_table_bill(base_order_id: str) -> bool:
         return result != "UPDATE 0"
 
 
-async def db_mark_factura_generada(base_order_id: str) -> None:
+async def db_mark_invoice_generated(base_order_id: str) -> None:
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
         await conn.execute(
@@ -437,8 +437,8 @@ async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
 
 async def db_get_order_ticket_data(base_order_id: str, branch_id: int = None) -> dict | None:
     """
-    Retorna los ítems y total agregados de todas las sub-órdenes de un ticket.
-    Usado por create_checks para validar cantidades antes de crear la división.
+    Returns the aggregated items and total across all sub-orders of a ticket.
+    Used by create_checks to validate quantities before creating the split.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -894,7 +894,7 @@ async def db_close_session(phone: str, bot_number: str, reason: str = "manual", 
 async def db_mark_session_warned(session_id: int) -> bool:
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
-        # El AND inactivity_warned=FALSE asegura que solo 1 worker pueda hacer el UPDATE
+        # The AND inactivity_warned=FALSE ensures only 1 worker can do the UPDATE
         result = await conn.execute(
             "UPDATE table_sessions SET inactivity_warned=TRUE WHERE id=$1 AND inactivity_warned=FALSE",
             session_id
@@ -974,16 +974,16 @@ async def db_init_table_checks():
 
 async def db_create_checks(base_order_id: str, checks: list) -> list:
     """
-    Reemplaza los checks 'open' del ticket y crea los nuevos.
+    Replaces the ticket's 'open' checks and creates the new ones.
     checks = [{"check_number": 1, "items": [...], "subtotal": N, "tax_amount": N, "total": N}, ...]
-    Cada item en items: {"name": str, "qty": int, "unit_price": float, "subtotal": float}
+    Each item in items: {"name": str, "qty": int, "unit_price": float, "subtotal": float}
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
         # tenant_connection() opens a transaction; conn.transaction() creates a SAVEPOINT.
         async with conn.transaction():
-            # Eliminar únicamente los checks todavía abiertos (no los ya cobrados)
+            # Delete only the checks still open (not the ones already paid)
             await conn.execute(
                 "DELETE FROM table_checks WHERE base_order_id=$1 AND status='open'",
                 base_order_id
@@ -1159,10 +1159,10 @@ async def db_finalize_check_payment(
     tip_amount: float = 0.0,
 ) -> bool:
     """
-    Atómicamente:
-    1. Actualiza el check de status='paying' a status='invoiced' con pagos y cambio.
-    2. Si TODOS los checks del base_order_id están en {invoiced, cancelled},
-       actualiza table_orders a status='factura_entregada'.
+    Atomically:
+    1. Updates the check from status='paying' to status='invoiced' with payments and change.
+    2. If ALL checks for the base_order_id are in {invoiced, cancelled},
+       updates table_orders to status='factura_entregada'.
 
     Returns True if the finalize succeeded, False if the check was not in
     'paying' state (e.g. already finalized by a concurrent call). The caller
@@ -1194,14 +1194,14 @@ async def db_finalize_check_payment(
                 # Concurrent finalize already happened, or claim was lost.
                 # Caller will detect via False return and stop downstream work.
                 return False
-            # Marcar propuesta como confirmada si existía
+            # Mark proposal as confirmed if it existed
             await conn.execute(
                 """UPDATE table_checks
                    SET proposal_status = 'confirmed'
                  WHERE id = $1 AND proposal_status IS NOT NULL""",
                 check_id
             )
-            # Verificar si todos los checks del grupo están cerrados
+            # Check whether all checks in the group are closed
             pending = await conn.fetchval(
                 """SELECT COUNT(*) FROM table_checks
                    WHERE base_order_id=$1
@@ -1220,7 +1220,7 @@ async def db_finalize_check_payment(
 
 
 async def db_delete_open_check(check_id: str) -> bool:
-    """Elimina un check solo si está en estado 'open'. Retorna True si se eliminó.
+    """Deletes a check only if it's in 'open' status. Returns True if deleted.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -1239,7 +1239,7 @@ async def db_attach_proposal(
     proposal_status: str,
     customer_phone: str,
 ) -> None:
-    """Adjunta metadatos de propuesta de pago a un check existente.
+    """Attaches payment proposal metadata to an existing check.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -1263,7 +1263,7 @@ async def db_attach_proposal(
 
 
 async def db_set_check_tip(check_id: str, tip_amount: float) -> None:
-    """Actualiza tip_amount en un check abierto (durante el flujo de checkout del bot).
+    """Updates tip_amount on an open check (during the bot's checkout flow).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -1277,8 +1277,8 @@ async def db_set_check_tip(check_id: str, tip_amount: float) -> None:
 
 async def db_attach_proof(base_order_id: str, customer_phone: str, media_url: str) -> bool:
     """
-    Adjunta URL de comprobante a los checks con propuesta awaiting_proof del cliente.
-    Retorna True si se actualizó al menos un check.
+    Attaches a proof URL to the customer's checks with an awaiting_proof proposal.
+    Returns True if at least one check was updated.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -1301,9 +1301,9 @@ async def db_get_open_proposal_for_phone(
     restaurant_id: int, customer_phone: str
 ) -> dict | None:
     """
-    Busca si el cliente tiene algún check con propuesta pendiente/esperando comprobante.
-    Útil en chat.py para interceptar imágenes y adjuntarlas sin pasar por el LLM.
-    Retorna el check (con base_order_id) o None.
+    Looks up whether the customer has any check with a pending/awaiting-proof proposal.
+    Useful in chat.py to intercept images and attach them without going through the LLM.
+    Returns the check (with base_order_id) or None.
 
     Caller passes restaurant_id = the org_id (post-Wave-2 db_get_restaurant_by_phone
     normalises restaurants.id → org_id). The legacy filter `tor.branch_id = $1`
@@ -1335,8 +1335,8 @@ async def db_list_checkout_proposals(
     restaurant_id: int, branch_ids: list[int] | None = None
 ) -> list:
     """
-    Lista mesas que tienen checks con propuestas bot activas (pending/awaiting_proof/proof_received).
-    Agrupado por base_order_id para la vista de Caja.
+    Lists tables that have checks with active bot proposals (pending/awaiting_proof/proof_received).
+    Grouped by base_order_id for the Cashier view.
 
     Caller passes restaurant_id = org_id. branch_ids (when given) is a list
     of location_ids to narrow down within the org. When omitted we filter
@@ -1412,7 +1412,7 @@ async def db_cancel_checkout_proposal(base_order_id: str) -> None:
 
 
 async def db_get_check_ticket(check_id: str) -> dict | None:
-    """Devuelve datos del check + info fiscal para impresión de factura.
+    """Returns check data + fiscal info for invoice printing.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -1911,7 +1911,7 @@ async def db_verify_branch_is_child(branch_id: int, parent_id: int) -> bool:
     return row is not None
 
 
-async def db_get_delivery_orders_for_caja() -> list:
+async def db_get_delivery_orders_for_cashier() -> list:
     """
     Return pending delivery/pickup orders for the kitchen/caja view (last 24h,
     excluding terminal statuses).

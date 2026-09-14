@@ -1,4 +1,4 @@
-/* ── Reservaciones page ──────────────────────────────────────────── */
+/* ── Reservations page ──────────────────────────────────────────── */
 (function () {
   'use strict';
 
@@ -53,7 +53,7 @@
     });
   }
 
-  // Nueva reserva button
+  // New reservation button
   const newResBtn = document.querySelector('.btn.primary');
   if (newResBtn) {
     newResBtn.addEventListener('click', openNewReservationModal);
@@ -393,7 +393,7 @@
     }
   }
 
-  // ── Nueva reserva modal ───────────────────────────────────────────
+  // ── New reservation modal ───────────────────────────────────────────
 
   function _buildModalHtml() {
     var tomorrow = new Date();

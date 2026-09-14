@@ -362,7 +362,7 @@ async def _notify_customer_of_cancellation(
     swallows transport errors and logs them.
 
     Skips silently when:
-      - reservation has no phone (manual reserva walk-in)
+      - reservation has no phone (manual walk-in reservation)
       - restaurant has no WA token / phone_id
     """
     phone = (reservation.get("phone") or "").strip()
@@ -439,8 +439,8 @@ async def seat_reservation(
 ):
     """Mark a confirmed reservation as 'seated' and open a table_session.
 
-    Closes DISCONNECT #9 (Reservas ↔ Salón) from PRODUCT_CONTEXT.md
-    regla #13. Previously the host had to open the mesa manually
+    Closes DISCONNECT #9 (Reservations ↔ Salon) from PRODUCT_CONTEXT.md
+    rule #13. Previously the host had to open the table manually
     (no link between the reservation and the table_session). Now:
 
       1. Customer arrives, host taps 'Cliente llegó' on the
@@ -453,7 +453,7 @@ async def seat_reservation(
          dashboard knows it's no longer "upcoming" / "confirmed".
       4. From then on, when the customer messages the bot the
          table_session is already open — bot picks them up on the
-         right mesa without needing a QR scan.
+         right table without needing a QR scan.
 
     Idempotent: returns already_seated=true if the reservation is
     already in 'seated' status.

@@ -22,7 +22,7 @@ log = get_logger(__name__)
 
 # ─── Utility (self-contained to avoid circular import) ────────────────────────
 
-def _ofuscar_phone(p: str) -> str:
+def _obfuscate_phone(p: str) -> str:
     """Return obfuscated phone for log contexts: '***XXXX' (last 4 digits only)."""
     if not p:
         return "***"
@@ -240,7 +240,7 @@ def _ask_payment_for_check(state: dict, idx: int) -> str:
 async def _save_checkout_proposal(
     phone: str, bot_number: str, state: dict, table_context: dict | None
 ) -> list[str]:
-    """Persiste la propuesta de pago en DB usando las funciones de database.py.
+    """Persists the payment proposal in the DB using database.py's functions.
 
     Honors state['check_amounts'] when set (per-item assignment, e.g. "una
     paga la Club, otra el Camarón"). Falls back to even division by n when
@@ -289,7 +289,7 @@ async def _save_checkout_proposal(
         amounts = [per] * n
         amounts[-1] = quantize_money(subtotal_d - per * (n - 1))
 
-    # Crear checks en DB
+    # Create checks in DB
     checks_payload = [
         {
             "check_number": i + 1,
@@ -333,7 +333,7 @@ async def _auto_confirm_checks(
     state: dict,
 ) -> dict:
     """
-    Auto-confirma checks de solo-efectivo cuando el cliente solicitó factura.
+    Auto-confirms cash-only checks when the customer requested an invoice.
 
     Returns {"success": True} on full success, or {"success": False, "reason": str}
     if any DB call fails. The caller MUST check success before appending the
@@ -377,9 +377,9 @@ async def _auto_confirm_checks(
 
 def _parse_item_assignments(msg: str, items: list, total: float) -> list[float] | None:
     """
-    Detecta asignaciones de ítems por nombre en el mensaje del cliente.
-    Ej: "una cuenta paga la Club Colombia, otra el Camarón"
-    Retorna lista de montos por cuenta en orden de aparición, o None si no detecta asignaciones.
+    Detects item assignments by name in the customer's message.
+    E.g.: "una cuenta paga la Club Colombia, otra el Camarón"
+    Returns a list of amounts per check in order of appearance, or None if no assignment is detected.
     """
     msg_lower = msg.lower()
 
@@ -497,7 +497,7 @@ async def handle_checkout_flow(
         ]
         return "\n".join(lines)
 
-    # ── Estado: esperando respuesta de propina ───────────────────────────
+    # ── State: waiting for tip response ───────────────────────────
     if state["step"] == "asking_tip":
         subtotal = state["subtotal"]
         tip = None
@@ -562,7 +562,7 @@ async def handle_checkout_flow(
         await state_store.checkout_set(phone, bot_number, state)
         return _ask_payment_for_check(state, 0)
 
-    # ── Estado: datos de factura ──────────────────────────────────────────
+    # ── State: invoice data ──────────────────────────────────────────
     if state["step"] == "asking_factura_nit":
         if msg in ("omitir", "omitir.", "no", "ninguno", "consumidor final"):
             state["factura_name"] = "Consumidor Final"
@@ -579,7 +579,7 @@ async def handle_checkout_flow(
         name_show = state["factura_name"]
         return f"Perfecto, factura a nombre de {name_show} 🧾\n" + _ask_payment_for_check(state, 0)
 
-    # ── Estado: pidiendo método de pago por check ────────────────────────
+    # ── State: asking payment method per check ────────────────────────
     if state["step"].startswith("asking_payment_"):
         idx = state.get("current_check_idx", 0)
         method = _detect_payment_method(msg)
@@ -632,7 +632,7 @@ async def handle_checkout_flow(
         try:
             created_check_ids = await _save_checkout_proposal(phone, bot_number, state, table_context)
         except Exception:
-            log.exception("checkout_proposal_save_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.exception("checkout_proposal_save_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
             await state_store.checkout_delete(phone, bot_number)
             return "Hubo un problema al procesar tu pago. Por favor pide ayuda al mesero."
 
@@ -672,17 +672,17 @@ async def handle_checkout_flow(
 
         return "\n".join(lines)
 
-    # ── Estado: esperando comprobante de pago ────────────────────────────
+    # ── State: waiting for payment proof ────────────────────────────
     if state["step"] == "confirming":
         if state.get("requires_proof"):
             return "Por favor envía la foto del comprobante de pago para confirmar tu pedido."
         return None  # auto-confirmed, shouldn't reach here
 
-    # ── Paso desconocido o estado corrupto — limpiar y notificar ────────
+    # ── Unknown step or corrupted state — clean up and notify ────────
     log.error(
         "checkout_unknown_step",
         step=state.get("step"),
-        phone=_ofuscar_phone(phone),
+        phone=_obfuscate_phone(phone),
         bot_number=bot_number,
         base_order_id=state.get("base_order_id"),
     )
@@ -712,7 +712,7 @@ async def execute_salon_action(
     if action == "order":
         cart = await db.db_get_cart(phone, bot_number)
         if not cart or not cart.get("items"):
-            log.warning("order_empty_cart", phone=_ofuscar_phone(phone), items=parsed.get("items"), action=action)
+            log.warning("order_empty_cart", phone=_obfuscate_phone(phone), items=parsed.get("items"), action=action)
             return reply
 
         cart_total    = await orders.get_cart_total(phone, bot_number)
@@ -721,11 +721,11 @@ async def execute_salon_action(
         separate_bill = parsed.get("separate_bill", False)
         items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
 
-        # ── Enrutamiento multi-estación (Cocina vs. Bar) ──────────────
+        # ── Multi-station routing (Kitchen vs. Bar) ──────────────
         # Station split itself now lives in table_order_commit.resolve_station_split,
         # called from save_table_order_round() below with these same `features` —
         # always computed fresh against whatever cart_items end up being
-        # committed (Capa 3 below may filter cart_items before the actual save).
+        # committed (Layer 3 below may filter cart_items before the actual save).
         features: dict = {}
         try:
             restaurant = await db.db_get_restaurant_by_bot_number(bot_number)
@@ -734,12 +734,12 @@ async def execute_salon_action(
                 if isinstance(features, str):
                     features = json.loads(features)
         except Exception:
-            log.exception("bar_routing_features_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.exception("bar_routing_features_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
 
         base_order_id = await db.db_get_base_order_id(table_context["id"])
         sub_number    = 1
 
-        # ── Capa 3: Anti-impostor — pending_table_validation ──────────
+        # ── Layer 3: Anti-impostor — pending_table_validation ──────────
         # First order in an unverified session is held for waiter
         # confirmation.  Subsequent orders (or verified sessions) go
         # straight to the kitchen.
@@ -752,14 +752,14 @@ async def execute_salon_action(
                     _needs_validation = True
                     log.info(
                         "table_order.pending_validation",
-                        phone=_ofuscar_phone(phone),
+                        phone=_obfuscate_phone(phone),
                         bot_number=bot_number,
                         table_id=table_context.get("id"),
                     )
         except Exception:
             log.exception(
                 "capa3_verification_check_failed",
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
                 bot_number=bot_number,
             )
             # Fail-open: if the check errors, don't block the customer.
@@ -768,7 +768,7 @@ async def execute_salon_action(
         _is_duplicate_order = False
         is_new_group = separate_bill or base_order_id is None
         if not is_new_group:
-            # Sub-orden adicional — idempotencia en dos capas
+            # Additional sub-order — two-layer idempotency
             from datetime import timezone as _tz
             _dup_items_key = sorted(f"{i['quantity']}x{i.get('name','')}" for i in cart_items)
             try:
@@ -783,7 +783,7 @@ async def execute_salon_action(
                         base_order_id,
                     )
 
-                # Capa 1: última sub-orden en últimos 15s
+                # Layer 1: last sub-order within the last 15s
                 if _recent:
                     _ri = _recent["items"] if isinstance(_recent["items"], list) else json.loads(_recent["items"])
                     _recent_key = sorted(f"{i['quantity']}x{i.get('name','')}" for i in _ri)
@@ -797,9 +797,9 @@ async def execute_salon_action(
                         _is_duplicate_order = True
                         log.info("duplicate_sub_order_ignored", base_order_id=base_order_id, age_s=round(_age))
 
-                # Capa 2: ¿todos los ítems ya estaban en la ÚLTIMA sub-orden? (solo en frase de cierre)
-                # Solo compara contra _recent (última sub-orden), NO contra todo el historial.
-                # Así, re-ordenar algo de una sub-orden anterior siempre se permite.
+                # Layer 2: were all items already in the LAST sub-order? (only on a closing phrase)
+                # Only compares against _recent (last sub-order), NOT against the full history.
+                # So re-ordering something from an earlier sub-order is always allowed.
                 _CLOSING = {
                     "eso es todo", "es todo", "así está bien", "así está", "con eso está",
                     "con eso bien", "nada más", "ya está", "ya es todo", "listo gracias",
@@ -821,9 +821,9 @@ async def execute_salon_action(
                         _is_duplicate_order = True
                         log.info("closing_phrase_duplicate_ignored", base_order_id=base_order_id)
 
-                # ── Capa 3: filtrar ítems que el LLM repitió de la ÚLTIMA sub-orden ──
-                # Solo filtra contra _recent (última sub-orden confirmada), NO contra todo el
-                # historial — así el comensal puede re-pedir algo de una sub-orden anterior.
+                # ── Layer 3: filter out items the LLM repeated from the LAST sub-order ──
+                # Only filters against _recent (last confirmed sub-order), NOT against the full
+                # history — so the diner can still re-order something from an earlier sub-order.
                 if not _is_duplicate_order and _recent and cart_items:
                     _ri3 = _recent["items"] if isinstance(_recent["items"], list) else json.loads(_recent["items"])
                     _prev_names: set[str] = set()
@@ -907,13 +907,13 @@ async def execute_salon_action(
                 try:
                     await orders.clear_cart(phone, bot_number)
                 except Exception:
-                    log.exception("cart_clear_failed_table_order", phone=_ofuscar_phone(phone), bot_number=bot_number)
+                    log.exception("cart_clear_failed_table_order", phone=_obfuscate_phone(phone), bot_number=bot_number)
                 return f"{_inv['message']} ¿Te gustaría ordenar algo diferente?"
 
         try:
             await orders.clear_cart(phone, bot_number)
         except Exception:
-            log.exception("cart_clear_failed_table_order", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.exception("cart_clear_failed_table_order", phone=_obfuscate_phone(phone), bot_number=bot_number)
 
         await db.db_session_mark_order(phone, bot_number)
         if not _skip_inventory:
@@ -1001,7 +1001,7 @@ async def execute_salon_action(
         except Exception:
             log.exception(
                 "bill_alert_total_lookup_failed",
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
                 bot_number=bot_number,
             )
 
@@ -1022,7 +1022,7 @@ async def execute_salon_action(
         except Exception:
             log.exception(
                 "bill_alert_immediate_failed",
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
                 bot_number=bot_number,
             )
 
@@ -1034,14 +1034,14 @@ async def execute_salon_action(
             log.info(
                 "bill_blocked_order_not_delivered",
                 table=table_name,
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
             )
             return (
                 f"¡Con gusto! En cuanto lleve tu pedido a la mesa puedes pedir la cuenta. "
                 f"Mientras tanto, ¿necesitas algo más? 😊"
             )
 
-        # Iniciar flujo de checkout conversacional
+        # Start the conversational checkout flow
         try:
             if base_order_id and total is not None:
                 _orig_msg = message.lower() if message else ""
@@ -1130,7 +1130,7 @@ async def execute_salon_action(
 
                 return "¡Claro! ¿Cómo van a pagar hoy? ¿Todo junto o lo dividimos en varias partes?"
         except Exception:
-            log.exception("checkout_start_failed_fallback_waiter", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.exception("checkout_start_failed_fallback_waiter", phone=_obfuscate_phone(phone), bot_number=bot_number)
 
         # Fallback: waiter_alert — best-effort, must not crash checkout.
         # Rule #17 alert already fired above in the common case; only send

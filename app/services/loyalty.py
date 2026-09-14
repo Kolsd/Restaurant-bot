@@ -1,7 +1,7 @@
 """
 app/routes/loyalty.py
 =====================
-Endpoints REST del módulo de Fidelización (Loyalty).
+REST endpoints for the Loyalty module.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request

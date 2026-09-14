@@ -142,14 +142,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   _stClock(); setInterval(_stClock, 30000);
 
-  // Perfil tab populate
+  // Profile tab populate
   const pn = document.getElementById('perfil-name');
   const pav = document.getElementById('perfil-av');
   const name = localStorage.getItem('rb_staff_name') || localStorage.getItem('rb_name') || 'Domiciliario';
   if (pn) pn.textContent = name;
   if (pav) pav.textContent = name.split(' ').map(p => p[0]).join('').slice(0,2).toUpperCase();
 
-  // Turno label with elapsed time
+  // Shift label with elapsed time
   const shiftStart = localStorage.getItem('rb_shift_start');
   if (shiftStart) {
     const mins = Math.floor((Date.now() - new Date(shiftStart).getTime()) / 60000);

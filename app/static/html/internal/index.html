@@ -406,7 +406,7 @@
       .catch(() => { /* keep '--' on error */ });
   }
 
-  // ── KPI: pedidos rescatados ───────────────────────────────────────────────────
+  // ── KPI: rescued orders ───────────────────────────────────────────────────
   function _loadRescatados() {
     return _apiGet('/api/internal/analytics/orders-rescued?period=mtd')
       .then(data => {
@@ -416,7 +416,7 @@
       .catch(() => _setSkel('kpi-rescued-skel', 'kpi-rescued', '—', ''));
   }
 
-  // ── KPI: tenants activos ──────────────────────────────────────────────────────
+  // ── KPI: active tenants ──────────────────────────────────────────────────────
   function _loadActiveToday() {
     return _apiGet('/api/internal/analytics/overview')
       .then(data => {
@@ -428,7 +428,7 @@
       .catch(() => _setSkel('kpi-active-skel', 'kpi-active', '—', ''));
   }
 
-  // ── KPI: prospects nuevos ─────────────────────────────────────────────────────
+  // ── KPI: new prospects ─────────────────────────────────────────────────────
   function _loadProspects() {
     return _apiGet('/api/internal/crm/stats')
       .then(data => {

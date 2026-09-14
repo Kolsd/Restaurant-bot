@@ -41,7 +41,7 @@ log = get_logger(__name__)
 APP_DOMAIN = os.getenv("APP_DOMAIN", "mesioai.com")
 
 
-def _ofuscar_phone(p: str) -> str:
+def _obfuscate_phone(p: str) -> str:
     """Return obfuscated phone for log contexts: '***XXXX' (last 4 digits only)."""
     if not p:
         return "***"
@@ -368,19 +368,19 @@ def _block_attr(block, attr: str):
     return getattr(block, attr, None)
 
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict | None:
-    # 0. QR-Phone-Claim (Capa 1, post-2026-04-28).
-    #    Cuando el cliente escaneó un QR vía /menu y registró su phone en
-    #    /api/qr-claim, hay un "claim" pendiente que vincula su phone al
-    #    table_id sin necesidad de un marker visible en el mensaje. Esto
-    #    permite que el wa.me prefilled sea 100% limpio. Path 0 corre
-    #    ANTES del marker [t:X] porque el claim es la fuente más confiable
-    #    cuando existe (cliente recién escaneó), y ANTES del path "sesión
-    #    activa" porque un cliente que re-escanea quiere empezar fresh
-    #    sobre la nueva mesa que escaneó. Diseño: docs/MESA_QR_ARCHITECTURE.md.
+    # 0. QR-Phone-Claim (Layer 1, post-2026-04-28).
+    #    When the customer scans a QR via /menu and registers their phone at
+    #    /api/qr-claim, there is a pending "claim" that links their phone to
+    #    the table_id without needing a visible marker in the message. This
+    #    lets the wa.me prefill stay 100% clean. Path 0 runs BEFORE the
+    #    [t:X] marker because the claim is the most reliable source when it
+    #    exists (customer just scanned), and BEFORE the "active session"
+    #    path because a customer who re-scans wants to start fresh on the
+    #    new table they scanned. Design: docs/MESA_QR_ARCHITECTURE.md.
     from app.repositories import qr_claims_repo  # noqa: PLC0415
     claim = await qr_claims_repo.find_unclaimed_by_phone(phone, bot_number)
     if claim is None:
-        # Defensive visibility for DISCONNECT #1 (Bot↔Mesa items huérfanos):
+        # Defensive visibility for DISCONNECT #1 (Bot↔Table orphaned items):
         # the customer's phone didn't match any pending claim, but a claim
         # may still exist for this restaurant (customer typed a different
         # phone in the /menu modal than the one used to send the WhatsApp
@@ -458,8 +458,8 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                         log.info(
                             "session.join_code_required",
                             table_id=table["id"],
-                            incoming_phone=_ofuscar_phone(phone),
-                            holder_phone=_ofuscar_phone(other_session["phone"]),
+                            incoming_phone=_obfuscate_phone(phone),
+                            holder_phone=_obfuscate_phone(other_session["phone"]),
                         )
                         await state_store.join_code_pending_set(phone, bot_number, {
                             "table_id": table["id"],
@@ -502,7 +502,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 table_id=claim["table_id"],
             )
 
-    # 1. Retrocompatibilidad: table_id explícito (por si hay QRs viejos físicos)
+    # 1. Backward compatibility: explicit table_id (in case old physical QRs exist)
     tid_match = re.search(r'\[(?:table_id|t):([^\]]+)\]', message)
     if tid_match:
         table_id = tid_match.group(1).strip()
@@ -523,8 +523,8 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                     log.warning(
                         "table_cooldown.blocked",
                         table_id=table["id"],
-                        incoming_phone=_ofuscar_phone(phone),
-                        holder_phone=_ofuscar_phone(other_session["phone"]),
+                        incoming_phone=_obfuscate_phone(phone),
+                        holder_phone=_obfuscate_phone(other_session["phone"]),
                     )
                     table["cooldown_blocked"] = True
                     return table
@@ -533,7 +533,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             table["is_new_session"] = True
             return table
 
-    # 2. Sesión activa existente: Si ya sabemos dónde está, respetamos la sesión
+    # 2. Existing active session: if we already know where they are, honor that session
     with _bypass_tenant("agent.detect_table_context: cross-tenant active session lookup"):
         session = await db.db_get_active_session(phone, bot_number)
     if session and session.get("table_id"):
@@ -593,7 +593,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 # Customer must scan the physical QR code to establish a real table session.
                 log.warning(
                     "detect_table_context.manual_text_blocked",
-                    phone=_ofuscar_phone(phone),
+                    phone=_obfuscate_phone(phone),
                     bot_number=bot_number,
                     extracted=extracted_val,
                     reason="allow_manual_table_number=False (default); QR scan required",
@@ -603,7 +603,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             # Feature flag is explicitly True — proceed with text-based lookup (opt-in only)
             log.info(
                 "detect_table_context.manual_text_allowed",
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
                 bot_number=bot_number,
                 extracted=extracted_val,
             )
@@ -654,12 +654,12 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                     pass  # not a numeric pair — fall through to name lookup
 
             else:
-                # ── FORMATO LEGACY: "Mesa 3" ──
+                # ── LEGACY FORMAT: "Mesa 3" ──
                 try:
-                    num_mesa = int(extracted_val)
+                    table_num = int(extracted_val)
                     all_tables = await _all_franchise_tables()
                     for row in all_tables:
-                        if row["number"] == num_mesa:
+                        if row["number"] == table_num:
                             table = dict(row)
                             await db.db_create_table_session(phone, bot_number, table["id"], table["name"], org_id=table.get("org_id"), location_id=table.get("location_id"))
                             table["is_new_session"] = True
@@ -667,8 +667,8 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 except (ValueError, TypeError):
                     pass
 
-            # ── FALLBACK: buscar por nombre de mesa (ej: "Estoy en Mesa 8-1") ──
-            # Cubre casos donde "8-1" es el nombre, no "restaurante 8, mesa 1"
+            # ── FALLBACK: look up by table name (e.g. "Estoy en Mesa 8-1") ──
+            # Covers cases where "8-1" is the name, not "restaurant 8, table 1"
             name_match = re.search(r'estoy en\s+(.+?)(?:\n|$)', clean_lower)
             if name_match:
                 candidate = name_match.group(1).strip()
@@ -745,7 +745,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
         try:
             await db.db_clear_nps_waiting(phone, bot_number)
         except Exception:
-            log.exception("nps_clear_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.exception("nps_clear_waiting_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
         try:
             async with _tenant_conn() as conn:
                 await conn.execute(
@@ -753,14 +753,14 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
                     phone, bot_number
                 )
         except Exception:
-            log.exception("nps_delete_conversation_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.exception("nps_delete_conversation_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
         return "¡Entendido! No hay problema. ¡Gracias por visitarnos y esperamos verte pronto! 😊"
 
     if state["state"] == "waiting_score":
-        # Solo aceptar el score si el mensaje es corto (≤30 chars).
-        # Bug fix 2026-05-05: regex previo `[1-5]` matcheaba por carácter, así que
-        # "10" → "1" (score 1, flujo negativo) — pésima UX para el cliente que
-        # creyó dar 10/10. Ahora extraemos números completos y validamos rango.
+        # Only accept the score if the message is short (≤30 chars).
+        # Bug fix 2026-05-05: the previous regex `[1-5]` matched per character, so
+        # "10" → "1" (score 1, negative flow) — terrible UX for a customer who
+        # thought they gave 10/10. Now we extract full numbers and validate range.
         stripped_msg = message.strip()
         digit_groups = re.findall(r'\d+', stripped_msg) if len(stripped_msg) <= 30 else []
         score: int | None = None
@@ -792,7 +792,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
             try:
                 await db.db_save_nps_pending(phone, bot_number, score)
             except Exception:
-                log.exception("nps_save_pending_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+                log.exception("nps_save_pending_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
             return (
                 f"Gracias por tu honestidad 🙏 Tu opinión es muy valiosa para nosotros.\n\n"
                 f"¿Nos podrías contar qué podríamos mejorar? Tu comentario llega directo al equipo."
@@ -801,13 +801,13 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
             try:
                 await db.db_save_nps_response(phone, bot_number, score, "")
             except Exception:
-                log.exception("nps_save_response_failed", phone=_ofuscar_phone(phone), bot_number=bot_number, score=score)
+                log.exception("nps_save_response_failed", phone=_obfuscate_phone(phone), bot_number=bot_number, score=score)
             await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
             await state_store.nps_mark_done(phone, bot_number)
             try:
                 await db.db_clear_nps_waiting(phone, bot_number)
             except Exception:
-                log.exception("nps_clear_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+                log.exception("nps_clear_waiting_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
 
             maps_msg = ""
             if google_maps_url:
@@ -820,7 +820,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
                         phone, bot_number
                     )
             except Exception:
-                log.exception("nps_delete_conversation_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+                log.exception("nps_delete_conversation_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
 
             return (
                 f"¡Muchas gracias! Nos alegra mucho que hayas tenido una gran experiencia 😊"
@@ -838,7 +838,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
             _update_raised = True
             log.exception(
                 "nps_update_comment_failed",
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
                 bot_number=bot_number,
             )
         if not updated:
@@ -846,19 +846,19 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
             log.info(
                 "nps.comment_fallback_to_save",
                 reason="update_raised" if _update_raised else "update_returned_falsy",
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
                 bot_number=bot_number,
             )
             try:
                 await db.db_save_nps_response(phone, bot_number, score, comment)
             except Exception:
-                log.exception("nps_save_response_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+                log.exception("nps_save_response_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
         await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
         await state_store.nps_mark_done(phone, bot_number)
         try:
             await db.db_clear_nps_waiting(phone, bot_number)
         except Exception:
-            log.exception("nps_clear_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.exception("nps_clear_waiting_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
 
         try:
             async with _tenant_conn() as conn:
@@ -867,7 +867,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
                     phone, bot_number
                 )
         except Exception:
-            log.exception("nps_delete_conversation_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.exception("nps_delete_conversation_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
 
         return (
             "¡Gracias por tu comentario! Lo tomaremos muy en cuenta para mejorar. "
@@ -880,7 +880,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
 async def trigger_nps(phone: str, bot_number: str, restaurant_name: str):
     # Idempotency guards: skip if NPS is already active, in cooldown, or done within 12h
     if await state_store.nps_is_done(phone, bot_number):
-        log.info("nps_trigger_skipped_done", phone=_ofuscar_phone(phone), bot_number=bot_number)
+        log.info("nps_trigger_skipped_done", phone=_obfuscate_phone(phone), bot_number=bot_number)
         return
 
     # Acquire distributed lock to prevent two workers from racing between the
@@ -888,14 +888,14 @@ async def trigger_nps(phone: str, bot_number: str, restaurant_name: str):
     lock_token = await state_store.nps_transition_lock_acquire(phone, bot_number, ttl_seconds=10)
     if lock_token is None:
         # Another worker is already in the process of setting NPS state.
-        log.info("nps_trigger_skipped_lock_contention", phone=_ofuscar_phone(phone), bot_number=bot_number)
+        log.info("nps_trigger_skipped_lock_contention", phone=_obfuscate_phone(phone), bot_number=bot_number)
         return
 
     try:
         # Re-check under lock — another worker may have set state between our
         # nps_is_done check above and lock acquisition.
         if await state_store.nps_get(phone, bot_number) is not None:
-            log.info("nps_trigger_skipped_active", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.info("nps_trigger_skipped_active", phone=_obfuscate_phone(phone), bot_number=bot_number)
             return
         await state_store.nps_set(phone, bot_number, {"state": "waiting_score", "score": 0})
         try:
@@ -910,8 +910,8 @@ async def trigger_nps(phone: str, bot_number: str, restaurant_name: str):
             else:
                 log.warning("nps_save_waiting_no_restaurant", bot_number=bot_number)
         except Exception:
-            log.exception("nps_save_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
-        log.info("nps.triggered", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.exception("nps_save_waiting_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
+        log.info("nps.triggered", phone=_obfuscate_phone(phone), bot_number=bot_number)
     finally:
         await state_store.nps_transition_lock_release(phone, bot_number, lock_token)
 
@@ -1406,7 +1406,7 @@ async def _validate_tool_call(
 
     # 1. Context mismatch — salon tool in external mode (or vice versa)
     if tool_name in _SALON_ONLY_TOOLS and not table_context:
-        log.warning("guard.salon_tool_without_table", tool=tool_name, phone=_ofuscar_phone(phone))
+        log.warning("guard.salon_tool_without_table", tool=tool_name, phone=_obfuscate_phone(phone))
         # CRITICAL: discard the LLM reply — it may have hallucinated a table session.
         # Replace with a context-appropriate message that guides the real flow.
         base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
@@ -1419,17 +1419,17 @@ async def _validate_tool_call(
         return None, safe_reply, {}
 
     if tool_name in _EXTERNAL_ONLY_TOOLS and table_context:
-        log.warning("guard.external_tool_at_table", tool=tool_name, phone=_ofuscar_phone(phone))
+        log.warning("guard.external_tool_at_table", tool=tool_name, phone=_obfuscate_phone(phone))
         return None, reply, {}
 
     # 2. Empty items on order tools
     if tool_name in ("place_order", "create_delivery_order", "create_pickup_order"):
         items = tool_input.get("items", [])
         if not isinstance(items, list):
-            log.warning("guard.order_tool_items_not_list", tool=tool_name, phone=_ofuscar_phone(phone), items_type=type(items).__name__)
+            log.warning("guard.order_tool_items_not_list", tool=tool_name, phone=_obfuscate_phone(phone), items_type=type(items).__name__)
             return None, reply or "¿Qué te gustaría ordenar? Cuéntame los platos que deseas.", {}
         if not items:
-            log.warning("guard.order_tool_empty_items", tool=tool_name, phone=_ofuscar_phone(phone))
+            log.warning("guard.order_tool_empty_items", tool=tool_name, phone=_obfuscate_phone(phone))
             return None, reply or "¿Qué te gustaría ordenar? Cuéntame los platos que deseas.", {}
 
     # 2b. Server-side price resolution — SECURITY CRITICAL.
@@ -1447,7 +1447,7 @@ async def _validate_tool_call(
             log.warning(
                 "guard.price_resolution_failed",
                 tool=tool_name,
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
                 errors=price_errors,
             )
             return (
@@ -1467,7 +1467,7 @@ async def _validate_tool_call(
         log.info(
             "guard.price_resolution_ok",
             tool=tool_name,
-            phone=_ofuscar_phone(phone),
+            phone=_obfuscate_phone(phone),
             item_count=len(resolved_items),
             total=str(resolved_total),
         )
@@ -1496,7 +1496,7 @@ async def _validate_tool_call(
                 ) if items else "tu pedido"
                 log.info(
                     "guard.order_awaiting_confirmation",
-                    tool=tool_name, phone=_ofuscar_phone(phone), items=items_label
+                    tool=tool_name, phone=_obfuscate_phone(phone), items=items_label
                 )
                 return None, f"¿Confirmas tu pedido de {items_label}? 😊", {}
 
@@ -1508,7 +1508,7 @@ async def _validate_tool_call(
             f"order_dedup:{phone}:{bot_number}:{item_key}", max_requests=1, window_seconds=60
         )
         if not is_ok:
-            log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=_ofuscar_phone(phone), fingerprint=item_key)
+            log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=_obfuscate_phone(phone), fingerprint=item_key)
             return None, "Tu pedido ya está siendo procesado. En un momento te confirmo.", {}
 
     # 3c. Confirmation guard for make_reservation on first attempt — mirrors
@@ -1541,7 +1541,7 @@ async def _validate_tool_call(
             if not _last_messages_have_confirmation(_hist):
                 log.info(
                     "guard.reservation_awaiting_confirmation",
-                    phone=_ofuscar_phone(phone),
+                    phone=_obfuscate_phone(phone),
                     date=tool_input.get("date"),
                     time=tool_input.get("time"),
                 )
@@ -1563,7 +1563,7 @@ async def _validate_tool_call(
             max_requests=5, window_seconds=86400,
         )
         if not daily_ok:
-            log.warning("guard.reservation_daily_limit", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.warning("guard.reservation_daily_limit", phone=_obfuscate_phone(phone), bot_number=bot_number)
             return None, "Solo puedes hacer hasta 5 reservas por día desde este número.", {}
         res_key = _make_reservation_fingerprint(tool_input)
         is_ok = await state_store.rate_limit_check(
@@ -1573,7 +1573,7 @@ async def _validate_tool_call(
         if not is_ok:
             log.warning(
                 "guard.duplicate_reservation_blocked",
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
                 fingerprint=res_key,
             )
             return None, "Tu reserva ya está siendo procesada. En un momento te confirmo.", {}
@@ -1582,14 +1582,14 @@ async def _validate_tool_call(
     if tool_name == "create_delivery_order":
         address = tool_input.get("address", "").strip()
         if not address:
-            log.warning("guard.delivery_no_address", phone=_ofuscar_phone(phone))
+            log.warning("guard.delivery_no_address", phone=_obfuscate_phone(phone))
             return None, reply + "\n\nNecesito tu dirección de entrega para procesar el pedido.", {}
 
     # 5. Pickup/Delivery without payment method
     if tool_name in ("create_delivery_order", "create_pickup_order"):
         pm = tool_input.get("payment_method", "").strip()
         if not pm:
-            log.warning("guard.order_no_payment", tool=tool_name, phone=_ofuscar_phone(phone))
+            log.warning("guard.order_no_payment", tool=tool_name, phone=_obfuscate_phone(phone))
             return None, reply or "¿Con qué método de pago prefieres? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)", {}
 
     # 6. Reservation with missing required fields
@@ -1598,40 +1598,40 @@ async def _validate_tool_call(
         if missing:
             missing_labels = {"name": "nombre", "date": "fecha", "time": "hora"}
             missing_str = " y ".join(missing_labels.get(f, f) for f in missing)
-            log.warning("guard.reservation_incomplete", missing=missing, phone=_ofuscar_phone(phone))
+            log.warning("guard.reservation_incomplete", missing=missing, phone=_obfuscate_phone(phone))
             return None, reply or f"Para completar tu reserva necesito el {missing_str}.", {}
         try:
             _guests = int(tool_input.get("guests", 1))
             if _guests <= 0:
                 raise ValueError("guests must be positive")
         except (ValueError, TypeError):
-            log.warning("guard.reservation_invalid_guests", guests=tool_input.get("guests"), phone=_ofuscar_phone(phone))
+            log.warning("guard.reservation_invalid_guests", guests=tool_input.get("guests"), phone=_obfuscate_phone(phone))
             return None, reply or "¿Cuántas personas serán para la reserva?", {}
         if _guests > 100:
-            log.warning("guard.reservation_guests_over_limit", guests=_guests, phone=_ofuscar_phone(phone))
+            log.warning("guard.reservation_guests_over_limit", guests=_guests, phone=_obfuscate_phone(phone))
             return None, "¿Cuántas personas serán para la reserva? Para grupos grandes (más de 100), por favor llámanos directamente.", {}
 
     # 7. send_dish_card — validate feature flag, dish existence, and image availability
     if tool_name == "send_dish_card":
         feats = features or {}
         if not isinstance(tool_input, dict):
-            log.warning("guard.send_dish_card_input_not_dict", phone=_ofuscar_phone(phone))
+            log.warning("guard.send_dish_card_input_not_dict", phone=_obfuscate_phone(phone))
             return None, reply, {}
         if not feats.get("bot_visual_menu"):
-            log.info("guard.send_dish_card_flag_off", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.info("guard.send_dish_card_flag_off", phone=_obfuscate_phone(phone), bot_number=bot_number)
             return None, reply + "\n\n(Las fotos de platos no están disponibles en este restaurante.)", {}
         dish_name = tool_input.get("dish_name", "")
         if not isinstance(dish_name, str) or not dish_name.strip() or len(dish_name) > 200:
-            log.warning("guard.send_dish_card_invalid_name", dish_name=dish_name, phone=_ofuscar_phone(phone))
+            log.warning("guard.send_dish_card_invalid_name", dish_name=dish_name, phone=_obfuscate_phone(phone))
             return None, reply, {}
         # Use find_dish (Regla 12 — same matching logic, no shortcuts)
         from app.services.orders import find_dish  # noqa: PLC0415
         matched_dish = await find_dish(dish_name.strip(), bot_number)
         if matched_dish is None:
-            log.warning("guard.send_dish_card_dish_not_found", dish_name=dish_name, phone=_ofuscar_phone(phone))
+            log.warning("guard.send_dish_card_dish_not_found", dish_name=dish_name, phone=_obfuscate_phone(phone))
             return None, reply, {}
         if not matched_dish.get("image_url"):
-            log.info("guard.send_dish_card_no_image", dish_name=dish_name, phone=_ofuscar_phone(phone))
+            log.info("guard.send_dish_card_no_image", dish_name=dish_name, phone=_obfuscate_phone(phone))
             return None, reply, {}
         # Inject resolved dish into tool_input so execute_action skips a second DB lookup
         tool_input = {**tool_input, "_resolved_dish": matched_dish}
@@ -1640,7 +1640,7 @@ async def _validate_tool_call(
     # 9. cancel_order — validate tool_input is dict; reason is optional free text
     if tool_name in ("notify_arrival", "call_waiter"):
         if not isinstance(tool_input, dict):
-            log.warning("guard.notify_arrival_input_not_dict", phone=_ofuscar_phone(phone), input_type=type(tool_input).__name__)
+            log.warning("guard.notify_arrival_input_not_dict", phone=_obfuscate_phone(phone), input_type=type(tool_input).__name__)
             tool_input = {}
         # Cap free-text message field to prevent prompt-stuffing via waiter alerts
         _msg = tool_input.get("message")
@@ -1649,7 +1649,7 @@ async def _validate_tool_call(
 
     if tool_name == "cancel_order":
         if not isinstance(tool_input, dict):
-            log.warning("guard.cancel_order_input_not_dict", phone=_ofuscar_phone(phone), input_type=type(tool_input).__name__)
+            log.warning("guard.cancel_order_input_not_dict", phone=_obfuscate_phone(phone), input_type=type(tool_input).__name__)
             tool_input = {}
         # Coerce reason to str or None — never keep arbitrary types
         raw_reason = tool_input.get("reason")
@@ -1662,39 +1662,39 @@ async def _validate_tool_call(
         value = str(tool_input.get("value", "")).strip()
         reason = str(tool_input.get("reason", "")).strip()
         if key not in VALID_PREFERENCE_KEYS:
-            log.warning("guard.remember_invalid_key", key=key, phone=_ofuscar_phone(phone))
+            log.warning("guard.remember_invalid_key", key=key, phone=_obfuscate_phone(phone))
             return None, reply, {}
         if not value or not reason:
-            log.warning("guard.remember_empty_value_or_reason", phone=_ofuscar_phone(phone))
+            log.warning("guard.remember_empty_value_or_reason", phone=_obfuscate_phone(phone))
             return None, reply, {}
         # Rate limit: max 3 remember calls per phone per conversation window (10 min)
         ok = await state_store.rate_limit_check(
             f"remember:{phone}:{bot_number}", max_requests=3, window_seconds=600
         )
         if not ok:
-            log.warning("guard.remember_rate_limited", phone=_ofuscar_phone(phone))
+            log.warning("guard.remember_rate_limited", phone=_obfuscate_phone(phone))
             return None, reply, {}
 
     # 10. redeem_loyalty_points — validate points > 0 (Regla 2: validate before execute)
     if tool_name == "redeem_loyalty_points":
         if not isinstance(tool_input, dict):
-            log.warning("guard.redeem_loyalty_input_not_dict", phone=_ofuscar_phone(phone))
+            log.warning("guard.redeem_loyalty_input_not_dict", phone=_obfuscate_phone(phone))
             return None, reply or "No pude procesar tu canje. ¿Cuántos puntos querés canjear?", {}
         try:
             pts = int(tool_input.get("points", 0))
         except (ValueError, TypeError):
             log.warning(
                 "guard.redeem_loyalty_invalid_points",
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
                 points=tool_input.get("points"),
             )
             return None, "No entendí cuántos puntos querés canjear. ¿Me decís el número?", {}
         if pts <= 0:
-            log.warning("guard.redeem_loyalty_non_positive", phone=_ofuscar_phone(phone), points=pts)
+            log.warning("guard.redeem_loyalty_non_positive", phone=_obfuscate_phone(phone), points=pts)
             return None, "Tenés que canjear al menos 1 punto. ¿Cuántos querés usar?", {}
         # Cap at a sane maximum to prevent runaway tool calls.
         if pts > 1_000_000:
-            log.warning("guard.redeem_loyalty_too_many", phone=_ofuscar_phone(phone), points=pts)
+            log.warning("guard.redeem_loyalty_too_many", phone=_obfuscate_phone(phone), points=pts)
             return None, "Esa cantidad de puntos parece demasiado alta. ¿Me confirmás el número?", {}
         tool_input = {**tool_input, "points": pts}
 
@@ -1739,7 +1739,7 @@ async def _execute_redeem_loyalty(
     if not restaurant_id:
         log.warning(
             "loyalty.redeem_no_restaurant_id",
-            phone=_ofuscar_phone(phone), bot_number=bot_number,
+            phone=_obfuscate_phone(phone), bot_number=bot_number,
         )
         return "No pudimos canjear tus puntos en este momento. Avisale al equipo."
 
@@ -1749,16 +1749,16 @@ async def _execute_redeem_loyalty(
     base_order_id_for_redeem: str | None = None
 
     if table_context:
-        # Salon: redemption only allowed AFTER the customer asks for la
-        # cuenta (table_checks rows exist). Without an open check there is
-        # nothing for caja to discount, and we'd burn the customer's points
+        # Salon: redemption only allowed AFTER the customer asks for the
+        # bill (table_checks rows exist). Without an open check there is
+        # nothing for the cashier to discount, and we'd burn the customer's points
         # on a transaction that hasn't been priced yet.
         try:
             base_order_id = await db.db_get_base_order_id(table_context["id"])
         except Exception:
             log.exception(
                 "loyalty.redeem_get_base_order_failed",
-                phone=_ofuscar_phone(phone), bot_number=bot_number,
+                phone=_obfuscate_phone(phone), bot_number=bot_number,
             )
             return "No pudimos canjear tus puntos en este momento. Avisale al mesero."
         if not base_order_id:
@@ -1779,7 +1779,7 @@ async def _execute_redeem_loyalty(
         except Exception:
             log.exception(
                 "loyalty.redeem_lookup_check_failed",
-                phone=_ofuscar_phone(phone), base_order_id=base_order_id,
+                phone=_obfuscate_phone(phone), base_order_id=base_order_id,
             )
             return "No pudimos canjear tus puntos en este momento. Avisale al mesero."
 
@@ -1810,7 +1810,7 @@ async def _execute_redeem_loyalty(
         except Exception:
             log.exception(
                 "loyalty.redeem_lookup_order_failed",
-                phone=_ofuscar_phone(phone), bot_number=bot_number,
+                phone=_obfuscate_phone(phone), bot_number=bot_number,
             )
             return "No pudimos canjear tus puntos en este momento. Probá de nuevo en un momento."
 
@@ -1835,13 +1835,13 @@ async def _execute_redeem_loyalty(
         # available without a follow-up turn.
         log.info(
             "loyalty.redeem_value_error",
-            phone=_ofuscar_phone(phone), points=points, reason=str(e),
+            phone=_obfuscate_phone(phone), points=points, reason=str(e),
         )
         balance = None
         try:
             balance = await db.db_get_loyalty_balance(restaurant_id, phone)
         except Exception:
-            log.exception("loyalty.redeem_balance_lookup_failed", phone=_ofuscar_phone(phone))
+            log.exception("loyalty.redeem_balance_lookup_failed", phone=_obfuscate_phone(phone))
         current = balance.get("puntos_actuales") if balance else 0
         return (
             f"No alcanzan los puntos: tenés {current} y querías canjear {points}. "
@@ -1850,7 +1850,7 @@ async def _execute_redeem_loyalty(
     except Exception:
         log.exception(
             "loyalty.redeem_db_failed",
-            phone=_ofuscar_phone(phone), bot_number=bot_number, points=points,
+            phone=_obfuscate_phone(phone), bot_number=bot_number, points=points,
         )
         return "No pudimos canjear tus puntos en este momento. Probá de nuevo en un momento."
 
@@ -1872,13 +1872,13 @@ async def _execute_redeem_loyalty(
     except Exception:
         log.exception(
             "loyalty.redeem_apply_to_target_failed",
-            phone=_ofuscar_phone(phone), target_kind=target_kind,
+            phone=_obfuscate_phone(phone), target_kind=target_kind,
             target_id=target_id, points=redeemed,
         )
 
     log.info(
         "loyalty.redeem_success",
-        phone=_ofuscar_phone(phone),
+        phone=_obfuscate_phone(phone),
         bot_number=bot_number,
         points=redeemed,
         cop_discount=cop_discount,
@@ -1916,9 +1916,9 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     key=pref["key"],
                     value=pref["value"],
                 )
-                log.info("customer.preference_saved", phone=_ofuscar_phone(phone), restaurant_id=restaurant_id, key=pref["key"])
+                log.info("customer.preference_saved", phone=_obfuscate_phone(phone), restaurant_id=restaurant_id, key=pref["key"])
         except Exception:
-            log.exception("customer.preference_save_failed", phone=_ofuscar_phone(phone))
+            log.exception("customer.preference_save_failed", phone=_obfuscate_phone(phone))
         return reply   # Reply flows through unchanged
 
     # ── Early: send_dish_card (sends image directly; fallback to text on failure) ──
@@ -1934,7 +1934,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             f"mesio:dish_img:{phone}:{bot_number}", max_requests=3, window_seconds=60
         )
         if not ok:
-            log.warning("send_dish_card.rate_limited", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.warning("send_dish_card.rate_limited", phone=_obfuscate_phone(phone), bot_number=bot_number)
             # Fallback: return the text reply Claude already prepared
             return reply or f"Te recomiendo {dish_name}" + (f" - {_fmt_cop(price)}" if price else "")
 
@@ -1955,12 +1955,12 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     phone_id=phone_id,
                 )
                 if sent:
-                    log.info("send_dish_card.image_sent", dish=dish_name, phone=_ofuscar_phone(phone))
+                    log.info("send_dish_card.image_sent", dish=dish_name, phone=_obfuscate_phone(phone))
                     # Return empty string — the image IS the response; Claude's text reply
                     # is optional but we return it so the conversation stays natural.
                     return reply or ""
             except Exception:
-                log.exception("send_dish_card.image_send_error", dish=dish_name, phone=_ofuscar_phone(phone))
+                log.exception("send_dish_card.image_send_error", dish=dish_name, phone=_obfuscate_phone(phone))
 
         # Fallback: text description (Regla 8 — never silence the client)
         price_str = _fmt_cop(price) if price else ""
@@ -1970,7 +1970,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             fallback += f" - {price_str}"
         if desc:
             fallback += f"\n{desc}"
-        log.warning("send_dish_card.fallback_text", dish=dish_name, phone=_ofuscar_phone(phone), bot_number=bot_number)
+        log.warning("send_dish_card.fallback_text", dish=dish_name, phone=_obfuscate_phone(phone), bot_number=bot_number)
         return reply or fallback
 
     try:
@@ -1991,13 +1991,13 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                             "cart.qty_parse_failed",
                             raw_qty=str(raw_qty),
                             dish=name,
-                            phone=_ofuscar_phone(phone),
+                            phone=_obfuscate_phone(phone),
                         )
                 if not name:
                     continue
                 res = await orders.add_to_cart(phone, name, qty, bot_number)
                 if res["success"]:
-                    log.info("cart.item_added", dish=res['dish']['name'], qty=qty, phone=_ofuscar_phone(phone))
+                    log.info("cart.item_added", dish=res['dish']['name'], qty=qty, phone=_obfuscate_phone(phone))
                 else:
                     err_msg = str(res.get("error", ""))
                     # Rule #5: lock contention → neutral message, bail IMMEDIATELY.
@@ -2005,10 +2005,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     # holds the cart lock. "siendo procesado" is the unique signal
                     # from orders.add_to_cart when cart_lock_acquire returns None.
                     if "siendo procesado" in err_msg:
-                        log.warning("cart.lock_contention_in_agent", phone=_ofuscar_phone(phone), dish=name)
+                        log.warning("cart.lock_contention_in_agent", phone=_obfuscate_phone(phone), dish=name)
                         return err_msg
                     cart_errors.append(name)
-                    log.warning("cart.item_not_found", name=name, phone=_ofuscar_phone(phone))
+                    log.warning("cart.item_not_found", name=name, phone=_obfuscate_phone(phone))
 
             if cart_errors and len(cart_errors) == len([i for i in items if i.get("name")]):
                 names = ", ".join(cart_errors)
@@ -2021,7 +2021,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         # ── Salon actions (order, bill, waiter) ───────────────────────────
         elif action == "order":
             if not table_context:
-                log.warning("agent.order_without_table_context", phone=_ofuscar_phone(phone))
+                log.warning("agent.order_without_table_context", phone=_obfuscate_phone(phone))
                 base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
                 menu_url = f"{base_url}/menu?bot={bot_number}" if base_url else f"/menu?bot={bot_number}"
                 return f"Para tomar tu pedido, necesito saber en qué mesa estás. ¿En qué número de mesa te encuentras?\n\nSi prefieres Domicilio o Recoger, usa nuestro menú digital: {menu_url}"
@@ -2057,7 +2057,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     phone=phone, bot_number=bot_number, alert_type=action,
                     message=alert_message, table_id=table_id, table_name=table_name,
                 )
-                log.info("waiter_alert_no_table", alert_type=action, phone=_ofuscar_phone(phone))
+                log.info("waiter_alert_no_table", alert_type=action, phone=_obfuscate_phone(phone))
                 blocks.push_block(blocks.build_waiter_ack_block(
                     "bill" if action == "bill" else "other", alert_message,
                 ))
@@ -2216,7 +2216,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     phone, bot_number,
                 )
             if _res_row is None:
-                log.info("cancel_reservation.no_upcoming", phone=_ofuscar_phone(phone), bot_number=bot_number)
+                log.info("cancel_reservation.no_upcoming", phone=_obfuscate_phone(phone), bot_number=bot_number)
                 reply = "No tienes reservas próximas para cancelar."
             else:
                 _res_id = _res_row["id"]
@@ -2225,7 +2225,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     await db.db_cancel_reservation(_res_id, cancel_reason)
                     log.info("cancel_reservation.cancelled",
                              reservation_id=_res_id,
-                             phone=_ofuscar_phone(phone),
+                             phone=_obfuscate_phone(phone),
                              bot_number=bot_number,
                              deposit_paid=_deposit_paid)
                     if _deposit_paid:
@@ -2239,7 +2239,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 except Exception:
                     log.exception("cancel_reservation.db_failed",
                                   reservation_id=_res_id,
-                                  phone=_ofuscar_phone(phone))
+                                  phone=_obfuscate_phone(phone))
                     reply = "Hubo un problema al cancelar tu reserva. Por favor contacta al restaurante directamente."
 
         # ── Loyalty redemption (shared, both flows) ───────────────────────
@@ -2251,11 +2251,11 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         # ── End session (shared, both flows) ──────────────────────────────
         elif action == "end_session":
             if session_state.get("has_order") and not session_state.get("order_delivered"):
-                log.warning("agent.end_session_blocked_order_pending", phone=_ofuscar_phone(phone))
+                log.warning("agent.end_session_blocked_order_pending", phone=_obfuscate_phone(phone))
                 return "Tu pedido aún está en preparación. Seguimos aquí por si necesitas algo más."
             if session_state.get("order_delivered"):
                 if await db.db_has_pending_invoice(phone):
-                    log.warning("agent.end_session_blocked_invoice_pending", phone=_ofuscar_phone(phone))
+                    log.warning("agent.end_session_blocked_invoice_pending", phone=_obfuscate_phone(phone))
                     return "Tu cuenta aún está pendiente de pago. El mesero llegará en un momento."
             await db.db_close_session(phone=phone, bot_number=bot_number,
                                       reason="client_goodbye", closed_by_username="")
@@ -2264,18 +2264,18 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     await conn.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
                                        phone, bot_number)
             except Exception:
-                log.exception("end_session.delete_conversation_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
-            log.info("agent.session_closed", phone=_ofuscar_phone(phone))
+                log.exception("end_session.delete_conversation_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
+            log.info("agent.session_closed", phone=_obfuscate_phone(phone))
             await trigger_nps(phone, bot_number, (restaurant_obj or {}).get("name", ""))
 
     except InsufficientStockError as e:
-        log.warning("execute_action.insufficient_stock", sku=str(e), phone=_ofuscar_phone(phone), bot_number=bot_number)
+        log.warning("execute_action.insufficient_stock", sku=str(e), phone=_obfuscate_phone(phone), bot_number=bot_number)
         return f"Lo siento, '{e}' ya no está disponible en el inventario. ¿Te gustaría elegir otra opción?"
     except OrderCommitError as e:
-        log.exception("execute_action.order_commit_failed", action=action, phone=_ofuscar_phone(phone), bot_number=bot_number)
+        log.exception("execute_action.order_commit_failed", action=action, phone=_obfuscate_phone(phone), bot_number=bot_number)
         return "No pudimos confirmar tu pedido. Por favor intenta de nuevo o avísale a un mesero."
     except Exception:
-        log.exception("execute_action_failed", action=action, phone=_ofuscar_phone(phone), bot_number=bot_number)
+        log.exception("execute_action_failed", action=action, phone=_obfuscate_phone(phone), bot_number=bot_number)
         # For order-creating actions, returning the hallucinated reply is worse than returning
         # an error — the customer thinks the order was placed when it wasn't.
         _ORDER_ACTIONS = {"delivery", "pickup", "place_order", "reserve", "reservation"}
@@ -2319,7 +2319,7 @@ async def _handle_nps_guard(user_phone: str, bot_number: str,
         return False
     if len(user_message_clean.strip()) > 30:
         await state_store.nps_delete(user_phone, bot_number)
-        log.info("nps_done_cleared_new_order", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
+        log.info("nps_done_cleared_new_order", phone=_obfuscate_phone(user_phone), bot_number=bot_number)
         return False   # cleared — let the normal flow proceed
     return True        # short message while NPS done and no session → stay silent
 
@@ -2364,7 +2364,7 @@ async def _try_nps_active_flow(user_phone: str, bot_number: str,
         try:
             await db.db_close_session(user_phone, bot_number, "nps_completed", "system")
         except Exception:
-            log.exception("nps_close_session_failed", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
+            log.exception("nps_close_session_failed", phone=_obfuscate_phone(user_phone), bot_number=bot_number)
     else:
         # Survey still active (waiting_score or, after a <=3 score,
         # waiting_comment) — push the render hint for the diner-web chat
@@ -2392,7 +2392,7 @@ async def _build_turn_blocks(user_phone: str, bot_number: str) -> list:
         if cart_block:
             turn_blocks.append(cart_block)
     except Exception:
-        log.exception("chat.cart_summary_block_failed", phone=_ofuscar_phone(user_phone))
+        log.exception("chat.cart_summary_block_failed", phone=_obfuscate_phone(user_phone))
     return turn_blocks
 
 
@@ -2509,7 +2509,7 @@ async def _build_enriched_user_message(
     except Exception:
         log.exception(
             "build_enriched_message.cart_summary_failed",
-            phone=_ofuscar_phone(user_phone),
+            phone=_obfuscate_phone(user_phone),
             bot_number=bot_number,
         )
         cart_text = ""
@@ -2543,7 +2543,7 @@ async def _build_enriched_user_message(
                     f"Si el cliente quiere pedir más, debe hacer un PEDIDO NUEVO completo.]"
                 )
         except Exception:
-            log.exception("transit_check_failed", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
+            log.exception("transit_check_failed", phone=_obfuscate_phone(user_phone), bot_number=bot_number)
 
     if table_context:
         table_note = f"\n[MESA: {table_context['name']}]"
@@ -2599,7 +2599,7 @@ async def _build_enriched_user_message(
     try:
         balance = await db.db_get_loyalty_balance(restaurant_obj.get("id"), user_phone)
     except Exception:
-        log.exception("loyalty.balance_lookup_failed", phone=_ofuscar_phone(user_phone))
+        log.exception("loyalty.balance_lookup_failed", phone=_obfuscate_phone(user_phone))
         balance = None
     if balance and (balance.get("puntos_actuales") or 0) > 0:
         pts = balance["puntos_actuales"]
@@ -2672,7 +2672,7 @@ async def _call_llm_and_execute(
             profile = await get_profile(restaurant_id, user_phone)
             customer_ctx = serialize_for_prompt(profile)
     except Exception:
-        log.exception("customer.profile_load_failed", phone=_ofuscar_phone(user_phone))
+        log.exception("customer.profile_load_failed", phone=_obfuscate_phone(user_phone))
         customer_ctx = ""  # Graceful fallback — chat proceeds without memory
 
     # Load order history for personalized recommendations (Fase 5a)
@@ -2688,7 +2688,7 @@ async def _call_llm_and_execute(
                 restaurant_id=_rid,
             )
     except Exception:
-        log.exception("customer.order_history_load_failed", phone=_ofuscar_phone(user_phone))
+        log.exception("customer.order_history_load_failed", phone=_obfuscate_phone(user_phone))
         order_history = []  # Graceful fallback — chat proceeds without history block
 
     sys_prompt = await build_system_prompt(
@@ -2707,7 +2707,7 @@ async def _call_llm_and_execute(
             max_tokens=MAX_TOKENS_SHORT,
         )
     except Exception:
-        log.exception("call_llm_and_execute.claude_error", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
+        log.exception("call_llm_and_execute.claude_error", phone=_obfuscate_phone(user_phone), bot_number=bot_number)
         return "Lo siento, tengo un problema técnico. Por favor intenta de nuevo en un momento.", {}
 
     reply = result["reply"]
@@ -2760,7 +2760,7 @@ async def _call_llm_and_execute(
     assistant_message = (assistant_message or "").replace("[LINK_MENU]", menu_url)
 
     if not assistant_message.strip():
-        log.warning("call_claude.empty_reply", bot_number=bot_number, phone=_ofuscar_phone(user_phone))
+        log.warning("call_claude.empty_reply", bot_number=bot_number, phone=_obfuscate_phone(user_phone))
         assistant_message = "Disculpa, no te entendí bien. ¿Puedes repetirme lo que necesitas?"
 
     # ── Anti-conversational session nudge (CEO rule 2026-05-07) ──────────────
@@ -2815,12 +2815,12 @@ async def _call_llm_and_execute(
                 except Exception:
                     log.exception(
                         "anti_conversational.waiter_alert_failed",
-                        phone=_ofuscar_phone(user_phone),
+                        phone=_obfuscate_phone(user_phone),
                     )
     except Exception:
         log.exception(
             "anti_conversational.counter_failed",
-            phone=_ofuscar_phone(user_phone),
+            phone=_obfuscate_phone(user_phone),
         )
 
     return assistant_message, routing_context
@@ -2903,7 +2903,7 @@ async def _resolve_location_id(
             return int(persisted)
     except Exception:
         log.exception("resolve_location_id.conversation_lookup_failed",
-                      phone=_ofuscar_phone(user_phone), bot_number=bot_number)
+                      phone=_obfuscate_phone(user_phone), bot_number=bot_number)
 
     return None
 
@@ -2987,7 +2987,7 @@ async def _handle_join_code_flow(
     if not rl_ok:
         log.warning(
             "join_code.rate_limited",
-            phone=_ofuscar_phone(phone),
+            phone=_obfuscate_phone(phone),
             bot_number=bot_number,
             table_id=table_id,
         )
@@ -3017,7 +3017,7 @@ async def _handle_join_code_flow(
             await state_store.join_code_pending_delete(phone, bot_number)
             log.warning(
                 "session.join_code_failed",
-                phone=_ofuscar_phone(phone),
+                phone=_obfuscate_phone(phone),
                 bot_number=bot_number,
                 table_id=table_id,
                 attempts=new_attempts,
@@ -3039,7 +3039,7 @@ async def _handle_join_code_flow(
     log.info(
         "session.participant_joined",
         session_id=new_session.get("id"),
-        phone=_ofuscar_phone(phone),
+        phone=_obfuscate_phone(phone),
         table_id=table_id,
     )
     return {"message": (
@@ -3170,7 +3170,7 @@ async def _chat_impl(
             log.warning(
                 "plan_enforcement.redirect_to_human",
                 org_id=_org_id_for_cap,
-                user_phone=_ofuscar_phone(user_phone),
+                user_phone=_obfuscate_phone(user_phone),
             )
             return {"message": REDIRECT_MESSAGE}
 

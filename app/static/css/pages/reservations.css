@@ -1,4 +1,4 @@
-/* ── Reservaciones page ──────────────────────────────────────────── */
+/* ── Reservations page ──────────────────────────────────────────── */
 .day-nav { display: flex; align-items: center; gap: 6px; padding: 4px; background: #fff; border: 0.5px solid var(--border); border-radius: 8px; }
 .day-nav button { border: none; background: none; width: 26px; height: 26px; border-radius: 6px; color: var(--text-2); cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .day-nav button:hover { background: #f0f0e8; color: var(--text); }

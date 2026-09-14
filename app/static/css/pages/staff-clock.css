@@ -172,7 +172,7 @@ body.staff-clock-page {
 .sc-status-pill.break { background: rgba(251,191,36,0.2); border-color: rgba(251,191,36,0.3); }
 .sc-status-pill.break .sc-dot { background: #FBBF24; animation: none; }
 
-/* Timeline del turno */
+/* Shift timeline */
 .sc-shift-timeline {
   margin: 14px 14px -22px;
   background: #fff; border: 0.5px solid var(--sc-border);

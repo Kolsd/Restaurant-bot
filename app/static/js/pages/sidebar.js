@@ -312,23 +312,23 @@
     // Fix 3: initialize mobile hamburger + drawer after sidebar is fully rendered
     initMobileSidebar();
 
-    // Sede switcher: wire the sb-switcher element to a popover that lists
-    // the org's locations and lets the user filter the dashboard to a sede.
-    initSedeSwitcher(sb);
+    // Location switcher: wire the sb-switcher element to a popover that lists
+    // the org's locations and lets the user filter the dashboard to a location.
+    initLocationSwitcher(sb);
   });
 
-  // ── Sede switcher (multi-sucursal navigation) ───────────────────────────
+  // ── Location switcher (multi-branch navigation) ───────────────────────────
   // Shows a popover under #sb-switcher with the org's locations + Casa Matriz.
   // Only visible to owner/admin/gerente roles. On select, persists the choice
   // to localStorage (rb_branch_id for legacy header, rb_current_location_id
   // for X-Location-ID) and reloads the page so all data refetches.
-  function initSedeSwitcher(sb) {
+  function initLocationSwitcher(sb) {
     const switcherEl = sb.querySelector('#sb-switcher');
     if (!switcherEl) return;
 
     const role = (localStorage.getItem('rb_role') || 'owner').toLowerCase();
     const operationalRoles = ['caja', 'mesero', 'cocina', 'bar', 'domiciliario'];
-    if (operationalRoles.includes(role)) return; // staff can't switch sedes
+    if (operationalRoles.includes(role)) return; // staff can't switch locations
 
     switcherEl.style.cursor = 'pointer';
     switcherEl.setAttribute('role', 'button');
@@ -408,16 +408,16 @@
       ].join(';');
 
       // restaurants VIEW exposes BOTH name (org name, same for all peers of an org)
-      // AND location_name (per-sede name like "Herradura Norte"). Prefer the
-      // location_name in the dropdown so the user can distinguish sedes — falling
+      // AND location_name (per-location name like "Herradura Norte"). Prefer the
+      // location_name in the dropdown so the user can distinguish locations — falling
       // back to name if the VIEW doesn't carry location_name (older VIEW snapshots).
       const items = [
         { value: 'matriz', name: 'Casa Matriz', sub: 'Todas las sucursales' }
       ].concat(
         branches.map(b => {
-          const sedeName = b.location_name || b.name || ('Sede ' + b.id);
+          const locationName = b.location_name || b.name || ('Sede ' + b.id);
           const sub = (b.location_name && b.name && b.location_name !== b.name) ? b.name : '';
-          return { value: String(b.id), name: sedeName, sub: sub };
+          return { value: String(b.id), name: locationName, sub: sub };
         })
       );
 

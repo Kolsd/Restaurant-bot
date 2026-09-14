@@ -8,7 +8,7 @@ Covers:
   - db_get_nps_waiting_pending_reminder: 24-48h window selection
   - db_mark_nps_reminded: idempotency (second call returns 0)
   - db_cleanup_expired_nps_waiting: only deletes >48h rows
-  - db_get_recent_nps_for_caja: phone anonymization + tenant isolation
+  - db_get_recent_nps_for_cashier: phone anonymization + tenant isolation
 
 Requirements:
   - TEST_DATABASE_URL env var must be set (otherwise all tests are skipped)
@@ -314,13 +314,13 @@ async def test_cleanup_deletes_only_after_48h(db_conn, org_id):
     assert gone == 0
 
 
-# ── Gap B: db_get_recent_nps_for_caja ────────────────────────────────────────
+# ── Gap B: db_get_recent_nps_for_cashier ────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_recent_nps_endpoint_anonymizes_phone(db_conn, org_id):
     """Recent NPS rows return phone as ***last4 — never the full number."""
-    from app.repositories.restaurant_repo import db_get_recent_nps_for_caja
+    from app.repositories.restaurant_repo import db_get_recent_nps_for_cashier
     from app.services.tenant_context import tenant_scope
 
     await _set_scope(db_conn, org_id)
@@ -334,7 +334,7 @@ async def test_recent_nps_endpoint_anonymizes_phone(db_conn, org_id):
     )
 
     with tenant_scope(org_id):
-        items = await db_get_recent_nps_for_caja(limit=10)
+        items = await db_get_recent_nps_for_cashier(limit=10)
 
     matching = [i for i in items if i["score"] == 5 and "Excelente" in i["comment"]]
     assert matching, f"Expected at least one matching row, got {items}"
@@ -349,7 +349,7 @@ async def test_recent_nps_endpoint_anonymizes_phone(db_conn, org_id):
 @pytest.mark.asyncio
 async def test_recent_nps_endpoint_tenant_isolated(raw_pool, monkeypatch):
     """Org A's NPS responses must NOT leak into Org B's recent feed."""
-    from app.repositories.restaurant_repo import db_get_recent_nps_for_caja
+    from app.repositories.restaurant_repo import db_get_recent_nps_for_cashier
     from app.services.tenant_context import tenant_scope
     from app.services import database as db_module
 
@@ -425,7 +425,7 @@ async def test_recent_nps_endpoint_tenant_isolated(raw_pool, monkeypatch):
         monkeypatch.setattr(db_module, "get_pool", _fake_get_pool_a)
 
         with tenant_scope(org_a_id):
-            items_a = await db_get_recent_nps_for_caja(limit=50)
+            items_a = await db_get_recent_nps_for_cashier(limit=50)
 
         markers_a = [i["comment"] for i in items_a]
         assert "ISOLATION_MARKER_A" in markers_a, f"Org A should see its own row: {items_a}"
@@ -437,7 +437,7 @@ async def test_recent_nps_endpoint_tenant_isolated(raw_pool, monkeypatch):
         monkeypatch.setattr(db_module, "get_pool", _fake_get_pool_b)
 
         with tenant_scope(org_b_id):
-            items_b = await db_get_recent_nps_for_caja(limit=50)
+            items_b = await db_get_recent_nps_for_cashier(limit=50)
 
         markers_b = [i["comment"] for i in items_b]
         assert "ISOLATION_MARKER_B" in markers_b, f"Org B should see its own row: {items_b}"

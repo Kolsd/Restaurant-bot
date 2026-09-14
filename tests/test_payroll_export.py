@@ -81,11 +81,11 @@ def _auth(monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 1. Calcular nómina
+# 1. Calculate payroll
 # ══════════════════════════════════════════════════════════════════════════════
 
 def test_payroll_calculate_returns_entries(client, monkeypatch):
-    """GET /payroll/calculate devuelve la lista de entradas por empleado."""
+    """GET /payroll/calculate returns the list of entries per employee."""
     _auth(monkeypatch)
     import app.services.database as db_mod
     monkeypatch.setattr(db_mod, "db_calculate_payroll", AsyncMock(return_value=_SNAPSHOT))
@@ -151,11 +151,11 @@ def test_list_payroll_runs(client, monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. Exportar CSV — caso feliz
+# 4. Export CSV — happy path
 # ══════════════════════════════════════════════════════════════════════════════
 
 def test_export_payroll_run_csv(client, monkeypatch):
-    """GET /payroll/runs/{id}/export devuelve CSV con cabecera y una fila por empleado."""
+    """GET /payroll/runs/{id}/export returns a CSV with a header and one row per employee."""
     _auth(monkeypatch)
     import app.services.database as db_mod
     monkeypatch.setattr(db_mod, "db_get_payroll_run", AsyncMock(return_value=_RUN_ROW))
@@ -197,7 +197,7 @@ def test_export_payroll_run_not_found(client, monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. Snapshot vacío → CSV solo con cabecera
+# 6. Empty snapshot → CSV with header only
 # ══════════════════════════════════════════════════════════════════════════════
 
 def test_export_empty_snapshot(client, monkeypatch):

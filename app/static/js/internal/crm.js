@@ -1013,7 +1013,7 @@ function onTplSendSelect() {
   if (!tpl) { preview.style.display = 'none'; return; }
   preview.style.display = 'block';
   const params = tpl.params || [];
-  // Mostrar qué campo se usará por parámetro (solo informativo, sin inputs)
+  // Show which field will be used per parameter (informational only, no inputs)
   document.getElementById('tpl-params-wrap').innerHTML = params.length
     ? `<div style="margin-top:10px"><div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;margin-bottom:6px">Parámetros automáticos</div>` +
       params.map(p => {
@@ -1040,7 +1040,7 @@ async function doSendTemplate() {
   if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
 
   try {
-    // Parámetros se resuelven automáticamente en el backend desde los datos del prospecto
+    // Parameters are resolved automatically on the backend from the prospect's data
     const paramsMap = {};
     ids.forEach(id => { paramsMap[id] = []; });
     const d = await api('POST', '/send-template', { prospect_ids: ids, template_id: tplId, params_map: paramsMap });

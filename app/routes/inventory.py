@@ -14,9 +14,9 @@ class InventoryItemCreate(BaseModel):
     name: str
     unit: str = "unidades"          # unidades, kg, litros, etc.
     current_stock: float
-    min_stock: float = 0            # umbral de alerta
-    linked_dishes: List[str] = []   # nombres exactos de platos del menú
-    cost_per_unit: float = 0        # costo por unidad (opcional)
+    min_stock: float = 0            # alert threshold
+    linked_dishes: List[str] = []   # exact menu dish names
+    cost_per_unit: float = 0        # cost per unit (optional)
 
 
 class InventoryItemUpdate(BaseModel):
@@ -37,7 +37,7 @@ class StockAdjustment(BaseModel):
 async def get_inventory(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Lista todos los productos del inventario"""
+    """Lists all inventory products"""
     items = await db.db_get_inventory(restaurant["id"])
     return {"items": items}
 
@@ -47,7 +47,7 @@ async def create_inventory_item(
     body: InventoryItemCreate,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Crea un nuevo producto en el inventario"""
+    """Creates a new inventory product"""
     item = await db.db_create_inventory_item(
         restaurant_id=restaurant["id"],
         name=body.name,
@@ -67,7 +67,7 @@ async def update_inventory_item(
     body: InventoryItemUpdate,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Actualiza un producto del inventario"""
+    """Updates an inventory product"""
     existing = await db.db_get_inventory_item(item_id)
     # Wave-2: inventory rows carry org_id (restaurant_id dropped in 0038).
     if not existing or existing.get("org_id") != restaurant["id"]:
@@ -85,7 +85,7 @@ async def delete_inventory_item(
     item_id: int,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Elimina un producto del inventario"""
+    """Deletes an inventory product"""
     existing = await db.db_get_inventory_item(item_id)
     # Wave-2: inventory rows carry org_id (restaurant_id dropped in 0038).
     if not existing or existing.get("org_id") != restaurant["id"]:
@@ -101,7 +101,7 @@ async def adjust_stock(
     body: StockAdjustment,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Ajusta el stock manualmente (reposición, merma, etc.)"""
+    """Manually adjusts stock (restock, shrinkage, etc.)"""
     result = await db.db_adjust_inventory_stock(
         item_id=item_id,
         quantity_delta=body.quantity,
@@ -119,7 +119,7 @@ async def get_stock_history(
     item_id: int,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Historial de movimientos de stock"""
+    """Stock movement history"""
     existing = await db.db_get_inventory_item(item_id)
     # Wave-2: inventory rows carry org_id (restaurant_id dropped in 0038).
     if not existing or existing.get("org_id") != restaurant["id"]:
@@ -133,7 +133,7 @@ async def get_stock_history(
 async def get_inventory_alerts(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Productos con stock bajo o agotado"""
+    """Products with low or depleted stock"""
     alerts = await db.db_get_inventory_alerts(restaurant["id"])
     return {"alerts": alerts}
 
@@ -142,7 +142,7 @@ async def get_inventory_alerts(
 async def get_menu_items_for_linking(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Devuelve todos los platos del menú para el selector de vinculación"""
+    """Returns all menu dishes for the linking selector"""
     menu = await db.db_get_menu(restaurant["whatsapp_number"]) or {}
     dishes = []
     for category, items in menu.items():
@@ -151,7 +151,7 @@ async def get_menu_items_for_linking(
     return {"dishes": dishes}
 
 
-# ── ESCANDALLOS / RECETAS (FASE 4) ────────────────────────────────────────────
+# ── RECIPES (PHASE 4) ────────────────────────────────────────────
 
 class RecipeLine(BaseModel):
     ingredient_id: int
@@ -167,7 +167,7 @@ class RecipeUpsert(BaseModel):
 async def get_all_recipes(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Lista todos los escandallos con food cost por plato."""
+    """Lists all recipes with food cost per dish."""
     recipes = await db.db_get_all_recipes(restaurant["id"])
     return {"recipes": recipes}
 
@@ -177,7 +177,7 @@ async def get_recipe(
     dish_name: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Devuelve las líneas de ingredientes de un plato."""
+    """Returns a dish's ingredient lines."""
     lines = await db.db_get_dish_recipe(restaurant["id"], dish_name)
     return {"dish_name": dish_name, "lines": lines}
 
@@ -187,7 +187,7 @@ async def upsert_recipe(
     body: RecipeUpsert,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Crea o reemplaza el escandallo completo de un plato."""
+    """Creates or replaces a dish's full recipe."""
     if not body.dish_name.strip():
         raise HTTPException(status_code=400, detail="dish_name no puede estar vacío")
     lines = [{"ingredient_id": l.ingredient_id, "quantity": l.quantity} for l in body.lines]
@@ -200,7 +200,7 @@ async def delete_recipe(
     dish_name: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Elimina todos los ingredientes del escandallo de un plato."""
+    """Deletes all ingredients from a dish's recipe."""
     await db.db_delete_dish_recipe(restaurant["id"], dish_name)
     return {"success": True}
 
@@ -209,6 +209,6 @@ async def delete_recipe(
 async def get_food_costs(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Food cost de cada plato con desglose por ingrediente."""
+    """Food cost of each dish with a per-ingredient breakdown."""
     costs = await db.db_get_food_costs(restaurant["id"])
     return {"food_costs": costs}

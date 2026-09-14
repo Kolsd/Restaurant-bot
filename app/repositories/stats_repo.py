@@ -1189,16 +1189,16 @@ async def db_branches_consolidated(org_id: int, days: int = 7) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
-    """Per-location metric comparison matrix for the sucursales page.
+    """Per-location metric comparison matrix for the branches page.
 
     Fetches all locations for the org, then computes a set of metrics per location.
     Metrics without a clean data source return null with a TODO comment.
 
     Supported metrics (with real queries):
-      Ventas diarias promedio  — total_sales / days per location
-      Ticket promedio          — avg order total per location
+      Average daily sales      — total_sales / days per location
+      Average ticket           — avg order total per location
       NPS                      — avg score from nps_responses per location (last 30d)
-      Tasa de reserva confirmada — confirmed / total reservations
+      Confirmed reservation rate — confirmed / total reservations
       No-show rate             — no_show / total reservations
       Food cost %              — sum(qty * cost_per_unit) / sum(qty * price) * 100
                                  from orders.items + table_orders.items × dish_recipes
@@ -1206,10 +1206,10 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
                                  or the location has zero matched revenue.
 
     Metrics returning null (pending data sources):
-      Rotación mesas / día     — TODO: requires table_sessions with open/close timestamps
-      Costo nómina / ventas    — TODO: requires payroll_runs linked to sales period
-      Rotación de personal (12m) — TODO: requires staff.termination_date or departure_events table
-      Crecimiento YoY          — TODO: computed at org level in branches_consolidated; per-location
+      Table turnover / day     — TODO: requires table_sessions with open/close timestamps
+      Payroll cost / sales     — TODO: requires payroll_runs linked to sales period
+      Staff turnover (12m)     — TODO: requires staff.termination_date or departure_events table
+      YoY growth               — TODO: computed at org level in branches_consolidated; per-location
                                        requires historical order data with location_id (available
                                        but not yet back-filled uniformly for all orgs)
     """

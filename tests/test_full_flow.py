@@ -878,7 +878,7 @@ class TestCashierFlows:
         # Adapter was not called because config is None
         adapter_mock.create_invoice.assert_not_called()
 
-    def test_order_passes_to_factura_entregada(self, client, monkeypatch):
+    def test_order_passes_to_invoice_delivered(self, client, monkeypatch):
         """After paying all checks, first table order transitions to factura_entregada."""
         patch_auth(monkeypatch, role="caja", features={"dian_active": False})
         check = _mock_check(total=20000.0)
@@ -1404,7 +1404,7 @@ class TestEndToEndTableFlow:
         assert resp.status_code == 200
         update_mock.assert_called_once_with("o-new", "listo")
 
-    def test_mesero_requests_bill_creates_check(self, client, monkeypatch):
+    def test_waiter_requests_bill_creates_check(self, client, monkeypatch):
         """Cashier creates a check for the table's bill."""
         patch_auth(monkeypatch, role="caja")
         ticket = {

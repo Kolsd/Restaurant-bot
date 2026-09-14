@@ -762,7 +762,7 @@
     if (btn) { btn.disabled = true; btn.textContent = 'Procesando...'; }
 
     try {
-      // Pago real via Wompi pendiente — backend stub crea pack sin cobrar // lint-allow: subscription billing endpoint — wired in billing_subscription.py
+      // Real payment via Wompi pending — backend stub creates the pack without charging // lint-allow: subscription billing endpoint — wired in billing_subscription.py
       var r = await fetch('/api/billing/buy-pack', { // lint-allow: subscription billing endpoint — wired in billing_subscription.py
         method: 'POST',
         headers: mesioHeaders(),
@@ -1001,15 +1001,15 @@
       return;
     }
 
-    // Determine how many sucursales the new plan allows
+    // Determine how many branches the new plan allows
     var planLocLimits = { pulso: 1, restaurante: 3, pro: 10, cadena: null };
     var newLimit = planLocLimits[newPlan];
-    var sucursales = status.current_sucursales || [];
+    var branches = status.current_sucursales || [];
 
-    if (newLimit !== null && sucursales.length > newLimit) {
+    if (newLimit !== null && branches.length > newLimit) {
       // Need to pick which one to keep
       list.textContent = '';
-      sucursales.forEach(function (s) {
+      branches.forEach(function (s) {
         var label = document.createElement('label');
         label.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;';
         var radio = document.createElement('input');
@@ -1029,9 +1029,9 @@
       picker.style.display = '';
       btn.disabled = true; // require location selection
     } else {
-      // Single sede or plan allows all current sedes — auto-pick first
+      // Single location or plan allows all current locations — auto-pick first
       picker.style.display = 'none';
-      _selectedLocId = sucursales.length > 0 ? sucursales[0].id : null;
+      _selectedLocId = branches.length > 0 ? branches[0].id : null;
       btn.disabled = !newPlan;
     }
   }

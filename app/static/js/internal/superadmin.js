@@ -161,17 +161,17 @@
       const tdPlan = document.createElement("td");
       tdPlan.innerHTML = planBadge;
       // Sedes
-      const tdSedes = document.createElement("td");
-      const sedesBtn = document.createElement("button");
-      sedesBtn.className = "btn btn-secondary btn-sm";
-      sedesBtn.textContent = (o.location_count || 0) + " sede(s)";
-      sedesBtn.onclick = function () {
+      const tdLocations = document.createElement("td");
+      const locationsBtn = document.createElement("button");
+      locationsBtn.className = "btn btn-secondary btn-sm";
+      locationsBtn.textContent = (o.location_count || 0) + " sede(s)";
+      locationsBtn.onclick = function () {
         _locOrgFilter = o.id;
         switchOrgTab("sedes");
         const sel = $("sedes-org-filter");
         if (sel) sel.value = String(o.id);
       };
-      tdSedes.appendChild(sedesBtn);
+      tdLocations.appendChild(locationsBtn);
       // Status
       const tdStatus = document.createElement("td");
       tdStatus.innerHTML = statusBadge;
@@ -209,7 +209,7 @@
       tr.appendChild(tdSlug);
       tr.appendChild(tdWa);
       tr.appendChild(tdPlan);
-      tr.appendChild(tdSedes);
+      tr.appendChild(tdLocations);
       tr.appendChild(tdStatus);
       tr.appendChild(tdCreated);
       tr.appendChild(tdActions);
@@ -252,7 +252,7 @@
       }
 
       ALL_LOCATIONS = locations;
-      renderSedesTable(locations);
+      renderLocationsTable(locations);
     } catch (e) {
       tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Error de conexión</td></tr>';
     }
@@ -263,7 +263,7 @@
     return o ? o.name : "Org #" + orgId;
   }
 
-  function renderSedesTable(locations) {
+  function renderLocationsTable(locations) {
     const tbody = $("sedes-tbody");
     if (!locations.length) {
       tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Sin sedes</td></tr>';
@@ -648,7 +648,7 @@
   };
 
   // ── Filter handler ────────────────────────────────────────────────────────────
-  window.onSedesOrgFilterChange = function () {
+  window.onLocationsOrgFilterChange = function () {
     const sel = $("sedes-org-filter");
     const orgId = sel ? (sel.value ? parseInt(sel.value) : null) : null;
     loadAllLocations(orgId);

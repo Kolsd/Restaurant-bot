@@ -754,15 +754,15 @@ async def analytics_mrr(_: None = Depends(verify_superadmin)):
     return {**current, **delta}
 
 
-# ── North-star: Pedidos Rescatados ────────────────────────────────────────────
+# ── North-star: Rescued Orders ────────────────────────────────────────────
 
 @router.get("/api/internal/analytics/orders-rescued")
-async def analytics_pedidos_rescatados(
+async def analytics_rescued_orders(
     period: str = "mtd",
     _: None = Depends(verify_superadmin),
 ):
     """
-    Cross-tenant north-star metric — Pedidos Rescatados.
+    Cross-tenant north-star metric — Rescued Orders.
 
     Returns total bot-originated orders across all tenants + per-tenant ranking.
 
@@ -781,7 +781,7 @@ async def analytics_pedidos_rescatados(
       }
     """
     from datetime import date, timedelta
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados_global
+    from app.repositories.north_star_repo import db_count_rescued_orders_global
 
     today = date.today()
     if period == "mtd":
@@ -791,11 +791,11 @@ async def analytics_pedidos_rescatados(
         period_start = today - timedelta(days=29)
         period_end   = today
 
-    with bypass_tenant_scope("internal_analytics_pedidos_rescatados_cross_tenant"):
+    with bypass_tenant_scope("internal_analytics_rescued_orders_cross_tenant"):
         try:
-            ranking = await db_count_pedidos_rescatados_global(period_start, period_end)
+            ranking = await db_count_rescued_orders_global(period_start, period_end)
         except Exception as exc:
-            log.exception("analytics.pedidos_rescatados_failed")
+            log.exception("analytics.rescued_orders_failed")
             return JSONResponse(status_code=500, content={"detail": "Error al calcular pedidos rescatados"})
 
     total = sum(r["count"] for r in ranking)

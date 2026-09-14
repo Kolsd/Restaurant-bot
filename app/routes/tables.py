@@ -60,7 +60,7 @@ async def _get_active_session_for_table(table_id: str, org_id: int) -> dict | No
     return dict(row) if row else None
 
 
-async def _resolve_mesero(staff_id: str | None, org_id: int) -> dict | None:
+async def _resolve_waiter(staff_id: str | None, org_id: int) -> dict | None:
     """Resolve staff name from staff_id UUID (GLOBAL lookup, no tenant scope needed).
 
     Returns {"name": "...", "first_name": "..."} or None if not found.
@@ -103,7 +103,7 @@ async def get_table_wa_number(table: dict) -> str:
         if r:
             wa_number = r.get("whatsapp_number", "") or ""
 
-    # 🛡️ Limpiamos el sufijo _b para que el enlace wa.me sea válido
+    # 🛡️ Strip the _b suffix so the wa.me link is valid
     return wa_number.split("_b")[0] if wa_number else ""
 
 async def _get_restaurant_for_table(table_id: str | None, session_data: dict | None) -> dict:
@@ -131,7 +131,7 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
 
 async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict | None, db_phone_id: str | None, username: str) -> None:
     rest = await _get_restaurant_for_table(table_id, session_data)
-    # Usamos el bot_number limpio para que coincida con el webhook de Meta
+    # Use the clean bot_number so it matches Meta's webhook
     raw_bot_num = rest.get("whatsapp_number", "")
     clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
     final_bot_num = (session_data.get("bot_number") if session_data else None) or clean_bot_num
@@ -146,7 +146,7 @@ async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict
     # via GET /api/diner/status + the nps_prompt block (blocks.py) once
     # trigger_nps below sets the Redis state; only the WhatsApp push is skipped.
     is_web_identity = phone.startswith("web:")
-    # Disparamos directamente la encuesta NPS
+    # Trigger the NPS survey directly
     if final_bot_num:
         asyncio.create_task(trigger_nps(phone, final_bot_num, rest_name))
         if not is_web_identity:
@@ -157,11 +157,11 @@ async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict
     with bypass_tenant_scope("farewell_and_nps: cleanup checkout data by phone"):
         await db.db_cleanup_after_checkout(phone)
 
-# ── MESAS ────────────────────────────────────────────────────────────
+# ── TABLES ────────────────────────────────────────────────────────────
 
 @router.get("/api/tables")
 async def get_tables(request: Request):
-    """Devuelve las mesas de la sucursal actual para pintarlas en el dashboard."""
+    """Returns the current branch's tables for rendering on the dashboard."""
     await require_auth(request)
     user = await get_current_user(request)
 
@@ -199,7 +199,7 @@ async def get_tables(request: Request):
 
 @router.post("/api/tables")
 async def create_table(request: Request):
-    """Crea una mesa automáticamente sin pedir número ni nombre manual."""
+    """Automatically creates a table without asking for a manual number or name."""
     await require_auth(request)
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
@@ -261,7 +261,7 @@ async def _verify_table_ownership(table_id: str, restaurant: dict) -> None:
 
 @router.delete("/api/tables/{table_id}")
 async def delete_table(table_id: str, restaurant=Depends(get_current_restaurant_scoped)):
-    """Elimina una mesa por su ID."""
+    """Deletes a table by its ID."""
     await _verify_table_ownership(table_id, restaurant)
     await db.db_delete_table(table_id)
     return {"success": True}
@@ -269,7 +269,7 @@ async def delete_table(table_id: str, restaurant=Depends(get_current_restaurant_
 
 @router.get("/api/tables/floor-plan")
 async def get_floor_plan(request: Request, restaurant=Depends(get_current_restaurant_scoped)):
-    """Devuelve todas las mesas con posiciones y ocupación actual para el mapa de planta.
+    """Returns all tables with positions and current occupancy for the floor plan.
 
     Filtering:
       - X-Branch-ID = digit (location_id) → filter to that sede.
@@ -306,7 +306,7 @@ class TablePropertiesBody(BaseModel):
 
 @router.put("/api/tables/{table_id}/position")
 async def update_table_position(table_id: str, body: TablePositionBody, restaurant=Depends(get_current_restaurant_scoped)):
-    """Actualiza la posición (x, y) de una mesa en el mapa de planta."""
+    """Updates a table's (x, y) position on the floor plan."""
     await _verify_table_ownership(table_id, restaurant)
     result = await db.db_update_table_position(
         table_id, body.position_x, body.position_y
@@ -385,7 +385,7 @@ async def save_floor_plan(
 
 @router.put("/api/tables/{table_id}/properties")
 async def update_table_properties(table_id: str, body: TablePropertiesBody, restaurant=Depends(get_current_restaurant_scoped)):
-    """Actualiza propiedades de una mesa (capacity, table_type, zone)."""
+    """Updates a table's properties (capacity, table_type, zone)."""
     await _verify_table_ownership(table_id, restaurant)
     updates = body.model_dump(exclude_none=True)
     if "table_type" in updates and updates["table_type"] not in _VALID_TABLE_TYPES:
@@ -400,7 +400,7 @@ async def update_table_properties(table_id: str, body: TablePropertiesBody, rest
 
 @router.get("/menu", response_class=HTMLResponse)
 async def menu_page_bot():
-    """Sirve el catálogo para contexto delivery/recoger (?bot=NUMBER)."""
+    """Serves the catalog for delivery/pickup context (?bot=NUMBER)."""
     p = STATIC / "html" / "menu.html"
     if not p.exists():
         raise HTTPException(status_code=404, detail="menu.html no encontrado en static/")
@@ -475,7 +475,7 @@ async def public_menu_context(table_id: str):
             with tenant_scope(rid):
                 session_row = await _get_active_session_for_table(table_id, rid)
             if session_row:
-                mesero_info = await _resolve_mesero(session_row.get("assigned_staff_id"), rid)
+                mesero_info = await _resolve_waiter(session_row.get("assigned_staff_id"), rid)
                 table_context = {
                     "table_name": table["name"],
                     "assigned_mesero": mesero_info,
@@ -636,11 +636,11 @@ async def get_delivery_orders(request: Request):
     import json as _json
 
     # Tenant-scope the read so RLS filters to the authenticated admin's org.
-    # Without this, db_get_delivery_orders_for_caja returned ALL tenants' orders.
+    # Without this, db_get_delivery_orders_for_cashier returned ALL tenants' orders.
     restaurant = await get_current_restaurant(request)
     org_id = restaurant["id"]
     with tenant_scope(org_id):
-        rows = await tr.db_get_delivery_orders_for_caja()
+        rows = await tr.db_get_delivery_orders_for_cashier()
     orders = []
     for r in rows:
         items = r["items"]
@@ -765,7 +765,7 @@ async def update_delivery_order_status(request: Request, order_id: str):
 
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None, station: str = None, table_id: str = None):
-    """Devuelve órdenes de mesa filtradas por sede y estado.
+    """Returns table orders filtered by branch and status.
 
     Resolution rules (post-2026-04-29 — fixes empty 'Pedidos activos' /
     Comanda Sin productos / proof loop bug family):
@@ -828,9 +828,9 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
 @router.get("/api/table-orders/{order_id}/ticket")
 async def get_order_ticket(request: Request, order_id: str):
     """
-    Devuelve los datos estructurados de un ticket/comanda agregando todas
-    las sub-órdenes del mismo base_order_id.
-    Incluye datos fiscales (CUFE, QR) si existe una factura emitida.
+    Returns the structured data for a ticket, aggregating all
+    sub-orders with the same base_order_id.
+    Includes fiscal data (CUFE, QR) if an invoice has been issued.
     """
     import json as _json
     user = await get_current_user(request)
@@ -842,7 +842,7 @@ async def get_order_ticket(request: Request, order_id: str):
     if not rows:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
-    # Agregar ítems y totales de todas las sub-órdenes
+    # Aggregate items and totals from all sub-orders
     all_items: list = []
     total: Decimal = Decimal("0")
     notes_parts: list = []
@@ -861,7 +861,7 @@ async def get_order_ticket(request: Request, order_id: str):
         if row.get("notes"):
             notes_parts.append(row["notes"])
 
-    # Datos fiscales: última factura emitida para esta orden (deferred to billing layer).
+    # Fiscal data: last invoice issued for this order (deferred to billing layer).
     # Use tenant_connection so the lookup inherits the active bypass_tenant_scope
     # set above (admins legitimately view tickets across branches). Raw pool.acquire
     # would create a new connection without the GUC — RLS-blocked under mesio_app
@@ -999,7 +999,7 @@ async def update_order_status(request: Request, order_id: str):
     if status == "generar_factura":
         base_id = order.get("base_order_id") or order_id
         with bypass_tenant_scope("update_order_status: mark factura generada by order ID"):
-            await db.db_mark_factura_generada(base_id)
+            await db.db_mark_invoice_generated(base_id)
         if phone and phone != "manual":
             await send_wa_msg(
                 phone,
@@ -1084,11 +1084,11 @@ class ManualOrderRequest(BaseModel):
     total:      Decimal
     notes:      str = ""
     station:    str = "all"
-    branch_id:  int = None  # 🛡️ Agregamos branch_id al modelo
+    branch_id:  int = None  # 🛡️ Added branch_id to the model
     
 @router.get("/api/pos/menu")
 async def get_pos_menu(request: Request):
-    """Devuelve el menú del restaurante para pintarlo en el POS del mesero.
+    """Returns the restaurant's menu for rendering in the waiter's POS.
 
     Wave-2: the menu lives at the org level (organizations.menu). The wa_number
     used for the menu lookup must come from the staff's actual sede (resolved
@@ -1124,10 +1124,10 @@ async def get_pos_menu(request: Request):
 
 @router.get("/api/pos/tables-status")
 async def get_tables_status(request: Request):
-    """Devuelve todas las mesas y su estado actual (ideal para pintar el mapa)"""
+    """Returns all tables and their current status (ideal for rendering the map)"""
     await require_auth(request)
 
-    # 1. Resolución de contexto inteligente
+    # 1. Smart context resolution
     restaurant = await get_current_restaurant(request)
 
     # Wave-2 model: every restaurant is a `locations` row. There is NO special
@@ -1295,7 +1295,7 @@ async def mark_table_ghost(request: Request, table_id: str):
 
 @router.patch("/api/table-orders/{base_order_id}/adjust")
 async def adjust_table_bill(request: Request, base_order_id: str):
-    """Ajusta ítems y total de una factura antes de cobrar (descuentos, propina, etc.)"""
+    """Adjusts an invoice's items and total before charging (discounts, tip, etc.)"""
     await require_auth(request)
     import json as _json
 
@@ -1320,8 +1320,8 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
     await require_auth(request)
     user = await get_current_user(request)
     
-    # 🛡️ RESOLUCIÓN DE SUCURSAL
-    # Si viene en el body lo usamos, si no, usamos el del usuario (mesero/admin)
+    # 🛡️ BRANCH RESOLUTION
+    # If it comes in the body we use it, otherwise use the user's (waiter/admin)
     branch_id = body.branch_id or user.get("branch_id")
     
     order_id = f"pos-{str(uuid.uuid4())[:8]}"
@@ -1367,7 +1367,7 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
 # ── PRE-CUENTA ─────────────────────────────────────────────────────────────────
 
 @router.post("/api/pos/tables/{table_id}/pre-cuenta")
-async def pos_pre_cuenta(request: Request, table_id: str):
+async def pos_pre_bill(request: Request, table_id: str):
     """Sends a WhatsApp pre-bill summary to the customer at the table.
 
     Queries the active session to get the customer's phone, aggregates all open
@@ -1377,7 +1377,7 @@ async def pos_pre_cuenta(request: Request, table_id: str):
     restaurant = await get_current_restaurant(request)
 
     # 1. Find active session for this table
-    with bypass_tenant_scope("pre_cuenta: active session lookup for table"):
+    with bypass_tenant_scope("pre_bill: active session lookup for table"):
         sess = await db.db_get_active_session_by_table_id(table_id)
 
     if not sess:
@@ -1387,13 +1387,13 @@ async def pos_pre_cuenta(request: Request, table_id: str):
     meta_phone_id = sess.get("meta_phone_id")
 
     # 2. Get all open orders for this table
-    with bypass_tenant_scope("pre_cuenta: order aggregation for table"):
+    with bypass_tenant_scope("pre_bill: order aggregation for table"):
         base_order_id = await db.db_get_base_order_id(table_id)
 
     if not base_order_id:
         raise HTTPException(status_code=404, detail="No hay pedidos activos en esta mesa")
 
-    with bypass_tenant_scope("pre_cuenta: ticket aggregation"):
+    with bypass_tenant_scope("pre_bill: ticket aggregation"):
         ticket = await db.db_get_order_ticket_data(base_order_id, None)
 
     if not ticket:
@@ -1427,7 +1427,7 @@ async def pos_pre_cuenta(request: Request, table_id: str):
     db_phone_id = meta_phone_id or restaurant.get("phone_number_id") or None
     await send_wa_msg(customer_phone, wa_text, db_phone_id=db_phone_id)
 
-    log.info("tables.pre_cuenta_sent", table_id=table_id, phone=customer_phone, items=len(items), total=total)
+    log.info("tables.pre_bill_sent", table_id=table_id, phone=customer_phone, items=len(items), total=total)
     return {
         "success":     True,
         "phone":       customer_phone,
@@ -1450,7 +1450,7 @@ class CheckDef(BaseModel):
 
 class CreateChecksBody(BaseModel):
     checks: list[CheckDef]
-    tax_pct: float = 19.0        # enviado por el cliente desde la config de billing
+    tax_pct: float = 19.0        # sent by the client from the billing config
     tax_regime: str = "iva"
 
 class PaymentMethod(BaseModel):
@@ -1462,7 +1462,7 @@ class PayCheckBody(BaseModel):
     customer_name: str = Field("Consumidor Final", max_length=200)
     customer_nit: str = Field("222222222", max_length=30, pattern=r"^[\d\-]{6,30}$")
     customer_email: str = Field("", max_length=254)
-    service_charge: float = 0.0  # Cargo de servicio en valor absoluto (ej. 10% del subtotal)
+    service_charge: float = 0.0  # Service charge as an absolute value (e.g. 10% of the subtotal)
     tip_amount: float = Field(0.0, ge=0.0)
 
     @field_validator("customer_email")
@@ -1477,13 +1477,13 @@ class PayCheckBody(BaseModel):
 @router.post("/api/table-orders/{base_order_id}/checks")
 async def create_checks(request: Request, base_order_id: str, body: CreateChecksBody):
     """
-    Crea o reemplaza la división de cuenta de una mesa.
-    Valida integridad de cantidades contra el ticket original.
-    Calcula subtotal/impuesto/total servidor-side (no confía en el cliente).
+    Creates or replaces a table's bill split.
+    Validates quantity integrity against the original ticket.
+    Calculates subtotal/tax/total server-side (does not trust the client).
     """
     user = await get_current_user(request)
 
-    # Obtener el ticket completo para validar cantidades
+    # Get the full ticket to validate quantities
     # First try with the user's branch filter; if nothing found (e.g. Matriz admin
     # handling a branch order), retry without the branch filter. The ownership
     # check below still enforces restaurant boundaries.
@@ -1494,7 +1494,7 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
 
-    # Mapa de qty disponible por plato en el ticket original
+    # Map of available qty per dish in the original ticket
     available: dict[str, int] = {}
     for item in ticket.get("items", []):
         key = item["name"].strip().lower()
@@ -1511,7 +1511,7 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
     if ticket_org_id is None or user_org_id is None or int(ticket_org_id) != int(user_org_id):
         raise HTTPException(status_code=403, detail="Este ticket no pertenece a tu organización")
 
-    # Validar que los checks no excedan las cantidades disponibles
+    # Validate that the checks don't exceed the available quantities
     check_totals: dict[str, int] = {}
     for chk in body.checks:
         for it in chk.items:
@@ -1525,7 +1525,7 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
                 detail=f"'{name}': cantidad en checks ({qty}) supera la pedida ({avail})"
             )
 
-    # Validar que el desglose cubre TODOS los ítems del ticket (no solo que no exceda)
+    # Validate that the breakdown covers ALL the ticket's items (not just that it doesn't exceed)
     for name, avail_qty in available.items():
         assigned = check_totals.get(name, 0)
         if assigned < avail_qty:
@@ -1534,11 +1534,11 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
                 detail=f"El desglose no cubre todos los ítems. Faltan: {name} x{avail_qty - assigned}"
             )
 
-    # Construir checks con totales calculados servidor-side
+    # Build checks with server-side calculated totals
     tax_factor = to_decimal(body.tax_pct) / Decimal("100")
     validated = []
     for chk in body.checks:
-        # Reconstruir items con unit_price desde el ticket (busca por nombre)
+        # Rebuild items with unit_price from the ticket (looked up by name)
         price_map: dict[str, Decimal] = {}
         for item in ticket.get("items", []):
             price_map[item["name"].strip().lower()] = to_decimal(item.get("price", 0))
@@ -1573,7 +1573,7 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
 
 @router.get("/api/table-orders/{base_order_id}/checks")
 async def get_checks(request: Request, base_order_id: str):
-    """Lista todos los checks de una mesa con sus datos fiscales."""
+    """Lists all of a table's checks with their fiscal data."""
     await get_current_user(request)
     with bypass_tenant_scope("get_checks: checks lookup by order ID across branches"):
         checks = await db.db_get_checks(base_order_id)
@@ -1582,18 +1582,18 @@ async def get_checks(request: Request, base_order_id: str):
 @router.post("/api/table-orders/{base_order_id}/checks/single/pay")
 async def pay_check_single(request: Request, base_order_id: str, body: PayCheckBody):
     """
-    Cobro de mesa completa en un solo check (sin split previo).
+    Charges the whole table in a single check (no prior split).
 
-    Crea atómicamente un check único con TODOS los ítems del ticket y lo cobra
-    reutilizando el flujo de pay_check (fiscal, lealtad, NPS, cambio, propina).
+    Atomically creates a single check with ALL the ticket's items and charges it
+    reusing the pay_check flow (fiscal, loyalty, NPS, change, tip).
 
-    Caja llama acá cuando el usuario selecciona "Pagar mesa completa" sin haber
-    dividido la cuenta. El check_id real se devuelve en la respuesta para que
-    el frontend pueda referenciarlo después si es necesario.
+    The cashier calls this when the user selects "Pagar mesa completa" without
+    having split the bill. The real check_id is returned in the response so
+    the frontend can reference it later if needed.
     """
     user = await get_current_user(request)
 
-    # TOCTOU guard — serialize concurrent single-pay attempts per mesa.
+    # TOCTOU guard — serialize concurrent single-pay attempts per table.
     rl_key = f"pay_single:{base_order_id}"
     if not await state_store.rate_limit_check(rl_key, max_requests=1, window_seconds=15):
         raise HTTPException(status_code=429, detail="Ya hay un cobro de mesa en proceso. Espera unos segundos.")
@@ -1642,7 +1642,7 @@ async def pay_check_single(request: Request, base_order_id: str, body: PayCheckB
         })
         gross += money_mul(unit_price, qty)
 
-    # For a single full-mesa check we treat the ticket's total as gross.
+    # For a single full-table check we treat the ticket's total as gross.
     # Tax factor is 0 here — split checks can pass tax_pct on creation, but
     # the single pay path uses whatever tax was already computed into the ticket.
     total      = quantize_money(gross)
@@ -1715,7 +1715,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
                 raise HTTPException(status_code=409, detail=f"Este check ya fue procesado (status: {existing['status']})")
             _claimed = True
 
-            # Si no se enviaron pagos, usar proposed_payments del check (flujo bot)
+            # If no payments were sent, use the check's proposed_payments (bot flow)
             if not body.payments:
                 proposed = check.get("proposed_payments")
                 if isinstance(proposed, str):
@@ -1726,14 +1726,14 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
                 else:
                     raise HTTPException(status_code=400, detail="No se especificaron métodos de pago")
 
-            # También usar tip propuesto si no se envió tip explícito y hay uno guardado
+            # Also use the proposed tip if no explicit tip was sent and one is stored
             if body.tip_amount == 0.0 and check.get("proposed_tip"):
                 body.tip_amount = float(to_decimal(check["proposed_tip"]))
 
-            total_pagado = to_decimal(sum(p.amount for p in body.payments))
+            total_paid = to_decimal(sum(p.amount for p in body.payments))
             check_total  = to_decimal(check["total"]) + to_decimal(body.service_charge)
-            if total_pagado < check_total:
-                raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${float(check_total):,.0f}, se recibieron ${float(total_pagado):,.0f}")
+            if total_paid < check_total:
+                raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${float(check_total):,.0f}, se recibieron ${float(total_paid):,.0f}")
 
             # Resolve currency before quantizing change/tip so zero-decimal currencies (COP, CLP)
             # are rounded correctly at this JSON boundary.
@@ -1746,7 +1746,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
                     features = {}
             _currency = features.get("currency") if isinstance(features, dict) else None
 
-            change = float(quantize_money(total_pagado - check_total, _currency))
+            change = float(quantize_money(total_paid - check_total, _currency))
 
             tip_amount_d = to_decimal(body.tip_amount)
             tip_cap_base = to_decimal(check["total"]) + to_decimal(body.service_charge)
@@ -1923,7 +1923,7 @@ async def attach_checkout_proof(
     base_order_id: str,
     body: CheckoutProofBody,
 ):
-    """Adjunta comprobante de pago a los checks con propuesta awaiting_proof."""
+    """Attaches proof of payment to checks with an awaiting_proof proposal."""
     await get_current_user(request)
     with bypass_tenant_scope("attach_proof: proof attachment by order ID across branches"):
         updated = await db.db_attach_proof(base_order_id, body.customer_phone, body.media_url)
@@ -1935,8 +1935,8 @@ async def attach_checkout_proof(
 @router.get("/api/checkout-proposals")
 async def list_checkout_proposals(request: Request):
     """
-    Lista mesas con propuestas de pago bot activas (pending/awaiting_proof/proof_received).
-    Para el tab 'Por Confirmar' en cashier.html.
+    Lists tables with active bot payment proposals (pending/awaiting_proof/proof_received).
+    For the 'Por Confirmar' tab in cashier.html.
     """
     restaurant = await get_current_restaurant(request)
     branch_header = request.headers.get("X-Branch-ID", "")
@@ -1963,7 +1963,7 @@ async def cancel_checkout_proposal(base_order_id: str, request: Request):
 
 @router.get("/api/table-orders/{base_order_id}/checks/{check_id}/ticket")
 async def get_check_ticket(request: Request, base_order_id: str, check_id: str):
-    """Devuelve los datos del check para impresión de factura térmica."""
+    """Returns the check data for thermal receipt printing."""
     await get_current_user(request)
     with bypass_tenant_scope("get_check_ticket: ticket lookup by check ID across branches"):
         ticket = await db.db_get_check_ticket(check_id)
@@ -2014,8 +2014,8 @@ class QuickInvoiceBody(BaseModel):
 @router.post("/api/pos/quick-invoice")
 async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
     """
-    Crea una venta rápida desde caja sin pasar por el flujo de mesa/bot.
-    Crea un table_order efímero, un check y lo paga en un solo paso.
+    Creates a quick sale from the register without going through the table/bot flow.
+    Creates an ephemeral table_order, a check, and pays it in a single step.
     """
     restaurant = await get_current_restaurant(request)
     user = await get_current_user(request)
@@ -2069,7 +2069,7 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
     with tenant_scope(restaurant["id"]):
         await db.db_save_table_order(order)
 
-        # Crear un check único para esta venta
+        # Create a single check for this sale
         check_payload = [{
             "check_number": 1,
             "items": items_payload,
@@ -2145,7 +2145,7 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
 # ── CAJA: Customer lookup ─────────────────────────────────────────────────────
 
 @router.get("/api/cashier/customer/{phone}")
-async def get_caja_customer(
+async def get_cashier_customer(
     phone: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ) -> dict:
@@ -2213,7 +2213,7 @@ async def get_caja_customer(
                 "tier": None,
             }
     except Exception:
-        log.exception("caja_customer.loyalty_lookup_failed", phone=clean_phone, org_id=org_id)
+        log.exception("cashier_customer.loyalty_lookup_failed", phone=clean_phone, org_id=org_id)
 
     # ── Recent orders (last 5 from orders + table_orders, by phone) ──────────
     recent_orders: list[dict] = await _get_recent_orders_for_phone(org_id, clean_phone, limit=5)
@@ -2246,7 +2246,7 @@ async def _get_recent_orders_for_phone(org_id: int, phone: str, limit: int = 5) 
         delivery = await db_get_recent_orders_by_phone(org_id, phone, limit)
         table = await db_get_recent_table_orders_by_phone(org_id, phone, limit)
     except Exception:
-        log.exception("caja_customer.recent_orders_failed", phone=phone, org_id=org_id)
+        log.exception("cashier_customer.recent_orders_failed", phone=phone, org_id=org_id)
         return []
 
     combined = delivery + table
@@ -2257,7 +2257,7 @@ async def _get_recent_orders_for_phone(org_id: int, phone: str, limit: int = 5) 
 # ── CAJA: Recent NPS feed ─────────────────────────────────────────────────────
 
 @router.get("/api/cashier/recent-nps")
-async def get_caja_recent_nps(
+async def get_cashier_recent_nps(
     limit: int = 10,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ) -> dict:
@@ -2271,5 +2271,5 @@ async def get_caja_recent_nps(
 
     Phone is anonymized (last 4 digits only). limit is clamped to [1, 50].
     """
-    rows = await db.db_get_recent_nps_for_caja(limit)
+    rows = await db.db_get_recent_nps_for_cashier(limit)
     return {"items": rows}

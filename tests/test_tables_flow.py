@@ -2,14 +2,14 @@
 Suite — Tables & KDS flow (50 tests)
 tests/test_tables_flow.py
 
-Cubre:
-  A.  Gestión de mesas (CRUD)                         [1–6]
+Covers:
+  A.  Table management (CRUD)                          [1–6]
   B.  POS manual order                                 [7–16]
   C.  KDS — get_table_orders (SQL raw via pool)        [17–24]
-  D.  Cambio de status de orden (SQL raw via pool)     [25–30]
-  E.  Split-checks y pago                              [31–42]
-  F.  Alertas al mesero (waiter alerts)                [43–46]
-  G.  db_get_base_order_id — fix bug duplicación       [47–50]
+  D.  Order status change (SQL raw via pool)           [25–30]
+  E.  Split-checks and payment                          [31–42]
+  F.  Waiter alerts                                     [43–46]
+  G.  db_get_base_order_id — duplication bug fix        [47–50]
 """
 import json
 from decimal import Decimal
@@ -71,7 +71,7 @@ _CHECK = {
 # ══════════════════════════════════════════════════════════════════════════════
 
 def test_get_tables_returns_list(client, monkeypatch):
-    """GET /api/tables → 200, lista de mesas."""
+    """GET /api/tables → 200, list of tables."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_tables", AsyncMock(return_value=[_TABLE]))
     r = client.get("/api/tables", headers=_HEADERS)
@@ -80,7 +80,7 @@ def test_get_tables_returns_list(client, monkeypatch):
 
 
 def test_get_tables_empty(client, monkeypatch):
-    """GET /api/tables sin mesas → lista vacía."""
+    """GET /api/tables without tables → empty list."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_tables", AsyncMock(return_value=[]))
     r = client.get("/api/tables", headers=_HEADERS)
@@ -89,7 +89,7 @@ def test_get_tables_empty(client, monkeypatch):
 
 
 def test_create_table_success(client, monkeypatch):
-    """POST /api/tables crea una mesa automáticamente."""
+    """POST /api/tables automatically creates a table."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_auto_create_table",
                         AsyncMock(return_value={"id": "TBL-NEW", "name": "Mesa 5"}))
@@ -99,7 +99,7 @@ def test_create_table_success(client, monkeypatch):
 
 
 def test_create_table_returns_name(client, monkeypatch):
-    """POST /api/tables retorna el nombre generado."""
+    """POST /api/tables returns the generated name."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_auto_create_table",
                         AsyncMock(return_value={"id": "TBL-3", "name": "Mesa 3"}))
@@ -118,7 +118,7 @@ def test_delete_table_success(client, monkeypatch):
 
 
 def test_delete_table_calls_db(client, monkeypatch):
-    """DELETE /api/tables/{id} llama a db_delete_table con el id correcto."""
+    """DELETE /api/tables/{id} calls db_delete_table with the correct id."""
     _auth(monkeypatch)
     _mock_pool(monkeypatch, fetchrow_result=make_row({"branch_id": None}))
     mock_del = AsyncMock()
@@ -141,8 +141,8 @@ def _pos_body(**kwargs):
     return base
 
 
-def test_pos_order_primera_orden(client, monkeypatch):
-    """Primera orden de la mesa → sub_number=1, order_id con prefijo pos-."""
+def test_pos_order_first_order(client, monkeypatch):
+    """First order for the table → sub_number=1, order_id with pos- prefix."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(db_mod, "db_save_table_order", AsyncMock())
@@ -154,8 +154,8 @@ def test_pos_order_primera_orden(client, monkeypatch):
     assert saved["id"].startswith("pos-")
 
 
-def test_pos_order_sub_orden(client, monkeypatch):
-    """Segunda orden en la misma mesa → sub_number=2, base_order_id heredado."""
+def test_pos_order_sub_order(client, monkeypatch):
+    """Second order on the same table → sub_number=2, inherited base_order_id."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_base_order_id", AsyncMock(return_value="MESA-AA3E4A"))
     monkeypatch.setattr(db_mod, "db_get_next_sub_number", AsyncMock(return_value=2))
@@ -168,7 +168,7 @@ def test_pos_order_sub_orden(client, monkeypatch):
 
 
 def test_pos_order_station_kitchen(client, monkeypatch):
-    """Station kitchen → mensaje indica cocina."""
+    """Station kitchen → message indicates kitchen."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(db_mod, "db_save_table_order", AsyncMock())
@@ -178,7 +178,7 @@ def test_pos_order_station_kitchen(client, monkeypatch):
 
 
 def test_pos_order_station_bar(client, monkeypatch):
-    """Station bar → mensaje indica bar."""
+    """Station bar → message indicates bar."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(db_mod, "db_save_table_order", AsyncMock())
@@ -188,7 +188,7 @@ def test_pos_order_station_bar(client, monkeypatch):
 
 
 def test_pos_order_station_all(client, monkeypatch):
-    """Station all → mensaje indica cocina y bar."""
+    """Station all → message indicates kitchen and bar."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(db_mod, "db_save_table_order", AsyncMock())
@@ -199,7 +199,7 @@ def test_pos_order_station_all(client, monkeypatch):
 
 
 def test_pos_order_returns_order_id(client, monkeypatch):
-    """Respuesta incluye order_id."""
+    """Response includes order_id."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(db_mod, "db_save_table_order", AsyncMock())
@@ -208,7 +208,7 @@ def test_pos_order_returns_order_id(client, monkeypatch):
 
 
 def test_pos_order_save_called_once(client, monkeypatch):
-    """db_save_table_order se llama exactamente una vez (sin duplicación)."""
+    """db_save_table_order is called exactly once (no duplication)."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_base_order_id", AsyncMock(return_value=None))
     save_mock = AsyncMock()
@@ -218,7 +218,7 @@ def test_pos_order_save_called_once(client, monkeypatch):
 
 
 def test_pos_order_missing_table_id(client, monkeypatch):
-    """Sin table_id → 422."""
+    """Without table_id → 422."""
     _auth(monkeypatch)
     body = _pos_body()
     del body["table_id"]
@@ -227,7 +227,7 @@ def test_pos_order_missing_table_id(client, monkeypatch):
 
 
 def test_pos_order_branch_id_from_body(client, monkeypatch):
-    """branch_id del body se usa si está presente."""
+    """branch_id from the body is used if present."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(db_mod, "db_save_table_order", AsyncMock())
@@ -242,7 +242,7 @@ def test_pos_order_branch_id_from_body(client, monkeypatch):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def test_get_table_orders_returns_orders(client, monkeypatch):
-    """GET /api/table-orders → 200, lista de órdenes."""
+    """GET /api/table-orders → 200, list of orders."""
     _auth(monkeypatch)
     _mock_pool(monkeypatch, rows=[make_row(_ORDER_ROW)])
     r = client.get("/api/table-orders", headers=_HEADERS)
@@ -251,7 +251,7 @@ def test_get_table_orders_returns_orders(client, monkeypatch):
 
 
 def test_get_table_orders_empty(client, monkeypatch):
-    """Sin órdenes activas → lista vacía."""
+    """Without active orders → empty list."""
     _auth(monkeypatch)
     _mock_pool(monkeypatch, rows=[])
     r = client.get("/api/table-orders", headers=_HEADERS)
@@ -260,7 +260,7 @@ def test_get_table_orders_empty(client, monkeypatch):
 
 
 def test_get_table_orders_items_deserialized(client, monkeypatch):
-    """Items JSON string se deserializa a lista en la respuesta."""
+    """Items JSON string is deserialized into a list in the response."""
     _auth(monkeypatch)
     _mock_pool(monkeypatch, rows=[make_row(_ORDER_ROW)])
     r = client.get("/api/table-orders", headers=_HEADERS)
@@ -270,7 +270,7 @@ def test_get_table_orders_items_deserialized(client, monkeypatch):
 
 
 def test_get_table_orders_multiple_sub_orders(client, monkeypatch):
-    """Múltiples sub-órdenes de la misma mesa aparecen separadas."""
+    """Multiple sub-orders for the same table appear separately."""
     _auth(monkeypatch)
     _mock_pool(monkeypatch, rows=[make_row(_ORDER_ROW), make_row(_ORDER_ROW2)])
     r = client.get("/api/table-orders", headers=_HEADERS)
@@ -280,7 +280,7 @@ def test_get_table_orders_multiple_sub_orders(client, monkeypatch):
 
 
 def test_get_table_orders_station_filter(client, monkeypatch):
-    """?station=bar → solo órdenes de bar."""
+    """?station=bar → only bar orders."""
     _auth(monkeypatch)
     bar_row = {**_ORDER_ROW, "id": "bar-01", "station": "bar"}
     _mock_pool(monkeypatch, rows=[make_row(bar_row)])
@@ -292,7 +292,7 @@ def test_get_table_orders_station_filter(client, monkeypatch):
 
 
 def test_get_table_orders_unauthenticated(client, monkeypatch):
-    """Sin auth → 401/403."""
+    """Without auth → 401/403."""
     from unittest.mock import AsyncMock as _AM
     monkeypatch.setattr("app.routes.deps.verify_token", _AM(return_value=None))
     r = client.get("/api/table-orders")
@@ -300,7 +300,7 @@ def test_get_table_orders_unauthenticated(client, monkeypatch):
 
 
 def test_get_table_orders_status_field_present(client, monkeypatch):
-    """Cada orden tiene campo status."""
+    """Each order has a status field."""
     _auth(monkeypatch)
     _mock_pool(monkeypatch, rows=[make_row(_ORDER_ROW)])
     r = client.get("/api/table-orders", headers=_HEADERS)
@@ -308,7 +308,7 @@ def test_get_table_orders_status_field_present(client, monkeypatch):
 
 
 def test_get_table_orders_branch_header(client, monkeypatch):
-    """X-Branch-ID header se respeta sin error."""
+    """X-Branch-ID header is respected without error."""
     _auth(monkeypatch)
     _mock_pool(monkeypatch, rows=[])
     r = client.get("/api/table-orders", headers={**_HEADERS, "X-Branch-ID": "2"})
@@ -320,7 +320,7 @@ def test_get_table_orders_branch_header(client, monkeypatch):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _mock_pool_for_status(monkeypatch, order_row=None):
-    """Mock pool que devuelve el order_row en fetchrow y ejecuta execute."""
+    """Mock pool that returns order_row in fetchrow and runs execute."""
     conn = MagicMock()
     conn.fetchrow = AsyncMock(return_value=make_row(order_row) if order_row else None)
     conn.execute = AsyncMock()
@@ -329,7 +329,7 @@ def _mock_pool_for_status(monkeypatch, order_row=None):
     return conn
 
 
-def test_update_order_status_en_preparacion(client, monkeypatch):
+def test_update_order_status_in_preparation(client, monkeypatch):
     """POST /api/table-orders/{id}/status → en_preparacion."""
     _auth(monkeypatch)
     order_rec = {"phone": "manual", "table_name": "Mesa 1",
@@ -342,7 +342,7 @@ def test_update_order_status_en_preparacion(client, monkeypatch):
     assert r.json()["status"] == "en_preparacion"
 
 
-def test_update_order_status_listo(client, monkeypatch):
+def test_update_order_status_ready(client, monkeypatch):
     """POST status → listo."""
     _auth(monkeypatch)
     order_rec = {"phone": "manual", "table_name": "Mesa 1",
@@ -356,7 +356,7 @@ def test_update_order_status_listo(client, monkeypatch):
 
 
 def test_update_order_status_invalid(client, monkeypatch):
-    """Status inválido → 400."""
+    """Invalid status → 400."""
     _auth(monkeypatch)
     _mock_pool_for_status(monkeypatch)
     r = client.post("/api/table-orders/MESA-AA3E4A/status",
@@ -365,7 +365,7 @@ def test_update_order_status_invalid(client, monkeypatch):
 
 
 def test_update_order_status_not_found(client, monkeypatch):
-    """Orden inexistente → 404."""
+    """Nonexistent order → 404."""
     _auth(monkeypatch)
     _mock_pool_for_status(monkeypatch, order_row=None)
     r = client.post("/api/table-orders/NOPE/status",
@@ -373,7 +373,7 @@ def test_update_order_status_not_found(client, monkeypatch):
     assert r.status_code == 404
 
 
-def test_update_order_status_cancelado(client, monkeypatch):
+def test_update_order_status_cancelled(client, monkeypatch):
     """POST status → cancelado."""
     _auth(monkeypatch)
     order_rec = {"phone": "manual", "table_name": "Mesa 1",
@@ -386,7 +386,7 @@ def test_update_order_status_cancelado(client, monkeypatch):
 
 
 def test_update_order_status_returns_order_id(client, monkeypatch):
-    """Respuesta incluye order_id."""
+    """Response includes order_id."""
     _auth(monkeypatch)
     order_rec = {"phone": "manual", "table_name": "Mesa 1",
                  "base_order_id": "MESA-AA3E4A", "table_id": "TBL-001"}
@@ -409,7 +409,7 @@ _TICKET = {
 }
 
 def test_create_checks_success(client, monkeypatch):
-    """POST /checks → 200, checks creados."""
+    """POST /checks → 200, checks created."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_order_ticket_data", AsyncMock(return_value=_TICKET))
     monkeypatch.setattr(db_mod, "db_create_checks", AsyncMock(return_value=[_CHECK]))
@@ -420,7 +420,7 @@ def test_create_checks_success(client, monkeypatch):
 
 
 def test_create_checks_bill_not_found(client, monkeypatch):
-    """Ticket inexistente → 404."""
+    """Nonexistent ticket → 404."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_order_ticket_data", AsyncMock(return_value=None))
     r = client.post("/api/table-orders/NOPE/checks",
@@ -429,7 +429,7 @@ def test_create_checks_bill_not_found(client, monkeypatch):
 
 
 def test_create_checks_qty_exceeded(client, monkeypatch):
-    """Check con más qty que la disponible → 400."""
+    """Check with more qty than available → 400."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_order_ticket_data", AsyncMock(return_value=_TICKET))
     body = {"checks": [{"check_number": 1, "items": [{"name": "Moñona", "qty": 5, "unit_price": 25000}]}]}
@@ -438,7 +438,7 @@ def test_create_checks_qty_exceeded(client, monkeypatch):
 
 
 def test_get_checks_returns_list(client, monkeypatch):
-    """GET /checks → lista de checks."""
+    """GET /checks → list of checks."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_checks", AsyncMock(return_value=[_CHECK]))
     r = client.get("/api/table-orders/MESA-AA3E4A/checks", headers=_HEADERS)
@@ -447,7 +447,7 @@ def test_get_checks_returns_list(client, monkeypatch):
 
 
 def test_get_checks_empty(client, monkeypatch):
-    """Sin checks → lista vacía."""
+    """Without checks → empty list."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_checks", AsyncMock(return_value=[]))
     r = client.get("/api/table-orders/MESA-AA3E4A/checks", headers=_HEADERS)
@@ -455,7 +455,7 @@ def test_get_checks_empty(client, monkeypatch):
 
 
 def test_pay_check_not_found(client, monkeypatch):
-    """Check inexistente → 404. New flow: claim returns None, then db_get_check
+    """Nonexistent check → 404. New flow: claim returns None, then db_get_check
     returns None → 404."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_claim_check_for_payment", AsyncMock(return_value=None))
@@ -468,7 +468,7 @@ def test_pay_check_not_found(client, monkeypatch):
 
 
 def test_pay_check_wrong_base_order(client, monkeypatch):
-    """Check de otra mesa → 400. New flow: claim refuses (base_order mismatches),
+    """Check from another table → 400. New flow: claim refuses (base_order mismatches),
     fallback db_get_check shows the wrong base_order, route returns 400."""
     _auth(monkeypatch)
     wrong_check = {**_CHECK, "base_order_id": "OTHER"}
@@ -482,7 +482,7 @@ def test_pay_check_wrong_base_order(client, monkeypatch):
 
 
 def test_pay_check_already_paid(client, monkeypatch):
-    """Check ya procesado → 409 (Conflict). Was 400 in the old flow.
+    """Check already processed → 409 (Conflict). Was 400 in the old flow.
 
     Race-free flow uses 409 because the request conflicts with the resource's
     current state — accurate HTTP semantic.
@@ -499,7 +499,7 @@ def test_pay_check_already_paid(client, monkeypatch):
 
 
 def test_pay_check_tip_exceeds_50pct(client, monkeypatch):
-    """Propina > 50% del total → 400. The check IS claimable (open → paying),
+    """Tip > 50% of the total → 400. The check IS claimable (open → paying),
     but business validation rejects the tip."""
     _auth(monkeypatch)
     claimed_check = {**_CHECK, "status": "paying"}
@@ -515,7 +515,7 @@ def test_pay_check_tip_exceeds_50pct(client, monkeypatch):
 
 
 def test_pay_check_insufficient_payment(client, monkeypatch):
-    """Pago insuficiente → 400. Claim succeeds, payment validation fails."""
+    """Insufficient payment → 400. Claim succeeds, payment validation fails."""
     _auth(monkeypatch)
     claimed_check = {**_CHECK, "status": "paying"}
     monkeypatch.setattr(db_mod, "db_claim_check_for_payment", AsyncMock(return_value=claimed_check))
@@ -538,7 +538,7 @@ def test_delete_check_success(client, monkeypatch):
 
 
 def test_delete_check_not_found(client, monkeypatch):
-    """DELETE check inexistente o ya procesado → 400."""
+    """DELETE nonexistent or already-processed check → 400."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_delete_open_check", AsyncMock(return_value=False))
     r = client.delete("/api/table-orders/MESA-AA3E4A/checks/NOPE", headers=_HEADERS)
@@ -607,7 +607,7 @@ def test_dismiss_alert_sets_dismissed_flag_not_delete(client, monkeypatch):
 
 
 def test_get_waiter_alerts_no_auth(client, monkeypatch):
-    """GET /api/waiter-alerts sin auth → 401/403."""
+    """GET /api/waiter-alerts without auth → 401/403."""
     from unittest.mock import AsyncMock as _AM
     monkeypatch.setattr("app.routes.deps.verify_token", _AM(return_value=None))
     r = client.get("/api/waiter-alerts")
@@ -638,17 +638,17 @@ def _make_tenant_conn(fetchrow_side_effect):
 
 
 @pytest.mark.asyncio
-async def test_base_order_id_sin_sesion_activa_retorna_none():
+async def test_base_order_id_without_active_session_returns_none():
     """
-    FIX DUPLICACIÓN: Sin sesión activa para la mesa → None.
-    Evita que nueva sesión añada "Adicional #N" a una sesión anterior.
+    DUPLICATION FIX: No active session for the table → None.
+    Prevents a new session from adding "Adicional #N" to a previous session.
     Updated: patches app.services.database.get_pool (tenant_connection pattern).
     """
     from app.repositories.tables_repo import db_get_base_order_id
 
     conn = _make_tenant_conn([
-        None,  # no hay sesión activa
-        make_row({"base_id": "MESA-OLD"}),  # no debe llegar aquí
+        None,  # no active session
+        make_row({"base_id": "MESA-OLD"}),  # must not be reached
     ])
     pool = make_pool(conn)
     with _patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
@@ -661,8 +661,8 @@ async def test_base_order_id_sin_sesion_activa_retorna_none():
 
 
 @pytest.mark.asyncio
-async def test_base_order_id_con_sesion_activa_retorna_id():
-    """Con sesión activa → retorna el base_order_id de la orden existente."""
+async def test_base_order_id_with_active_session_returns_id():
+    """With an active session → returns the base_order_id of the existing order."""
     from app.repositories.tables_repo import db_get_base_order_id
 
     conn = _make_tenant_conn([
@@ -678,8 +678,8 @@ async def test_base_order_id_con_sesion_activa_retorna_id():
 
 
 @pytest.mark.asyncio
-async def test_base_order_id_sesion_activa_sin_ordenes_retorna_none():
-    """Sesión activa pero sin órdenes previas → None (primera orden del cliente)."""
+async def test_base_order_id_active_session_without_orders_returns_none():
+    """Active session but no previous orders → None (customer's first order)."""
     from app.repositories.tables_repo import db_get_base_order_id
 
     conn = _make_tenant_conn([
@@ -695,8 +695,8 @@ async def test_base_order_id_sesion_activa_sin_ordenes_retorna_none():
 
 
 @pytest.mark.asyncio
-async def test_base_order_id_sesion_cerrada_no_reutiliza():
-    """Mesa con sesión cerrada (status != active) → None, no reutiliza órdenes."""
+async def test_base_order_id_closed_session_does_not_reuse():
+    """Table with a closed session (status != active) → None, doesn't reuse orders."""
     from app.repositories.tables_repo import db_get_base_order_id
 
     conn = _make_tenant_conn([

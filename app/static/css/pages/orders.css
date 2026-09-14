@@ -1,4 +1,4 @@
-/* ── Pedidos page ────────────────────────────────────────────────── */
+/* ── Orders page ────────────────────────────────────────────────── */
 .kds-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; padding: 14px 18px 18px; }
 .kds-card { background: #fff; border: 0.5px solid var(--border); border-radius: 9px; padding: 12px 14px; position: relative; transition: border-color .15s; }
 .kds-card:hover { border-color: var(--border-strong); }

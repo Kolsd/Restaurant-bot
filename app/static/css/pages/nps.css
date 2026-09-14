@@ -1,4 +1,4 @@
-/* ── NPS & Reseñas page ──────────────────────────────────────────── */
+/* ── NPS & Reviews page ──────────────────────────────────────────── */
 .nps-hero { display: grid; grid-template-columns: 280px 1fr 1fr; gap: 0; background: var(--surface); border: 0.5px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
 .nps-hero > div { padding: 20px 22px; border-right: 0.5px solid var(--border); }
 .nps-hero > div:last-child { border-right: none; }

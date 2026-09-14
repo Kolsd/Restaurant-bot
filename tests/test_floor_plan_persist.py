@@ -387,7 +387,7 @@ def _override_admin():
     return _restaurant_dep, _user_dep
 
 
-def _override_mesero():
+def _override_waiter():
     from app.services.tenant_context import tenant_scope
 
     async def _restaurant_dep(request=None):
@@ -414,7 +414,7 @@ def _clear_overrides():
 
 def test_save_endpoint_rejects_non_admin_role():
     """Mesero hitting POST /api/tables/floor-plan → 403."""
-    rest_dep, user_dep = _override_mesero()
+    rest_dep, user_dep = _override_waiter()
     _install_overrides(rest_dep, user_dep)
     try:
         with patch(

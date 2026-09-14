@@ -49,7 +49,7 @@ function _applyZoneFilter() {
   });
 }
 
-// ── Channel badge: origen del pedido (bot WhatsApp vs POS vs QR) ──
+// ── Channel badge: order origin (bot WhatsApp vs POS vs QR) ──
 function _channelBadge(channel) {
   if (!channel) return '';
   const map = {
@@ -179,7 +179,7 @@ async function openTable(t) {
   const footer = document.createElement('div');
   footer.style.cssText = 'display:flex;gap:8px;margin-top:16px;';
 
-  // Cobrar mesa: physical-payment trigger by mesero. Picks service %,
+  // Charge table: physical-payment trigger by mesero. Picks service %,
   // marks every active order as generar_factura → caja sees them in
   // their queue ready to invoice.
   const cobrarBtn = document.createElement('button');
@@ -207,7 +207,7 @@ async function openTable(t) {
   await _loadTableOrders(t.id, ordersDiv);
 }
 
-// ── Cobrar mesa: service % picker + send orders to caja queue ────────
+// ── Charge table: service % picker + send orders to caja queue ────────
 async function _showCobrarServiceModal(table, parentModal) {
   const existing = document.getElementById('mesero-cobrar-modal');
   if (existing) existing.remove();
@@ -303,7 +303,7 @@ async function _showCobrarServiceModal(table, parentModal) {
   okBtn.addEventListener('click', async () => {
     okBtn.disabled = true;
     okBtn.textContent = 'Enviando…';
-    const ok = await _generateFacturaForTable(table.id, chosenPct);
+    const ok = await _generateInvoiceForTable(table.id, chosenPct);
     if (ok) {
       if (typeof mesioToast === 'function') mesioToast(`Mesa enviada a caja · servicio ${chosenPct}%`, 'success', 2400);
       modal.remove();
@@ -324,7 +324,7 @@ async function _showCobrarServiceModal(table, parentModal) {
   document.body.appendChild(modal);
 }
 
-async function _generateFacturaForTable(tableId, servicePct) {
+async function _generateInvoiceForTable(tableId, servicePct) {
   // Find every active table_order on this mesa and transition them to
   // generar_factura. Backend handler (tables.py update_order_status) marks
   // each as factura_generada AND notifies the customer via WhatsApp.
@@ -360,7 +360,7 @@ const _STATUS_LABELS = {
   generar_factura: { txt: 'Cobrando',     color: '#a78bfa', bg: '#2d1f3d' },
 };
 
-// ── Capa 3: Validation action helpers ────────────────────────────────────────
+// ── Layer 3: Validation action helpers ────────────────────────────────────────
 
 async function _confirmTableReal(tableId, parentModal) {
   if (typeof mesioConfirm === 'function') {
@@ -431,7 +431,7 @@ async function _loadTableOrders(tableId, container) {
     // Clear and rebuild.  Pending validation UI comes first if applicable.
     container.innerHTML = '';
 
-    // Capa 3: detect if any orders are pending waiter validation
+    // Layer 3: detect if any orders are pending waiter validation
     const hasPendingValidation = orders.some(o => o.pending_table_validation);
     if (hasPendingValidation) {
       // Find the modal that wraps this container to pass to confirm/ghost handlers
@@ -529,7 +529,7 @@ async function _loadTableOrders(tableId, container) {
           if (ok) {
             if (typeof mesioToast === 'function') mesioToast('Pedido entregado', 'success', 1800);
             await _loadTableOrders(tableId, container);
-            // Refresh the mesa grid in the background so the tile state updates
+            // Refresh the table grid in the background so the tile state updates
             loadTables();
           } else {
             btn.disabled = false;
@@ -862,7 +862,7 @@ async function openActiveOrdersModal() {
 }
 
 // ── Active chats modal (bot conversations visibility) ─
-// Closes DISCONNECT #5 (mesero/caja no ve chats activos del bot).
+// Closes DISCONNECT #5 (mesero/caja can't see the bot's active chats).
 // Lists recent conversations + click row → individual chat history.
 async function openChatsModal() {
   const existing = document.getElementById('mesero-chats-modal');

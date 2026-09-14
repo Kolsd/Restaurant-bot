@@ -39,7 +39,7 @@ def get_date_range(period: str, tz_str: str):
     return str(today), str(today)
 
 async def filter_conversations_for_branch(conversations: list, branch_id: int | str, bot_number: str) -> list:
-    """Si el usuario es de una sucursal, solo muestra los chats de sus mesas."""
+    """If the user belongs to a branch, only shows chats from their tables."""
     if not branch_id or branch_id == "all" or not conversations:
         return conversations
     from app.repositories import tables_repo
@@ -338,13 +338,13 @@ async def set_dish_availability(request: Request):
 @router.post("/api/menu/sync-branches")
 async def sync_menu_to_branches(request: Request):
     """
-    Endpoint exclusivo para la Casa Matriz. Propaga el menú a todas las sucursales.
+    Endpoint exclusive to Casa Matriz (HQ). Propagates the menu to all branches.
     """
     await require_auth(request)
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    
-    # Validaciones de seguridad
+
+    # Security checks
     if "owner" not in user.get("role", ""):
         raise HTTPException(status_code=403, detail="Solo el dueño puede sincronizar el menú.")
 
@@ -361,7 +361,7 @@ async def sync_menu_to_branches(request: Request):
 @router.put("/api/menu/update")
 async def update_menu_structure(request: Request):
     """
-    Endpoint exclusivo para la Casa Matriz. Actualiza la estructura del JSON del menú.
+    Endpoint exclusive to Casa Matriz (HQ). Updates the menu JSON structure.
     """
     await require_auth(request)
     user = await get_current_user(request)
@@ -380,7 +380,7 @@ async def update_menu_structure(request: Request):
     if not isinstance(new_menu, dict):
         raise HTTPException(status_code=400, detail="Formato de menú inválido.")
 
-    # 🛡️ Validación estricta en backend: asegurar que los precios sean numéricos
+    # 🛡️ Strict backend validation: ensure prices are numeric
     for cat, items in new_menu.items():
         for item in items:
             try:
@@ -424,7 +424,7 @@ async def manual_reply(phone: str, request: Request):
     if not message: raise HTTPException(status_code=400, detail="Mensaje vacio")
 
     with tenant_scope(restaurant["id"]):
-        # Usar bot_number real de la conversación (puede diferir en setup multi-sucursal)
+        # Use the conversation's real bot_number (may differ in multi-branch setups)
         details    = await db.db_get_conversation_details(phone, restaurant["whatsapp_number"])
         actual_bot = details.get("bot_number") or restaurant["whatsapp_number"]
         history    = details.get("history", [])

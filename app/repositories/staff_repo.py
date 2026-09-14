@@ -259,8 +259,8 @@ async def db_get_staff_pin_by_id(staff_id: str, restaurant_id: int) -> dict | No
 
 
 async def db_get_staff_candidates_by_name(name: str) -> list:
-    """Retorna todos los staff activos con ese nombre (multi-restaurante).
-    El caller verifica el PIN contra cada candidato para resolver colisiones.
+    """Returns all active staff with that name (multi-restaurant).
+    The caller verifies the PIN against each candidate to resolve collisions.
 
     # Cross-tenant lookup — always uses bypass_tenant_scope internally.
     """
@@ -372,7 +372,7 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
 
 
 async def db_delete_staff(staff_id: str, restaurant_id: int) -> bool:
-    """Elimina permanentemente un miembro de staff. Retorna True si se eliminó.
+    """Permanently deletes a staff member. Returns True if deleted.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """

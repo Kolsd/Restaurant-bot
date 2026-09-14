@@ -16,7 +16,7 @@ not the column name):
                             (post-Wave-2 + 0057: branch_id carries location_id, not org_id)
 - NPS responses           → bot_number LIKE base_bot_number || '%'
                             where base_bot_number = split_part(r.whatsapp_number, '_b', 1)
-                            This covers both exact matches and sucursal suffixes (_b<ts>).
+                            This covers both exact matches and branch suffixes (_b<ts>).
 - dormant customers       → customer_profiles WHERE org_id = $1
                             AND total_orders >= MIN_DORMANT_ORDERS
                             AND last_seen < NOW() - MAKE_INTERVAL(days => DORMANT_DAYS)
@@ -168,10 +168,10 @@ async def compute_weekly_stats(
             revenue_delta_pct = round(float(raw_pct), 1)
 
         # ── 4. NPS (nps_responses filtered by bot_number prefix) ──────────────
-        # NPS rows store bot_number as-is at send time; sucursales have a suffix
+        # NPS rows store bot_number as-is at send time; branches have a suffix
         # like "_b1713000000".  Strategy: LIKE base_bot_number || '%'
         # where base_bot_number = split_part(r.whatsapp_number, '_b', 1).
-        # This matches both the exact matriz number and any sucursal suffixes.
+        # This matches both the exact matriz number and any branch suffixes.
         nps_row = await conn.fetchrow(
             """
             SELECT

@@ -1,5 +1,5 @@
 """
-tests/e2e/test_caja_validates_proof.py — E2E test: caja validates Nequi proof.
+tests/e2e/test_cashier_validates_proof.py — E2E test: caja validates Nequi proof.
 
 Goal: customer paid via Nequi/Bancolombia and uploaded a proof image.
 The caja operator sees the order in "Comprobantes" tab, inspects the image,
@@ -76,7 +76,7 @@ async def e2e_app(wa_capture, monkeypatch):
 
 @pytest.mark.e2e_no_llm
 @pytest.mark.asyncio
-async def test_caja_validates_proof(
+async def test_cashier_validates_proof(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
     wa_capture: WACapture,

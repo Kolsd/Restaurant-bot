@@ -325,7 +325,7 @@ async def test_basic_distribution(db_conn):
 # ── Test 2: Non-divisible tip — rounding test ────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_rounding_three_meseros(db_conn):
+async def test_rounding_three_waiters(db_conn):
     """
     Config: mesero=100 %
     1 check  tip=10 000

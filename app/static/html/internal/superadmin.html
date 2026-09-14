@@ -244,7 +244,7 @@ input:checked+.slider:before{transform:translateX(18px);}
       </div>
     </div>
 
-    <!-- ══ RESTAURANTES ═════════════════════════════════════════════════ -->
+    <!-- ══ RESTAURANTS ═════════════════════════════════════════════════ -->
     <div id="restaurantes" class="section">
       <!-- Detail panel (shown when a restaurant is selected) -->
       <div id="detail-panel">
@@ -367,7 +367,7 @@ input:checked+.slider:before{transform:translateX(18px);}
             </div>
           </div>
 
-          <!-- Tab: Módulos -->
+          <!-- Tab: Modules -->
           <div id="dtab-modulos" class="detail-tab-panel">
             <div style="font-size:12px;color:#888;margin-bottom:1rem;">Los cambios se aplican inmediatamente. El restaurante ve los módulos activos en su dashboard.</div>
             <div id="dp-modules-list"></div>
@@ -377,7 +377,7 @@ input:checked+.slider:before{transform:translateX(18px);}
             </div>
           </div>
 
-          <!-- Tab: Credenciales Meta / WA -->
+          <!-- Tab: Meta / WA Credentials -->
           <div id="dtab-credenciales" class="detail-tab-panel">
             <div style="background:#FFF8E6;border:1px solid #F0A500;border-radius:8px;padding:10px 14px;font-size:12px;color:#7A4F00;margin-bottom:1rem;">
               ⚠️ Estas credenciales se guardan en la DB. Cámbialas solo si el cliente actualizó su token de Meta.
@@ -437,7 +437,7 @@ input:checked+.slider:before{transform:translateX(18px);}
             </div>
           </div>
 
-          <!-- Tab: Peligroso -->
+          <!-- Tab: Danger Zone -->
           <div id="dtab-peligroso" class="detail-tab-panel">
             <div style="background:#FDE8E8;border:1px solid #f5b7b1;border-radius:8px;padding:12px 14px;margin-bottom:1.25rem;">
               <div style="font-size:13px;font-weight:600;color:#C0392B;margin-bottom:6px;">⚠️ Zona peligrosa</div>
@@ -486,7 +486,7 @@ input:checked+.slider:before{transform:translateX(18px);}
       </div>
     </div>
 
-    <!-- ══ NUEVO ═════════════════════════════════════════════════════════ -->
+    <!-- ══ NEW ═════════════════════════════════════════════════════════ -->
     <div id="nuevo" class="section">
       <div class="card">
         <div class="card-title">Datos del restaurante</div>
@@ -601,7 +601,7 @@ input:checked+.slider:before{transform:translateX(18px);}
       </div>
     </div>
 
-    <!-- ══ USUARIOS ══════════════════════════════════════════════════════ -->
+    <!-- ══ USERS ══════════════════════════════════════════════════════ -->
     <div id="usuarios" class="section">
       <div style="display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start;">
         <d<div class="card">
@@ -632,7 +632,7 @@ input:checked+.slider:before{transform:translateX(18px);}
       </div>
     </div>
 
-    <!-- ══ DIAN & FOLIOS ══════════════════════════════════════════════════ -->
+    <!-- ══ DIAN & INVOICE FOLIOS ══════════════════════════════════════════════════ -->
     <div id="dian" class="section">
       <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
         <div class="metric"><div class="metric-label">📄 Folios totales emitidos</div><div class="metric-value" id="dian-total">—</div><div class="metric-sub">histórico</div></div>
@@ -662,7 +662,7 @@ input:checked+.slider:before{transform:translateX(18px);}
       </div>
     </div>
 
-    <!-- ══ ORG + SEDES ══════════════════════════════════════════════════════ -->
+    <!-- ══ ORG + LOCATIONS ══════════════════════════════════════════════════════ -->
     <div id="orgloc" class="section">
 
       <!-- Tab bar -->
@@ -679,7 +679,7 @@ input:checked+.slider:before{transform:translateX(18px);}
         </button>
       </div>
 
-      <!-- ── Tab: Organizaciones ── -->
+      <!-- ── Tab: Organizations ── -->
       <div id="orgtab-orgs" class="org-tab-panel">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
           <span style="font-size:14px;font-weight:600;">Todas las organizaciones</span>
@@ -700,13 +700,13 @@ input:checked+.slider:before{transform:translateX(18px);}
         </div>
       </div>
 
-      <!-- ── Tab: Sedes ── -->
+      <!-- ── Tab: Locations ── -->
       <div id="orgtab-sedes" class="org-tab-panel" style="display:none;">
         <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:10px;">
             <label style="font-size:12px;color:#888;font-weight:600;">Organización:</label>
             <select id="sedes-org-filter" class="field-input" style="width:220px;"
-                    onchange="onSedesOrgFilterChange()">
+                    onchange="onLocationsOrgFilterChange()">
               <option value="">Todas las organizaciones</option>
             </select>
           </div>
@@ -732,7 +732,7 @@ input:checked+.slider:before{transform:translateX(18px);}
   </div><!-- /main -->
 </div><!-- /app -->
 
-<!-- ══ MODAL: Organización ══════════════════════════════════════════════════ -->
+<!-- ══ MODAL: Organization ══════════════════════════════════════════════════ -->
 <div id="org-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:16px;padding:2rem;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
@@ -781,7 +781,7 @@ input:checked+.slider:before{transform:translateX(18px);}
   </div>
 </div>
 
-<!-- ══ MODAL: Sede ══════════════════════════════════════════════════════════ -->
+<!-- ══ MODAL: Location ══════════════════════════════════════════════════════════ -->
 <div id="loc-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:16px;padding:2rem;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
@@ -856,7 +856,7 @@ input:checked+.slider:before{transform:translateX(18px);}
 <script src="/static/js/internal/superadmin.js"></script>
 
 <script>
-// ── Estado global ──────────────────────────────────────────────────────
+// ── Global state ──────────────────────────────────────────────────────
 // ADMIN_KEY is never stored in browser storage — we use a session token instead
 let ALL_RESTAURANTS = [];
 let _currentRestFilter = 'all';
@@ -949,7 +949,7 @@ async function doLogout() {
   location.reload();
 }
 
-// Auto-login si hay sesión guardada
+// Auto-login if a saved session exists
 window.addEventListener('DOMContentLoaded', async () => {
   const saved = _getToken();
   if(saved) {
@@ -971,7 +971,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-// ── Sección / nav ──────────────────────────────────────────────────
+// ── Section / nav ──────────────────────────────────────────────────
 const SECTION_TITLES = {
   resumen:'Resumen',restaurantes:'Restaurantes',nuevo:'Nuevo cliente',
   usuarios:'Usuarios',dian:'DIAN & Folios',
@@ -1009,7 +1009,7 @@ function renderKPIs(data) {
   $('kpi-active-sub').textContent = `${data.active_restaurants} activos`;
 }
 
-// ── Restaurantes ──────────────────────────────────────────────────
+// ── Restaurants ──────────────────────────────────────────────────
 async function loadRestaurants() {
   try {
     const r = await _hqFetch('/api/internal/admin/restaurants');
@@ -1022,7 +1022,7 @@ async function loadRestaurants() {
   } catch(e){}
 }
 
-// Actualizamos el llenado de la lista para que sea un SELECT
+// Update the list population to use a SELECT
 function populateRestaurantDatalist() {
   const select = $('u_rest_id');
   if(!select) return;
@@ -1394,7 +1394,7 @@ async function setSubStatus(status) {
   }
 }
 
-// ── Nuevo restaurante ─────────────────────────────────────────────
+// ── New restaurant ─────────────────────────────────────────────────
 async function createRestaurant() {
   const name  = $('r_name').value.trim();
   const wa    = $('r_wa').value.trim();
@@ -1458,7 +1458,7 @@ async function parseMenuFile() {
   btn.textContent = '✨ Extraer con IA'; btn.disabled = false;
 }
 
-// ── Usuarios ──────────────────────────────────────────────────────
+// ── Users ──────────────────────────────────────────────────────────
 async function loadUsers() {
   try {
     const r = await _hqFetch('/api/internal/admin/users');
@@ -1470,7 +1470,7 @@ async function loadUsers() {
   } catch(e){}
 }
 
-// Actualizamos la tabla para añadir los botones Reset y Eliminar
+// Update the table to add the Reset and Delete buttons
 function renderUsersTable(users) {
   const tbody = $('users-tbody');
   if(!users.length){ tbody.innerHTML=`<tr><td colspan="5" class="empty-state">Sin usuarios</td></tr>`; return; }
@@ -1486,7 +1486,7 @@ function renderUsersTable(users) {
   </tr>`).join('');
 }
 
-// Modificamos la creación para enviar el ID
+// Update creation to send the ID
 async function createUser() {
   const restId = $('u_rest_id').value;
   const email  = $('u_email').value.trim();
@@ -1517,15 +1517,15 @@ async function createUser() {
       $('u_email').value=''; $('u_pass').value=''; 
       loadUsers(); 
     } else { 
-      // 🛡️ Lógica mejorada para evitar el [object Object]
+      // 🛡️ Improved logic to avoid [object Object]
       let errorMsg = 'Error del servidor';
       
       if (data.detail) {
         if (Array.isArray(data.detail)) {
-          // Es un error de validación 422 (Pydantic)
+          // It's a 422 validation error (Pydantic)
           errorMsg = data.detail.map(e => `${e.loc[1]}: ${e.msg}`).join(', ');
         } else {
-          // Es un error común (HTTPException)
+          // It's a common error (HTTPException)
           errorMsg = data.detail;
         }
       }
@@ -1537,7 +1537,7 @@ async function createUser() {
   }
 }
 
-// ── DIAN & Folios ─────────────────────────────────────────────────
+// ── DIAN & Invoice Folios ─────────────────────────────────────────────────
 async function loadDIAN() {
   try {
     const r = await _hqFetch('/api/internal/admin/billing-stats');
@@ -1696,7 +1696,7 @@ async function submitResetPw() {
   }
 }
 
-// Nueva función para borrar usuarios
+// New function to delete users
 async function deleteGlobalUser(username) {
   if(!confirm(`¿Estás seguro de eliminar permanentemente al usuario ${username}?`)) return;
   
@@ -1717,7 +1717,7 @@ async function deleteGlobalUser(username) {
 </script>
 <script src="/static/js/internal/hq-shell.js" defer></script>
 
-<!-- ══ MODAL: Reset contraseña ════════════════════════════════════════════════ -->
+<!-- ══ MODAL: Reset Password ════════════════════════════════════════════════ -->
 <div id="reset-pw-modal" class="hq-modal-overlay" style="display:none;">
   <div class="hq-modal-box">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">

@@ -1,4 +1,4 @@
-/* ── Fidelización page ───────────────────────────────────────────── */
+/* ── Loyalty page ───────────────────────────────────────────────── */
 (function () {
   'use strict';
 
@@ -419,7 +419,7 @@
     });
   });
 
-  // ── Ver todos segments ────────────────────────────────────────────
+  // ── View all segments ────────────────────────────────────────────
 
   const viewAllBtn = document.getElementById('btn-view-all-segments');
   if (viewAllBtn) {

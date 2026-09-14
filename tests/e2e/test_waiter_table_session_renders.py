@@ -1,5 +1,5 @@
 """
-tests/e2e/test_mesero_table_session_renders.py — E2E test: mesero POS table flow.
+tests/e2e/test_waiter_table_session_renders.py — E2E test: mesero POS table flow.
 
 Goal: prove the mesero POS page shows tables with real data and the action
 buttons (open table → add order → mark ready → mark delivered → pay) all
@@ -68,7 +68,7 @@ async def e2e_app(wa_capture):
 
 @pytest.mark.e2e_no_llm
 @pytest.mark.asyncio
-async def test_mesero_table_session_renders(
+async def test_waiter_table_session_renders(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
     wa_capture: WACapture,

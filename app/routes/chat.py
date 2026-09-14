@@ -21,8 +21,8 @@ log = get_logger(__name__)
 router = APIRouter()
 
 # ── RATE LIMITING BACKED BY POSTGRES (Workers Safe) ──────────────────
-RATE_LIMIT_MESSAGES = 20   # max mensajes por ventana
-RATE_LIMIT_WINDOW   = 60   # segundos
+RATE_LIMIT_MESSAGES = 20   # max messages per window
+RATE_LIMIT_WINDOW   = 60   # seconds
 
 async def _is_rate_limited(phone: str) -> bool:
     return await conversations_repo.db_check_rate_limit(
@@ -31,7 +31,7 @@ async def _is_rate_limited(phone: str) -> bool:
 
 # ── META SIGNATURE VERIFICATION (V-02) ──────────────────────────────
 def _verify_meta_signature(body: bytes, signature_header: str) -> bool:
-    """Verifica X-Hub-Signature-256 de Meta para autenticar el webhook.
+    """Verifies Meta's X-Hub-Signature-256 to authenticate the webhook.
 
     When the env var DISABLE_META_SIGNATURE_VERIFY=1 is set (E2E test mode only),
     signature verification is skipped and the function returns True unconditionally.
@@ -92,13 +92,13 @@ async def get_whatsapp_media(
     user: dict = Depends(get_current_user),
 ):
     """
-    Descarga la imagen encriptada desde Meta y la muestra en el navegador del Cajero.
+    Downloads the encrypted image from Meta and shows it in the Cashier's browser.
 
-    Requiere autenticación (Bearer token de admin/staff del tenant).
-    El parámetro `bot` es obligatorio y debe corresponder al tenant del usuario autenticado.
-    Rate limit: 60 req/min por usuario.
+    Requires authentication (admin/staff Bearer token for the tenant).
+    The `bot` parameter is required and must correspond to the authenticated user's tenant.
+    Rate limit: 60 req/min per user.
     """
-    # ── Ownership: el bot_number debe pertenecer al tenant del usuario autenticado ──
+    # ── Ownership: bot_number must belong to the authenticated user's tenant ──
     if not bot:
         raise HTTPException(status_code=400, detail="Parámetro bot requerido")
 
@@ -109,8 +109,8 @@ async def get_whatsapp_media(
     if not tenant_org_id:
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    # Verificar que el bot_number pertenece al mismo org que el usuario autenticado.
-    # Wave-2: comparar org_id (parent_restaurant_id fue dropeado en 0038).
+    # Verify that bot_number belongs to the same org as the authenticated user.
+    # Wave-2: compare org_id (parent_restaurant_id was dropped in 0038).
     from app.services.tenant_context import bypass_tenant_scope
     with bypass_tenant_scope("media_proxy_ownership_check"):
         tenant_rest = await db.db_get_restaurant_by_phone(bot)
@@ -120,7 +120,7 @@ async def get_whatsapp_media(
     if tenant_rest.get("org_id") != user_rest.get("org_id"):
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    # ── Rate limit: 60 req/min por usuario ──────────────────────────────────────
+    # ── Rate limit: 60 req/min per user ──────────────────────────────────────
     user_key = user.get("username") or str(tenant_restaurant_id)
     allowed = await rate_limit_check(f"media:{user_key}", max_requests=60, window_seconds=60)
     if not allowed:
@@ -180,7 +180,7 @@ async def _process_message(
     access_token: str,
     location_id: int | None = None,
 ):
-    """Procesamiento real de la IA — corre en background, desacoplado del ACK.
+    """The actual AI processing — runs in the background, decoupled from the ACK.
 
     location_id: resolved by the inbox worker before dispatch.  May be None for
     exploratory chat; the agent resolves it lazily when needed (e.g. on delivery/
@@ -225,9 +225,9 @@ async def _process_message(
 
 
 async def _is_image_safe(image_id: str, access_token: str) -> bool:
-    """Descarga la imagen desde Meta y consulta a Claude Haiku si contiene contenido inapropiado.
-    Retorna False si el modelo responde YES (inapropiado), True en cualquier otro caso.
-    En caso de excepción, retorna True (fail open — no bloquear por errores)."""
+    """Downloads the image from Meta and asks Claude Haiku whether it contains inappropriate content.
+    Returns False if the model answers YES (inappropriate), True in any other case.
+    On exception, returns True (fail open — don't block on errors)."""
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
             headers = {"Authorization": f"Bearer {access_token}"}
@@ -277,7 +277,7 @@ async def _is_image_safe(image_id: str, access_token: str) -> bool:
             ],
         )
         answer = response.content[0].text.strip().upper()
-        # Si Claude se niega a clasificar (refusal por contenido extremo), tratar como unsafe
+        # If Claude refuses to classify (refusal due to extreme content), treat as unsafe
         if not answer.startswith("YES") and not answer.startswith("NO"):
             return False
         return not answer.startswith("YES")
@@ -300,7 +300,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
         log.warning("webhook.global_rate_limit")
         return JSONResponse(content={"status": "ok"})
 
-    # 1. Leer body ANTES de parsear JSON (necesitamos bytes para la firma)
+    # 1. Read body BEFORE parsing JSON (we need bytes for the signature)
     raw_body = await request.body()
 
     # 2. Verificar firma Meta — return 200 to prevent Meta retry storms on bad signatures
@@ -342,7 +342,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                 if not message:
                     continue
 
-                # 3. Deduplicación por WAM_ID — descarta reintentos de Meta
+                # 3. Deduplication by WAM_ID — discards Meta retries
                 wam_id = message.get("id", "")
                 if wam_id and await db.db_is_duplicate_wam(wam_id):
                     log.info("chat.wam_duplicate_ignored", wam_id=wam_id)
@@ -432,7 +432,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                         log.exception("chat.send_ratelimit_msg_failed", phone=mask_phone(user_phone))
                     continue
 
-                # 7. Extraer texto del mensaje
+                # 7. Extract the message text
                 if msg_type == "location":
                     loc = message.get("location", {})
                     lat, lon = loc.get("latitude"), loc.get("longitude")
@@ -456,8 +456,8 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                     image_id = message.get("image", {}).get("id", "")
                     media_url = f"/api/media/{image_id}?bot={bot_number}"
 
-                    # Atajo no-LLM: si hay una propuesta awaiting_proof para este teléfono,
-                    # adjuntar el comprobante directamente sin pasar por el modelo.
+                    # Non-LLM shortcut: if there is an awaiting_proof proposal for this phone,
+                    # attach the proof directly without going through the model.
                     try:
                         restaurant_data = await db.db_get_restaurant_by_bot_number(bot_number)
                         if restaurant_data:
@@ -465,7 +465,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                                 restaurant_data["id"], user_phone
                             )
                             if proposal and proposal.get("proposal_status") == "awaiting_proof":
-                                # Moderación de contenido: rechazar imágenes inapropiadas
+                                # Content moderation: reject inappropriate images
                                 is_safe = await _is_image_safe(image_id, access_token)
                                 from app.services.meta_api import send_text as _meta_send  # noqa: PLC0415
                                 if not is_safe:
@@ -492,9 +492,9 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                                 )
                                 continue
 
-                            # Atajo no-LLM (delivery/pickup): si hay un pedido externo
-                            # pendiente de pago para este teléfono, vincular el comprobante
-                            # a orders.proof_url para que caja lo vea en su grid.
+                            # Non-LLM shortcut (delivery/pickup): if there is an external order
+                            # awaiting payment for this phone, link the proof to
+                            # orders.proof_url so the cashier sees it in their grid.
                             from app.services.meta_api import send_text as _meta_send  # noqa: PLC0415
                             is_safe = await _is_image_safe(image_id, access_token)
                             if not is_safe:
@@ -584,9 +584,9 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
 
                 log.info("chat.inbound", phone=mask_phone(user_phone), bot_number=bot_number, wam_id=wam_id, text_len=len(user_text))
 
-                # 7b. Atajo no-LLM: si el cliente responde CONFIRMAR/CANCELAR a un
-                # recordatorio reciente de reserva, actualizar la reserva directamente
-                # sin enviar el mensaje al LLM.
+                # 7b. Non-LLM shortcut: if the customer replies CONFIRMAR/CANCELAR to a
+                # recent reservation reminder, update the reservation directly
+                # without sending the message to the LLM.
                 #
                 # Tenant scoping: this whole webhook block runs under
                 # bypass_tenant_scope("webhook_enqueue_cross_tenant"). The repo

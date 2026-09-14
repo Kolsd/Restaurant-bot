@@ -123,10 +123,10 @@ async def test_no_branches_injects_ubicacion_unica():
     assert "[SUCURSALES:" not in enriched, "Should not inject SUCURSALES when there are none"
 
 
-# ── SUCURSALES — multi-location case ─────────────────────────────────────────
+# ── BRANCHES — multi-location case ─────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_branches_present_injects_sucursales_block():
+async def test_branches_present_injects_branches_block():
     """Matriz with branches → [SUCURSALES: ...] block, no UBICACION_UNICA."""
     branches = [
         {"id": 11, "name": "Sede Norte",   "address": "Cra 7 #100"},

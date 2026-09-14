@@ -1,8 +1,8 @@
 /* ════════════════════════════════════════════════════
-   scenarios.js · Narrativa declarativa
-   5 escenarios = 75-90s totales (Loom-ready)
-   Cada step: { at: ms, type, ...payload }
-   Tipos: msg-in | msg-out | typing | quick | dash-event
+   scenarios.js · Declarative narrative
+   5 scenarios = 75-90s total (Loom-ready)
+   Each step: { at: ms, type, ...payload }
+   Types: msg-in | msg-out | typing | quick | dash-event
    ════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -10,7 +10,7 @@
   var SCENARIOS = {
 
     // ════════════════════════════════════════════════
-    // 1. MESA — cliente escanea QR, ordena y paga
+    // 1. TABLE — customer scans QR, orders and pays
     // ════════════════════════════════════════════════
     mesa: {
       id: 'mesa',
@@ -58,7 +58,7 @@
     },
 
     // ════════════════════════════════════════════════
-    // 2. DELIVERY — cliente pide a domicilio
+    // 2. DELIVERY — customer orders delivery
     // ════════════════════════════════════════════════
     delivery: {
       id: 'delivery',
@@ -103,7 +103,7 @@
     },
 
     // ════════════════════════════════════════════════
-    // 3. NPS — feedback post-visita
+    // 3. NPS — post-visit feedback
     // ════════════════════════════════════════════════
     nps: {
       id: 'nps',
@@ -140,7 +140,7 @@
     },
 
     // ════════════════════════════════════════════════
-    // 4. RESERVA — anticipada, equipo recibe
+    // 4. RESERVATION — advance booking, team is notified
     // ════════════════════════════════════════════════
     reserva: {
       id: 'reserva',
@@ -177,7 +177,7 @@
     },
 
     // ════════════════════════════════════════════════
-    // 5. NÓMINA — clock-in biométrico del staff
+    // 5. PAYROLL — biometric staff clock-in
     // ════════════════════════════════════════════════
     nomina: {
       id: 'nomina',

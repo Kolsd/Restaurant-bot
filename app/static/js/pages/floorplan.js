@@ -97,7 +97,7 @@ async function loadFloorPlan() {
     if (_currentView === 'qr') renderQrGrid();
     if (_selectedTableId) selectTable(_selectedTableId);
     updateRefreshBadge();
-    _populateReservaTables();
+    _populateReservationTables();
   } catch (e) {
     mesioTrackFetch(false);
     console.warn('floor-plan fetch failed:', e);
@@ -629,7 +629,7 @@ async function selectTable(tableId) {
       var mins = Math.round((Date.now() - new Date(tbl.opened_at).getTime()) / 60000);
       parts.push('Abierta hace <strong>' + mins + ' min</strong>');
     }
-    // Mesera line — only render if API provides it
+    // Waiter line — only render if API provides it
     var waiterName = tbl.assigned_staff_name || tbl.waiter_name;
     if (waiterName) parts.push('Mesero/a: <strong>' + _escHtml(waiterName) + '</strong>');
     // Last event — only render if API provides it
@@ -919,8 +919,8 @@ function renderQrGrid() {
   }
 }
 
-// ── Phase 3: Reserva modal ────────────────────────────────────────
-function _openReservaModal() {
+// ── Phase 3: Reservation modal ────────────────────────────────────────
+function _openReservationModal() {
   // Defaults: today, current time + 1h
   var now = new Date();
   var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -940,7 +940,7 @@ function _openReservaModal() {
   el('reservaModal').classList.add('open');
 }
 
-function _populateReservaTables() {
+function _populateReservationTables() {
   var sel = el('resTable');
   if (!sel) return;
   var current = sel.value;
@@ -955,7 +955,7 @@ function _populateReservaTables() {
   if (current) sel.value = current;
 }
 
-async function _submitReserva() {
+async function _submitReservation() {
   var name = el('resName').value.trim();
   if (!name) { mesioToast('El nombre del cliente es obligatorio', 'error'); return; }
   var date = el('resDate').value;
@@ -1096,9 +1096,9 @@ function bindAll() {
   var reloadBtn = el('btnEmptyReload');
   if (reloadBtn) reloadBtn.addEventListener('click', function () { loadFloorPlan(); });
 
-  // New reserva
+  // New reservation
   var resBtn = el('newReservaBtn');
-  if (resBtn) resBtn.addEventListener('click', _openReservaModal);
+  if (resBtn) resBtn.addEventListener('click', _openReservationModal);
 
   // View toggle
   var mapBtn = el('viewMap');
@@ -1126,7 +1126,7 @@ function bindAll() {
     if (_selectedTableId) window.location.href = '/cashier?table=' + _selectedTableId + '&action=add';
   });
 
-  // Editar mesa (capacidad, tipo, zona) — abre el modal de propiedades
+  // Edit table (capacity, type, zone) — opens the properties modal
   var btnEditTable = el('btnEditTable');
   if (btnEditTable) btnEditTable.addEventListener('click', function () {
     if (_selectedTableId) _openPropsModal(_selectedTableId);
@@ -1138,13 +1138,13 @@ function bindAll() {
     if (_selectedTableId) window.open('/api/tables/' + _selectedTableId + '/qr-sheet', '_blank');
   });
 
-  // Reserva modal
+  // Reservation modal
   var resCancel = el('reservaModalCancel');
   var resClose  = el('reservaModalClose');
   var resSubmit = el('reservaModalSubmit');
   if (resCancel) resCancel.addEventListener('click', function () { _closeModal('reservaModal'); });
   if (resClose)  resClose.addEventListener('click',  function () { _closeModal('reservaModal'); });
-  if (resSubmit) resSubmit.addEventListener('click', _submitReserva);
+  if (resSubmit) resSubmit.addEventListener('click', _submitReservation);
 
   // Props modal
   var propsCancel = el('propsModalCancel');

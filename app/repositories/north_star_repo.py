@@ -1,10 +1,10 @@
 """
 app/repositories/north_star_repo.py
 
-North-star metric — "Pedidos Rescatados" (bot-originated orders).
+North-star metric — "Rescued Orders" (bot-originated orders).
 
 Definition (CEO-confirmed 2026-05-07):
-  A "pedido rescatado" = any order created via the bot — WhatsApp
+  A "rescued order" = any order created via the bot — WhatsApp
   (channel = 'whatsapp_bot') OR Mesio's own diner web-chat
   (channel = 'web_chat', added 2026-09 when WhatsApp stopped being the only
   bot surface) — regardless of status, including cancelled. It represents
@@ -16,8 +16,8 @@ Sources:
   - table_orders  (in-restaurant mesa orders)          channel IN _CHANNELS
 
 Functions:
-  db_count_pedidos_rescatados       — single-tenant, requires active tenant_scope
-  db_count_pedidos_rescatados_global — cross-tenant ranking, requires bypass_tenant_scope
+  db_count_rescued_orders       — single-tenant, requires active tenant_scope
+  db_count_rescued_orders_global — cross-tenant ranking, requires bypass_tenant_scope
 """
 from __future__ import annotations
 
@@ -28,12 +28,12 @@ from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
 
-# Every bot-originated channel counts as a "pedido rescatado" — the metric is
+# Every bot-originated channel counts as a "rescued order" — the metric is
 # about demand captured BY THE BOT, not by any one messaging surface.
 _CHANNELS = ("whatsapp_bot", "web_chat")
 
 
-async def db_count_pedidos_rescatados(
+async def db_count_rescued_orders(
     period_start: date,
     period_end: date,
 ) -> dict:
@@ -77,7 +77,7 @@ async def db_count_pedidos_rescatados(
     }
 
 
-async def db_count_pedidos_rescatados_global(
+async def db_count_rescued_orders_global(
     period_start: date,
     period_end: date,
 ) -> list[dict]:

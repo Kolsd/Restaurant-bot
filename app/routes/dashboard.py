@@ -35,9 +35,9 @@ STATIC = Path(__file__).parent.parent / "static"
 
 async def geocode_address(address: str) -> tuple:
     """
-    Geocodifica una dirección. Usa Nominatim (OpenStreetMap) como primario,
-    con sesgo a Colombia, y sin API key requerida.
-    Retorna (lat, lon, display_name) o (None, None, None).
+    Geocodes an address. Uses Nominatim (OpenStreetMap) as the primary provider,
+    biased toward Colombia, with no API key required.
+    Returns (lat, lon, display_name) or (None, None, None).
     """
     headers = {"User-Agent": "Mesio-Bot/1.0 (contacto@mesioai.com)"}
     query = address if any(c in address.lower() for c in ("colombia", "bogotá", "medellin", "cali")) else f"{address}, Colombia"
@@ -126,11 +126,11 @@ async def staff_portal_redirect(request: Request):
     return RedirectResponse(url=target, status_code=302)
 
 @router.get("/waiter", response_class=HTMLResponse)
-async def mesero_page():
+async def waiter_page():
     return (STATIC / "html" / "waiter.html").read_text(encoding="utf-8")
 
 @router.get("/cashier", response_class=HTMLResponse)
-async def caja_page():
+async def cashier_page():
     p = STATIC / "html" / "cashier.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Caja no disponible</h1>")
 
@@ -166,11 +166,11 @@ async def diner_chat_page(table_id: str):
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Chat no disponible</h1>", status_code=404)
 
 @router.get("/privacy", response_class=HTMLResponse)
-async def privacidad_page():
+async def privacy_page():
     return (STATIC / "html" / "privacy.html").read_text(encoding="utf-8")
 
 @router.get("/terms", response_class=HTMLResponse)
-async def terminos_page():
+async def terms_page():
     return (STATIC / "html" / "terms.html").read_text(encoding="utf-8")
 
 @router.get("/billing", response_class=HTMLResponse)
@@ -179,7 +179,7 @@ async def billing_page():
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Billing no disponible</h1>")
 
 @router.get("/courier", response_class=HTMLResponse)
-async def domiciliario_page():
+async def courier_page():
     p = STATIC / "html" / "courier.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no encontrada</h1>", status_code=404)
 
@@ -205,17 +205,17 @@ async def floorplan_page():
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Floorplan no disponible</h1>", status_code=404)
 
 @router.get("/team", response_class=HTMLResponse)
-async def equipo_page():
+async def team_page():
     p = STATIC / "html" / "team.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Equipo no disponible</h1>", status_code=404)
 
 @router.get("/orders", response_class=HTMLResponse)
-async def pedidos_page():
+async def orders_page():
     p = STATIC / "html" / "orders.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Pedidos no disponible</h1>", status_code=404)
 
 @router.get("/reservations", response_class=HTMLResponse)
-async def reservaciones_page():
+async def reservations_page():
     p = STATIC / "html" / "reservations.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Reservaciones no disponible</h1>", status_code=404)
 
@@ -235,22 +235,22 @@ async def nps_page():
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>NPS no disponible</h1>", status_code=404)
 
 @router.get("/loyalty", response_class=HTMLResponse)
-async def fidelizacion_page():
+async def loyalty_page():
     p = STATIC / "html" / "loyalty.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Fidelización no disponible</h1>", status_code=404)
 
 @router.get("/customers-at-risk", response_class=HTMLResponse)
-async def clientes_riesgo_page():
+async def customers_at_risk_page():
     p = STATIC / "html" / "customers-at-risk.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Clientes en riesgo no disponible</h1>", status_code=404)
 
 @router.get("/payroll", response_class=HTMLResponse)
-async def nomina_page():
+async def payroll_page():
     p = STATIC / "html" / "payroll.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Nómina no disponible</h1>", status_code=404)
 
 @router.get("/locations", response_class=HTMLResponse)
-async def sucursales_page():
+async def locations_page():
     p = STATIC / "html" / "locations.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Sucursales no disponible</h1>", status_code=404)
 
@@ -271,13 +271,13 @@ async def public_restaurant_info(id: int):
     return {"name": restaurant.get("name", "")}
 
 
-# ── QR-Phone-Claim (Capa 1 de identificación de mesa) ─────────────────
-# Diseño completo: docs/MESA_QR_ARCHITECTURE.md
-# El cliente escanea QR → /menu/{table_id} pide su teléfono → el browser
-# llama a este endpoint para registrar el pre-binding (phone, table). Cuando
-# el cliente envía el primer mensaje al bot, detect_table_context busca
-# por igualdad exacta de phone y abre la sesión sobre la mesa correcta —
-# sin race conditions ni markers visibles en el WhatsApp.
+# ── QR-Phone-Claim (Layer 1 of table identification) ─────────────────
+# Full design: docs/MESA_QR_ARCHITECTURE.md
+# The customer scans a QR → /menu/{table_id} asks for their phone → the browser
+# calls this endpoint to register the pre-binding (phone, table). When
+# the customer sends their first message to the bot, detect_table_context looks
+# up by exact phone match and opens the session on the correct table —
+# no race conditions, no visible markers in WhatsApp.
 
 class QrClaimRequest(BaseModel):
     bot_number: str
@@ -378,7 +378,7 @@ async def post_qr_claim(request: Request, body: QrClaimRequest):
 
 @router.get("/api/public/menu/{bot_number}")
 async def get_public_menu(request: Request, bot_number: str):
-    # ── Rate limit: 30 req/min por IP — previene harvesting masivo ─────────────
+    # ── Rate limit: 30 req/min per IP — prevents mass harvesting ─────────────
     client_ip = request.client.host if request.client else "unknown"
     allowed = await state_store.rate_limit_check(f"public_menu:{client_ip}", max_requests=30, window_seconds=60)
     if not allowed:
@@ -430,13 +430,13 @@ async def get_public_menu(request: Request, bot_number: str):
 @router.get("/api/geocode")
 async def geocode_endpoint(request: Request, address: str):
     """
-    Proxy geocode a Nominatim. Requiere autenticación (Bearer token de admin/staff).
-    Rate limit: 10 req/min por IP.
+    Geocode proxy to Nominatim. Requires authentication (admin/staff Bearer token).
+    Rate limit: 10 req/min per IP.
     """
     from app.routes.deps import require_auth
     await require_auth(request)
 
-    # ── Rate limit: 10 req/min por IP ────────────────────────────────────────────
+    # ── Rate limit: 10 req/min per IP ────────────────────────────────────────────
     client_ip = request.client.host if request.client else "unknown"
     allowed = await state_store.rate_limit_check(f"geocode:{client_ip}", max_requests=10, window_seconds=60)
     if not allowed:
@@ -456,10 +456,10 @@ async def geocode_endpoint(request: Request, address: str):
 @router.get("/api/geocode/reverse")
 async def geocode_reverse_endpoint(request: Request, lat: float, lon: float):
     """
-    Proxy reverse geocode a Nominatim. Requiere autenticación (Bearer token de admin/staff).
-    Rate limit: 10 req/min por IP (compartido con /api/geocode).
-    El frontend debe usar este endpoint en lugar de llamar a Nominatim directamente.
-    TODO (wave siguiente): migrar dashboard-features.js para usar este endpoint.
+    Reverse geocode proxy to Nominatim. Requires authentication (admin/staff Bearer token).
+    Rate limit: 10 req/min per IP (shared with /api/geocode).
+    The frontend must use this endpoint instead of calling Nominatim directly.
+    TODO (next wave): migrate dashboard-features.js to use this endpoint.
     """
     from app.routes.deps import require_auth
     await require_auth(request)

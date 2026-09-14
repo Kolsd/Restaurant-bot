@@ -1,4 +1,4 @@
-/* ── Clientes en Riesgo page ─────────────────────────────────────── */
+/* ── Customers at Risk page ─────────────────────────────────────── */
 (function () {
   'use strict';
 

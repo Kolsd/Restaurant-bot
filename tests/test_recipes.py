@@ -1,8 +1,8 @@
 """
-Tests para FASE 4: Escandallos / Recetas.
-Cubre: db_upsert_dish_recipe, db_get_dish_recipe, db_get_food_costs,
+Tests for PHASE 4: Recipes.
+Covers: db_upsert_dish_recipe, db_get_dish_recipe, db_get_food_costs,
        db_deduct_inventory_for_order (recipe path + legacy fallback).
-No requiere base de datos ni credenciales reales.
+Does not require a database or real credentials.
 """
 import pytest
 import json
@@ -14,7 +14,7 @@ from app.services.tenant_context import tenant_scope
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_row(d: dict):
-    """Crea un asyncpg Row-like desde un dict."""
+    """Creates an asyncpg Row-like object from a dict."""
     row = MagicMock()
     row.__iter__ = lambda s: iter(d.items())
     row.keys     = lambda: d.keys()
@@ -37,8 +37,8 @@ def _make_pool(conn):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_upsert_dish_recipe_llama_delete_e_insert():
-    """Upsert debe eliminar las líneas previas y volver a insertar."""
+async def test_upsert_dish_recipe_calls_delete_and_insert():
+    """Upsert must delete the previous lines and insert again."""
     from app.services import database as db
 
     result_rows = [_make_row({
@@ -66,24 +66,24 @@ async def test_upsert_dish_recipe_llama_delete_e_insert():
                 lines=[{"ingredient_id": 10, "quantity": 0.5}]
             )
 
-    # DELETE fue llamado
+    # DELETE was called
     delete_calls = [c for c in mock_conn.execute.call_args_list
                     if "DELETE" in str(c)]
     assert len(delete_calls) >= 1
 
-    # INSERT fue llamado
+    # INSERT was called
     insert_calls = [c for c in mock_conn.execute.call_args_list
                     if "INSERT" in str(c)]
     assert len(insert_calls) >= 1
 
-    # Devuelve las líneas del GET posterior
+    # Returns the lines from the subsequent GET
     assert len(result) == 1
     assert result[0]["ingredient_id"] == 10
 
 
 @pytest.mark.asyncio
-async def test_upsert_dish_recipe_vacio_elimina_escandallo():
-    """Pasar lines=[] debe solo ejecutar el DELETE (borrar el escandallo)."""
+async def test_upsert_dish_recipe_empty_deletes_recipe():
+    """Passing lines=[] must only run the DELETE (removing the recipe)."""
     from app.services import database as db
 
     mock_conn = AsyncMock()
@@ -101,7 +101,7 @@ async def test_upsert_dish_recipe_vacio_elimina_escandallo():
         with tenant_scope(1):
             result = await db.db_upsert_dish_recipe(1, "Pizza", [])
 
-    # Fase 5c: _sync_dish_availability_conn inserts into menu_availability when
+    # Phase 5c: _sync_dish_availability_conn inserts into menu_availability when
     # lines=[] — only dish_recipes INSERTs must be absent (the recipe was deleted).
     recipe_insert_calls = [c for c in mock_conn.execute.call_args_list
                            if "INSERT INTO dish_recipes" in str(c)]
@@ -114,8 +114,8 @@ async def test_upsert_dish_recipe_vacio_elimina_escandallo():
 # ══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_get_food_costs_retorna_lista_con_breakdown():
-    """db_get_food_costs debe retornar dish_name, food_cost y breakdown."""
+async def test_get_food_costs_returns_list_with_breakdown():
+    """db_get_food_costs must return dish_name, food_cost and breakdown."""
     from app.services import database as db
 
     breakdown = [{"ingredient": "Queso", "unit": "kg", "quantity": 0.2,
@@ -145,7 +145,7 @@ async def test_get_food_costs_retorna_lista_con_breakdown():
 
 
 @pytest.mark.asyncio
-async def test_get_food_costs_sin_escandallos_retorna_lista_vacia():
+async def test_get_food_costs_without_recipes_returns_empty_list():
     from app.services import database as db
 
     mock_conn = AsyncMock()
@@ -164,21 +164,21 @@ async def test_get_food_costs_sin_escandallos_retorna_lista_vacia():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 3. db_deduct_inventory_for_order — recipe path (escandallo)
+# 3. db_deduct_inventory_for_order — recipe path
 # ══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_deduct_usa_receta_cuando_existe():
+async def test_deduct_uses_recipe_when_it_exists():
     """
-    Si hay líneas en dish_recipes para un plato, debe descontar por ingrediente
-    (qty_receta × qty_pedida) y NO usar linked_dishes.
+    If there are lines in dish_recipes for a dish, it must deduct per ingredient
+    (recipe_qty × ordered_qty) and NOT use linked_dishes.
     """
     from app.services import database as db
     import app.repositories.inventory_repo as inv_repo
 
     restaurant = {"id": 1}
 
-    # recipe row: 0.3 kg de queso por porción
+    # recipe row: 0.3 kg of cheese per serving
     recipe_row = _make_row({"ingredient_id": 10, "recipe_qty": 0.3})
     # locked inventory row: 5 kg stock
     locked_row = _make_row({
@@ -200,7 +200,7 @@ async def test_deduct_usa_receta_cuando_existe():
         __aexit__=AsyncMock(return_value=False),
     ))
 
-    # Fase 5c: stub out the new auto-hide helper so it doesn't consume conn.fetch
+    # Phase 5c: stub out the new auto-hide helper so it doesn't consume conn.fetch
     async def _noop_sync(conn, ingredient_id, new_stock, min_stock, restaurant_id):
         pass
 
@@ -216,7 +216,7 @@ async def test_deduct_usa_receta_cuando_existe():
                 bot_number="+57300", items=[{"name": "Pizza", "quantity": 2}]
             )
 
-    # Debe haber un UPDATE de inventario via fetchrow (uses RETURNING)
+    # There must be an inventory UPDATE via fetchrow (uses RETURNING)
     update_calls = [c for c in mock_conn.fetchrow.call_args_list
                     if "UPDATE inventory" in str(c)]
     assert len(update_calls) == 1
@@ -226,17 +226,17 @@ async def test_deduct_usa_receta_cuando_existe():
     update_args = update_calls[0].args
     assert abs(float(update_args[1]) - 0.6) < 0.001
 
-    # Historial registrado via execute
+    # History logged via execute
     history_calls = [c for c in mock_conn.execute.call_args_list
                      if "inventory_history" in str(c)]
     assert len(history_calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_deduct_usa_linked_dishes_fallback_sin_receta():
+async def test_deduct_uses_linked_dishes_fallback_without_recipe():
     """
-    Si dish_recipes no tiene líneas para el plato, cae al comportamiento
-    legacy de linked_dishes.
+    If dish_recipes has no lines for the dish, it falls back to the
+    legacy linked_dishes behavior.
     """
     from app.services import database as db
 
@@ -250,7 +250,7 @@ async def test_deduct_usa_linked_dishes_fallback_sin_receta():
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock()
     mock_conn.fetch = AsyncMock(side_effect=[
-        [],           # dish_recipes → vacío → fallback
+        [],           # dish_recipes → empty → fallback
         [legacy_row], # linked_dishes FOR UPDATE
     ])
     # fetchrow returns updated stock after UPDATE ... RETURNING current_stock
@@ -282,10 +282,10 @@ async def test_deduct_usa_linked_dishes_fallback_sin_receta():
 
 
 @pytest.mark.asyncio
-async def test_deduct_desactiva_plato_al_agotar_stock():
+async def test_deduct_deactivates_dish_when_stock_runs_out():
     """
-    Cuando el stock de un ingrediente baja a ≤ min_stock, debe llamar
-    a _sync_dish_availability_conn para desactivar los platos vinculados.
+    When an ingredient's stock drops to ≤ min_stock, it must call
+    _sync_dish_availability_conn to deactivate the linked dishes.
     """
     from app.services import database as db
     import app.repositories.inventory_repo as inv_repo
@@ -317,7 +317,7 @@ async def test_deduct_desactiva_plato_al_agotar_stock():
     async def fake_sync_conn(conn, dish_names, available, restaurant_id):
         sync_calls.append((dish_names, available))
 
-    # Fase 5c: stub out _sync_ingredient_dishes_conn so it doesn't consume
+    # Phase 5c: stub out _sync_ingredient_dishes_conn so it doesn't consume
     # additional conn.fetch calls; the linked_dishes path is what this test
     # exercises via _sync_dish_availability_conn.
     async def _noop_ingredient_sync(conn, ingredient_id, new_stock, min_stock, restaurant_id):
@@ -337,15 +337,15 @@ async def test_deduct_desactiva_plato_al_agotar_stock():
                 items=[{"name": "Sopa del día", "quantity": 1}]
             )
 
-    # Debe haber llamado a _sync_dish_availability_conn con available=False
+    # _sync_dish_availability_conn must have been called with available=False
     assert len(sync_calls) == 1
     assert sync_calls[0][1] is False
     assert "Sopa del día" in sync_calls[0][0]
 
 
 @pytest.mark.asyncio
-async def test_deduct_restaurante_inexistente_no_hace_nada():
-    """Si el restaurante no existe, la función debe retornar sin error."""
+async def test_deduct_nonexistent_restaurant_does_nothing():
+    """If the restaurant doesn't exist, the function must return without error."""
     from app.services import database as db
 
     mock_conn = AsyncMock()
@@ -358,7 +358,7 @@ async def test_deduct_restaurante_inexistente_no_hace_nada():
         patch.object(db, "db_get_restaurant_by_phone",
                      AsyncMock(return_value=None)),
     ):
-        # No debe lanzar excepción
+        # Must not raise an exception
         await db.db_deduct_inventory_for_order(
             bot_number="+57000",
             items=[{"name": "Nada", "quantity": 1}]
@@ -371,8 +371,8 @@ async def test_deduct_restaurante_inexistente_no_hace_nada():
 # 4. HTTP routes — /api/inventory/recipes
 # ══════════════════════════════════════════════════════════════════════════════
 
-def test_recipe_routes_upsert_y_delete(client, monkeypatch):
-    """POST y DELETE de /api/inventory/recipes retornan 200 con datos correctos."""
+def test_recipe_routes_upsert_and_delete(client, monkeypatch):
+    """POST and DELETE of /api/inventory/recipes return 200 with correct data."""
     from app.services import database as db_mod
     from app.routes.deps import get_current_restaurant_scoped
     from app.main import app
@@ -424,7 +424,7 @@ def test_recipe_routes_upsert_y_delete(client, monkeypatch):
 
 
 def test_recipe_routes_food_costs(client, monkeypatch):
-    """GET /api/inventory/food-costs retorna lista con food_cost por plato."""
+    """GET /api/inventory/food-costs returns a list with food_cost per dish."""
     from app.services import database as db_mod
     from app.routes.deps import get_current_restaurant_scoped
     from app.main import app

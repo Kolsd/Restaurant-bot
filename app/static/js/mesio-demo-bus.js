@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════
    mesio-demo-bus.js · Mock state + EventBus
-   - Mantiene contrato: window.MesioDemo.state, fetch monkey-patch (no-op aquí)
-   - Añade: pub/sub vía window.MesioBus
+   - Keeps the contract: window.MesioDemo.state, fetch monkey-patch (no-op here)
+   - Adds: pub/sub via window.MesioBus
    ════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -30,7 +30,7 @@
   window.MesioBus = Bus;
 
   // ─── Initial state ────────────────────────────────
-  // Restaurante: Sazón Caribe (escena demo coherente)
+  // Restaurant: Sazón Caribe (coherent demo scene)
   var state = {
     restaurant: {
       id: 'sazon-caribe',
@@ -45,7 +45,7 @@
       ticket: 38500
     },
     floor: (function () {
-      // 8 mesas; ocupadas: 2, 4, 7, 8 → 4 ocupadas / 4 libres
+      // 8 tables; occupied: 2, 4, 7, 8 → 4 occupied / 4 free
       var occupiedSet = { 2: true, 4: true, 7: true, 8: true };
       var arr = [];
       for (var i = 1; i <= 8; i++) arr.push({ num: i, occupied: !!occupiedSet[i] });

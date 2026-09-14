@@ -940,7 +940,7 @@ async def get_dashboard_menu(request: Request):
 
 
 @router.get("/api/dashboard/orders-rescued")
-async def get_pedidos_rescatados(
+async def get_rescued_orders(
     request: Request,
     period: str = "mtd",
 ):
@@ -965,7 +965,7 @@ async def get_pedidos_rescatados(
     Requires: active restaurant Bearer token.
     """
     from datetime import date, timedelta
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.repositories.north_star_repo import db_count_rescued_orders
     from app.services.tenant_context import tenant_scope
 
     restaurant = await get_current_restaurant(request)
@@ -989,10 +989,10 @@ async def get_pedidos_rescatados(
     org_id = restaurant["id"]
     try:
         with tenant_scope(org_id):
-            current = await db_count_pedidos_rescatados(period_start, period_end)
-            prev    = await db_count_pedidos_rescatados(prev_start, prev_end)
+            current = await db_count_rescued_orders(period_start, period_end)
+            prev    = await db_count_rescued_orders(prev_start, prev_end)
     except Exception as exc:
-        log.exception("dashboard.pedidos_rescatados_failed", org_id=org_id)
+        log.exception("dashboard.rescued_orders_failed", org_id=org_id)
         raise HTTPException(status_code=500, detail="Error al calcular pedidos rescatados")
 
     delta_pct = None
@@ -1129,12 +1129,12 @@ def _get_ai_client() -> Anthropic:
 @router.post("/api/ai/proxy")
 async def ai_proxy(payload: _AIProxyRequest, request: Request, _user: str = Depends(require_auth)):
     """
-    Proxy autenticado para llamadas al modelo de IA desde el dashboard.
-    El ANTHROPIC_API_KEY vive solo en el servidor — nunca se expone al cliente.
-    Requiere Bearer token de admin válido.
-    Rate limit: 20 req/min por usuario autenticado.
+    Authenticated proxy for AI model calls from the dashboard.
+    ANTHROPIC_API_KEY lives only on the server — never exposed to the client.
+    Requires a valid admin Bearer token.
+    Rate limit: 20 req/min per authenticated user.
     """
-    # ── Rate limit: 20 req/min por usuario ───────────────────────────────────────
+    # ── Rate limit: 20 req/min per user ───────────────────────────────────────
     rl_key = f"ai_proxy:{_user}"
     allowed = await state_store.rate_limit_check(rl_key, max_requests=20, window_seconds=60)
     if not allowed:
@@ -1174,14 +1174,14 @@ async def sign_image_upload(
     restaurant: dict = Depends(get_current_restaurant),
 ):
     """
-    Retorna parámetros firmados para upload directo browser→Cloudinary.
+    Returns signed parameters for a direct browser→Cloudinary upload.
 
-    El browser hace POST multipart a:
+    The browser does a multipart POST to:
         https://api.cloudinary.com/v1_1/{cloud_name}/image/upload
-    usando estos params + el archivo elegido. Nuestro servidor nunca toca los bytes.
+    using these params + the chosen file. Our server never touches the bytes.
 
-    Rate limit: 30 requests/min por restaurante (Redis cross-worker).
-    Auth: Bearer token de admin/owner del restaurante.
+    Rate limit: 30 requests/min per restaurant (Redis cross-worker).
+    Auth: admin/owner Bearer token for the restaurant.
     """
     from app.services import image_host
 
@@ -1190,7 +1190,7 @@ async def sign_image_upload(
     _raw_suffix = (body.folder_suffix or "menu").strip() or "menu"
     folder_suffix = _raw_suffix if _raw_suffix in _FOLDER_SUFFIX_ALLOWLIST else "menu"
 
-    # ── Rate limit: 30 uploads/min por restaurante ────────────────────────────
+    # ── Rate limit: 30 uploads/min per restaurant ────────────────────────────
     rl_key = f"menu_image_sign:{restaurant_id}"
     allowed = await state_store.rate_limit_check(
         key=rl_key, max_requests=30, window_seconds=60
@@ -1225,13 +1225,13 @@ async def delete_menu_image(
     restaurant: dict = Depends(get_current_restaurant),
 ):
     """
-    Borra una imagen de Cloudinary por public_id.
+    Deletes a Cloudinary image by public_id.
 
-    Valida ownership: el public_id DEBE comenzar con mesio/r_{restaurant_id}/.
-    Si no pertenece al restaurante autenticado → 403.
-    Si Cloudinary falla (imagen ya no existe, etc.) → 200 igual (idempotente).
+    Validates ownership: public_id MUST start with mesio/r_{restaurant_id}/.
+    If it doesn't belong to the authenticated restaurant → 403.
+    If Cloudinary fails (image no longer exists, etc.) → 200 anyway (idempotent).
 
-    Auth: Bearer token de admin/owner del restaurante.
+    Auth: admin/owner Bearer token for the restaurant.
     """
     from app.services import image_host
 
@@ -1241,7 +1241,7 @@ async def delete_menu_image(
     if not public_id:
         raise HTTPException(status_code=422, detail="public_id es requerido.")
 
-    # ── Ownership check: verificar antes de intentar borrar ───────────────────
+    # ── Ownership check: verify before attempting to delete ───────────────────
     expected_prefix = f"mesio/r_{restaurant_id}/"
     if not public_id.startswith(expected_prefix):
         log.warning(
@@ -1255,13 +1255,13 @@ async def delete_menu_image(
             detail="No puedes borrar esta imagen.",
         )
 
-    # ── Borrar de Cloudinary (idempotente: si ya no existe, igual 200) ────────
+    # ── Delete from Cloudinary (idempotent: 200 even if it no longer exists) ────────
     success = image_host.delete_image(public_id, restaurant_id)
 
     if not success:
-        # delete_image retorna False tanto si ownership falla (ya verificado arriba)
-        # como si Cloudinary falla o la imagen no existe. En ambos casos loguear
-        # y retornar 200 para mantener idempotencia — el recurso ya no existe.
+        # delete_image returns False both when ownership fails (already checked above)
+        # and when Cloudinary fails or the image doesn't exist. In both cases, log
+        # and return 200 to keep idempotency — the resource no longer exists.
         log.warning(
             "menu.image.delete.cloudinary_noop",
             restaurant_id=restaurant_id,

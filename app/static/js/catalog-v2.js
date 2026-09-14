@@ -709,7 +709,7 @@ class HeroCarousel {
   }
 }
 
-/* ── QR-Phone-Claim modal (Capa 1) ──
+/* ── QR-Phone-Claim modal (Layer 1) ──
  *
  * Shown once per page load when state.tableId is set (i.e. customer arrived
  * via a table QR scan). Asks for their WhatsApp phone, attempts a
@@ -890,7 +890,7 @@ function initCatalog() {
     openDish: null,
     loading: true,
     error: null,
-    // QR-Phone-Claim (Capa 1): when this is true, the bot will identify
+    // QR-Phone-Claim (Layer 1): when this is true, the bot will identify
     // the table via the registered claim — the wa.me message can be sent
     // without the [t:tbl-X] marker. See docs/MESA_QR_ARCHITECTURE.md.
     qrClaimDone: false,
@@ -994,7 +994,7 @@ function initCatalog() {
     }
     const itemsText = items.join('\n');
     if (state.tableId) {
-      // QR-Phone-Claim (Capa 1, post-2026-04-28): when state.qrClaimDone is
+      // QR-Phone-Claim (Layer 1, post-2026-04-28): when state.qrClaimDone is
       // true the customer registered their phone via the modal and the bot
       // will identify the table via that claim — no marker needed, message
       // 100% clean. When the claim FAILED (modal skipped, network error,
@@ -1418,7 +1418,7 @@ function initCatalog() {
       renderHeader(state);
       setState({});
 
-      // QR-Phone-Claim (Capa 1, post-2026-04-28). If the customer arrived
+      // QR-Phone-Claim (Layer 1, post-2026-04-28). If the customer arrived
       // via a table QR scan, prompt for their WhatsApp number BEFORE they
       // tap "Pedir por WhatsApp". The phone is pre-bound on the server so
       // the bot identifies the table by exact phone match, and the prefilled

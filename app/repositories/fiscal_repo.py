@@ -24,7 +24,7 @@ async def db_init_fiscal_tables():
 
 
 async def db_get_fiscal_resolution(restaurant_id: int) -> dict | None:
-    """Devuelve la resolución DIAN activa del restaurante, o None si no existe.
+    """Returns the restaurant's active DIAN resolution, or None if it doesn't exist.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -37,7 +37,7 @@ async def db_get_fiscal_resolution(restaurant_id: int) -> dict | None:
 
 
 async def db_upsert_fiscal_resolution(restaurant_id: int, data: dict) -> None:
-    """Inserta o actualiza la resolución DIAN de un restaurante.
+    """Inserts or updates a restaurant's DIAN resolution.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -74,9 +74,9 @@ async def db_upsert_fiscal_resolution(restaurant_id: int, data: dict) -> None:
 
 async def db_claim_next_invoice_number(restaurant_id: int) -> int:
     """
-    Incrementa atómicamente el consecutivo de factura y lo devuelve.
-    Lanza RuntimeError si la resolución no existe o el rango está agotado.
-    La operación es atómica (UPDATE ... RETURNING) — segura con múltiples workers.
+    Atomically increments the invoice sequence number and returns it.
+    Raises RuntimeError if the resolution doesn't exist or the range is exhausted.
+    The operation is atomic (UPDATE ... RETURNING) — safe with multiple workers.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -92,7 +92,7 @@ async def db_claim_next_invoice_number(restaurant_id: int) -> int:
             restaurant_id
         )
     if not row:
-        # Puede ser: no existe resolución, rango agotado, o resolución vencida
+        # Could be: resolution doesn't exist, range exhausted, or resolution expired
         res = await db_get_fiscal_resolution(restaurant_id)
         if not res:
             raise RuntimeError("No hay resolución DIAN configurada para este restaurante")
@@ -106,12 +106,12 @@ async def db_claim_next_invoice_number(restaurant_id: int) -> int:
 
 
 async def db_save_fiscal_invoice(data: dict) -> int:
-    """Persiste la factura electrónica. Devuelve el ID generado.
+    """Persists the electronic invoice. Returns the generated ID.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
 
-    # asyncpg espera date/time nativos, no strings
+    # asyncpg expects native date/time objects, not strings
     raw_date = data.get("issue_date")
     issue_date = (
         datetime.strptime(raw_date[:10], "%Y-%m-%d").date()
@@ -158,7 +158,7 @@ async def db_save_fiscal_invoice(data: dict) -> int:
 
 
 async def db_get_fiscal_invoices(restaurant_id: int, limit: int = 50) -> list:
-    """Lista las facturas electrónicas emitidas por el restaurante.
+    """Lists the electronic invoices issued by the restaurant.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -182,10 +182,10 @@ async def db_get_next_invoice_number(
     start_at: int = 5200,
 ) -> int:
     """
-    Retorna MAX(invoice_number)+1 para el restaurante y prefijo indicados.
-    Devuelve start_at si no existen facturas previas con ese prefijo.
-    NOTA: SELECT no-atómico — apropiado para sandbox. En producción multi-worker
-    usar db_claim_next_invoice_number (UPDATE … RETURNING atómico).
+    Returns MAX(invoice_number)+1 for the given restaurant and prefix.
+    Returns start_at if no previous invoices exist with that prefix.
+    NOTE: non-atomic SELECT — fine for sandbox. In multi-worker production
+    use db_claim_next_invoice_number (atomic UPDATE … RETURNING).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -207,8 +207,8 @@ async def db_update_invoice_dian_data(
     dian_response: dict | None = None,
 ) -> None:
     """
-    Almacena los 3 campos DIAN retornados por MATIAS API tras la emisión exitosa:
-    CUFE, URL/base64 del PDF y cadena QR. Actualiza dian_status a 'accepted'.
+    Stores the 3 DIAN fields returned by the MATIAS API after successful issuance:
+    CUFE, PDF URL/base64, and QR string. Updates dian_status to 'accepted'.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """

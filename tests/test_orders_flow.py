@@ -193,7 +193,7 @@ def test_update_delivery_status_calls_db(client, monkeypatch):
 
 
 def test_update_delivery_no_notification_for_listo(client, monkeypatch):
-    """Status 'listo' no dispara notificación WhatsApp."""
+    """Status 'listo' does not trigger a WhatsApp notification."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_order", AsyncMock(return_value=_ORDER))
     monkeypatch.setattr(db_mod, "db_update_order_status", AsyncMock())
@@ -204,7 +204,7 @@ def test_update_delivery_no_notification_for_listo(client, monkeypatch):
 
 
 def test_update_delivery_returns_new_status(client, monkeypatch):
-    """Respuesta incluye new_status."""
+    """Response includes new_status."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_order", AsyncMock(return_value=_ORDER))
     monkeypatch.setattr(db_mod, "db_update_order_status", AsyncMock())
@@ -298,7 +298,7 @@ def test_wompi_invalid_signature(client, monkeypatch):
 
 
 def test_wompi_declined_transaction(client, monkeypatch):
-    """Transacción DECLINED → 200 pero no llama db_confirm_payment."""
+    """DECLINED transaction → 200 but does not call db_confirm_payment."""
     secret = "test_secret"
     monkeypatch.setattr("app.routes.orders_routes.WOMPI_EVENTS_SECRET", secret)
     monkeypatch.setattr(
@@ -332,7 +332,7 @@ def test_wompi_unknown_event(client, monkeypatch):
 
 
 def test_wompi_no_reference(client, monkeypatch):
-    """Transacción APPROVED sin reference → 200, no crashea."""
+    """APPROVED transaction without reference → 200, doesn't crash."""
     secret = "test_secret"
     monkeypatch.setattr("app.routes.orders_routes.WOMPI_EVENTS_SECRET", secret)
     monkeypatch.setattr(
@@ -395,7 +395,7 @@ def _meta_sig(body: bytes, secret: str) -> str:
 
 
 def test_meta_webhook_verification(client, monkeypatch):
-    """GET /api/webhook/meta con challenge → retorna el challenge."""
+    """GET /api/webhook/meta with challenge → returns the challenge."""
     monkeypatch.setenv("META_VERIFY_TOKEN", "verify_tok")
     r = client.get("/api/webhook/meta?hub.mode=subscribe"
                    "&hub.verify_token=verify_tok&hub.challenge=abc123")
@@ -404,7 +404,7 @@ def test_meta_webhook_verification(client, monkeypatch):
 
 
 def test_meta_webhook_verification_wrong_token(client, monkeypatch):
-    """Token incorrecto → 403."""
+    """Incorrect token → 403."""
     monkeypatch.setenv("META_VERIFY_TOKEN", "correct")
     r = client.get("/api/webhook/meta?hub.mode=subscribe"
                    "&hub.verify_token=wrong&hub.challenge=abc123")
@@ -412,7 +412,7 @@ def test_meta_webhook_verification_wrong_token(client, monkeypatch):
 
 
 def test_meta_webhook_ingest_returns_200(client, monkeypatch):
-    """POST /api/webhook/meta → siempre 200 (ACK inmediato a Meta)."""
+    """POST /api/webhook/meta → always 200 (immediate ACK to Meta)."""
     secret = "test_secret"
     monkeypatch.setenv("META_APP_SECRET", secret)
     payload = _meta_payload()
@@ -432,7 +432,7 @@ def test_meta_webhook_ingest_returns_200(client, monkeypatch):
 
 
 def test_meta_webhook_status_update_returns_200(client, monkeypatch):
-    """Webhook de status update (sin messages) → 200 silencioso."""
+    """Status update webhook (no messages) → silent 200."""
     secret = "test_secret"
     monkeypatch.setenv("META_APP_SECRET", secret)
     payload = {"entry": [{"changes": [{"value": {
@@ -447,8 +447,8 @@ def test_meta_webhook_status_update_returns_200(client, monkeypatch):
 
 
 def test_meta_webhook_invalid_signature(client, monkeypatch):
-    """Firma inválida → 200 (NO 401). Rule 6: 401 causa retry flood infinito en Meta.
-    Meta reintenta si no recibe 2xx. Retornar 200 + log warning es la política correcta."""
+    """Invalid signature → 200 (NOT 401). Rule 6: 401 causes an infinite retry flood in Meta.
+    Meta retries if it doesn't get a 2xx. Returning 200 + a log warning is the correct policy."""
     monkeypatch.setenv("META_APP_SECRET", "real_secret")
     payload = _meta_payload()
     body = json.dumps(payload).encode()
@@ -463,7 +463,7 @@ def test_meta_webhook_invalid_signature(client, monkeypatch):
 
 
 def test_meta_webhook_duplicate_not_enqueued(client, monkeypatch):
-    """WAM duplicado → no encola."""
+    """Duplicate WAM → not enqueued."""
     secret = "test_secret"
     monkeypatch.setenv("META_APP_SECRET", secret)
     payload = _meta_payload(wam_id="wam-SEEN")
@@ -588,7 +588,7 @@ def _make_wam_conn(fetchval_result):
 
 @pytest.mark.asyncio
 async def test_wam_dedup_new_message_false(monkeypatch):
-    """Mensaje nuevo → retorna False (no es duplicado)."""
+    """New message → returns False (not a duplicate)."""
     from app.repositories.conversations_repo import db_is_duplicate_wam
 
     conn = _make_wam_conn(fetchval_result="wam-001")  # insertado → no duplicado
@@ -616,7 +616,7 @@ async def test_wam_dedup_duplicate_true(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_wam_dedup_cleans_old_records(monkeypatch):
-    """Limpia registros > 2 min antes de insertar."""
+    """Cleans up records > 2 min old before inserting."""
     from app.repositories.conversations_repo import db_is_duplicate_wam
 
     executed_queries = []
@@ -634,7 +634,7 @@ async def test_wam_dedup_cleans_old_records(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_wam_dedup_different_ids_both_new(monkeypatch):
-    """Dos WAM IDs distintos → ambos retornan False (ninguno duplicado)."""
+    """Two different WAM IDs → both return False (neither is a duplicate)."""
     from app.repositories.conversations_repo import db_is_duplicate_wam
 
     conn = _make_wam_conn(fetchval_result="any_id")
@@ -650,7 +650,7 @@ async def test_wam_dedup_different_ids_both_new(monkeypatch):
 
 
 def test_wam_dedup_endpoint_dedup_no_enqueue(client, monkeypatch):
-    """Webhook con WAM ya procesado → 200 pero no encola."""
+    """Webhook with an already-processed WAM → 200 but not enqueued."""
     secret = "test_secret"
     monkeypatch.setenv("META_APP_SECRET", secret)
     payload = _meta_payload(wam_id="wam-SEEN")
@@ -768,7 +768,7 @@ async def test_commit_inserts_order(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_commit_deletes_cart(monkeypatch):
-    """commit_order_transaction borra el carrito del cliente."""
+    """commit_order_transaction clears the customer's cart."""
     from app.repositories.orders_repo import commit_order_transaction
     from app.services.tenant_context import tenant_scope
 
@@ -847,10 +847,10 @@ async def test_commit_float_total_coerced(monkeypatch):
     pool = make_pool(conn)
 
     order = _make_order_payload(price=12500)
-    order["total"] = 12500.50  # float intencional
+    order["total"] = 12500.50  # deliberate float
     cart = {"items": order["items"], "bot_number": "+57999"}
 
-    # No debe lanzar TypeError
+    # Must not raise TypeError
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(1):
             await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
@@ -860,7 +860,7 @@ async def test_commit_float_total_coerced(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_commit_db_error_raises_order_commit_error(monkeypatch):
-    """Error en DB → OrderCommitError (no Exception genérica)."""
+    """DB error → OrderCommitError (not a generic Exception)."""
     from app.repositories.orders_repo import commit_order_transaction, OrderCommitError
 
     conn = MagicMock()
@@ -883,7 +883,7 @@ async def test_commit_db_error_raises_order_commit_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_commit_no_items_no_inventory_deduction(monkeypatch):
-    """Orden sin items (edge case) → no intenta descontar inventario."""
+    """Order without items (edge case) → does not attempt to deduct inventory."""
     from app.repositories.orders_repo import commit_order_transaction
     from app.services.tenant_context import tenant_scope
 
@@ -894,17 +894,17 @@ async def test_commit_no_items_no_inventory_deduction(monkeypatch):
     conn.transaction = MagicMock(return_value=txn)
     conn.fetch = AsyncMock(return_value=[])
     conn.fetchval = AsyncMock(return_value=None)
-    conn.fetchrow = AsyncMock(return_value=None)  # no se debe llamar para inventario
+    conn.fetchrow = AsyncMock(return_value=None)  # must not be called for inventory
     conn.execute = AsyncMock()
     pool = make_pool(conn)
 
     order = _make_order_payload()
-    order["items"] = []  # sin items
+    order["items"] = []  # no items
     cart = {"items": [], "bot_number": "+57999"}
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(1):
             await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
                                            cart=cart, order_payload=order)
-    # fetchrow no llamado para inventario (no hay items)
+    # fetchrow not called for inventory (no items)
     conn.fetchrow.assert_not_awaited()

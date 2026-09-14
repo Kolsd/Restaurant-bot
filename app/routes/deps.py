@@ -246,7 +246,7 @@ def require_module(module_name: str) -> Callable:
 
     return _check_module
 
-# Al final del archivo, después de las funciones existentes
+# At the end of the file, after the existing functions
 
 ROLE_PAGE_MAP = {
     "/waiter":      {"mesero"},
@@ -267,34 +267,34 @@ def _extract_roles(role_str: str) -> set:
 
 async def require_page_access(request: Request, path: str):
     """
-    Verifica token + rol para servir una página HTML protegida.
-    Redirige a /login si no hay token, a /staff si no tiene el rol.
+    Verifies token + role to serve a protected HTML page.
+    Redirects to /login if there's no token, to /staff if the role doesn't match.
     """
     from app.services.auth import verify_token
     from app.services import database as db
 
     token = None
-    # Buscar token en cookie o header
+    # Look up token in cookie or header
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header.replace("Bearer ", "")
-    # Las páginas HTML no mandan Authorization header — el token vive en localStorage
-    # así que para rutas de página, devolvemos el HTML y dejamos que el JS valide
-    # PERO: podemos leer una cookie si existe
+    # HTML pages don't send an Authorization header — the token lives in localStorage
+    # so for page routes, we return the HTML and let the JS validate
+    # BUT: we can read a cookie if one exists
     token = request.cookies.get("rb_token") or token
 
     allowed_roles = ROLE_PAGE_MAP.get(path, set())
     if not allowed_roles:
-        return None  # ruta sin restricción definida, dejar pasar
+        return None  # route has no restriction defined, let it through
 
     if not token:
-        return None  # sin cookie, el JS en el HTML hará el redirect
+        return None  # no cookie, the JS in the HTML will handle the redirect
 
     username = await verify_token(token)
     if not username:
         return None
 
-    # Obtener rol del usuario
+    # Get the user's role
     if username.startswith("staff:"):
         staff_id = username.replace("staff:", "")
         pool = await db.get_pool()
@@ -314,11 +314,11 @@ async def require_page_access(request: Request, path: str):
             return None
         user_roles = _extract_roles(user.get("role", ""))
 
-    # Admin siempre puede entrar a todo
+    # Admin can always access everything
     if user_roles & ADMIN_ROLES:
-        return None  # permitir
+        return None  # allow
 
-    # Verificar si tiene algún rol permitido para esta página
+    # Check whether they have any role allowed for this page
     if not (user_roles & allowed_roles):
         raise HTTPException(status_code=403, detail="Rol no autorizado para esta página")
 

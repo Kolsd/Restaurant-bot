@@ -573,9 +573,9 @@ function _scRenderTips(data) {
     }
   }
 
-  // Mobile grid: mesas + pct indicator (use week data in sub-cells if available)
-  const mesasEl = document.getElementById('sc-tip-mesas');
-  if (mesasEl) mesasEl.textContent = todayCount > 0 ? String(todayCount) : '—';
+  // Mobile grid: tables + pct indicator (use week data in sub-cells if available)
+  const tablesEl = document.getElementById('sc-tip-mesas');
+  if (tablesEl) tablesEl.textContent = todayCount > 0 ? String(todayCount) : '—';
 
   const ventasEl = document.getElementById('sc-tip-ventas');
   if (ventasEl) ventasEl.textContent = weekAmt > 0 ? _scFmtCOP(weekAmt) : '—';

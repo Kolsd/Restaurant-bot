@@ -1,7 +1,7 @@
 """
 tests/e2e/test_webhook_resilience.py — Circuit-breaker contract tests.
 
-Contract: "Si falla un webhook de WhatsApp, la caja no debe romperse."
+Contract: "If a WhatsApp webhook fails, the cashier register must not break."
 
 4 tests validating the isolation between the webhook ingestion path and the
 caja (kitchen) read path:
@@ -251,7 +251,7 @@ async def test_webhook_empty_payloads_do_not_crash(test_pool):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_caja_endpoint_works_with_inbox_worker_disabled(test_pool):
+async def test_cashier_endpoint_works_with_inbox_worker_disabled(test_pool):
     """
     The caja GET /api/kitchen/delivery-orders must return orders even when the
     inbox worker is completely offline (no webhook processed, no agent involved).

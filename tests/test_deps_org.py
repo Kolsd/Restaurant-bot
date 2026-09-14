@@ -137,11 +137,11 @@ async def test_get_current_org_resolves_org_for_matriz_user():
     assert request.state.mesio_org is not None
 
 
-# ── test_get_current_org_resolves_org_for_sucursal_user ──────────────────────
+# ── test_get_current_org_resolves_org_for_branch_user ──────────────────────
 
 
-async def test_get_current_org_resolves_org_for_sucursal_user():
-    """For a Sucursal staff user (restaurant_id = 20, mapped to org_id = 1),
+async def test_get_current_org_resolves_org_for_branch_user():
+    """For a Branch staff user (restaurant_id = 20, mapped to org_id = 1),
     get_current_org correctly returns the parent Org."""
     conn = _make_conn()
     # Mapping lookup returns org_id=1 for restaurant_id=20

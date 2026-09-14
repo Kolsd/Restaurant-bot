@@ -190,7 +190,7 @@ async def db_get_conversation_details(phone: str, bot_number: str = ""):
             phone, bot_number,
         )
         if not row:
-            # Fallback: conversaciones asignadas a sucursal tienen bot_number diferente
+            # Fallback: conversations assigned to a branch have a different bot_number
             row = await conn.fetchrow(
                 "SELECT history, bot_paused, bot_number FROM conversations WHERE phone=$1 ORDER BY updated_at DESC LIMIT 1",
                 phone,
@@ -235,7 +235,7 @@ async def db_save_nps_response(phone: str, bot_number: str, score: int, comment:
         session_id = row["session_id"] if row else None
         branch_id  = row["branch_id"]  if row else None
 
-        # 2. Guardamos la calificación amarrada a esa sucursal + sesión
+        # 2. Save the rating tied to that branch + session
         await conn.execute("""
             INSERT INTO nps_responses
                 (phone, bot_number, score, comment, branch_id, table_session_id, org_id, created_at)
@@ -302,7 +302,7 @@ async def db_get_pending_nps_score(phone: str, bot_number: str) -> int | None:
         return row["score"] if row else None
 
 
-# ── NPS WAITING STATE (persiste el estado "waiting_score" en DB) ──────
+# ── NPS WAITING STATE (persists the "waiting_score" state in DB) ──────
 
 async def db_save_nps_waiting(phone: str, bot_number: str, restaurant_id: int | None = None):
     """Persists that we are waiting for an NPS score from this customer.
@@ -434,7 +434,7 @@ async def db_clear_cart(phone: str, bot_number: str):
     async with _tenant_connection() as conn:
         await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number)
 
-# 🛡️ NUEVO: Migrar el carrito atómicamente a otra sucursal
+# 🛡️ NEW: Atomically migrate the cart to another branch
 async def db_migrate_cart(phone: str, from_bot_number: str, to_bot_number: str):
     if from_bot_number == to_bot_number:
         return
@@ -506,16 +506,16 @@ async def db_update_restaurant_features(restaurant_id: int, features: dict) -> N
 
 async def db_is_duplicate_wam(wam_id: str) -> bool:
     """
-    Deduplicación idempotente por WAM_ID (WhatsApp Message ID).
+    Idempotent deduplication by WAM_ID (WhatsApp Message ID).
 
-    Lógica:
-    - Borra entradas con más de 2 minutos (ventana de reintentos de Meta).
-    - Intenta insertar el wam_id con INSERT ... ON CONFLICT DO NOTHING.
-    - Si el INSERT no devuelve filas → el ID ya existía → duplicado (True).
-    - Si el INSERT devuelve el wam_id → era nuevo → procesar (False).
+    Logic:
+    - Deletes entries older than 2 minutes (Meta's retry window).
+    - Tries to insert the wam_id with INSERT ... ON CONFLICT DO NOTHING.
+    - If the INSERT returns no rows → the ID already existed → duplicate (True).
+    - If the INSERT returns the wam_id → it was new → process it (False).
 
-    Al usar la PK como única constraint, el INSERT es atómico y safe
-    bajo concurrencia multi-worker sin necesidad de locks adicionales.
+    Using the PK as the sole constraint makes the INSERT atomic and safe
+    under multi-worker concurrency without needing additional locks.
     """
     if not wam_id:
         return False

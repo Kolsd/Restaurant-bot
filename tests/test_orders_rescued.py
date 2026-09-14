@@ -240,7 +240,7 @@ async def _insert_table_order(
 @pytest.mark.asyncio
 async def test_empty_tenant_returns_zeros(db_conn, org_ids):
     """Fresh org with no orders returns 0, not a 500."""
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.repositories.north_star_repo import db_count_rescued_orders
     from app.services.tenant_context import tenant_scope
 
     org_a, _ = org_ids
@@ -248,7 +248,7 @@ async def test_empty_tenant_returns_zeros(db_conn, org_ids):
 
     today = _utc_today()
     with tenant_scope(org_a):
-        result = await db_count_pedidos_rescatados(today.replace(day=1), today)
+        result = await db_count_rescued_orders(today.replace(day=1), today)
 
     assert result["count"] == 0
     assert result["delivery"] == 0
@@ -258,7 +258,7 @@ async def test_empty_tenant_returns_zeros(db_conn, org_ids):
 @pytest.mark.asyncio
 async def test_delivery_bot_orders_counted(db_conn, org_ids):
     """Delivery orders with channel='whatsapp_bot' are counted."""
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.repositories.north_star_repo import db_count_rescued_orders
     from app.services.tenant_context import tenant_scope
 
     org_a, _ = org_ids
@@ -271,7 +271,7 @@ async def test_delivery_bot_orders_counted(db_conn, org_ids):
 
     today = _utc_today()
     with tenant_scope(org_a):
-        result = await db_count_pedidos_rescatados(today.replace(day=1), today)
+        result = await db_count_rescued_orders(today.replace(day=1), today)
 
     assert result["delivery"] == 3
     assert result["count"] == 3  # manual excluded
@@ -280,7 +280,7 @@ async def test_delivery_bot_orders_counted(db_conn, org_ids):
 @pytest.mark.asyncio
 async def test_table_bot_orders_counted(db_conn, org_ids):
     """table_orders with channel='whatsapp_bot' are counted."""
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.repositories.north_star_repo import db_count_rescued_orders
     from app.services.tenant_context import tenant_scope
 
     org_a, _ = org_ids
@@ -293,7 +293,7 @@ async def test_table_bot_orders_counted(db_conn, org_ids):
 
     today = _utc_today()
     with tenant_scope(org_a):
-        result = await db_count_pedidos_rescatados(today.replace(day=1), today)
+        result = await db_count_rescued_orders(today.replace(day=1), today)
 
     assert result["table"] == 2
     assert result["count"] == 2  # pos excluded
@@ -305,7 +305,7 @@ async def test_web_chat_table_orders_counted(db_conn, org_ids):
     2026-09) are counted exactly like 'whatsapp_bot' — both are bot-captured
     demand, just via a different surface. Mixing both channels at the same
     org must sum correctly."""
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.repositories.north_star_repo import db_count_rescued_orders
     from app.services.tenant_context import tenant_scope
 
     org_a, _ = org_ids
@@ -318,7 +318,7 @@ async def test_web_chat_table_orders_counted(db_conn, org_ids):
 
     today = _utc_today()
     with tenant_scope(org_a):
-        result = await db_count_pedidos_rescatados(today.replace(day=1), today)
+        result = await db_count_rescued_orders(today.replace(day=1), today)
 
     assert result["table"] == 3  # 2 web_chat + 1 whatsapp_bot; pos excluded
     assert result["count"] == 3
@@ -327,7 +327,7 @@ async def test_web_chat_table_orders_counted(db_conn, org_ids):
 @pytest.mark.asyncio
 async def test_manual_orders_excluded(db_conn, org_ids):
     """channel='manual', 'pos', NULL — none of these count as rescatados."""
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.repositories.north_star_repo import db_count_rescued_orders
     from app.services.tenant_context import tenant_scope
 
     org_a, _ = org_ids
@@ -340,7 +340,7 @@ async def test_manual_orders_excluded(db_conn, org_ids):
 
     today = _utc_today()
     with tenant_scope(org_a):
-        result = await db_count_pedidos_rescatados(today.replace(day=1), today)
+        result = await db_count_rescued_orders(today.replace(day=1), today)
 
     assert result["count"] == 0
 
@@ -348,7 +348,7 @@ async def test_manual_orders_excluded(db_conn, org_ids):
 @pytest.mark.asyncio
 async def test_cancelled_orders_counted(db_conn, org_ids):
     """Cancelled orders ARE counted — CEO confirmed: total demand captured."""
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.repositories.north_star_repo import db_count_rescued_orders
     from app.services.tenant_context import tenant_scope
 
     org_a, _ = org_ids
@@ -360,7 +360,7 @@ async def test_cancelled_orders_counted(db_conn, org_ids):
 
     today = _utc_today()
     with tenant_scope(org_a):
-        result = await db_count_pedidos_rescatados(today.replace(day=1), today)
+        result = await db_count_rescued_orders(today.replace(day=1), today)
 
     assert result["count"] == 1
 
@@ -368,7 +368,7 @@ async def test_cancelled_orders_counted(db_conn, org_ids):
 @pytest.mark.asyncio
 async def test_period_filter_excludes_old_orders(db_conn, org_ids):
     """An order from 60 days ago is NOT included in a 30d window."""
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.repositories.north_star_repo import db_count_rescued_orders
     from app.services.tenant_context import tenant_scope
 
     org_a, _ = org_ids
@@ -384,7 +384,7 @@ async def test_period_filter_excludes_old_orders(db_conn, org_ids):
     today = _utc_today()
     period_start = today - timedelta(days=29)
     with tenant_scope(org_a):
-        result = await db_count_pedidos_rescatados(period_start, today)
+        result = await db_count_rescued_orders(period_start, today)
 
     # Only the recent one should be included
     assert result["count"] == 1
@@ -393,7 +393,7 @@ async def test_period_filter_excludes_old_orders(db_conn, org_ids):
 @pytest.mark.asyncio
 async def test_delivery_and_table_split(db_conn, org_ids):
     """count = delivery + table, split keys reflect source correctly."""
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.repositories.north_star_repo import db_count_rescued_orders
     from app.services.tenant_context import tenant_scope
 
     org_a, _ = org_ids
@@ -407,7 +407,7 @@ async def test_delivery_and_table_split(db_conn, org_ids):
 
     today = _utc_today()
     with tenant_scope(org_a):
-        result = await db_count_pedidos_rescatados(today.replace(day=1), today)
+        result = await db_count_rescued_orders(today.replace(day=1), today)
 
     assert result["delivery"] == 4
     assert result["table"] == 3
@@ -417,7 +417,7 @@ async def test_delivery_and_table_split(db_conn, org_ids):
 @pytest.mark.asyncio
 async def test_tenant_isolation(db_conn, org_ids):
     """Org A's orders are NOT visible when scoped to org B."""
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.repositories.north_star_repo import db_count_rescued_orders
     from app.services.tenant_context import tenant_scope
 
     org_a, org_b = org_ids
@@ -431,7 +431,7 @@ async def test_tenant_isolation(db_conn, org_ids):
     # Query scoped to org B — must see 0
     await _set_org_scope(db_conn, org_b)
     with tenant_scope(org_b):
-        result_b = await db_count_pedidos_rescatados(today.replace(day=1), today)
+        result_b = await db_count_rescued_orders(today.replace(day=1), today)
 
     assert result_b["count"] == 0, "Org B should NOT see Org A's orders (tenant isolation)"
 
@@ -439,7 +439,7 @@ async def test_tenant_isolation(db_conn, org_ids):
 @pytest.mark.asyncio
 async def test_global_cross_tenant_aggregation(db_conn, org_ids):
     """Global aggregation: org A=5 bot, org B=3 bot, manual orders excluded."""
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados_global
+    from app.repositories.north_star_repo import db_count_rescued_orders_global
     from app.services.tenant_context import bypass_tenant_scope
 
     org_a, org_b = org_ids
@@ -461,7 +461,7 @@ async def test_global_cross_tenant_aggregation(db_conn, org_ids):
     period_start = today.replace(day=1)
 
     with bypass_tenant_scope("test_global_cross_tenant"):
-        ranking = await db_count_pedidos_rescatados_global(period_start, today)
+        ranking = await db_count_rescued_orders_global(period_start, today)
 
     # Find our two test orgs in the ranking
     counts = {r["org_id"]: r["count"] for r in ranking}

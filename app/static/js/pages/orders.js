@@ -1,4 +1,4 @@
-/* ── Pedidos page ────────────────────────────────────────────────── */
+/* ── Orders page ────────────────────────────────────────────────── */
 (function () {
   'use strict';
 
@@ -223,11 +223,11 @@
     }
   }
 
-  // ── Salon monitor (mesas activas) ──────────────────────────────
+  // ── Dining-room monitor (active tables) ──────────────────────────────
 
   function renderSalonMonitor(tables) {
     var grids = document.querySelectorAll('.kds-grid');
-    var salonGrid = grids[1]; // second kds-grid is the Salón monitor
+    var salonGrid = grids[1]; // second kds-grid is the dining-room monitor
     if (!salonGrid) return;
 
     // Populate metrics row for salon section (second metrics-row inside #tab-rt)

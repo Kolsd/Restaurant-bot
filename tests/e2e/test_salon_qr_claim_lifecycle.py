@@ -1,41 +1,41 @@
 """
 tests/e2e/test_salon_qr_claim_lifecycle.py — E2E: full salon QR-Phone-Claim lifecycle.
 
-Variante del flujo en test_salon_qr_lifecycle.py que usa Path 0 (QR-Phone-Claim,
-Capa 1 deployada 2026-04-28) en lugar del marker [table_id:X] de Path 1.
+Variant of the flow in test_salon_qr_lifecycle.py that uses Path 0 (QR-Phone-Claim,
+Layer 1 deployed 2026-04-28) instead of the [table_id:X] marker of Path 1.
 
-Diferencia clave vs test_salon_qr_lifecycle.py:
-  - ANTES del primer WhatsApp: POST /api/qr-claim registra phone+table_id.
-  - El primer mensaje WhatsApp del cliente es LIMPIO ("Hola, quisiera el menú 👋").
-  - detect_table_context Path 0 consume el claim y abre la sesión correctamente.
-  - El mensaje NO contiene [table_id:X] ni ningún marcador técnico.
+Key difference vs test_salon_qr_lifecycle.py:
+  - BEFORE the first WhatsApp message: POST /api/qr-claim registers phone+table_id.
+  - The customer's first WhatsApp message is CLEAN ("Hola, quisiera el menú 👋").
+  - detect_table_context Path 0 consumes the claim and opens the session correctly.
+  - The message does NOT contain [table_id:X] or any technical marker.
 
-Adicionalmente cubre 3 asserts de disconnects identificados en
-docs/PRODUCT_CONTEXT.md regla #13 (tabla "Los 10 disconnects descubiertos hoy"
-en SESSION_HANDOFF_2026-04-28.md) que el test viejo NO tiene:
+Additionally covers 3 disconnect asserts identified in
+docs/PRODUCT_CONTEXT.md rule #13 (the "Los 10 disconnects descubiertos hoy" table
+in SESSION_HANDOFF_2026-04-28.md) that the old test does NOT have:
 
-  DISCONNECT #2 — Mesa ↔ Mesero:
-    table_sessions.assigned_staff_id debe ser NOT NULL después de abrir la sesión.
-    Hoy ningún flujo asigna mesero automáticamente al abrir mesa.
-    → FALLA en main actual. Es el roadmap concreto para la sub-sesión 0b.
+  DISCONNECT #2 — Table ↔ Waiter:
+    table_sessions.assigned_staff_id must be NOT NULL after opening the session.
+    Today no flow automatically assigns a waiter when opening a table.
+    → FAILS on current main. This is the concrete roadmap for sub-session 0b.
 
-  DISCONNECT #3 — Cocina ↔ Mesero:
-    Cuando cocina marca status=listo, debe crearse un waiter_alert con
-    alert_type='ready' (o similar) para notificar al mesero asignado.
-    Hoy no se crea ningún waiter_alert al marcar listo.
-    → FALLA en main actual. Es el roadmap concreto para la sub-sesión 0c.
+  DISCONNECT #3 — Kitchen ↔ Waiter:
+    When kitchen marks status=listo, a waiter_alert must be created with
+    alert_type='ready' (or similar) to notify the assigned waiter.
+    Today no waiter_alert is created when marking ready.
+    → FAILS on current main. This is the concrete roadmap for sub-session 0c.
 
-  DISCONNECT #8 — Mesa ↔ NPS:
-    Inmediatamente después del pay_check (misma operación atómica), debe
-    existir un row en nps_waiting para el phone del cliente. NPS debe estar
-    encolado ANTES de que el cliente abandone la mesa, no después del timeout
-    del scheduler.
-    → PUEDE PASAR si trigger_nps ya corre dentro del pay_check flow
+  DISCONNECT #8 — Table ↔ NPS:
+    Immediately after pay_check (same atomic operation), a row must
+    exist in nps_waiting for the customer's phone. NPS must be
+    queued BEFORE the customer leaves the table, not after the
+    scheduler's timeout.
+    → MAY PASS if trigger_nps already runs inside the pay_check flow
        (via _farewell_and_nps → trigger_nps → db_save_nps_waiting).
-       Si falla, es timing/scope issue que bloquea la tasa de respuesta NPS.
+       If it fails, it's a timing/scope issue blocking the NPS response rate.
 
-ESPERADO: este test FALLA en main actual en los asserts DISCONNECT #2 y #3.
-Eso es deseable: cada falla es el roadmap concreto para la sub-sesión que la arregla.
+EXPECTED: this test FAILS on current main on the DISCONNECT #2 and #3 asserts.
+That is desirable: each failure is the concrete roadmap for the sub-session that fixes it.
 
 Run:
   pytest tests/e2e/test_salon_qr_claim_lifecycle.py -v -s -m e2e
@@ -508,10 +508,10 @@ async def test_salon_qr_claim_full_lifecycle(
             )
 
     assert waiter_alert_row is not None, (
-        f"DISCONNECT #3: cocina marcó status=listo para mesa {table_id} pero "
-        "NO se creó ningún waiter_alert. El mesero asignado no recibe notificación. "
-        "La comida queda en el pase hasta que el mesero la vea por polling. "
-        "Sub-sesión objetivo: 0c (Cocina ↔ Mesero alerta automática en 'listo')."
+        f"DISCONNECT #3: kitchen marked status=listo for table {table_id} but "
+        "NO waiter_alert was created. The assigned waiter gets no notification. "
+        "The food sits in the pass until the waiter sees it via polling. "
+        "Target sub-session: 0c (Kitchen ↔ Waiter automatic alert on 'listo')."
     )
     log.info(
         "e2e.qr_claim_waiter_alert_found",
@@ -670,13 +670,13 @@ async def test_salon_qr_claim_full_lifecycle(
         await asyncio.sleep(0.5)
 
     assert nps_waiting_row is not None, (
-        f"DISCONNECT #8: NPS no se encoló en nps_waiting para phone={CUSTOMER_PHONE} "
-        "después del pay_check. El cliente ya salió del restaurante y si el NPS no está "
-        "encolado, nunca lo recibirá. "
-        "Verificar: (a) _farewell_and_nps se llama en el pay_check path (tables.py), "
-        "(b) trigger_nps resuelve bot_number limpio (sin sufijo _b), "
-        "(c) db_save_nps_waiting inserta con org_id correcto bajo tenant_scope. "
-        "Sub-sesión objetivo: 0h (Mesa ↔ NPS timing)."
+        f"DISCONNECT #8: NPS was not queued in nps_waiting for phone={CUSTOMER_PHONE} "
+        "after pay_check. The customer has already left the restaurant, and if the NPS is not "
+        "queued, they will never receive it. "
+        "Check: (a) _farewell_and_nps is called on the pay_check path (tables.py), "
+        "(b) trigger_nps resolves a clean bot_number (no _b suffix), "
+        "(c) db_save_nps_waiting inserts with the correct org_id under tenant_scope. "
+        "Target sub-session: 0h (Table ↔ NPS timing)."
     )
     log.info(
         "e2e.qr_claim_nps_waiting_confirmed",

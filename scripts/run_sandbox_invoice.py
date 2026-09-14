@@ -2,30 +2,30 @@
 """
 run_sandbox_invoice.py
 ======================
-Prueba de fuego del adaptador MATIAS API contra el Sandbox DIAN.
+Fire test of the MATIAS API adapter against the DIAN Sandbox.
 
-Uso rápido:
+Quick usage:
     python run_sandbox_invoice.py
 
-Variables de entorno obligatorias (en .env o en el shell):
+Required environment variables (in .env or the shell):
     DATABASE_URL            PostgreSQL connection string
     MATIAS_API_URL          https://api-v2.matias-api.com/api/ubl2.1
-    MATIAS_API_TOKEN        token estatico del panel de MATIAS (recomendado)
-    DIAN_RESOLUTION         numero de resolucion  (ej. 18764074347312)
-    DIAN_PREFIX             prefijo de factura    (ej. LZT)
+    MATIAS_API_TOKEN        static token from the MATIAS panel (recommended)
+    DIAN_RESOLUTION         resolution number  (e.g. 18764074347312)
+    DIAN_PREFIX             invoice prefix     (e.g. LZT)
 
-Alternativa al token estatico (login dinamico):
-    MATIAS_API_USER         email de la cuenta sandbox MATIAS
-    MATIAS_API_PASS         password de la cuenta sandbox MATIAS
+Alternative to the static token (dynamic login):
+    MATIAS_API_USER         MATIAS sandbox account email
+    MATIAS_API_PASS         MATIAS sandbox account password
     MATIAS_AUTH_URL         https://api-v2.matias-api.com/api/login
 
-Variables opcionales:
-    SANDBOX_RESTAURANT_ID   ID del restaurante en la BD   (default: 1)
+Optional variables:
+    SANDBOX_RESTAURANT_ID   Restaurant ID in the DB       (default: 1)
     SANDBOX_TAX_REGIME      iva | ico                     (default: iva)
-    SANDBOX_TAX_PCT         porcentaje de impuesto        (default: 19.0)
-    DIAN_TECHNICAL_KEY      clave técnica de la resolución
-    DIAN_SOFTWARE_ID        software_id del PT certificado
-    DIAN_SOFTWARE_PIN       PIN del software
+    SANDBOX_TAX_PCT         tax percentage                (default: 19.0)
+    DIAN_TECHNICAL_KEY      resolution's technical key
+    DIAN_SOFTWARE_ID        certified Technology Provider's software_id
+    DIAN_SOFTWARE_PIN       software PIN
 """
 
 import asyncio
@@ -35,15 +35,15 @@ import time
 import json
 
 
-# ── Cargar .env si existe ─────────────────────────────────────────────────────
+# ── Load .env if it exists ─────────────────────────────────────────────────────
 try:
     from dotenv import load_dotenv
     load_dotenv()
-    print("  .env cargado")
+    print("  .env loaded")
 except ImportError:
-    pass  # python-dotenv no instalado; se usan las vars del entorno
+    pass  # python-dotenv not installed; environment vars are used instead
 
-# ── Añadir raíz del proyecto al PYTHONPATH ────────────────────────────────────
+# ── Add the project root to PYTHONPATH ────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.services import database as db
@@ -51,7 +51,7 @@ from app.services.billing import MesioNativeAdapter, _get_matias_token
 from datetime import date
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Configuración del test
+# Test configuration
 # ══════════════════════════════════════════════════════════════════════════════
 
 RESTAURANT_ID  = int(os.getenv("SANDBOX_RESTAURANT_ID", "1"))
@@ -59,17 +59,17 @@ TAX_REGIME     = os.getenv("SANDBOX_TAX_REGIME", "iva")          # "iva" | "ico"
 TAX_PCT        = float(os.getenv("SANDBOX_TAX_PCT", "19.0"))
 INVOICE_NUMBER = int(os.getenv("SANDBOX_INVOICE_NUMBER", "5210"))
 
-# order_id único por ejecución para evitar llave duplicada en fiscal_invoices
+# order_id unique per run to avoid a duplicate key in fiscal_invoices
 _TS = int(time.time())
 
-# Orden falsa — dos productos, total calculado manualmente
-# Precios incluyen IVA/INC (Colombia: precio menú ya lleva impuesto)
+# Fake order — two products, total calculated manually
+# Prices include IVA/INC (Colombia: menu price already includes tax)
 FAKE_ORDER = {
     "id":             f"SANDBOX-TEST-{INVOICE_NUMBER}-{_TS}",
     "order_type":     "mesa",
-    "total":          190.0,     # Límite sandbox MATIAS: máx 224 pesos
+    "total":          190.0,     # MATIAS sandbox limit: max 224 pesos
     "payment_method": "cash",
-    "notes":          "Factura de prueba Sandbox DIAN — Mesio",
+    "notes":          "DIAN Sandbox test invoice — Mesio",
     "items": [
         {
             "id":       "P001",
@@ -109,25 +109,25 @@ def _hr(char="-", width=62):
 
 async def _ensure_resolution() -> dict:
     """
-    Devuelve la resolución DIAN del restaurante desde DB.
-    Si no existe, la crea con los valores de las variables DIAN_* de entorno
-    (útil en sandbox donde la BD puede estar vacía).
+    Returns the restaurant's DIAN resolution from the DB.
+    If it doesn't exist, creates it from the DIAN_* environment variables
+    (useful in sandbox where the DB may be empty).
     """
     resolution = await db.db_get_fiscal_resolution(RESTAURANT_ID)
     if resolution:
         print(
-            f"  Resolución en BD  : {resolution['resolution_number']}"
-            f"  |  prefijo '{resolution.get('prefix', '')}'"
+            f"  Resolution in DB  : {resolution['resolution_number']}"
+            f"  |  prefix '{resolution.get('prefix', '')}'"
             f"  |  env '{resolution.get('environment', '')}'"
         )
         return resolution
 
-    print("  No hay resolución en BD — creando desde variables DIAN_* …")
+    print("  No resolution in DB — creating from DIAN_* variables …")
     res_number = os.getenv("DIAN_RESOLUTION", "")
     if not res_number:
         sys.exit(
-            "\n  ERROR: DIAN_RESOLUTION no está definida y la BD no tiene resolución.\n"
-            "  Define DIAN_RESOLUTION=<número> en tu .env y vuelve a ejecutar.\n"
+            "\n  ERROR: DIAN_RESOLUTION is not set and the DB has no resolution.\n"
+            "  Set DIAN_RESOLUTION=<number> in your .env and run again.\n"
         )
 
     await db.db_upsert_fiscal_resolution(RESTAURANT_ID, {
@@ -146,8 +146,8 @@ async def _ensure_resolution() -> dict:
     })
     resolution = await db.db_get_fiscal_resolution(RESTAURANT_ID)
     print(
-        f"  Resolución creada : {resolution['resolution_number']}"
-        f"  |  prefijo '{resolution.get('prefix', '')}'"
+        f"  Resolution created : {resolution['resolution_number']}"
+        f"  |  prefix '{resolution.get('prefix', '')}'"
     )
     return resolution
 
@@ -158,36 +158,36 @@ async def _ensure_resolution() -> dict:
 
 async def main():
     _hr("=")
-    print("  MATIAS API -- Prueba de Fuego Sandbox DIAN")
+    print("  MATIAS API -- DIAN Sandbox Fire Test")
     _hr("=")
 
-    # ── 1. Base de datos ──────────────────────────────────────────────────────
-    print("\n[1/4] Conectando a la base de datos…")
+    # ── 1. Database ──────────────────────────────────────────────────────
+    print("\n[1/4] Connecting to the database…")
     await db.init_pool()
     print("  Pool OK")
 
-    # ── 2. Resolución DIAN ───────────────────────────────────────────────────
-    print(f"\n[2/4] Resolución DIAN  (restaurant_id={RESTAURANT_ID})…")
+    # ── 2. DIAN Resolution ───────────────────────────────────────────────────
+    print(f"\n[2/4] DIAN Resolution  (restaurant_id={RESTAURANT_ID})…")
     resolution = await _ensure_resolution()
 
-    # ── 3. Token MATIAS (login dinamico) ─────────────────────────────────────
+    # ── 3. MATIAS Token (dynamic login) ─────────────────────────────────────
     matias_url = os.getenv("MATIAS_API_URL", "").strip()
     auth_url   = os.getenv("MATIAS_AUTH_URL", "https://api-v2.matias-api.com/api/ubl2.1/login")
-    print("\n[3/4] Autenticacion MATIAS API (login dinamico)…")
+    print("\n[3/4] MATIAS API Authentication (dynamic login)…")
     print(f"  Auth URL  : {auth_url}")
-    print(f"  Email     : {os.getenv('MATIAS_API_USER', '(no definido)')}")
-    print(f"  API URL   : {matias_url or '(no definida — modo MOCK)'}")
+    print(f"  Email     : {os.getenv('MATIAS_API_USER', '(not set)')}")
+    print(f"  API URL   : {matias_url or '(not set — MOCK mode)'}")
 
     if not matias_url:
-        print("  -> Modo MOCK activado. Para el sandbox real define MATIAS_API_URL.")
+        print("  -> MOCK mode active. Set MATIAS_API_URL for the real sandbox.")
     else:
         t0 = time.perf_counter()
         token = await _get_matias_token()
         ms = (time.perf_counter() - t0) * 1000
         print(f"  Token     : {token[:20]}…  ({ms:.0f} ms)")
 
-    # ── 4. Emisión ────────────────────────────────────────────────────────────
-    # Forzar número de factura exacto (soporte MATIAS: rango 5200-5210)
+    # ── 4. Issuance ────────────────────────────────────────────────────────────
+    # Force the exact invoice number (MATIAS support: range 5200-5210)
     forced_number = INVOICE_NUMBER
 
     _original_get_next = db.db_get_next_invoice_number
@@ -195,9 +195,9 @@ async def main():
         return forced_number
     db.db_get_next_invoice_number = _fixed_invoice_number
 
-    print("\n[4/4] Emitiendo factura de prueba…")
-    print(f"  Nro. factura : {forced_number}  (SANDBOX_INVOICE_NUMBER)")
-    print(f"  Orden        : {FAKE_ORDER['id']}")
+    print("\n[4/4] Issuing test invoice…")
+    print(f"  Invoice No.  : {forced_number}  (SANDBOX_INVOICE_NUMBER)")
+    print(f"  Order        : {FAKE_ORDER['id']}")
     for item in FAKE_ORDER["items"]:
         print(f"  Item         : {item['name']}  x{item['quantity']}  ${item['price']:,.0f}")
     print(
@@ -215,15 +215,15 @@ async def main():
             resolution=resolution,
         )
     except Exception as exc:
-        db.db_get_next_invoice_number = _original_get_next  # restaurar siempre
+        db.db_get_next_invoice_number = _original_get_next  # always restore
         elapsed_ms = (time.perf_counter() - t_start) * 1000
-        print(f"\n  ERROR tras {elapsed_ms:.0f} ms")
+        print(f"\n  ERROR after {elapsed_ms:.0f} ms")
         print(f"  {type(exc).__name__}: {exc}")
 
-        # Imprimir body HTTP si está disponible (ayuda a depurar 400 UBL)
+        # Print the HTTP body if available (helps debug 400 UBL errors)
         response = getattr(exc, "response", None)
         if response is not None:
-            print(f"\n  HTTP {response.status_code}  —  respuesta del servidor:")
+            print(f"\n  HTTP {response.status_code}  —  server response:")
             try:
                 body = response.json()
                 print(json.dumps(body, indent=2, ensure_ascii=False))
@@ -231,46 +231,46 @@ async def main():
                 print(response.text[:1200])
         raise SystemExit(1)
     finally:
-        db.db_get_next_invoice_number = _original_get_next  # restaurar siempre
+        db.db_get_next_invoice_number = _original_get_next  # always restore
 
     elapsed_ms = (time.perf_counter() - t_start) * 1000
 
-    # ── Resultado ──────────────────────────────────────────────────────────
+    # ── Result ──────────────────────────────────────────────────────────
     _hr("─")
-    print("  RESULTADO")
+    print("  RESULT")
     _hr("─")
 
     cufe    = result.get("cufe", "")
     qr_data = result.get("qr_data", "")
     pdf_url = result.get("pdf_url", "")
 
-    print(f"  Nro. factura      : {result['invoice_number']}")
+    print(f"  Invoice No.       : {result['invoice_number']}")
     print(f"  fiscal_invoice_id : {result['id']}")
     print(f"  DIAN status       : {result['dian_status']}")
-    print(f"  Modo mock         : {result['provider_mock']}")
+    print(f"  Mock mode         : {result['provider_mock']}")
     print()
 
-    # CUFE — línea larga, mostrar completo
+    # CUFE — long line, show in full
     print(f"  CUFE  ({len(cufe)} chars):")
     print(f"    {cufe}")
 
-    # QR — puede ser URL o cadena larga
+    # QR — may be a URL or a long string
     print(f"\n  QR data  ({len(qr_data)} chars):")
     print(f"    {qr_data[:120]}{'…' if len(qr_data) > 120 else ''}")
 
-    # PDF — puede ser URL corta o base64 muy largo
+    # PDF — may be a short URL or a very long base64 string
     print(f"\n  PDF  ({len(pdf_url)} chars):")
     if len(pdf_url) > 120:
-        print(f"    {pdf_url[:80]}…  [base64 truncado]")
+        print(f"    {pdf_url[:80]}…  [base64 truncated]")
     else:
-        print(f"    {pdf_url or '(vacío)'}")
+        print(f"    {pdf_url or '(empty)'}")
 
     print()
     print(f"  Subtotal          : ${result['subtotal']:,.2f}")
-    print(f"  Impuesto          : ${result['tax']:,.2f}  ({result['tax_pct']}%)")
+    print(f"  Tax               : ${result['tax']:,.2f}  ({result['tax_pct']}%)")
     print(f"  Total             : ${result['total']:,.2f}")
     print()
-    print(f"  Tiempo total      : {elapsed_ms:.0f} ms")
+    print(f"  Total time        : {elapsed_ms:.0f} ms")
     _hr("─")
     print()
 
