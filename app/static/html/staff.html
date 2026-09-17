@@ -64,6 +64,11 @@
         <span class="sep topbar-crumb">/</span>
         <span class="topbar-title" id="staff-topbar-title">Staff</span>
       </div>
+      <div class="topbar-right">
+        <div class="m-live-status offline" id="staff-live-status" data-mesio-live>
+          <div class="dot"></div><span class="label">Sin conexión</span>
+        </div>
+      </div>
     </div>
 
     <!-- Section content — mounted/unmounted by staff-shell.js, no full
@@ -74,6 +79,7 @@
 </div><!-- /.app -->
 
 <script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/mesio-realtime.js"></script>
 <script src="/static/js/staff/staff-shell.js"></script>
 </body>
 </html>

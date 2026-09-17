@@ -144,6 +144,9 @@ async def lifespan(app):
         except Exception:
             _log.exception("inbox_worker_shutdown_error")
 
+    from app.services.realtime import shutdown as realtime_shutdown
+    await realtime_shutdown()
+
     from app.services.redis_client import close_redis
     await close_redis()
 

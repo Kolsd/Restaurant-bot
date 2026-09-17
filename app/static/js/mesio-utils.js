@@ -457,6 +457,34 @@ function mesioInterval(fn, ms) {
   }, ms);
 }
 
+// ── Live-aware interval (safety net behind MesioRealtime SSE) ───────────
+/**
+ * Like mesioInterval, but treats window.MesioRealtime as the fresh source
+ * of truth when it's connected: polling backs off to once every 60s (just
+ * a safety net for a missed event or a disconnect the client hasn't
+ * noticed yet). While MesioRealtime isn't connected (script not loaded on
+ * this page, stream still reconnecting, etc.) it falls back to the
+ * original `fastMs` cadence, same as mesioInterval(fn, fastMs) would.
+ *
+ * Returns a real setInterval id — cancel it with clearInterval() exactly
+ * like mesioInterval(), so existing _trackInterval()/unmount() cleanup
+ * needs no changes at call sites.
+ */
+function mesioLiveInterval(fn, fastMs) {
+  var SAFE_MS = 60000;
+  var tickMs = Math.min(fastMs, 5000);
+  var last = Date.now();
+  return setInterval(() => {
+    if (document.visibilityState === 'hidden') return;
+    var live = (typeof MesioRealtime !== 'undefined') && MesioRealtime.connected;
+    var period = live ? SAFE_MS : fastMs;
+    if (Date.now() - last >= period) {
+      last = Date.now();
+      fn();
+    }
+  }, tickMs);
+}
+
 // ── Cloudinary image URL transform ───────────────
 /**
  * Insert a Cloudinary transform into an image URL. Falls through unchanged

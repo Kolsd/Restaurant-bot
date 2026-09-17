@@ -274,6 +274,13 @@
     _populateUserChrome();
     _initMobileDrawer();
 
+    // One SSE connection for the whole page lifetime (real-time invalidation
+    // events — see app/static/js/mesio-realtime.js). Sections subscribe to
+    // the topics they care about in their own mount()/unmount().
+    if (window.MesioRealtime) {
+      MesioRealtime.connect('/api/staff/stream', mesioHeaders);
+    }
+
     var sections;
     try {
       const res = await fetch('/api/staff/sections', { headers: mesioHeaders() });

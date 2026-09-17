@@ -136,6 +136,9 @@
         <div class="k-stat-val ok" id="kds-delayed">0</div>
       </div>
       <div class="k-clock" id="kds-clock">--:--</div>
+      <button id="kds-sound-toggle" class="tkt-btn" style="padding:5px 10px;font-size:11px;width:auto;flex:none;" type="button" aria-pressed="false">
+        🔈 Activar sonido
+      </button>
       <button id="kds-notify-optin" class="tkt-btn" style="padding:5px 10px;font-size:11px;width:auto;flex:none;" hidden>
         Activar alertas
       </button>
@@ -195,6 +198,29 @@
   let _station = 'all';       // station filter
   let _localPlusMins = {};    // ticketId → extra minutes added locally
   let _seenOrderIds = null;   // Set of order IDs seen on previous polls; null = first load (suppress alert)
+  var _rtUnsubs = [];         // MesioRealtime.on() unsubscribe fns, cleared on unmount
+  var _lastBeepAt = 0;        // throttle: never beep more than once every 2s
+
+  // ── Sound preference (per device, opt-in — browsers block autoplay
+  // until a user gesture, so this is unlocked by the "Activar sonido"
+  // click itself, which also plays the initial confirmation beep). ──────
+  function _soundEnabled() {
+    try { return localStorage.getItem('rb_kds_sound') === '1'; } catch (e) { return false; }
+  }
+  function _setSoundEnabled(v) {
+    try { localStorage.setItem('rb_kds_sound', v ? '1' : '0'); } catch (e) { /* private mode etc. */ }
+  }
+  function _playBeep() {
+    var now = Date.now();
+    if (now - _lastBeepAt < 2000) return;
+    _lastBeepAt = now;
+    mesioDing();
+  }
+  function _updateSoundBtn(btn) {
+    var on = _soundEnabled();
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.textContent = on ? '🔊 Sonido activado' : '🔈 Activar sonido';
+  }
 
   function _tc() {
     const el = document.getElementById('kds-clock');
@@ -496,7 +522,7 @@
 
     if (!newOrders.length) return;
 
-    if (!document.hidden) mesioDing();
+    if (!document.hidden && _soundEnabled()) _playBeep();
 
     const count = newOrders.length;
     if (count === 1) {
@@ -606,14 +632,34 @@
     _applyKdsScale();
     window.addEventListener('resize', _boundKdsScale);
 
+    const soundBtn = document.getElementById('kds-sound-toggle');
+    if (soundBtn) {
+      _updateSoundBtn(soundBtn);
+      soundBtn.addEventListener('click', () => {
+        _setSoundEnabled(!_soundEnabled());
+        _updateSoundBtn(soundBtn);
+        if (_soundEnabled()) mesioDing(); // audible confirmation + unlocks WebAudio via this click gesture
+      });
+    }
+
     _initNotifyOptin();
     loadOrders();
-    _trackInterval(mesioInterval(loadOrders, 15000));
+    _trackInterval(mesioLiveInterval(loadOrders, 15000));
+
+    // Real-time invalidation — SSE events call loadOrders() immediately;
+    // mesioLiveInterval above is just the 60s safety net while connected.
+    if (window.MesioRealtime) {
+      ['table_order.created', 'table_order.updated', 'order.created', 'order.updated', 'resync'].forEach((topic) => {
+        _rtUnsubs.push(MesioRealtime.on(topic, loadOrders));
+      });
+    }
   }
 
   function unmount(container) {
     _intervalHandles.forEach(function (id) { clearInterval(id); });
     _intervalHandles = [];
+    _rtUnsubs.forEach(function (off) { off(); });
+    _rtUnsubs = [];
     if (_boundKeydown) { document.removeEventListener('keydown', _boundKeydown); _boundKeydown = null; }
     if (_boundKdsScale) { window.removeEventListener('resize', _boundKdsScale); _boundKdsScale = null; }
     if (container) container.innerHTML = '';

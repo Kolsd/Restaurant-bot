@@ -427,6 +427,7 @@
   // ── Cleanup tracking ─────────────────────────────────
   var _intervalHandles = [];
   var _docListeners = [];
+  var _rtUnsubs = [];  // MesioRealtime.on() unsubscribe fns, cleared on unmount
   function _trackInterval(id) { _intervalHandles.push(id); return id; }
   function _trackDocListener(type, fn) { document.addEventListener(type, fn); _docListeners.push([type, fn]); }
 
@@ -2192,20 +2193,32 @@ function mount(container) {
   _trackDocListener('keydown', _onKeydown);
 
   // ── Auto-refresh ──────────────────────────────────────
-  _trackInterval(mesioInterval(() => {
-    if (_currentTab === 'mesas') loadOpenTables();
-    else if (_currentTab === 'proposals') loadDeliveryProposals();
-    else if (_currentTab === 'pickup') loadPickupOrders();
-    else if (_currentTab === 'chats') loadChatsTab();
-    else if (_currentTab === 'nps') loadRecentNpsTab();
-  }, 18000));
+  _trackInterval(mesioLiveInterval(_tabRefresh, 18000));
 
   // NPS feed gets a shorter refresh (30s) when active — fresher signal for caja.
-  _trackInterval(mesioInterval(() => {
-    if (_currentTab === 'nps') loadRecentNpsTab();
-  }, 30000));
+  _trackInterval(mesioLiveInterval(_npsRefresh, 30000));
+
+  // Real-time invalidation — any SSE topic (table orders, pickup/delivery
+  // orders, waiter alerts, check/payment status, NPS) refreshes whatever
+  // tab is currently open; the two mesioLiveInterval calls above are just
+  // the 60s safety net while connected.
+  if (window.MesioRealtime) {
+    _rtUnsubs.push(MesioRealtime.on('*', _tabRefresh));
+  }
 
   _boot();
+}
+
+function _tabRefresh() {
+  if (_currentTab === 'mesas') loadOpenTables();
+  else if (_currentTab === 'proposals') loadDeliveryProposals();
+  else if (_currentTab === 'pickup') loadPickupOrders();
+  else if (_currentTab === 'chats') loadChatsTab();
+  else if (_currentTab === 'nps') loadRecentNpsTab();
+}
+
+function _npsRefresh() {
+  if (_currentTab === 'nps') loadRecentNpsTab();
 }
 
 async function _boot() {
@@ -2296,6 +2309,8 @@ async function _boot() {
 function unmount(container) {
   _intervalHandles.forEach(function (id) { clearInterval(id); });
   _intervalHandles = [];
+  _rtUnsubs.forEach(function (off) { off(); });
+  _rtUnsubs = [];
   _docListeners.forEach(function (pair) { document.removeEventListener(pair[0], pair[1]); });
   _docListeners = [];
   if (container) container.innerHTML = '';

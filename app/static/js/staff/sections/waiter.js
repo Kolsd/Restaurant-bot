@@ -104,6 +104,7 @@
 
   // ── Cleanup tracking ─────────────────────────────────
   var _intervalHandles = [];
+  var _rtUnsubs = [];  // MesioRealtime.on() unsubscribe fns, cleared on unmount
   function _trackInterval(id) { _intervalHandles.push(id); return id; }
 
   // ── Auth guard ──────────────────────────────────────
@@ -1172,12 +1173,24 @@ function mount(container) {
   if (chatsBtn) chatsBtn.addEventListener('click', openChatsModal);
 
   loadTables();
-  _trackInterval(mesioInterval(loadTables, 20000));
+  _trackInterval(mesioLiveInterval(loadTables, 20000));
+
+  // Real-time invalidation — SSE events refresh tables + the alerts banner
+  // immediately; mesioLiveInterval above is just the 60s safety net.
+  if (window.MesioRealtime) {
+    function _rtRefresh() { loadTables(); _loadAlerts(); }
+    ['table_order.created', 'table_order.updated', 'waiter_alert.created',
+     'waiter_alert.updated', 'check.updated', 'resync'].forEach(function (topic) {
+      _rtUnsubs.push(MesioRealtime.on(topic, _rtRefresh));
+    });
+  }
 }
 
 function unmount(container) {
   _intervalHandles.forEach(function (id) { clearInterval(id); });
   _intervalHandles = [];
+  _rtUnsubs.forEach(function (off) { off(); });
+  _rtUnsubs = [];
   if (container) container.innerHTML = '';
 }
 

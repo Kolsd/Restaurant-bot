@@ -138,6 +138,7 @@
   // ── Cleanup tracking ─────────────────────────────────
   var _intervalHandles = [];
   var _observers = [];
+  var _rtUnsubs = [];  // MesioRealtime.on() unsubscribe fns, cleared on unmount
   function _trackInterval(id) { _intervalHandles.push(id); return id; }
 
   // ── State ───────────────────────────────────────────
@@ -493,7 +494,15 @@
     });
 
     fetchOrders();
-    _trackInterval(mesioInterval(checkUpdates, 10000));
+    _trackInterval(mesioLiveInterval(checkUpdates, 10000));
+
+    // Real-time invalidation — SSE events call checkUpdates() immediately;
+    // mesioLiveInterval above is just the 60s safety net while connected.
+    if (window.MesioRealtime) {
+      ['order.created', 'order.updated', 'resync'].forEach(function (topic) {
+        _rtUnsubs.push(MesioRealtime.on(topic, checkUpdates));
+      });
+    }
 
     // Status bar clock
     _stClock();
@@ -533,6 +542,8 @@
   function unmount(container) {
     _intervalHandles.forEach(function (id) { clearInterval(id); });
     _intervalHandles = [];
+    _rtUnsubs.forEach(function (off) { off(); });
+    _rtUnsubs = [];
     _observers.forEach(function (o) { o.disconnect(); });
     _observers = [];
     if (container) container.innerHTML = '';

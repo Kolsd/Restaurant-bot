@@ -370,6 +370,15 @@ async def commit_order_transaction(
         _log.exception("order_commit_failed", order_id=order_payload.get("id"), error=str(exc))
         raise OrderCommitError(f"Order commit failed for order '{order_payload.get('id')}': {exc}") from exc
 
+    # Publish OUTSIDE the transaction block — _tenant_connection() has already
+    # committed by here. order_payload["id"] may have been reassigned above
+    # (sub-order numbering) so read it fresh rather than the outer order_id.
+    from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+    await realtime.publish(
+        restaurant_id, "order.created",
+        location_id=location_id, table_id=None, entity_id=order_payload["id"],
+    )
+
 
 # ── Lazy wrappers (break circular import with database.py) ────────────────────
 
@@ -439,7 +448,18 @@ async def db_confirm_payment(order_id: str, transaction_id: str):
                AND status NOT IN ('cancelado', 'entregado')
             RETURNING *
         """, order_id, transaction_id)
-        return _serialize(dict(row)) if row else None
+
+    if row is None:
+        return None
+
+    # Publish OUTSIDE the transaction block — _tenant_connection() has already
+    # committed by here.
+    from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+    await realtime.publish(
+        row["org_id"], "order.updated",
+        location_id=row.get("location_id"), table_id=None, entity_id=order_id,
+    )
+    return _serialize(dict(row))
 
 async def db_get_orders_range(date_from: str, date_to: str, bot_number: str = None):
     from datetime import timedelta
@@ -554,7 +574,15 @@ async def db_update_order_status(order_id: str, new_status: str) -> dict | None:
             "UPDATE orders SET status=$2 WHERE base_order_id=$1 AND id != $1",
             order_id, new_status,
         )
-        return _serialize(dict(row))
+
+    # Publish OUTSIDE the transaction block — _tenant_connection() has already
+    # committed by here.
+    from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+    await realtime.publish(
+        row["org_id"], "order.updated",
+        location_id=row.get("location_id"), table_id=None, entity_id=order_id,
+    )
+    return _serialize(dict(row))
 
 
 # ── Wompi webhook idempotency (GLOBAL table) ──────────────────────────────────
@@ -648,16 +676,30 @@ async def db_cancel_pending_order(
 
     # Status is 'pendiente' — cancel it
     async with _tenant_connection() as conn:
-        await conn.execute(
+        updated = await conn.fetchrow(
             """
             UPDATE orders
                SET status           = 'cancelado',
                    cancelled_at     = NOW(),
                    cancelled_reason = $2
              WHERE id = $1
+            RETURNING id, org_id, location_id
             """,
             row["id"], reason or None,
         )
+
+    # Publish OUTSIDE the transaction block — _tenant_connection() has already
+    # committed by here. Best-effort: never let a publish hiccup break the
+    # customer-facing cancellation that already succeeded.
+    if updated is not None:
+        try:
+            from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+            await realtime.publish(
+                updated["org_id"], "order.updated",
+                location_id=updated.get("location_id"), table_id=None, entity_id=row["id"],
+            )
+        except Exception:
+            log.warning("realtime.order_cancelled.publish_failed", order_id=row["id"], exc_info=True)
 
     return {"cancelled": True, "order_id": row["id"]}
 

@@ -5,10 +5,12 @@ The superadmin CRUD endpoints (/api/admin/*) have been moved to
 app/routes/internal/admin.py under /api/internal/admin/*.
 """
 from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.services.auth import login, logout, hash_password
 from app.services import state_store
+from app.services import realtime
 from app.routes.deps import get_current_user
 from app.services.logging import get_logger
 from app.services.staff_sections import sections_for_roles
@@ -308,3 +310,32 @@ async def staff_visible_sections(request: Request):
         sections = [s for s in sections if s != "myshift"]
 
     return {"ok": True, "roles": roles, "sections": sections}
+
+
+@router.get("/api/staff/stream")
+async def staff_stream(request: Request):
+    """Real-time SSE feed for the Staff App (kitchen/bar/waiter/cashier/courier).
+
+    Same auth gate as GET /api/staff/sections (Bearer token — admin sessions
+    and staff PIN sessions), 401 without it. Streams every invalidation event
+    (see app/services/realtime.py) for the caller's org — no location
+    filtering, sections filter client-side by topic (mesio-realtime.js).
+
+    Auth is resolved once, here, before the generator starts; the generator
+    itself never touches the DB (CLAUDE.md "4 workers" — no long-held
+    connection while streaming).
+    """
+    user = await get_current_user(request)
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    org_id = int(org_id)
+
+    return StreamingResponse(
+        realtime.event_stream(request.is_disconnected, org_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

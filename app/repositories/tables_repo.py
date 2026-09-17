@@ -189,7 +189,7 @@ async def db_save_table_order(order: dict):
                     f"Cannot resolve org_id for table_order {order['id']} "
                     f"(table_id={order['table_id']})"
                 )
-        await conn.execute("""
+        row = await conn.fetchrow("""
             INSERT INTO table_orders
                 (id, table_id, table_name, phone, items, status, notes, total,
                  base_order_id, sub_number, station, branch_id, org_id,
@@ -202,6 +202,7 @@ async def db_save_table_order(order: dict):
                 total=EXCLUDED.total,
                 branch_id=EXCLUDED.branch_id,
                 updated_at=NOW()
+            RETURNING id, table_id, org_id, branch_id, (xmax = 0) AS inserted
         """, order['id'], order['table_id'], order['table_name'], order['phone'],
             json.dumps(order['items']),
             order.get('status', 'recibido'),
@@ -215,6 +216,17 @@ async def db_save_table_order(order: dict):
             order.get('channel'),
             order.get('waiter_staff_id'),
             bool(order.get('pending_table_validation', False)))
+
+    # Publish OUTSIDE the transaction block (tenant_connection() has already
+    # committed and released the connection by here) — table_order.created on
+    # first insert, table_order.updated on every subsequent save/merge of the
+    # same id (ON CONFLICT DO UPDATE, e.g. status/items refresh).
+    from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+    topic = "table_order.created" if row["inserted"] else "table_order.updated"
+    await realtime.publish(
+        row["org_id"], topic,
+        location_id=row["branch_id"], table_id=row["table_id"], entity_id=row["id"],
+    )
 
 
 async def db_get_base_order_status(base_order_id: str) -> str | None:
@@ -235,6 +247,7 @@ async def db_merge_table_order_items(base_order_id: str, new_items: list, additi
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
+    published_row = None
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT items, total FROM table_orders WHERE id=$1 AND status='recibido'",
@@ -259,11 +272,20 @@ async def db_merge_table_order_items(base_order_id: str, new_items: list, additi
 
         merged = list(items_map.values())
         new_total = to_decimal(row["total"]) + to_decimal(additional_total)
-        await conn.execute(
-            "UPDATE table_orders SET items=$2, total=$3, updated_at=NOW() WHERE id=$1",
+        published_row = await conn.fetchrow(
+            "UPDATE table_orders SET items=$2, total=$3, updated_at=NOW() WHERE id=$1 "
+            "RETURNING id, table_id, org_id, branch_id",
             base_order_id, json.dumps(merged), new_total
         )
-        return True
+
+    if published_row is not None:
+        from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+        await realtime.publish(
+            published_row["org_id"], "table_order.updated",
+            location_id=published_row["branch_id"], table_id=published_row["table_id"],
+            entity_id=published_row["id"],
+        )
+    return True
 
 
 async def db_get_table_orders(status: str = None):
@@ -284,7 +306,18 @@ async def db_get_table_orders(status: str = None):
 async def db_update_table_order_status(order_id: str, status: str):
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
-        await conn.execute("UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1", order_id, status)
+        row = await conn.fetchrow(
+            "UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1 "
+            "RETURNING id, table_id, org_id, branch_id",
+            order_id, status,
+        )
+
+    if row is not None:
+        from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+        await realtime.publish(
+            row["org_id"], "table_order.updated",
+            location_id=row["branch_id"], table_id=row["table_id"], entity_id=row["id"],
+        )
 
 
 async def db_get_base_order_id(table_id: str) -> str | None:
@@ -508,6 +541,9 @@ async def db_create_waiter_alert(
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
+    from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+
+    topic = "waiter_alert.created"
     async with tenant_connection() as conn:
         # Dedup window: 60 seconds for waiter (non-bill) alerts only
         if alert_type == "waiter" and table_id:
@@ -530,14 +566,24 @@ async def db_create_waiter_alert(
                     "UPDATE waiter_alerts SET message = $1 WHERE id = $2 RETURNING *",
                     combined, existing["id"],
                 )
-                return _serialize(dict(row))
+                topic = "waiter_alert.updated"
 
-        row = await conn.fetchrow(
-            "INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message, org_id, location_id) "
-            "VALUES ($1, $2, $3, $4, $5, $6, NULLIF(current_setting('app.org_id', true), '')::bigint, $7) RETURNING *",
-            table_id, table_name, phone, bot_number, alert_type, message, location_id,
-        )
-        return _serialize(dict(row))
+        if topic == "waiter_alert.created":
+            row = await conn.fetchrow(
+                "INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message, org_id, location_id) "
+                "VALUES ($1, $2, $3, $4, $5, $6, NULLIF(current_setting('app.org_id', true), '')::bigint, $7) RETURNING *",
+                table_id, table_name, phone, bot_number, alert_type, message, location_id,
+            )
+        result = _serialize(dict(row))
+
+    # Publish OUTSIDE the transaction block (tenant_connection() has already
+    # committed by here) — .created for a genuinely new alert, .updated when
+    # an existing open alert absorbed this message via the 60s dedup window.
+    await realtime.publish(
+        row["org_id"], topic,
+        location_id=row["location_id"], table_id=row["table_id"], entity_id=str(row["id"]),
+    )
+    return result
 
 
 async def db_get_waiter_alerts(bot_number: str, location_id: int | None = None) -> list:
@@ -574,7 +620,31 @@ async def db_dismiss_waiter_alert(alert_id: int) -> bool:
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
         result = await conn.execute("UPDATE waiter_alerts SET dismissed=TRUE WHERE id=$1", alert_id)
-        return result == "UPDATE 1"
+        dismissed = result == "UPDATE 1"
+        ctx = None
+        if dismissed:
+            # Best-effort context read for the SSE publish below — kept as a
+            # SEPARATE statement (not folded into the UPDATE ... RETURNING)
+            # so the core dismiss/not-found determination above stays exactly
+            # the pre-existing `result == "UPDATE 1"` contract.
+            try:
+                ctx = await conn.fetchrow(
+                    "SELECT table_id, org_id, location_id FROM waiter_alerts WHERE id=$1",
+                    alert_id,
+                )
+            except Exception:
+                ctx = None
+
+    if dismissed and ctx is not None:
+        try:
+            from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+            await realtime.publish(
+                ctx["org_id"], "waiter_alert.updated",
+                location_id=ctx["location_id"], table_id=ctx["table_id"], entity_id=str(alert_id),
+            )
+        except Exception:
+            log.warning("realtime.waiter_alert_dismissed.publish_failed", alert_id=alert_id, exc_info=True)
+    return dismissed
 
 
 # ── table_sessions ────────────────────────────────────────────────────────────
@@ -872,10 +942,22 @@ async def db_session_mark_delivered(phone: str, bot_number: str, total: int = 0)
 async def db_mark_session_nps_pending(phone: str, bot_number: str) -> None:
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
-        await conn.execute(
+        row = await conn.fetchrow(
             "UPDATE table_sessions SET status='nps_pending', closed_by='factura_entregada', last_activity=NOW() "
-            "WHERE phone=$1 AND bot_number=$2 AND status='active'",
+            "WHERE phone=$1 AND bot_number=$2 AND status='active' "
+            "RETURNING id, table_id, org_id, location_id",
             phone, bot_number
+        )
+
+    if row is not None:
+        from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+        # entity_id is the table_sessions PK (an int, stringified) — NEVER the
+        # phone: on the WhatsApp channel `phone` is a real phone number, and
+        # the contract forbids personal data in events (ids/topics only).
+        await realtime.publish(
+            row["org_id"], "nps.updated",
+            location_id=row["location_id"], table_id=row["table_id"] or None,
+            entity_id=str(row["id"]),
         )
 
 
@@ -1008,6 +1090,12 @@ async def db_create_checks(base_order_id: str, checks: list) -> list:
             "SELECT * FROM table_checks WHERE base_order_id=$1 ORDER BY check_number",
             base_order_id
         )
+
+    # Publish OUTSIDE the transaction block — tenant_connection() has already
+    # committed by here. One event for the whole batch (this replaces the
+    # entire open-checks set for the ticket in one call); entity_id is the
+    # group id since no single check_id is more "the" event here.
+    await _publish_check_group_updated(base_order_id)
     return [_serialize(dict(r)) for r in rows]
 
 
@@ -1050,6 +1138,12 @@ async def db_insert_check(
             check_id, base_order_id, check_number,
             json.dumps(items), to_decimal(subtotal), to_decimal(tax_amount), to_decimal(total),
         )
+
+    # Publish OUTSIDE the transaction block — tenant_connection() has already
+    # committed by here. Only on a genuine insert: ON CONFLICT DO NOTHING
+    # means row is None when nothing actually changed.
+    if row is not None:
+        await _publish_check_updated(check_id, base_order_id)
     return _serialize(dict(row)) if row else None
 
 
@@ -1093,6 +1187,63 @@ async def db_get_check(check_id: str) -> dict | None:
 # rejected upfront, before DIAN is even attempted.
 
 
+async def _table_order_group_context(base_order_id: str) -> dict | None:
+    """table_checks has no org_id/location_id/table_id of its own (it isn't
+    an RLS table — scoped only via its base_order_id FK into table_orders).
+    Resolve the (org_id, location_id, table_id) triple for an SSE event via
+    that join, in a FRESH connection (called after the write's own
+    tenant_connection() block has already committed and returned the
+    connection to the pool)."""
+    async with tenant_connection() as conn:
+        return await conn.fetchrow(
+            "SELECT org_id, branch_id, table_id FROM table_orders "
+            "WHERE id=$1 OR base_order_id=$1 LIMIT 1",
+            base_order_id,
+        )
+
+
+async def _publish_check_updated(check_id: str, base_order_id: str) -> None:
+    """Best-effort: swallows lookup/publish errors (including odd shapes from
+    unit tests that mock conn.fetchrow with a fixed, unrelated row sequence)
+    so a check.updated publish failure can never fail the payment flow that
+    just committed."""
+    from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+    try:
+        ctx = await _table_order_group_context(base_order_id)
+        if ctx is None or ctx["org_id"] is None:
+            return
+        await realtime.publish(
+            ctx["org_id"], "check.updated",
+            location_id=ctx["branch_id"], table_id=ctx["table_id"], entity_id=check_id,
+        )
+    except Exception:
+        log.warning("realtime.check_updated.publish_failed", check_id=check_id, exc_info=True)
+
+
+async def _publish_check_group_updated(base_order_id: str) -> None:
+    """Like _publish_check_updated, for a write that touches the WHOLE open-
+    checks set of a ticket at once (db_create_checks) rather than a single
+    check_id — entity_id is the group id itself."""
+    await _publish_check_updated(base_order_id, base_order_id)
+
+
+async def _publish_table_order_group_updated(base_order_id: str) -> None:
+    """Same context resolution as _publish_check_updated, for the
+    table_order.updated event fired when finalizing payment closes the whole
+    group (table_orders.status -> 'factura_entregada')."""
+    from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+    try:
+        ctx = await _table_order_group_context(base_order_id)
+        if ctx is None or ctx["org_id"] is None:
+            return
+        await realtime.publish(
+            ctx["org_id"], "table_order.updated",
+            location_id=ctx["branch_id"], table_id=ctx["table_id"], entity_id=base_order_id,
+        )
+    except Exception:
+        log.warning("realtime.table_order_updated.publish_failed", base_order_id=base_order_id, exc_info=True)
+
+
 async def db_claim_check_for_payment(check_id: str, base_order_id: str) -> dict | None:
     """Atomically claim a check for payment processing.
 
@@ -1128,6 +1279,7 @@ async def db_claim_check_for_payment(check_id: str, base_order_id: str) -> dict 
     # We don't refetch — the caller only needs the immutable fields (items, total, etc.).
     claimed = _serialize(dict(row))
     claimed["status"] = "paying"
+    await _publish_check_updated(check_id, base_order_id)
     return claimed
 
 
@@ -1141,9 +1293,12 @@ async def db_release_check(check_id: str) -> bool:
     """
     async with tenant_connection() as conn:
         result = await conn.fetchrow(
-            "UPDATE table_checks SET status='open' WHERE id=$1 AND status='paying' RETURNING id",
+            "UPDATE table_checks SET status='open' WHERE id=$1 AND status='paying' "
+            "RETURNING id, base_order_id",
             check_id,
         )
+    if result is not None:
+        await _publish_check_updated(check_id, result["base_order_id"])
     return result is not None
 
 
@@ -1174,6 +1329,7 @@ async def db_finalize_check_payment(
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
+    group_closed = False
     async with tenant_connection() as conn:
         # tenant_connection() opens a transaction; conn.transaction() creates a SAVEPOINT.
         async with conn.transaction():
@@ -1216,6 +1372,15 @@ async def db_finalize_check_payment(
                          AND status NOT IN ('cancelado','factura_entregada')""",
                     base_order_id
                 )
+                group_closed = True
+
+    # Publish OUTSIDE the transaction block — tenant_connection() has already
+    # committed by here. check.updated always; table_order.updated too when
+    # this finalize just closed the whole group (kitchen/waiter/cashier
+    # screens all key off table_orders.status).
+    await _publish_check_updated(check_id, base_order_id)
+    if group_closed:
+        await _publish_table_order_group_updated(base_order_id)
     return True
 
 
@@ -1225,10 +1390,16 @@ async def db_delete_open_check(check_id: str) -> bool:
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
-        result = await conn.execute(
-            "DELETE FROM table_checks WHERE id=$1 AND status='open'", check_id
+        row = await conn.fetchrow(
+            "DELETE FROM table_checks WHERE id=$1 AND status='open' RETURNING base_order_id",
+            check_id,
         )
-    return result != "DELETE 0"
+
+    if row is not None:
+        # Publish OUTSIDE the transaction block — tenant_connection() has
+        # already committed by here.
+        await _publish_check_updated(check_id, row["base_order_id"])
+    return row is not None
 
 
 async def db_attach_proposal(
@@ -1244,7 +1415,7 @@ async def db_attach_proposal(
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
-        await conn.execute(
+        row = await conn.fetchrow(
             """UPDATE table_checks
                SET proposed_payments     = $2::jsonb,
                    proposed_tip          = $3,
@@ -1252,7 +1423,8 @@ async def db_attach_proposal(
                    proposal_status       = $5,
                    proposal_customer_phone = $6,
                    proposal_created_at   = NOW()
-             WHERE id = $1""",
+             WHERE id = $1
+             RETURNING base_order_id""",
             check_id,
             json.dumps(proposed_payments),
             to_decimal(proposed_tip),
@@ -1260,6 +1432,9 @@ async def db_attach_proposal(
             proposal_status,
             customer_phone,
         )
+
+    if row is not None:
+        await _publish_check_updated(check_id, row["base_order_id"])
 
 
 async def db_set_check_tip(check_id: str, tip_amount: float) -> None:

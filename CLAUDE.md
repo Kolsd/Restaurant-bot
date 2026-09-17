@@ -29,7 +29,7 @@ Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_
 ## Next session (order)
 1. ~~Validate bot with real LLM~~ (2026-09-12: e2e 55/59, sim 12/20 → 15/20 after fixes, commit fefa800). Pending when there is Anthropic credit: one sim run + `test_reservation_lifecycle.py`; the sim doesn't reset the test org's conversation cap. Key in local `.env`.
 1b. ~~English codebase~~ (2026-09-13/14: files+URLs 78a2aee, identifiers+comments 5f81d3a, docs). User-facing text stays Spanish; DB columns/values and DOM ids/classes still Spanish (later wave).
-1c. IN PROGRESS: unified staff app `/staff` (admin-dashboard shell, sections per role: cashier, waiter, kitchen, bar, courier, my shift; old role pages removed).
+1c. ~~Unified staff app `/staff`~~ (2026-09-17, d18118b: admin-dashboard shell, sections per role; old role pages removed; demo seed `scripts/dev/seed_staff_app_demo.py`). Open: SW never registered + static max-age 24h → tablets may run stale JS after deploy; orders-rescued metric must bucket days in the restaurant's timezone.
 2. Real-time SSE + Redis pub/sub (kitchen/bar/waiter/cashier/diner) — required for the live map and staff chat.
 3. Web delivery wave (decisions closed 2026-09-12): per-organization link + GPS assigns location, Turnstile, pickup + delivery, cashier accepts first, live map (Mapbox), live chat with cashier, staff with `location_id`, turn off delivery via WhatsApp.
 4. First customer: 8-day trial via `comp_until`.

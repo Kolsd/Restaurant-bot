@@ -10,7 +10,7 @@
  * Cache busting: increment CACHE_VERSION on every deploy that changes static assets.
  */
 
-const CACHE_VERSION  = 'v49';
+const CACHE_VERSION  = 'v50';
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
@@ -20,6 +20,7 @@ const SHELL_ASSETS = [
   '/static/css/tokens.css',
   '/static/css/shared.css',
   '/static/js/mesio-utils.js',
+  '/static/js/mesio-realtime.js',
   '/static/js/offline-sync.js',
   '/static/js/pages/sidebar.js',
   '/static/js/pages/dashboard.js',

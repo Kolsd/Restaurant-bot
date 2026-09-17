@@ -57,11 +57,13 @@ import uuid
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.services import blocks
 from app.services import database as db
 from app.services import orders
+from app.services import realtime
 from app.services import state_store
 from app.services.agent import chat as agent_chat, _generate_join_code, _JOIN_CODE_RE
 from app.services.logging import get_logger
@@ -1313,3 +1315,57 @@ async def diner_status(token: str = Query(..., min_length=1, max_length=200)):
             nps_block = blocks.build_nps_prompt_block(stage)
 
     return {"checkout": checkout_status, "nps": nps_block}
+
+
+async def _resolve_diner_stream_session(request: Request) -> dict:
+    """Same diner auth as GET /api/diner/status (diner_sessions_repo.get_by_token),
+    but the token comes from the Authorization header instead of the URL —
+    per the SSE contract, tokens never go in the URL for the stream endpoint
+    (EventSource can't send headers, so the browser uses fetch() + ReadableStream
+    instead — see app/static/js/mesio-realtime.js). 401 (not 404) on any
+    failure, matching GET /api/staff/stream's auth-gate shape.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+    if not token:
+        raise HTTPException(status_code=401, detail="Autenticación requerida")
+    session = await diner_sessions_repo.get_by_token(token)
+    if session is None:
+        raise HTTPException(status_code=401, detail="Sesión no encontrada o expirada")
+    return session
+
+
+def _make_diner_filter(table_id: str | None):
+    """Build the per-connection topic_filter for GET /api/diner/stream.
+
+    Standalone (module-level) so it's directly unit-testable — see
+    tests/test_realtime.py — without spinning up a request. `resync` is
+    NOT special-cased here: app.services.realtime.event_stream() already
+    lets `resync` bypass any topic_filter unconditionally.
+    """
+    def _filter(event: dict) -> bool:
+        return event.get("topic") in realtime.DINER_ALLOWLIST and event.get("table_id") == table_id
+    return _filter
+
+
+@router.get("/stream")
+async def diner_stream(request: Request):
+    """Real-time SSE feed for the diner's own table (Mesio-native chat).
+
+    Streams only the allowlisted topics (table_order.*, check.updated,
+    nps.updated) for the diner's own table_id — see
+    app.services.realtime.DINER_ALLOWLIST. `resync` events always pass
+    through regardless of the filter.
+    """
+    session = await _resolve_diner_stream_session(request)
+    org_id = int(session["org_id"])
+    table_id = session.get("table_id")
+
+    return StreamingResponse(
+        realtime.event_stream(request.is_disconnected, org_id, topic_filter=_make_diner_filter(table_id)),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

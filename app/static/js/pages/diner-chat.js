@@ -64,6 +64,24 @@ function dinerEl(id) { return document.getElementById(id); }
 
 function getToken() { return state.token; }
 
+/* ── Realtime (SSE invalidation events) ───────────────────────────────
+ * Connects once the diner has a session token (either freshly minted or
+ * restored from sessionStorage — see startSession()/restoreSavedSession()
+ * below, both of which call this right after state.token is set).
+ * Idempotent: MesioRealtime.connect() is only ever called once per page
+ * load even though both of those paths can reach here. ────────────────*/
+var _rtConnected = false;
+function connectDinerRealtime() {
+  if (_rtConnected || !state.token || !window.MesioRealtime) return;
+  _rtConnected = true;
+  MesioRealtime.connect('/api/diner/stream', getToken);
+  MesioRealtime.on('table_order.created', () => TablePanel.refresh());
+  MesioRealtime.on('table_order.updated', () => TablePanel.refresh());
+  MesioRealtime.on('check.updated', () => pollDinerStatus());
+  MesioRealtime.on('nps.updated', () => pollDinerStatus());
+  MesioRealtime.on('resync', () => { TablePanel.refresh(); pollDinerStatus(); });
+}
+
 function renderer() { return window.MesioCatalogRenderer; }
 
 function genIdempotencyKey() {
@@ -668,6 +686,7 @@ async function restoreSavedSession(tableId) {
   state.currency = saved.currency || 'COP';
   state.locale = saved.locale || 'es-CO';
   state.joinCode = saved.joinCode || '';
+  connectDinerRealtime();
 
   if (saved.needsJoin) {
     // Reloaded before ever entering the code — ask again. Never calls
@@ -725,6 +744,7 @@ async function startSession() {
     state.currency = data.currency || 'COP';
     state.locale = data.locale || 'es-CO';
     if (!state.token) throw new Error('missing session token');
+    connectDinerRealtime();
 
     if (data.requires_join_code) {
       // Table occupied — never show the greeting/carta (PM decision). Save
@@ -2033,9 +2053,11 @@ function initErrorBanner() {
 }
 
 function initTablePolling() {
-  // Visibility-aware (mesioInterval skips ticks while the tab is hidden);
-  // TablePanel.refresh() itself is a no-op unless the panel is open.
-  mesioInterval(function () { TablePanel.refresh(); }, 8000);
+  // Visibility-aware, and backs off to a 60s safety net once MesioRealtime
+  // is connected (table_order.* events call TablePanel.refresh() directly —
+  // see connectDinerRealtime() above). TablePanel.refresh() itself is a
+  // no-op unless the panel is open.
+  mesioLiveInterval(function () { TablePanel.refresh(); }, 8000);
 }
 
 /* ── Status polling — GET /api/diner/status ───────────────────────────
@@ -2080,7 +2102,9 @@ async function pollDinerStatus() {
 }
 
 function initStatusPolling() {
-  mesioInterval(function () { pollDinerStatus(); }, 6000);
+  // Backs off to a 60s safety net once MesioRealtime is connected —
+  // check.updated/nps.updated events call pollDinerStatus() directly.
+  mesioLiveInterval(function () { pollDinerStatus(); }, 6000);
 }
 
 function initDinerChat() {
