@@ -535,7 +535,7 @@ function mesioDateTime(isoStr) { return mesioDate(isoStr, { format: 'short' }); 
 (function _mesioSupportButton() {
   // URL patterns where the button should NOT appear
   var SKIP_PATHS = [
-    '/cashier', '/kitchen', '/bar', '/waiter', '/courier', '/staff-hq',
+    '/staff',   // unified Staff App (cashier/waiter/kitchen/bar/courier/my shift)
     '/landing', '/menu', '/login', '/signup', '/demo', '/dashboard-demo',
     '/r/',   // public QR menu routes
   ];

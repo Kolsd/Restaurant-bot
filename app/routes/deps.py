@@ -249,15 +249,12 @@ def require_module(module_name: str) -> Callable:
 # At the end of the file, after the existing functions
 
 ROLE_PAGE_MAP = {
-    "/waiter":      {"mesero"},
-    "/cashier":     {"caja", "cashier"},
-    "/courier":     {"domiciliario", "delivery"},
-    "/kitchen":     {"cocina"},
-    "/bar":         {"bar"},
     "/dashboard":   {"owner", "admin", "gerente"},
     "/settings":    {"owner", "admin", "gerente"},
     "/billing":     {"owner", "admin", "gerente"},
-    "/staff":       {"owner", "admin", "gerente"},
+    # /staff (the unified Staff App) has no single allowed-roles set here —
+    # every staff/admin role may load it; which sections it shows per role
+    # is decided by app.services.staff_sections, not this map.
 }
 
 ADMIN_ROLES = {"owner", "admin", "gerente"}

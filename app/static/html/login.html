@@ -621,7 +621,7 @@
         <p class="f-sub">¿A qué área vas a entrar hoy?</p>
 
         <div style="margin-top:24px;">
-          <a href="/staff-hq" class="panel-primary-tile">
+          <a href="/staff" class="panel-primary-tile">
             <span class="tile-icon" aria-hidden="true">🏠</span>
             <span class="tile-text">
               <strong>Panel principal</strong>
@@ -706,17 +706,23 @@
   (function () {
     'use strict';
 
-    /* ── Role metadata ───────────────────────────────────────────────── */
+    /* ── Role metadata ───────────────────────────────────────────────────
+       Every operational role now lands on the unified /staff app (Staff App
+       unification, 2026-09-14) — ?section= just preselects the sidebar item
+       so a single-role login opens straight into their area. The canonical
+       role -> section mapping lives server-side in
+       app/services/staff_sections.py; this table is only a UX convenience
+       for building the redirect URL, not an authorization boundary. ────── */
     var ROLE_META = {
-      mesero:       { icon: '🍽️', label: 'Mesero',      url: '/waiter',       bg: '#E1F5EE', color: '#0F6E56' },
-      cocina:       { icon: '👨‍🍳', label: 'Cocina',       url: '/kitchen',      bg: '#FEF3C7', color: '#92400E' },
-      bar:          { icon: '🍹', label: 'Bar',           url: '/bar',          bg: '#F0E6FF', color: '#6B21A8' },
-      caja:         { icon: '💰', label: 'Caja',          url: '/cashier',      bg: '#FFF8E6', color: '#BA7517' },
-      domiciliario: { icon: '🛵', label: 'Domicilios',    url: '/courier',      bg: '#E3F2FD', color: '#1565C0' },
+      mesero:       { icon: '🍽️', label: 'Mesero',      url: '/staff?section=waiter',  bg: '#E1F5EE', color: '#0F6E56' },
+      cocina:       { icon: '👨‍🍳', label: 'Cocina',       url: '/staff?section=kitchen', bg: '#FEF3C7', color: '#92400E' },
+      bar:          { icon: '🍹', label: 'Bar',           url: '/staff?section=bar',     bg: '#F0E6FF', color: '#6B21A8' },
+      caja:         { icon: '💰', label: 'Caja',          url: '/staff?section=cashier', bg: '#FFF8E6', color: '#BA7517' },
+      domiciliario: { icon: '🛵', label: 'Domicilios',    url: '/staff?section=courier', bg: '#E3F2FD', color: '#1565C0' },
       gerente:      { icon: '📊', label: 'Dashboard',     url: '/dashboard',    bg: '#F3E8FF', color: '#7C3AED' },
       owner:        { icon: '👑', label: 'Dashboard',     url: '/dashboard',    bg: '#F3E8FF', color: '#7C3AED' },
       admin:        { icon: '⚙️', label: 'Dashboard',     url: '/dashboard',    bg: '#F3E8FF', color: '#7C3AED' },
-      otro:         { icon: '🔧', label: 'Panel',         url: '/staff-hq',     bg: '#F3F4F6', color: '#555555' },
+      otro:         { icon: '🔧', label: 'Mi turno',      url: '/staff?section=myshift', bg: '#F3F4F6', color: '#555555' },
     };
 
     /* ── URL param ?r= ──────────────────────────────────────────────── */
@@ -813,7 +819,7 @@
     /* ── Redirect a single role ─────────────────────────────────────── */
     function redirectForRole(role) {
       var meta = ROLE_META[role];
-      window.location.href = meta ? meta.url : '/staff-hq';
+      window.location.href = meta ? meta.url : '/staff';
     }
 
     /* ── Persist localStorage for a resolved restaurant+role ───────────
@@ -851,7 +857,14 @@
       }
     }
 
-    /* ── Decide where to redirect after session is saved ────────────── */
+    /* ── Decide where to redirect after session is saved ──────────────
+       Staff App unification (2026-09-14): every operational role — single
+       or multiple — lands on /staff, which shows a sidebar item per role
+       the user actually has (app/services/staff_sections.py) and lets
+       owner/admin/gerente switch between ALL sections from the same page.
+       A single-role login preselects that section via ?section=; a
+       multi-role login (e.g. caja+mesero) just opens /staff and the user
+       picks a section from the sidebar — no separate role-chooser screen. */
     function redirectAfterLogin(rolesArr, staffName) {
       var hasRole = function (names) {
         return names.some(function (n) { return rolesArr.includes(n); });
@@ -863,22 +876,14 @@
         return;
       }
 
-      // Single operational role — go directly
+      // Single operational role — preselect that section
       if (rolesArr.length === 1) {
         redirectForRole(rolesArr[0]);
         return;
       }
 
-      // Multiple operational roles — show role selector
-      var hasVisibleTile = rolesArr.some(function (r) { return !!ROLE_META[r]; });
-      if (!hasVisibleTile) {
-        window.location.href = '/staff-hq';
-        return;
-      }
-      _pendingRoles     = rolesArr;
-      _pendingStaffName = staffName || '';
-      renderRoleSelector();
-      showView('role-view');
+      // Multiple operational roles — /staff shows all of them in its sidebar
+      window.location.href = '/staff';
     }
 
     /* ── Build role selector grid ───────────────────────────────────── */

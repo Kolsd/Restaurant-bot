@@ -1,4 +1,514 @@
 /* ═══════════════════════════════════════════════════════════════
+   Mesio — Staff App / "Mi turno" section
+   Ported from the old /staff-hq page (app/static/html/staff-hq.html +
+   app/static/js/pages/staff-clock.js) into a mount()/unmount() module for
+   the unified Staff App shell. Everyone with a staff login sees this
+   section (clock in/out, timecard, biometrics, tips, announcements,
+   tasks, shift swaps). Business logic below is UNCHANGED from the
+   original staff-clock.js — the whole top-level script body (which used
+   to run once at page load) now runs from mount(), and every interval /
+   window listener it starts is tracked so unmount() can stop it.
+   ═══════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  var TEMPLATE = `
+<div class="mesio-sec-myshift">
+<!-- ═══════════ MOBILE STAGE ═══════════ -->
+<div class="sc-stage sc-stage-mobile active" id="sc-stage-mobile">
+  <div class="sc-phone">
+    <div class="sc-notch"></div>
+    <div class="sc-stat-bar">
+      <span id="sc-m-time" style="font-family:var(--font-mono);">--:--</span>
+      <span>•••• 5G</span>
+    </div>
+
+    <div class="sc-screen">
+      <!-- HERO -->
+      <div class="sc-hero-m">
+        <div class="sc-hero-m-row">
+          <div>
+            <div class="sc-hero-m-greet" id="sc-m-greet">Bienvenido</div>
+            <div class="sc-hero-m-name" id="sc-m-name">...</div>
+          </div>
+          <div class="sc-hero-m-avatar" id="sc-m-avatar">?</div>
+        </div>
+
+        <div class="sc-hero-m-clock">
+          <span class="sc-time" id="sc-m-time-big">--:--</span>
+          <span class="sc-sec" id="sc-m-sec">:--</span>
+        </div>
+        <div class="sc-hero-m-date" id="sc-m-date">--</div>
+
+        <div class="sc-status-pill" id="sc-m-status">
+          <span class="sc-dot"></span>
+          <span id="sc-m-status-text">Sin fichar</span>
+        </div>
+      </div>
+
+      <!-- TIMELINE -->
+      <div class="sc-shift-timeline">
+        <div class="sc-stl-head">
+          <span class="sc-stl-label" id="sc-stl-label">Turno de hoy</span>
+          <span class="sc-stl-dur" id="sc-stl-dur">—</span>
+        </div>
+        <div class="sc-stl-bar">
+          <div class="sc-stl-progress" id="sc-stl-progress" style="width:0;"></div>
+          <div class="sc-stl-break" id="sc-stl-break" style="display:none;"></div>
+          <div class="sc-stl-now" id="sc-stl-now" style="left:0;"></div>
+        </div>
+        <div class="sc-stl-ticks" id="sc-stl-ticks">
+          <span>—</span><span>—</span><span>—</span><span>—</span><span>—</span>
+        </div>
+        <div class="sc-stl-foot" id="sc-stl-foot">
+          <span>No has fichado aún</span>
+        </div>
+      </div>
+
+      <!-- ACTIONS -->
+      <div class="sc-m-actions">
+        <!-- Clock-in button (shown when out of shift) -->
+        <button class="sc-m-act primary" id="sc-m-btn-clock-in">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M10 2h3a1 1 0 011 1v10a1 1 0 01-1 1h-3M6 5l-3 3 3 3M3 8h10"/>
+          </svg>
+          <span>Marcar entrada</span>
+        </button>
+        <!-- Clock-out button (shown when in shift) -->
+        <button class="sc-m-act primary" id="sc-m-btn-clock-out" style="display:none;">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 5l3 3-3 3M13 8H6"/>
+          </svg>
+          <span>Marcar salida</span>
+        </button>
+        <!-- Break button (shown when in shift) -->
+        <button class="sc-m-act sec" id="sc-m-btn-break" style="display:none;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M2 6h9v3a4 4 0 01-8 0V6z"/><path d="M11 7h2a2 2 0 010 4h-2"/>
+            <path d="M4 3v1M6 3v1M8 3v1"/>
+          </svg>
+          <span class="sc-m-break-label">Break</span>
+        </button>
+      </div>
+
+      <!-- TIPS — populated by scLoadTips() on mount -->
+      <div class="sc-m-sect">Propinas · hoy</div>
+      <div class="sc-m-card">
+        <div class="sc-tip-hero">
+          <div class="sc-tip-label">Tu parte del turno</div>
+          <div class="sc-tip-amount" id="sc-tip-amount">—</div>
+          <div class="sc-tip-sub" id="sc-tip-sub">Cargando…</div>
+        </div>
+        <div class="sc-tip-grid">
+          <div class="sc-tip-cell"><div class="n" id="sc-tip-mesas">—</div><div class="l">mesas</div></div>
+          <div class="sc-tip-cell"><div class="n" id="sc-tip-ventas">—</div><div class="l">ventas</div></div>
+          <div class="sc-tip-cell"><div class="n" id="sc-tip-pct">—</div><div class="l">propina</div></div>
+        </div>
+      </div>
+
+      <!-- ANNOUNCEMENTS — populated by scLoadAnnouncements() on mount -->
+      <div class="sc-m-sect">Anuncios</div>
+      <div class="sc-annc" id="sc-annc-container">
+        <div style="font-size:12px;color:var(--sc-text-3);padding:4px 0;">Cargando…</div>
+      </div>
+
+      <!-- TASKS — populated by scLoadTasks() on mount -->
+      <div class="sc-m-sect">Checklist del turno <span id="sc-task-count" style="font-size:11px;color:var(--sc-text-3);font-weight:500;letter-spacing:0;text-transform:none;"></span></div>
+      <div class="sc-m-card" id="sc-tasks-container">
+        <div style="padding:10px 14px;font-size:12px;color:var(--sc-text-3);">Cargando…</div>
+      </div>
+
+      <!-- STATIONS -->
+      <div class="sc-m-sect">Mis estaciones</div>
+      <div class="sc-stations-m" id="sc-stations-m"></div>
+
+      <!-- UPCOMING SHIFTS — populated by scLoadUpcomingShifts() on mount -->
+      <div class="sc-m-sect">Próximos turnos</div>
+      <div class="sc-m-card" id="sc-shifts-container">
+        <div style="padding:14px;font-size:12px;color:var(--sc-text-3);">Cargando…</div>
+      </div>
+
+      <!-- SWAP INCOMING (shown only when there are pending requests) -->
+      <div id="sc-swap-incoming-wrapper" style="margin-top:10px;">
+        <div class="sc-m-sect" id="sc-swap-incoming-label" style="display:none;">Solicitudes de cambio entrantes</div>
+        <div id="sc-swap-incoming-container"></div>
+      </div>
+
+      <!-- SWAP OUTGOING (my sent requests) -->
+      <div id="sc-swap-outgoing-container" style="margin-bottom:8px;"></div>
+
+      <!-- PERFORMANCE — populated by scLoadPerformance() on mount -->
+      <div class="sc-m-sect">Mi desempeño · este mes</div>
+      <div class="sc-perf" id="sc-perf-container">
+        <div class="sc-perf-head">
+          <div>
+            <div class="sc-perf-title">Rendimiento del período</div>
+            <div class="sc-perf-sub" id="sc-perf-sub">Cargando…</div>
+          </div>
+        </div>
+        <div style="margin-top:8px;">
+          <div class="sc-perf-row">
+            <span class="l">Propinas promedio / turno</span>
+            <span class="v">—</span>
+          </div>
+          <div class="sc-perf-row">
+            <span class="l">NPS de tus mesas</span>
+            <span class="v">—</span>
+          </div>
+          <div class="sc-perf-row">
+            <span class="l">Ticket promedio</span>
+            <span class="v">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- TIMECARD PREVIEW -->
+      <div class="sc-m-sect">Timecard · semana actual</div>
+      <div class="sc-m-card sc-tc-preview">
+        <div class="sc-tc-sum">
+          <div>
+            <div class="sc-tc-sum-big" id="sc-tc-sum-big">—</div>
+            <div class="sc-tc-sum-sub">horas esta semana</div>
+          </div>
+        </div>
+        <div class="sc-tc-days">
+          <div class="sc-tc-day" id="sc-tc-L"><span class="d">L</span><div class="bar"><div class="fill" style="height:0;"></div></div><span class="h">—</span></div>
+          <div class="sc-tc-day" id="sc-tc-M"><span class="d">M</span><div class="bar"><div class="fill" style="height:0;"></div></div><span class="h">—</span></div>
+          <div class="sc-tc-day" id="sc-tc-X"><span class="d">M</span><div class="bar"><div class="fill" style="height:0;"></div></div><span class="h">—</span></div>
+          <div class="sc-tc-day" id="sc-tc-J"><span class="d">J</span><div class="bar"><div class="fill" style="height:0;"></div></div><span class="h">—</span></div>
+          <div class="sc-tc-day" id="sc-tc-V"><span class="d">V</span><div class="bar"><div class="fill" style="height:0;"></div></div><span class="h">—</span></div>
+          <div class="sc-tc-day off" id="sc-tc-S"><span class="d">S</span><div class="bar"></div><span class="h">—</span></div>
+          <div class="sc-tc-day off" id="sc-tc-D"><span class="d">D</span><div class="bar"></div><span class="h">—</span></div>
+        </div>
+      </div>
+
+      <div class="sc-m-pad"></div>
+    </div>
+  </div>
+  <div class="sc-layout-label">Móvil · Celular personal</div>
+</div>
+
+<!-- ═══════════ KIOSCO STAGE ═══════════ -->
+<div class="sc-stage sc-stage-kiosco" id="sc-stage-kiosco">
+  <div class="sc-tablet-scale" id="sc-tablet-scale">
+  <div class="sc-tablet">
+    <div class="sc-tablet-cam"></div>
+    <div class="sc-kiosco">
+
+      <!-- LEFT: clock + geofence -->
+      <div class="sc-k-left">
+        <div class="sc-k-brand"><div class="mk">M</div> Mesio</div>
+        <div class="sc-k-branch" id="sc-k-branch">Restaurante</div>
+        <div class="sc-k-kiosk-label"><span class="d"></span>Kiosco · Entrada staff</div>
+
+        <div class="sc-k-clock">
+          <span id="sc-k-time">--:--</span><span class="sc-k-clock-sec" id="sc-k-sec">:--</span>
+        </div>
+        <div class="sc-k-date" id="sc-k-date">--</div>
+
+        <div class="sc-k-geo">
+          <span class="d"></span>
+          <div>
+            <b>Verificando ubicación…</b>
+            <span id="sc-k-geo-sub">Activar geolocalización para validar presencia</span>
+          </div>
+        </div>
+
+        <div class="sc-k-instruct">
+          <b>Cómo fichar</b>
+          Usa tu huella dactilar o Face ID, o ingresa tu PIN.
+          El sistema detecta automáticamente si es entrada, salida o break según tu turno.
+        </div>
+      </div>
+
+      <!-- RIGHT: identity + actions + panels -->
+      <div class="sc-k-right">
+        <div class="sc-k-panel-head">
+          <div>
+            <div class="sc-k-panel-title" id="sc-k-panel-title">Hola 👋</div>
+            <div class="sc-k-panel-sub" id="sc-k-panel-sub">Ficha tu entrada para comenzar el turno.</div>
+          </div>
+          <div class="sc-k-meta">
+            <div class="sc-k-meta-item"><b id="sc-k-dur">—</b>trabajadas hoy</div>
+            <div class="sc-k-meta-item"><b id="sc-k-tips">—</b>propinas</div>
+          </div>
+        </div>
+
+        <!-- Alerts — populated by scLoadProfile() on mount -->
+        <div class="sc-k-alerts" id="sc-k-alerts"></div>
+
+        <!-- Identity card -->
+        <div class="sc-k-ident">
+          <div class="sc-k-ident-av" id="sc-k-ident-av">?</div>
+          <div class="sc-k-ident-info">
+            <div class="sc-k-ident-name" id="sc-k-ident-name">Cargando...</div>
+            <div class="sc-k-ident-role" id="sc-k-ident-roles"></div>
+          </div>
+          <div class="sc-k-ident-shift" id="sc-k-ident-shift">
+            <span>Sin turno activo</span>
+          </div>
+        </div>
+
+        <!-- Big action buttons -->
+        <div class="sc-k-actions">
+          <button class="sc-k-act primary" id="sc-k-btn-clock-in">
+            <div class="sc-k-act-ico">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M10 2h3a1 1 0 011 1v10a1 1 0 01-1 1h-3M6 5l-3 3 3 3M3 8h10"/>
+              </svg>
+            </div>
+            <div class="sc-k-act-body"><b>Marcar entrada</b><span>Iniciar turno</span></div>
+          </button>
+          <button class="sc-k-act primary finish" id="sc-k-btn-clock-out" style="display:none;">
+            <div class="sc-k-act-ico">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 5l3 3-3 3M13 8H6"/>
+              </svg>
+            </div>
+            <div class="sc-k-act-body"><b>Marcar salida</b><span>Cerrar turno</span></div>
+          </button>
+          <button class="sc-k-act sec" id="sc-k-btn-break" style="display:none;">
+            <div class="sc-k-act-ico">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M2 6h9v3a4 4 0 01-8 0V6z"/><path d="M11 7h2a2 2 0 010 4h-2"/>
+                <path d="M4 3v1M6 3v1M8 3v1"/>
+              </svg>
+            </div>
+            <div class="sc-k-act-body"><b>Break</b><span>15 o 30 min</span></div>
+          </button>
+          <button class="sc-k-act sec" id="sc-k-btn-register-bio">
+            <div class="sc-k-act-ico">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+                <path d="M8 2C5 2 3 4 3 7v3M8 2c3 0 5 2 5 5v3"/>
+                <path d="M5 7c0-2 1-3 3-3s3 1 3 3v4"/>
+                <path d="M8 7v5M6.5 10v2M9.5 10v2"/>
+              </svg>
+            </div>
+            <div class="sc-k-act-body"><b>Registrar huella</b><span>Biometría FIDO2</span></div>
+          </button>
+        </div>
+
+        <!-- TIMELINE + PANELS GRID -->
+        <div class="sc-k-grid">
+          <!-- Shift timeline -->
+          <div class="sc-k-panel">
+            <div class="sc-k-panel-h"><span>Turno en curso</span></div>
+            <div class="sc-k-timeline">
+              <div class="sc-k-tl-head">
+                <div class="sc-k-tl-sched" id="sc-k-tl-sched">Horario: <b>—</b></div>
+                <div class="sc-k-tl-dur" id="sc-k-tl-dur">—</div>
+              </div>
+              <div class="sc-k-tl-bar">
+                <div class="fill" id="sc-k-tl-fill" style="width:0;"></div>
+                <div class="brk" id="sc-k-tl-brk" style="display:none;"></div>
+                <div class="now" id="sc-k-tl-now" style="left:0;"></div>
+              </div>
+              <div class="sc-k-tl-ticks" id="sc-k-tl-ticks">
+                <span>—</span><span>—</span><span>—</span><span>—</span><span>—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tips kiosco — populated by scLoadTips() on mount -->
+          <div class="sc-k-panel">
+            <div class="sc-k-panel-h"><span>Propinas · hoy</span></div>
+            <div style="padding:16px;">
+              <div style="font-family:var(--font-display);font-weight:700;font-size:32px;letter-spacing:-0.8px;color:#6B3F05;font-variant-numeric:tabular-nums;" id="sc-k-tip-amount">—</div>
+              <div style="font-size:11.5px;color:var(--sc-text-3);" id="sc-k-tip-sub">Cargando…</div>
+            </div>
+          </div>
+
+          <!-- Tasks — populated by scLoadTasks() on mount -->
+          <div class="sc-k-panel">
+            <div class="sc-k-panel-h"><span>Checklist del turno</span></div>
+            <div id="sc-k-tasks">
+              <div style="padding:12px 16px;font-size:12px;color:var(--sc-text-3);">Cargando…</div>
+            </div>
+          </div>
+
+          <!-- Upcoming shifts — populated by scLoadUpcomingShifts() on mount -->
+          <div class="sc-k-panel">
+            <div class="sc-k-panel-h"><span>Próximos turnos</span></div>
+            <div id="sc-k-shifts">
+              <div style="padding:12px 16px;font-size:12px;color:var(--sc-text-3);">Cargando…</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /.sc-k-right -->
+
+      <!-- AUTH MODAL (kiosco) -->
+      <div class="sc-modal-backdrop" id="sc-auth-modal">
+        <div class="sc-modal">
+          <div class="sc-modal-head">
+            <div class="sc-modal-title" id="sc-auth-title">Confirmar acción</div>
+            <button class="sc-modal-close" id="sc-auth-modal-close" aria-label="Cerrar">&times;</button>
+          </div>
+          <div class="sc-modal-sub">Confirma con tu huella o Face ID.</div>
+
+          <div class="sc-fp-wrap" id="sc-auth-fp">
+            <div class="sc-fp-circle" aria-hidden="true">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+                <path d="M8 2C5 2 3 4 3 7v3M8 2c3 0 5 2 5 5v3"/>
+                <path d="M5 7c0-2 1-3 3-3s3 1 3 3v4"/>
+                <path d="M8 7v5M6.5 10v2M9.5 10v2"/>
+              </svg>
+            </div>
+            <div class="sc-fp-label">Esperando huella…</div>
+            <div class="sc-fp-sub">También Face ID disponible</div>
+          </div>
+
+          <button class="sc-modal-act ghost" id="sc-auth-use-pin">Usar PIN en su lugar</button>
+          <button class="sc-modal-act" style="margin-top:6px;background:var(--sc-brand);display:none;" id="sc-auth-confirm" aria-label="Iniciar autenticación biométrica">Verificar huella</button>
+        </div>
+      </div>
+
+      <!-- PIN MODAL (kiosco) -->
+      <div class="sc-modal-backdrop" id="sc-pin-modal">
+        <div class="sc-modal">
+          <div class="sc-modal-head">
+            <div class="sc-modal-title">PIN de 6 dígitos</div>
+            <button class="sc-modal-close" id="sc-pin-close" aria-label="Cerrar">&times;</button>
+          </div>
+          <div class="sc-modal-sub">Ingresa tu PIN personal.</div>
+          <div class="sc-pin-dots" id="sc-pin-dots">
+            <div class="sc-pin-dot"></div><div class="sc-pin-dot"></div><div class="sc-pin-dot"></div>
+            <div class="sc-pin-dot"></div><div class="sc-pin-dot"></div><div class="sc-pin-dot"></div>
+          </div>
+          <div class="sc-pin-keypad">
+            <button class="sc-pin-key" data-digit="1">1</button>
+            <button class="sc-pin-key" data-digit="2">2</button>
+            <button class="sc-pin-key" data-digit="3">3</button>
+            <button class="sc-pin-key" data-digit="4">4</button>
+            <button class="sc-pin-key" data-digit="5">5</button>
+            <button class="sc-pin-key" data-digit="6">6</button>
+            <button class="sc-pin-key" data-digit="7">7</button>
+            <button class="sc-pin-key" data-digit="8">8</button>
+            <button class="sc-pin-key" data-digit="9">9</button>
+            <button class="sc-pin-key fn" id="sc-pin-back">← Borrar</button>
+            <button class="sc-pin-key" data-digit="0">0</button>
+            <button class="sc-pin-key fn" id="sc-pin-fp">Huella</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SWAP MODAL (kiosco) -->
+      <div class="sc-modal-backdrop" id="sc-swap-modal">
+        <div class="sc-modal" style="width:380px;">
+          <div class="sc-modal-head">
+            <div class="sc-modal-title">Pedir cambio de turno</div>
+            <button class="sc-modal-close" id="sc-swap-close" aria-label="Cerrar">&times;</button>
+          </div>
+          <div class="sc-modal-sub">Selecciona el compañero con quien quieres cambiar el turno.</div>
+          <div style="margin-bottom:12px;">
+            <label for="sc-swap-target-kiosco" style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Compañero</label>
+            <select id="sc-swap-target-kiosco" class="sc-swap-target-sel" style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;">
+              <option value="">— Selecciona compañero —</option>
+            </select>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label for="sc-swap-reason-kiosco" style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Razón (opcional)</label>
+            <input id="sc-swap-reason-kiosco" class="sc-swap-reason" type="text" maxlength="200" placeholder="Cita médica, viaje, etc." style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;box-sizing:border-box;" />
+          </div>
+          <button class="sc-modal-act" style="background:var(--sc-brand,#1D9E75);color:#fff;" id="sc-swap-submit">Enviar solicitud</button>
+          <button class="sc-modal-act ghost" id="sc-swap-cancel">Cancelar</button>
+        </div>
+      </div>
+
+    </div><!-- /.sc-kiosco -->
+  </div><!-- /.sc-tablet -->
+  </div><!-- /.sc-tablet-scale -->
+  <div class="sc-layout-label">Kiosco · Tablet compartida en restaurante</div>
+</div><!-- /.sc-stage-kiosco -->
+
+<!-- AUTH MODAL (mobile — fixed position) -->
+<div class="sc-modal-backdrop sc-modal-backdrop fixed-pos" id="sc-auth-modal-m">
+  <div class="sc-modal">
+    <div class="sc-modal-head">
+      <div class="sc-modal-title" id="sc-auth-title-m">Confirmar acción</div>
+      <button class="sc-modal-close" id="sc-auth-modal-m-close" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="sc-modal-sub">Confirma con tu huella o Face ID.</div>
+    <div class="sc-fp-wrap">
+      <div class="sc-fp-circle" aria-hidden="true">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+          <path d="M8 2C5 2 3 4 3 7v3M8 2c3 0 5 2 5 5v3"/>
+          <path d="M5 7c0-2 1-3 3-3s3 1 3 3v4"/>
+          <path d="M8 7v5M6.5 10v2M9.5 10v2"/>
+        </svg>
+      </div>
+      <div class="sc-fp-label">Esperando huella…</div>
+      <div class="sc-fp-sub">También Face ID disponible</div>
+    </div>
+    <button class="sc-modal-act ghost" id="sc-auth-m-use-pin">Usar PIN</button>
+    <button class="sc-modal-act" style="margin-top:6px;background:var(--sc-brand);display:none;" id="sc-auth-m-confirm" aria-label="Iniciar autenticación biométrica">Verificar huella</button>
+  </div>
+</div>
+
+<!-- KIOSCO SUCCESS OVERLAY -->
+<div id="sc-kiosco-success-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);align-items:center;justify-content:center;flex-direction:column;gap:16px;">
+  <div style="width:72px;height:72px;border-radius:50%;background:var(--brand,#1D9E75);display:flex;align-items:center;justify-content:center;">
+    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+  </div>
+  <div class="sc-ks-name" style="font-size:22px;font-weight:700;color:#fff;text-align:center;"></div>
+  <div class="sc-ks-action" style="font-size:15px;color:rgba(255,255,255,.7);text-align:center;"></div>
+</div>
+
+<style>
+.sc-fp-wrap { transition: background .2s; border-radius: 12px; padding: 16px 0; }
+.sc-fp-state-waiting .sc-fp-circle { animation: sc-fp-pulse 1.4s ease-in-out infinite; }
+.sc-fp-state-success .sc-fp-circle { color: var(--brand); }
+.sc-fp-state-error   .sc-fp-circle { color: #EF4444; }
+@keyframes sc-fp-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .55; transform: scale(1.08); }
+}
+#sc-kiosco-success-overlay.visible { display: flex !important; animation: sc-ks-in .25s ease; }
+@keyframes sc-ks-in {
+  from { opacity: 0; transform: scale(.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+</style>
+
+<!-- SWAP MODAL (mobile — fixed position) -->
+<div class="sc-modal-backdrop sc-modal-backdrop fixed-pos" id="sc-swap-modal-m">
+  <div class="sc-modal">
+    <div class="sc-modal-head">
+      <div class="sc-modal-title">Cambio de turno</div>
+      <button class="sc-modal-close" id="sc-swap-m-close" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="sc-modal-sub">Selecciona el compañero con quien quieres cambiar.</div>
+    <div style="margin-bottom:12px;">
+      <label for="sc-swap-target-mobile" style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Compañero</label>
+      <select id="sc-swap-target-mobile" class="sc-swap-target-sel" style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;">
+        <option value="">— Selecciona compañero —</option>
+      </select>
+    </div>
+    <div style="margin-bottom:12px;">
+      <label for="sc-swap-reason-mobile" style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Razón (opcional)</label>
+      <input id="sc-swap-reason-mobile" class="sc-swap-reason" type="text" maxlength="200" placeholder="Cita médica, viaje, etc." style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;box-sizing:border-box;" />
+    </div>
+    <button class="sc-modal-act" style="background:var(--sc-brand,#1D9E75);color:#fff;" id="sc-swap-m-submit">Enviar solicitud</button>
+    <button class="sc-modal-act ghost" id="sc-swap-m-cancel">Cancelar</button>
+  </div>
+</div>
+
+<!-- Logout button — visible in mobile footer -->
+<button id="sc-logout-btn" style="position:fixed;bottom:16px;right:16px;z-index:100;padding:8px 14px;font-size:12px;border:1px solid rgba(0,0,0,0.15);border-radius:8px;background:rgba(255,255,255,0.9);color:#374151;cursor:pointer;backdrop-filter:blur(4px);" aria-label="Cerrar sesión">Cerrar sesión</button>
+</div><!-- /.mesio-sec-myshift -->
+`;
+
+  // ── Cleanup tracking ─────────────────────────────────
+  var _intervalHandles = [];
+  var _winListeners = [];
+  function _trackInterval(id) { _intervalHandles.push(id); return id; }
+  function _trackWinListener(type, fn) { window.addEventListener(type, fn); _winListeners.push([type, fn]); }
+
+function mount(container) {
+  container.innerHTML = TEMPLATE;
+  document.body.classList.add('staff-clock-page');
+
+/* ═══════════════════════════════════════════════════════════════
    STAFF CLOCK — interactions + backend wiring
    Produced by: staff-clock.html design → production port
    ═══════════════════════════════════════════════════════════════
@@ -318,7 +828,7 @@ function scTick() {
   if (kDate) kDate.textContent = dateStrK.charAt(0).toUpperCase() + dateStrK.slice(1);
 }
 scTick();
-setInterval(scTick, 1000);
+_trackInterval(setInterval(scTick, 1000));
 
 /* ── Clock actions ─────────────────────────────────────────────── */
 const SC_ACTION_ENDPOINTS = {
@@ -1647,7 +2157,7 @@ function scScaleMobile() {
   }
 }
 
-window.addEventListener('resize', () => { scScaleKiosco(); scScaleMobile(); });
+_trackWinListener('resize', () => { scScaleKiosco(); scScaleMobile(); });
 
 /* ── Modal backdrop click-to-close ──────────────────────────────── */
 document.querySelectorAll('.sc-modal-backdrop').forEach(m => {
@@ -1655,7 +2165,7 @@ document.querySelectorAll('.sc-modal-backdrop').forEach(m => {
 });
 
 /* ── Edit mode bridge ───────────────────────────────────────────── */
-window.addEventListener('message', (e) => {
+_trackWinListener('message', (e) => {
   if (!e.data) return;
   const tw = document.getElementById('sc-tw-panel');
   if (!tw) return;
@@ -1683,15 +2193,100 @@ scLoadTasks();
 // Auto-refresh every 60 seconds (tips + upcoming shifts added in Sprint Y;
 // performance added in Sprint Z — refreshed once per minute like tips).
 if (typeof mesioInterval === 'function') {
-  mesioInterval(scLoadAnnouncements,    60000);
-  mesioInterval(scLoadTasks,            60000);
-  mesioInterval(scLoadTips,             60000);
-  mesioInterval(scLoadUpcomingShifts,   60000);
-  mesioInterval(scLoadPerformance,      60000);
+  _trackInterval(mesioInterval(scLoadAnnouncements,    60000));
+  _trackInterval(mesioInterval(scLoadTasks,            60000));
+  _trackInterval(mesioInterval(scLoadTips,             60000));
+  _trackInterval(mesioInterval(scLoadUpcomingShifts,   60000));
+  _trackInterval(mesioInterval(scLoadPerformance,      60000));
 } else {
-  setInterval(scLoadAnnouncements,    60000);
-  setInterval(scLoadTasks,            60000);
-  setInterval(scLoadTips,             60000);
-  setInterval(scLoadUpcomingShifts,   60000);
-  setInterval(scLoadPerformance,      60000);
+  _trackInterval(setInterval(scLoadAnnouncements,    60000));
+  _trackInterval(setInterval(scLoadTasks,            60000));
+  _trackInterval(setInterval(scLoadTips,             60000));
+  _trackInterval(setInterval(scLoadUpcomingShifts,   60000));
+  _trackInterval(setInterval(scLoadPerformance,      60000));
 }
+
+  /* ── Merged from staff-hq.html's trailing inline <script> ─────────── */
+  document.getElementById('sc-m-btn-clock-in')?.addEventListener('click', function() {
+    doClockAction('clock-in');
+  });
+  document.getElementById('sc-m-btn-clock-out')?.addEventListener('click', function() {
+    doClockAction('clock-out');
+  });
+  document.getElementById('sc-m-btn-break')?.addEventListener('click', function() {
+    const inBreak = this.classList.contains('active');
+    doClockAction(inBreak ? 'break-end' : 'break-start');
+  });
+
+  document.getElementById('sc-k-btn-clock-in')?.addEventListener('click', function() {
+    doClockAction('clock-in');
+  });
+  document.getElementById('sc-k-btn-clock-out')?.addEventListener('click', function() {
+    doClockAction('clock-out');
+  });
+  document.getElementById('sc-k-btn-break')?.addEventListener('click', function() {
+    const inBreak = this.classList.contains('active');
+    doClockAction(inBreak ? 'break-end' : 'break-start');
+  });
+  document.getElementById('sc-k-btn-register-bio')?.addEventListener('click', function() {
+    scStartBioRegistration();
+  });
+
+  document.getElementById('sc-auth-modal-close')?.addEventListener('click', scCloseAuth);
+  document.getElementById('sc-auth-use-pin')?.addEventListener('click', scShowPinPad);
+  document.getElementById('sc-auth-confirm')?.addEventListener('click', function() {
+    if (_pendingAction) _scStartAuthFlow(_pendingAction);
+  });
+
+  document.getElementById('sc-auth-modal-m-close')?.addEventListener('click', scCloseAuthM);
+  document.getElementById('sc-auth-m-use-pin')?.addEventListener('click', scShowPinPad);
+  document.getElementById('sc-auth-m-confirm')?.addEventListener('click', function() {
+    if (_pendingAction) _scStartAuthFlow(_pendingAction);
+  });
+
+  document.getElementById('sc-pin-close')?.addEventListener('click', scClosePin);
+  document.getElementById('sc-pin-back')?.addEventListener('click', scPinBack);
+  document.getElementById('sc-pin-fp')?.addEventListener('click', scShowFp);
+  document.querySelectorAll('.sc-pin-key[data-digit]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      scPinPress(this.dataset.digit);
+    });
+  });
+
+  document.getElementById('sc-swap-close')?.addEventListener('click', scCloseSwap);
+  document.getElementById('sc-swap-cancel')?.addEventListener('click', scCloseSwap);
+  document.getElementById('sc-swap-m-close')?.addEventListener('click', scCloseSwapM);
+  document.getElementById('sc-swap-m-cancel')?.addEventListener('click', scCloseSwapM);
+
+  var swapSubmitK = document.getElementById('sc-swap-submit');
+  if (swapSubmitK) swapSubmitK.addEventListener('click', function() { scSubmitSwap('sc-swap-modal'); });
+
+  var swapSubmitM = document.getElementById('sc-swap-m-submit');
+  if (swapSubmitM) swapSubmitM.addEventListener('click', function() { scSubmitSwap('sc-swap-modal-m'); });
+
+  scLoadSwapIncoming();
+  scLoadSwapOutgoing();
+
+  document.getElementById('sc-logout-btn')?.addEventListener('click', function() {
+    mesioConfirm('¿Cerrar sesión?', { confirmText: 'Sí, salir', cancelText: 'Cancelar' }).then(function(ok) {
+      if (ok) scLogout();
+    });
+  });
+
+  const kBranch = document.getElementById('sc-k-branch');
+  if (kBranch && SC_REST.name) kBranch.textContent = SC_REST.name;
+}
+
+function unmount(container) {
+  _intervalHandles.forEach(function (id) { clearInterval(id); });
+  _intervalHandles = [];
+  if (typeof _durInterval !== 'undefined' && _durInterval) { clearInterval(_durInterval); _durInterval = null; }
+  _winListeners.forEach(function (pair) { window.removeEventListener(pair[0], pair[1]); });
+  _winListeners = [];
+  document.body.classList.remove('staff-clock-page');
+  if (container) container.innerHTML = '';
+}
+
+window.MesioStaffSections = window.MesioStaffSections || {};
+window.MesioStaffSections.myshift = { mount: mount, unmount: unmount };
+})();

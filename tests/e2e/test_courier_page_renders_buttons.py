@@ -130,22 +130,28 @@ async def test_courier_page_renders_buttons(
     admin_token = await create_admin_token(pool, owner_email)
     auth_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    # ── Step c: GET /courier → HTML ─────────────────────────────────────────
-    page_resp = await e2e_app.get("/courier", headers=auth_headers)
+    # ── Step c: GET /staff → HTML (Courier is now a section of the unified
+    # Staff App, not its own page — see app/static/html/staff.html) ────────
+    page_resp = await e2e_app.get("/staff", headers=auth_headers)
     assert page_resp.status_code == 200, (
-        f"GET /courier returned {page_resp.status_code}. "
-        "The page must serve the domiciliario HTML — if it's 404, the route is missing."
+        f"GET /staff returned {page_resp.status_code}. "
+        "The page must serve the Staff App shell HTML — if it's 404, the route is missing."
     )
     content_type = page_resp.headers.get("content-type", "")
     assert "html" in content_type, (
-        f"GET /courier returned content-type={content_type!r} instead of HTML. "
+        f"GET /staff returned content-type={content_type!r} instead of HTML. "
         "The page is not rendering HTML — check dashboard.py route."
     )
     html_body = page_resp.text
     # The page must have some structure — a completely empty page means the template is broken
     assert len(html_body) > 200, (
-        f"GET /courier returned only {len(html_body)} chars — page appears empty. "
-        "Check that courier.html exists and is properly served."
+        f"GET /staff returned only {len(html_body)} chars — page appears empty. "
+        "Check that staff.html exists and is properly served."
+    )
+    # The Courier section module must be referenced so the shell can lazy-load
+    # it once a domiciliario role is detected (app/static/js/staff/staff-shell.js).
+    assert "staff-shell.js" in html_body, (
+        "GET /staff did not reference staff-shell.js — the section switcher is missing."
     )
     log.info("e2e.domiciliario.page_ok", content_length=len(html_body))
 

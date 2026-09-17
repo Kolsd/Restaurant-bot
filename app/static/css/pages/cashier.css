@@ -28,16 +28,23 @@
    📱 MOBILE MODE (activates on phone screens)
    ========================================================= */
 @media (max-width: 768px) {
+  /* This whole legacy block (originally written for a pre-v2, non-Staff-App
+     cashier page that had its OWN <body>/.sidebar) is scoped to
+     .mesio-sec-cashier so it can never touch the Staff App shell's real
+     <body>/.sidebar again — see the Staff App mobile-drawer bug report
+     (2026-09-14): .sidebar here was clobbering the admin drawer with
+     flex-direction:row at 375px. None of .sidebar/.sidebar h2/.sidebar a/
+     .main-content exist in the ported v2 cashier markup any more, so this
+     is effectively dead weight kept for history rather than deleted. */
   /* 1. General adjustment to avoid broken scroll */
-  body {
+  .mesio-sec-cashier {
     flex-direction: column !important;
-    height: 100vh;
     height: 100dvh; /* Modern support for mobile Safari */
     overflow: hidden;
   }
 
   /* 2. The side menu becomes a scrollable top bar */
-  .sidebar {
+  .mesio-sec-cashier .sidebar {
     width: 100% !important;
     height: auto !important;
     flex-direction: row !important;
@@ -47,10 +54,10 @@
     border-bottom: 1px solid var(--border);
     -webkit-overflow-scrolling: touch;
   }
-  .sidebar h2 {
+  .mesio-sec-cashier .sidebar h2 {
     display: none; /* Hide the large title to make room for the buttons */
   }
-  .sidebar a {
+  .mesio-sec-cashier .sidebar a {
     padding: 8px 14px !important;
     margin-bottom: 0 !important;
     margin-right: 8px !important;
@@ -58,32 +65,34 @@
   }
 
   /* 3. The main content */
-  .main-content {
+  .mesio-sec-cashier .main-content {
     flex: 1 !important;
     overflow-y: auto !important;
     padding: 10px !important;
   }
 
   /* 4. Adapt Kanban columns (stack vertically) */
-  .kanban-board {
+  .mesio-sec-cashier .kanban-board {
     flex-direction: column !important;
     overflow-y: auto !important;
   }
-  .kanban-col {
+  .mesio-sec-cashier .kanban-col {
     width: 100% !important;
     min-width: 100% !important;
     margin-bottom: 20px !important;
   }
 
   /* 5. Tables with smooth horizontal scroll */
-  .table-wrapper {
+  .mesio-sec-cashier .table-wrapper {
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch;
   }
 
   /* 🔥 6. THE CHAT / INBOX (Fullscreen, WhatsApp-style) 🔥 */
   /* Targets the Inbox container and floats it above everything */
-  #inbox-modal, .modal-content, [style*="display: flex"][style*="max-width: 800px"] {
+  .mesio-sec-cashier #inbox-modal,
+  .mesio-sec-cashier .modal-content,
+  .mesio-sec-cashier [style*="display: flex"][style*="max-width: 800px"] {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
@@ -100,7 +109,7 @@
   }
 
   /* Chat background so messages stand out */
-  #inbox-messages {
+  .mesio-sec-cashier #inbox-messages {
     flex: 1 !important;
     height: auto !important;
     max-height: none !important;
@@ -109,7 +118,7 @@
   }
 
   /* Compose area docked to the bottom */
-  #inbox-input-area {
+  .mesio-sec-cashier #inbox-input-area {
     position: sticky !important;
     bottom: 0 !important;
     background: var(--card) !important;
@@ -119,23 +128,26 @@
     z-index: 10000;
   }
 
-  #inbox-input-area textarea {
+  .mesio-sec-cashier #inbox-input-area textarea {
     min-height: 45px !important;
     border-radius: 20px !important;
     font-size: 16px !important; /* Prevents automatic zoom on iPhone */
   }
 
   /* Bigger, more finger-friendly buttons */
-  button {
+  .mesio-sec-cashier button {
     min-height: 44px !important;
   }
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F4F4F5; color: #18181B; min-height: 100vh; }
+/* Scoped to .mesio-sec-cashier (the Staff App section wrapper) instead of the
+   real `*`/`body` so this page-era reset doesn't leak onto the admin shell
+   (sidebar/topbar) when this section is mounted inside /staff. */
+.mesio-sec-cashier, .mesio-sec-cashier * { box-sizing: border-box; margin: 0; padding: 0; }
+.mesio-sec-cashier { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F4F4F5; color: #18181B; min-height: 100%; display: block; }
 
 /* ── MAIN GRID ── */
-.main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
+.mesio-sec-cashier .main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
 .section-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; }
 .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.5rem; }
 
@@ -275,7 +287,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 
 /* ── MOBILE: compact layout ── */
 @media (max-width: 600px) {
-  .main { padding: 1rem; }
+  .mesio-sec-cashier .main { padding: 1rem; }
   .board { grid-template-columns: 1fr !important; }
   .sp-box { max-height: 98vh; }
   #split-table { font-size: 12px; }
@@ -450,5 +462,5 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     border-left: none !important;
     border-top: 1px solid #1a1d26 !important;
   }
-  body { overflow-y: auto !important; height: auto !important; }
+  .mesio-sec-cashier { overflow-y: auto !important; height: auto !important; }
 }

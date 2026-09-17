@@ -142,44 +142,22 @@ def test_filter_station_all_returns_all(client, mock_auth, monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 2. /bar route serves bar.html
+# 2. Bar/Kitchen are now sections of the unified Staff App (/staff) —
+#    the old dedicated /bar and /kitchen pages are removed with no
+#    redirect (Staff App unification, 2026-09-14). See
+#    tests/test_staff_app.py for the /staff shell + role->section tests.
 # ══════════════════════════════════════════════════════════════════════
 
-def test_bar_route_returns_html(client):
-    """/bar must return 200 with the Bar KDS HTML content."""
+def test_bar_route_removed(client):
+    """/bar must be gone — Bar is now a section inside /staff, not its own page."""
     response = client.get("/bar")
-    assert response.status_code == 200
-    assert "text/html" in response.headers["content-type"]
-    # Verify it's the bar KDS and not some other HTML
-    body = response.text
-    assert "Bar" in body
-    # Post-redesign: station=bar fetch moved from inline script to external bar.js
-    assert "/static/js/pages/bar.js" in body
-    assert "Mesio" in body
+    assert response.status_code == 404
 
 
-def test_kitchen_route_still_works(client, monkeypatch):
-    """/kitchen must keep returning 200 after the changes (requires valid kitchen role)."""
-    from unittest.mock import AsyncMock
-    # /kitchen now validates the user role — mock auth so a kitchen user passes
-    monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="cocina_user"))
-    monkeypatch.setattr(
-        "app.routes.deps.db.db_get_user",
-        AsyncMock(return_value={
-            "username": "cocina_user",
-            "restaurant_name": "Test",
-            "branch_id": 1,
-            "role": "cocina",
-        }),
-    )
-    # Provide a cookie-based token (kitchen page checks cookies)
-    response = client.get("/kitchen", headers={"Authorization": "Bearer cocina-token"})
-    assert response.status_code == 200
-    assert "text/html" in response.headers["content-type"]
-    # Inline <script> moved to external file under CSP hardening — assert the
-    # kitchen-specific JS bundle (which contains the station=kitchen fetch) is
-    # referenced instead of the literal string.
-    assert "/static/js/pages/kitchen.js" in response.text
+def test_kitchen_route_removed(client):
+    """/kitchen must be gone — Kitchen is now a section inside /staff, not its own page."""
+    response = client.get("/kitchen")
+    assert response.status_code == 404
 
 
 # ══════════════════════════════════════════════════════════════════════

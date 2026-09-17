@@ -11,6 +11,7 @@ from app.services.auth import login, logout, hash_password
 from app.services import state_store
 from app.routes.deps import get_current_user
 from app.services.logging import get_logger
+from app.services.staff_sections import sections_for_roles
 
 log = get_logger(__name__)
 
@@ -42,12 +43,16 @@ class LoginRequest(BaseModel):
 # ── AUTH ──────────────────────────────────────────────────────────────
 
 _ADMIN_ROLES = {"owner", "admin", "gerente"}
+# Every staff role lands on the unified /staff app now (Staff App unification,
+# 2026-09-14) — the old one-HTML-per-role pages (/waiter, /cashier, /kitchen,
+# /bar, /courier, /staff-hq) are removed. Which sections a role sees inside
+# /staff is decided by app.services.staff_sections (single source of truth).
 _ROLE_REDIRECT = {
-    "mesero":       "/waiter",   "waiter":   "/waiter",
-    "cocina":       "/kitchen",  "cook":     "/kitchen",  "cocinero": "/kitchen",
-    "caja":         "/cashier",  "cashier":  "/cashier",  "cajero":   "/cashier",
-    "bar":          "/bar",
-    "domiciliario": "/courier",  "delivery": "/courier",
+    "mesero":       "/staff",   "waiter":   "/staff",
+    "cocina":       "/staff",   "cook":     "/staff",  "cocinero": "/staff",
+    "caja":         "/staff",   "cashier":  "/staff",  "cajero":   "/staff",
+    "bar":          "/staff",
+    "domiciliario": "/staff",   "delivery": "/staff",
 }
 
 
@@ -262,7 +267,7 @@ async def verify_role_for_page(request: Request, page: str):
 
     allowed = _PAGE_ROLES.get(page, set())
     if not (user_roles & allowed):
-        redirect_to = "/staff-hq"
+        redirect_to = "/staff"
         for role in user_roles:
             if role in _ROLE_REDIRECT:
                 redirect_to = _ROLE_REDIRECT[role]
@@ -270,3 +275,36 @@ async def verify_role_for_page(request: Request, page: str):
         raise HTTPException(status_code=403, detail={"redirect": redirect_to})
 
     return {"ok": True}
+
+
+@router.get("/api/staff/sections")
+async def staff_visible_sections(request: Request):
+    """Canonical role -> Staff App section mapping for the current session.
+
+    Backs the unified `/staff` shell (app/static/js/staff/staff-shell.js):
+    the sidebar renders only the sections this endpoint returns. This is the
+    ONE place that decides section visibility server-side — see
+    app/services/staff_sections.py for the actual role -> section table.
+
+    401 when the Bearer token is missing/invalid — this is the real,
+    server-enforced "you need a session" gate for the Staff App (the HTML
+    shell itself is served unconditionally, same as every operational page
+    before it — the token never reaches a plain browser navigation, only
+    fetch() calls made after the page's own JS runs).
+    """
+    user = await get_current_user(request)
+    roles = [r.strip() for r in (user.get("role") or "").split(",") if r.strip()]
+    sections = sections_for_roles(roles)
+
+    # "My shift" (clock in/out, timecard, tips) reads from the `staff` table
+    # (GET /api/staff/self/profile and friends, app/routes/staff.py) — a
+    # `users`-table admin/owner account (username NOT "staff:<uuid>") has no
+    # such row, so showing them this tab would 401 the moment it tries to
+    # load. owner/admin/gerente still get every OPERATIONAL section; "My
+    # shift" only shows for an actual staff login, matching the product
+    # decision literally ("everyone with a staff login sees 'My shift'").
+    is_staff_account = user.get("username", "").startswith("staff:")
+    if not is_staff_account:
+        sections = [s for s in sections if s != "myshift"]
+
+    return {"ok": True, "roles": roles, "sections": sections}

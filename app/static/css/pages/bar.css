@@ -11,14 +11,18 @@
   --b-purple:   #A78BFA;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+/* Scoped to .mesio-sec-bar (the Staff App section wrapper) instead of the
+   real `*`/`body` so this page-era reset doesn't leak onto the admin shell
+   (sidebar/topbar) when this section is mounted inside /staff. */
+.mesio-sec-bar, .mesio-sec-bar * { box-sizing: border-box; margin: 0; padding: 0; }
 
-body {
+.mesio-sec-bar {
   background: #0b0d14;
   color: var(--b-text);
   font-family: var(--font-body, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
   overflow: hidden;
-  height: 100vh;
+  height: 100%;
+  display: block;
 }
 
 .bar-layout {
@@ -26,6 +30,30 @@ body {
   grid-template-columns: 1fr 310px;
   grid-template-rows: 52px 1fr;
   height: 100vh;
+}
+
+/* Bar was tablet/station-only (no phone fallback existed) — Staff App
+   mobile review round 2 (2026-09-14) requires every section to fit a
+   375px phone, so stack the queue above the inventory sidebar instead of
+   the fixed 1fr/310px columns. */
+@media (max-width: 768px) {
+  .bar-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 52px auto auto;
+    height: auto;
+    min-height: 100%;
+  }
+  .bar-side {
+    border-left: none;
+    border-top: 1px solid var(--b-border);
+  }
+  .bar-top {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 8px 12px;
+    row-gap: 6px;
+  }
+  .bar-top-right { margin-left: 0; width: 100%; justify-content: space-between; }
 }
 
 /* ── Topbar ── */

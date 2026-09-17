@@ -87,12 +87,12 @@ class StaffVerifyPinRequest(BaseModel):
 def _staff_redirect(roles: list) -> str:
     """Return the best landing page URL for the given role set.
     Admins/managers go to /dashboard.
-    All operational staff go to /staff-hq (personal HQ terminal).
+    All operational staff go to /staff (the unified Staff App).
     """
     admin_roles = {"owner", "admin", "gerente"}
     if any(r in admin_roles for r in roles):
         return "/dashboard"
-    return "/staff-hq"
+    return "/staff"
 
 
 class ClockInRequest(BaseModel):

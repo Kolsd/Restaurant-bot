@@ -121,23 +121,23 @@
 
     <div class="sb-group" id="sb-ops-group" style="display:none;">
       <div class="sb-group-label">Mi área</div>
-      <a class="sb-item" data-key="ops-caja" href="/orders" style="display:none;">
+      <a class="sb-item" data-key="ops-caja" href="/staff?section=cashier" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1"/><path d="M2 7h12M5 10h2M9 10h2"/></svg>
         Caja
       </a>
-      <a class="sb-item" data-key="ops-mesero" href="/waiter" style="display:none;">
+      <a class="sb-item" data-key="ops-mesero" href="/staff?section=waiter" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>
         Mesero
       </a>
-      <a class="sb-item" data-key="ops-cocina" href="/kitchen" style="display:none;">
+      <a class="sb-item" data-key="ops-cocina" href="/staff?section=kitchen" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6a4 4 0 018 0v2H4V6z"/><path d="M3 8h10v6H3z"/><path d="M6 11h4"/></svg>
         Cocina
       </a>
-      <a class="sb-item" data-key="ops-bar" href="/bar" style="display:none;">
+      <a class="sb-item" data-key="ops-bar" href="/staff?section=bar" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2h6l2 5H3L5 2z"/><path d="M3 7v7h10V7"/><path d="M7 10v4M9 10v4"/></svg>
         Bar
       </a>
-      <a class="sb-item" data-key="ops-domiciliario" href="/courier" style="display:none;">
+      <a class="sb-item" data-key="ops-domiciliario" href="/staff?section=courier" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><path d="M1 3h2l2 7h6l2-5H5"/></svg>
         Domicilios
       </a>

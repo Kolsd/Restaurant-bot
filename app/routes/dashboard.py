@@ -15,7 +15,7 @@ import re as _re
 import urllib.parse
 import httpx
 from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from pathlib import Path
 from pydantic import BaseModel, field_validator
 
@@ -119,20 +119,20 @@ async def superadmin_internal_alias():
     p = STATIC / "html" / "internal" / "superadmin.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
-@router.get("/staff")
-async def staff_portal_redirect(request: Request):
-    r = request.query_params.get("r", "")
-    target = f"/login?r={r}" if r else "/login"
-    return RedirectResponse(url=target, status_code=302)
+@router.get("/staff", response_class=HTMLResponse)
+async def staff_app_page():
+    """Unified Staff App shell — one page for every operational role.
 
-@router.get("/waiter", response_class=HTMLResponse)
-async def waiter_page():
-    return (STATIC / "html" / "waiter.html").read_text(encoding="utf-8")
-
-@router.get("/cashier", response_class=HTMLResponse)
-async def cashier_page():
-    p = STATIC / "html" / "cashier.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Caja no disponible</h1>")
+    Replaces the old one-HTML-per-role pages (/waiter, /cashier, /kitchen,
+    /bar, /courier, /staff-hq / /staff-clock), which are removed with no
+    redirects (product decision, 2026-09-14). Served unconditionally, same
+    as every operational page before it — the auth guard runs client-side
+    in app/static/js/staff/staff-shell.js (localStorage token check), and
+    the real, server-enforced session gate is GET /api/staff/sections
+    (app/routes/auth_routes.py::staff_visible_sections), which the shell
+    calls on mount to decide which sections to show.
+    """
+    return (STATIC / "html" / "staff.html").read_text(encoding="utf-8")
 
 @router.get("/crm", response_class=HTMLResponse)
 async def crm_page():
@@ -177,22 +177,6 @@ async def terms_page():
 async def billing_page():
     p = STATIC / "html" / "billing.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Billing no disponible</h1>")
-
-@router.get("/courier", response_class=HTMLResponse)
-async def courier_page():
-    p = STATIC / "html" / "courier.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no encontrada</h1>", status_code=404)
-
-@router.get("/staff-hq", response_class=HTMLResponse)
-async def staff_hq_page():
-    p = STATIC / "html" / "staff-hq.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
-
-@router.get("/staff-clock", response_class=HTMLResponse)
-async def staff_clock_page():
-    """Alias of /staff-hq for the new design naming convention."""
-    p = STATIC / "html" / "staff-hq.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Staff Clock no disponible</h1>", status_code=404)
 
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page():
@@ -263,7 +247,8 @@ async def public_restaurant_info(id: int):
 
     `id` here is the org_id — this endpoint is only ever called from
     login.html's `?r=` kiosk/login param, which is always an org id (see
-    static/js/pages/staff-clock.js's kiosk bootstrap comment).
+    static/js/staff/sections/myshift.js's kiosk bootstrap comment — ported
+    verbatim from the old staff-clock.js).
     """
     restaurant = await db.db_get_restaurant_by_org_id(id)
     if not restaurant:

@@ -1,0 +1,51 @@
+/* ═══════════════════════════════════════════════════
+   Mesio — Staff App shell (/staff)
+   Reuses the admin dashboard's .app/.sidebar/.topbar/.sb-* chrome from
+   shared.css so the Staff App looks like "the same app" as /dashboard.
+   Overrides just the height/scroll behavior of .app/.main/#staff-section-root
+   so operational sections (KDS, POS) can fill the viewport and manage
+   their own internal scrolling, like the old dedicated pages did.
+   ═══════════════════════════════════════════════════ */
+
+html, body { height: 100%; }
+
+.app {
+  height: 100vh;
+  min-height: 100vh;
+}
+
+.main {
+  height: 100vh;
+  overflow: hidden;
+  /* .main is a flex item of .app AND a flex container itself
+     (flex-direction: column, from shared.css). Flex items default to
+     min-width:auto, which refuses to shrink below the intrinsic width of
+     their content — so a wide section (a KDS ticket wall, the 400px-cart
+     cashier grid, etc.) silently grew .topbar/#staff-section-root past the
+     375px viewport instead of triggering their own internal scrollbars
+     (Staff App mobile review round 2, 2026-09-14). min-width:0 here is
+     the fix; overflow:hidden then clips anything a section still doesn't
+     handle itself, and each section's own overflow-x:auto takes over. */
+  min-width: 0;
+}
+
+.topbar {
+  min-width: 0;
+}
+
+#staff-section-root {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+
+/* Sidebar nav items render via JS (staff-shell.js) with the same .sb-item
+   look as the admin sidebar; data-section is used instead of an href for
+   in-page switching, so give it the same active/hover affordances. */
+.sidebar .sb-item[data-section] { cursor: pointer; }
+
+@media (max-width: 768px) {
+  .main { height: 100vh; }
+}

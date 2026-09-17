@@ -397,8 +397,15 @@ def check_html_seed_money(path: Path, source: str) -> list[Violation]:
 #   - When you add a new page, add a contract here.  When you rename a button,
 #     update the contract.
 PAGE_CONTRACTS: dict[str, dict] = {
-    "courier.html": {
-        "js": "pages/courier.js",
+    # These 6 entries cover the Staff App (/staff) sections — one unified
+    # page since 2026-09-14 (see app/static/html/staff.html +
+    # app/static/js/staff/staff-shell.js). There is no per-role .html file
+    # any more (the old cashier.html/waiter.html/kitchen.html/bar.html/
+    # courier.html/staff-hq.html were deleted) — the dict key is just a
+    # human-readable label for this section, and "js" points at the actual
+    # section module under app/static/js/staff/sections/ that renders it.
+    "staff:courier": {
+        "js": "staff/sections/courier.js",
         "required_button_labels": [
             "Salir a entregar",
             "Llegué",
@@ -410,8 +417,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/status",
         ],
     },
-    "waiter.html": {
-        "js": "pages/waiter.js",
+    "staff:waiter": {
+        "js": "staff/sections/waiter.js",
         "required_button_labels": [
             "Cobrar mesa",
             "Mandar a caja",
@@ -424,8 +431,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/waiter-alerts",
         ],
     },
-    "cashier.html": {
-        "js": "pages/cashier.js",
+    "staff:cashier": {
+        "js": "staff/sections/cashier.js",
         "required_button_labels": [
             "Cobrar total completo",
             "Cobrar este check",
@@ -437,8 +444,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/pos/order",
         ],
     },
-    "kitchen.html": {
-        "js": "pages/kitchen.js",
+    "staff:kitchen": {
+        "js": "staff/sections/kitchen.js",
         "required_button_labels": [
             "Listo",
             "+ 2 min",
@@ -448,8 +455,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/kitchen/delivery-orders",
         ],
     },
-    "bar.html": {
-        "js": "pages/bar.js",
+    "staff:bar": {
+        "js": "staff/sections/bar.js",
         "required_button_labels": [
             "Listo",
             "+2 min",
@@ -458,8 +465,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/table-orders",
         ],
     },
-    "staff-hq.html": {
-        "js": "pages/staff-clock.js",
+    "staff:myshift": {
+        "js": "staff/sections/myshift.js",
         "required_button_labels": [
             "Confirmar entrada",
             "Confirmar salida",
@@ -551,7 +558,7 @@ def check_page_contracts(violations: list[Violation]) -> None:
     js_root = JS_DIR  # app/static/js/
 
     for html_name, contract in PAGE_CONTRACTS.items():
-        js_rel = contract["js"]          # e.g. "pages/courier.js"
+        js_rel = contract["js"]          # e.g. "pages/courier.js" or "staff/sections/courier.js"
         js_path = js_root / js_rel
         if not js_path.exists():
             violations.append(Violation(

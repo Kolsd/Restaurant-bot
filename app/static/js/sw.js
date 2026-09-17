@@ -10,7 +10,7 @@
  * Cache busting: increment CACHE_VERSION on every deploy that changes static assets.
  */
 
-const CACHE_VERSION  = 'v47';
+const CACHE_VERSION  = 'v49';
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
@@ -76,15 +76,10 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // roles.js: always network-only, never cache.
-  if (url.pathname === '/static/js/roles.js') {
-    event.respondWith(fetch(request));
-    return;
-  }
-
-  // Staff pages: always network-first, no cache fallback.
-  const staffPages = ['/waiter', '/cashier', '/bar', '/kitchen', '/courier'];
-  if (staffPages.includes(url.pathname)) {
+  // Staff App: always network-first, no cache fallback (operational data —
+  // POS/KDS/clock — must never be served stale). Covers the unified /staff
+  // shell and its lazy-loaded section scripts.
+  if (url.pathname === '/staff' || url.pathname.startsWith('/static/js/staff/')) {
     event.respondWith(fetch(request));
     return;
   }

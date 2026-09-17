@@ -1064,17 +1064,6 @@ async def update_order_status(request: Request, order_id: str):
 
     return {"success": True, "order_id": order_id, "status": status}
 
-@router.get("/kitchen", response_class=HTMLResponse)
-async def kitchen_display():
-    return HTMLResponse((STATIC / "html" / "kitchen.html").read_text(encoding="utf-8"))
-
-@router.get("/bar", response_class=HTMLResponse)
-async def bar_display():
-    p = STATIC / "html" / "bar.html"
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="bar.html no encontrado en static/")
-    return HTMLResponse(p.read_text(encoding="utf-8"))
-
 # ── MÓDULO PUNTO DE VENTA (POS) PARA MESEROS ─────────────────────────
 
 class ManualOrderRequest(BaseModel):

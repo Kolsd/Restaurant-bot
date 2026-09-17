@@ -1,11 +1,114 @@
 /* ═══════════════════════════════════════════════════
-   Mesio — Mesero v2
+   Mesio — Staff App / Waiter section (mesero)
+   Ported from the old /waiter page (app/static/html/waiter.html +
+   app/static/js/pages/waiter.js) into a mount()/unmount() module for the
+   unified Staff App shell. Business logic is UNCHANGED from the original
+   waiter.js — only bootstrap/cleanup are new.
    Auto-refresh 20s · zone filter · waiter alert banner
    ═══════════════════════════════════════════════════ */
+(function () {
+  'use strict';
 
-// ── Auth guard ──────────────────────────────────────
-const _token = localStorage.getItem('rb_token') || localStorage.getItem('rb_staff_token');
-if (!_token) { window.location.href = '/login'; }
+  var TEMPLATE = `
+<div class="mesio-sec-waiter">
+<div class="mesero-layout">
+
+  <!-- ── Main content area ── -->
+  <section class="m-area">
+
+    <!-- Page header -->
+    <div class="m-head">
+      <div class="m-head-info">
+        <h1>Salón</h1>
+        <div class="m-head-sub" id="mesero-sub">Cargando estado del turno…</div>
+      </div>
+      <!-- Quick views: active chats + active orders cross-table -->
+      <div class="m-head-actions" style="display:flex;gap:8px;align-items:center;">
+        <button id="m-btn-orders" class="m-btn m-btn--sm m-btn--ghost" type="button"
+                style="display:flex;align-items:center;gap:6px;font-size:12px;">
+          📋 <span>Pedidos activos</span>
+        </button>
+        <button id="m-btn-chats" class="m-btn m-btn--sm m-btn--ghost" type="button"
+                style="display:flex;align-items:center;gap:6px;font-size:12px;">
+          💬 <span>Chats</span>
+        </button>
+      </div>
+      <!-- Zone filter tabs -->
+      <div class="m-zone-tabs" role="tablist">
+        <button class="m-zone-btn active" data-zone="all" role="tab" aria-selected="true">Todas</button>
+        <button class="m-zone-btn" data-zone="terraza" role="tab" aria-selected="false">Terraza</button>
+        <button class="m-zone-btn" data-zone="salon" role="tab" aria-selected="false">Salón</button>
+        <button class="m-zone-btn" data-zone="privado" role="tab" aria-selected="false">Privado</button>
+        <button class="m-zone-btn" data-zone="barra" role="tab" aria-selected="false">Barra</button>
+      </div>
+    </div>
+
+    <!-- Legend row -->
+    <div class="m-legend" role="note" aria-label="Leyenda de estados">
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-libre-bg);border-color:var(--fp-libre);"></span>Libre
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-sentados-bg);border-color:var(--fp-sentados);"></span>Sentados
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-ocupada-bg);border-color:var(--fp-ocupada);"></span>Comiendo
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-factura-bg);border-color:var(--fp-factura);"></span>Facturando
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-reservada-bg);border-color:var(--fp-reservada);"></span>Reservada
+      </div>
+      <div class="m-live-row">
+        <div class="m-live-dot"></div>
+        <span style="font-size:11px;color:var(--text-3);">Sync en vivo</span>
+      </div>
+    </div>
+
+    <!-- Alert banner (hidden by default) -->
+    <div class="m-alert-banner hidden" id="mesero-alert-banner" role="alert" aria-live="polite">
+      <!-- Populated by JS -->
+    </div>
+
+    <!-- Table grid -->
+    <div class="m-floor" id="mesero-floor" role="list" aria-label="Mesas del salón">
+      <div style="padding:40px;text-align:center;color:var(--text-3);grid-column:1/-1;">Cargando mesas…</div>
+    </div>
+
+    <!-- Bottom action bar -->
+    <div class="m-action-bar" role="complementary" aria-label="Métricas del turno">
+      <div class="m-act-metric">
+        <div class="m-act-label">Mis ventas</div>
+        <div class="m-act-val" id="m-stat-ventas">—</div>
+      </div>
+      <div class="m-act-metric">
+        <div class="m-act-label">Propinas hoy</div>
+        <div class="m-act-val" id="m-stat-propinas">—</div>
+      </div>
+      <div class="m-act-metric">
+        <div class="m-act-label">Mesas atendidas</div>
+        <div class="m-act-val" id="m-stat-mesas">—</div>
+      </div>
+      <div class="m-act-metric">
+        <div class="m-act-label">Ticket promedio</div>
+        <div class="m-act-val" id="m-stat-ticket">—</div>
+      </div>
+    </div>
+
+  </section><!-- /.m-area -->
+
+</div><!-- /.mesero-layout -->
+</div><!-- /.mesio-sec-waiter -->
+`;
+
+  // ── Cleanup tracking ─────────────────────────────────
+  var _intervalHandles = [];
+  function _trackInterval(id) { _intervalHandles.push(id); return id; }
+
+  // ── Auth guard ──────────────────────────────────────
+  const _token = localStorage.getItem('rb_token') || localStorage.getItem('rb_staff_token');
+  if (!_token) { window.location.href = '/login'; }
 
 const _hdr = mesioHeaders;
 const _staffId = localStorage.getItem('rb_staff_id') || null;
@@ -1053,8 +1156,12 @@ async function openChatHistoryModal(phone) {
   }
 }
 
-// ── Zone tabs setup ───────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+// ── mount / unmount ───────────────────────────────────
+function mount(container) {
+  container.innerHTML = TEMPLATE;
+  _currentZone = 'all';
+  _allTables = [];
+
   document.querySelectorAll('.m-zone-btn').forEach(btn => {
     btn.addEventListener('click', () => setZone(btn.dataset.zone || 'all'));
   });
@@ -1065,5 +1172,15 @@ document.addEventListener('DOMContentLoaded', () => {
   if (chatsBtn) chatsBtn.addEventListener('click', openChatsModal);
 
   loadTables();
-  mesioInterval(loadTables, 20000);
-});
+  _trackInterval(mesioInterval(loadTables, 20000));
+}
+
+function unmount(container) {
+  _intervalHandles.forEach(function (id) { clearInterval(id); });
+  _intervalHandles = [];
+  if (container) container.innerHTML = '';
+}
+
+window.MesioStaffSections = window.MesioStaffSections || {};
+window.MesioStaffSections.waiter = { mount: mount, unmount: unmount };
+})();

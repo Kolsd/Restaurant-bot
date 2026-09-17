@@ -21,11 +21,9 @@ let _periodEnd   = '';
   const roles   = rawRole.split(',').map(r => r.trim()).filter(Boolean);
   const isAdmin = roles.some(r => ['owner', 'admin', 'gerente'].includes(r));
   if (!isAdmin) {
-    if (roles.includes('mesero'))    { location.href = '/waiter';   return; }
-    if (roles.includes('cocina'))    { location.href = '/kitchen';  return; }
-    if (roles.includes('bar'))       { location.href = '/bar';      return; }
-    if (roles.includes('caja'))      { location.href = '/cashier';  return; }
-    location.href = '/staff-hq';
+    // Staff App unification: every operational role goes to the unified
+    // /staff shell now, not a dedicated page per role.
+    location.href = '/staff';
   }
 })();
 
