@@ -2009,7 +2009,16 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
     restaurant = await get_current_restaurant(request)
     user = await get_current_user(request)
 
-    branch_id = body.branch_id or user.get("branch_id") or restaurant["id"]
+    # P1 fix (2026-09-17): `user.get("branch_id")` is the AMBIGUOUS legacy
+    # column (users.branch_id — some writers stored org_id, others
+    # location_id; see docs/claude/rls-multitenant.md). Falling back further
+    # to `restaurant["id"]` (the ORG id) was even worse: it substituted an
+    # org_id for a location_id, exactly the conflation CLAUDE.md forbids.
+    # `user.get("location_id")` is the explicit, unambiguous field (backfilled
+    # by migration 0081). If neither the caller nor the user carries a real
+    # location, branch_id stays NULL — table_orders.branch_id is nullable —
+    # rather than guessing.
+    branch_id = body.branch_id or user.get("location_id")
 
     if not body.items:
         raise HTTPException(status_code=400, detail="Se requiere al menos un ítem")
@@ -2033,7 +2042,22 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
 
     order = {
         "id": order_id,
-        "table_id": None,
+        # P1 fix (2026-09-17): table_orders.table_id is TEXT NOT NULL with no
+        # default and no FK to restaurant_tables — quick-invoice has no real
+        # table, so `None` here always violated the NOT NULL constraint (this
+        # was masked in practice because db_save_table_order's own org_id
+        # resolution — see below — raised ValueError first). Reuse the
+        # synthetic order_id: it's unique (uuid4-based) and never collides
+        # with a real table id (those look like "table-{org_id}-{number}",
+        # see db_create_table), so it can't be mistaken for one anywhere that
+        # joins on table_id.
+        "table_id": order_id,
+        # db_save_table_order cannot resolve a tenant from table_id alone for
+        # a synthetic id like the one above — it used to raise ValueError
+        # trying. This route already knows the ORG id (it's what it scopes
+        # tenant_scope() with below) — pass it through explicitly instead of
+        # relying on the table_id lookup.
+        "org_id": restaurant["id"],
         "table_name": body.table_name,
         "phone": "caja",
         "items": items_payload,
@@ -2055,72 +2079,111 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
     # restaurant with DIAN enabled would 500 on quick-invoice exactly like
     # pay_check did. Pinning the scope once for the whole block makes that
     # class of bug structurally impossible here too.
+    #
+    # _claimed tracks whether we hold the check in 'paying' state (mirrors
+    # pay_check()'s pattern below) — release it on any failure after the
+    # claim so a retry isn't stuck behind a check nothing will ever finalize.
+    check_id = None
+    _claimed = False
     with tenant_scope(restaurant["id"]):
-        await db.db_save_table_order(order)
+        try:
+            await db.db_save_table_order(order)
 
-        # Create a single check for this sale
-        check_payload = [{
-            "check_number": 1,
-            "items": items_payload,
-            "subtotal": float(to_decimal(subtotal)),
-            "tax_amount": 0.0,
-            "total": float(to_decimal(subtotal)),
-        }]
-        created = await db.db_create_checks(base_order_id, check_payload)
-        if not created:
-            raise HTTPException(status_code=500, detail="No se pudo crear el check")
-        check_id = created[0]["id"]
+            # Create a single check for this sale
+            check_payload = [{
+                "check_number": 1,
+                "items": items_payload,
+                "subtotal": float(to_decimal(subtotal)),
+                "tax_amount": 0.0,
+                "total": float(to_decimal(subtotal)),
+            }]
+            created = await db.db_create_checks(base_order_id, check_payload)
+            if not created:
+                raise HTTPException(status_code=500, detail="No se pudo crear el check")
+            check_id = created[0]["id"]
 
-        # Billing / DIAN (opcional)
-        features = restaurant.get("features") or {}
-        if isinstance(features, str):
-            import json as _json
-            try:
-                features = _json.loads(features)
-            except Exception:
-                features = {}
-        _currency = features.get("currency") if isinstance(features, dict) else None
+            # P1 fix (2026-09-17): db_create_checks always creates in status
+            # 'open'. db_finalize_check_payment only commits a check that is
+            # in status 'paying' (its documented pre-condition — see
+            # db_claim_check_for_payment's docstring) and silently returns
+            # False otherwise. Calling finalize directly on an 'open' check
+            # (as this route used to) is a same-shape bug to the org_id one:
+            # it looked like a working call but was structurally a no-op —
+            # the route reported success while the check stayed unpaid.
+            claimed_check = await db.db_claim_check_for_payment(check_id, base_order_id)
+            if claimed_check is None:
+                raise HTTPException(status_code=500, detail="No se pudo reservar el check para el pago")
+            _claimed = True
 
-        fiscal_invoice_id = None
-        if billing._is_dian_enabled(features):
-            config = await billing.get_billing_config(restaurant["id"])
-            if config:
-                config["_restaurant_id"] = restaurant["id"]
-                provider = config.get("provider", "mesio_native")
-                adapter = billing.get_adapter(provider)
-                order_for_billing = {
-                    "id": check_id,
-                    "total": float(total_d),
-                    "subtotal": float(to_decimal(subtotal)),
-                    "service_charge": 0.0,
-                    "items": items_payload,
-                    "payment_method": body.payment_method,
-                    "order_ref": base_order_id,
-                    "customer": {
-                        "name": body.customer_name,
-                        "nit": body.customer_nit,
-                        "email": body.customer_email,
-                    },
-                }
+            # Billing / DIAN (opcional)
+            features = restaurant.get("features") or {}
+            if isinstance(features, str):
+                import json as _json
                 try:
-                    fiscal = await adapter.create_invoice(order_for_billing, config)
-                    fiscal_invoice_id = fiscal["id"]
-                except Exception as exc:
-                    raise HTTPException(status_code=500, detail=f"Error al emitir factura DIAN: {exc}")
+                    features = _json.loads(features)
+                except Exception:
+                    features = {}
+            _currency = features.get("currency") if isinstance(features, dict) else None
 
-        payments_list = [{"method": body.payment_method, "amount": float(total_d)}]
+            fiscal_invoice_id = None
+            if billing._is_dian_enabled(features):
+                config = await billing.get_billing_config(restaurant["id"])
+                if config:
+                    config["_restaurant_id"] = restaurant["id"]
+                    provider = config.get("provider", "mesio_native")
+                    adapter = billing.get_adapter(provider)
+                    order_for_billing = {
+                        "id": check_id,
+                        "total": float(total_d),
+                        "subtotal": float(to_decimal(subtotal)),
+                        "service_charge": 0.0,
+                        "items": items_payload,
+                        "payment_method": body.payment_method,
+                        "order_ref": base_order_id,
+                        "customer": {
+                            "name": body.customer_name,
+                            "nit": body.customer_nit,
+                            "email": body.customer_email,
+                        },
+                    }
+                    try:
+                        fiscal = await adapter.create_invoice(order_for_billing, config)
+                        fiscal_invoice_id = fiscal["id"]
+                    except Exception as exc:
+                        raise HTTPException(status_code=500, detail=f"Error al emitir factura DIAN: {exc}")
 
-        await db.db_finalize_check_payment(
-            check_id=check_id,
-            base_order_id=base_order_id,
-            payments=payments_list,
-            change_amount=0.0,
-            fiscal_invoice_id=fiscal_invoice_id,
-            customer_name=body.customer_name,
-            customer_nit=body.customer_nit,
-            customer_email=body.customer_email,
-            tip_amount=float(tip_d),
-        )
+            payments_list = [{"method": body.payment_method, "amount": float(total_d)}]
+
+            finalized = await db.db_finalize_check_payment(
+                check_id=check_id,
+                base_order_id=base_order_id,
+                payments=payments_list,
+                change_amount=0.0,
+                fiscal_invoice_id=fiscal_invoice_id,
+                customer_name=body.customer_name,
+                customer_nit=body.customer_nit,
+                customer_email=body.customer_email,
+                tip_amount=float(tip_d),
+            )
+            if not finalized:
+                _claimed = False  # claim already gone (concurrent op) — nothing to release
+                raise HTTPException(status_code=409, detail="El check fue modificado por otra operación.")
+            _claimed = False
+        except HTTPException:
+            if _claimed and check_id:
+                try:
+                    await db.db_release_check(check_id)
+                except Exception:
+                    log.exception("tables.pos_quick_invoice.release_failed", check_id=check_id)
+            raise
+        except Exception as e:
+            if _claimed and check_id:
+                try:
+                    await db.db_release_check(check_id)
+                except Exception:
+                    log.exception("tables.pos_quick_invoice.release_failed", check_id=check_id)
+            log.exception("tables.pos_quick_invoice.unexpected_error", order_id=order_id)
+            raise HTTPException(status_code=500, detail=f"Error interno del servidor: {e}")
 
     return {
         "success": True,
