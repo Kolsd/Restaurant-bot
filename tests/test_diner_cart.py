@@ -102,7 +102,7 @@ async def _make_org(conn) -> dict:
     await conn.execute(
         "INSERT INTO menu_availability (dish_name, org_id, available, updated_at) "
         "VALUES ($1, $2, FALSE, NOW()) "
-        "ON CONFLICT (dish_name) DO UPDATE SET org_id=EXCLUDED.org_id, available=FALSE, updated_at=NOW()",
+        "ON CONFLICT (dish_name, org_id) DO UPDATE SET available=FALSE, updated_at=NOW()",
         UNAVAILABLE_DISH, org_id,
     )
     return {

@@ -192,43 +192,14 @@ async def seed(conn: asyncpg.Connection) -> dict:
         # for anyone copying this script against a non-superuser DSN later).
         await conn.execute("SELECT set_config('app.org_id', $1::text, true)", str(org_id))
 
-        # NOT `ON CONFLICT (dish_name, org_id)` — the real menu_availability
-        # table (checked against this DB) has NO unique constraint on that
-        # pair; its PRIMARY KEY is `dish_name` ALONE (menu_availability_pkey),
-        # a leftover from before org_id/location_id were added to the table.
-        # The existing app code (restaurant_repo.db_set_dish_availability,
-        # inventory_repo._sync_dish_availability_conn) both use that exact
-        # ON CONFLICT clause and would raise
-        # asyncpg.exceptions.InvalidColumnReferenceError on every real call —
-        # confirmed by hitting it here first. Worse, since dish_name alone is
-        # the PK, it is ALSO a cross-tenant bug: two different orgs cannot
-        # both have a dish named e.g. "Pizza" in this table without one
-        # clobbering the other's availability row. Reported separately
-        # (out of scope for this chunk / this seed script to fix — it needs
-        # a real migration to rebuild the PK as (dish_name, org_id) after
-        # deduplicating any existing collisions). This script works AROUND
-        # it defensively instead of reproducing the crash or the clobber.
-        existing_avail = await conn.fetchrow(
-            "SELECT org_id FROM menu_availability WHERE dish_name = $1", SOLD_OUT_DISH,
+        # Same upsert the app uses; its (org_id, dish_name) key exists since
+        # migration 0085 (before it, this ON CONFLICT raised on every call).
+        await conn.execute(
+            "INSERT INTO menu_availability (dish_name, org_id, available, updated_at) "
+            "VALUES ($1, $2, false, NOW()) "
+            "ON CONFLICT (dish_name, org_id) DO UPDATE SET available = false, updated_at = NOW()",
+            SOLD_OUT_DISH, org_id,
         )
-        if existing_avail is None:
-            await conn.execute(
-                "INSERT INTO menu_availability (dish_name, org_id, available, updated_at) "
-                "VALUES ($1, $2, false, NOW())",
-                SOLD_OUT_DISH, org_id,
-            )
-        elif existing_avail["org_id"] == org_id:
-            await conn.execute(
-                "UPDATE menu_availability SET available = false, updated_at = NOW() WHERE dish_name = $1",
-                SOLD_OUT_DISH,
-            )
-        else:
-            print(
-                f"  WARNING: menu_availability row for {SOLD_OUT_DISH!r} already belongs to "
-                f"org {existing_avail['org_id']} (see the PK bug noted above) — not touching it. "
-                "The sold-out demo dish will show as available; pick a more distinctive "
-                "SOLD_OUT_DISH name and re-run if you need this scenario."
-            )
 
         await _seed_staff(conn, org_id, CASHIER_NAME, "camila.torres", "caja", CASHIER_PIN)
         await _seed_staff(conn, org_id, COURIER_NAME, "julian.restrepo", "domiciliario", COURIER_PIN)

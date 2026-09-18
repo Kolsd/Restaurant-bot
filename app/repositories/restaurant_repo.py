@@ -1484,10 +1484,9 @@ async def db_set_dish_availability(restaurant_id: int, dish_name: str, available
     """# Requires active tenant_scope() or bypass_tenant_scope().
 
     Wave-2: `restaurant_id` param name kept for the legacy interface,
-    value is the org_id tenant key. menu_availability lost the
-    restaurant_id column in 0037 (the unique constraint was recreated
-    as (dish_name, org_id) — see inventory_repo._sync_dish_availability_conn
-    for the canonical pattern).
+    value is the org_id tenant key. The ON CONFLICT target below relies on
+    the (org_id, dish_name) primary key from migration 0085 — before it the
+    only key was dish_name alone, and this upsert raised on every call.
     """
     async with _tenant_connection() as conn:
         await conn.execute("""

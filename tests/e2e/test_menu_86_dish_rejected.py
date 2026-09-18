@@ -137,13 +137,12 @@ async def test_86d_dish_rejected_by_bot(
                 DISH_NAME,
             )
             # Primary key on menu_availability is (dish_name) — not (dish_name, org_id).
-            # The org_id column exists but the unique constraint is on dish_name alone.
+            # Keyed per tenant since migration 0085: (org_id, dish_name).
             await conn.execute(
                 """
                 INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
                 VALUES ($1, $2, FALSE, NOW())
-                ON CONFLICT (dish_name) DO UPDATE SET
-                    org_id    = EXCLUDED.org_id,
+                ON CONFLICT (dish_name, org_id) DO UPDATE SET
                     available = FALSE,
                     updated_at = NOW()
                 """,
