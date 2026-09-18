@@ -153,6 +153,10 @@ async def diner_org_info(
         "delivery_enabled": delivery_enabled_any,
         "pickup_enabled": pickup_enabled_any,
         "locations": sedes,
+        # Site key only — never the secret (turnstile.py never exposes it).
+        # None (not "") when unset so the page's own truthiness check is a
+        # single `if (data.turnstile_site_key)` with no extra empty-string case.
+        "turnstile_site_key": turnstile.get_site_key() or None,
     }
 
 

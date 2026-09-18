@@ -38,6 +38,141 @@ function dinerGetTableToken() {
   return last.toLowerCase() === 'chat' ? '' : last;
 }
 
+/**
+ * Tells the ONE shared chat page (docs/claude/delivery-web.md chunk 5)
+ * which entry point served it: the dine-in QR path `/chat/{table_id}` or
+ * the public delivery/pickup link `/pedir/{organizations.slug}`. Query
+ * params still win (manual `?t=` testing link), mirroring dinerGetTableToken.
+ * Returns {mode: 'dine_in', tableId} or {mode: 'pedir', slug}.
+ */
+function dinerGetEntryMode() {
+  var qp = new URLSearchParams(window.location.search);
+  var fromQuery = qp.get('t') || qp.get('table') || qp.get('mesa');
+  if (fromQuery) return { mode: 'dine_in', tableId: fromQuery };
+
+  var parts = window.location.pathname.split('/').filter(Boolean);
+  if (parts.length >= 2 && parts[0].toLowerCase() === 'pedir') {
+    return { mode: 'pedir', slug: parts[1] };
+  }
+  var last = parts[parts.length - 1] || '';
+  return { mode: 'dine_in', tableId: last.toLowerCase() === 'chat' ? '' : last };
+}
+
+var DINER_DEVICE_TOKEN_KEY = 'mesio_device_token';
+
+/**
+ * An opaque per-browser token, persisted in localStorage (survives across
+ * sessions/tabs — unlike the sessionStorage-scoped diner session token
+ * above), used ONLY as an additional per-IP-adjacent rate-limit dimension
+ * on the public, unauthenticated delivery/pickup entry endpoints
+ * (app/routes/diner_delivery.py module docstring: "the frontend is expected
+ * to generate and persist its own opaque device token"). Never an identity,
+ * never sent anywhere except those endpoints' own `device_token` field.
+ */
+function dinerGetDeviceToken() {
+  try {
+    var existing = localStorage.getItem(DINER_DEVICE_TOKEN_KEY);
+    if (existing) return existing;
+    var fresh = (window.crypto && typeof window.crypto.randomUUID === 'function')
+      ? window.crypto.randomUUID()
+      : 'dev-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+    localStorage.setItem(DINER_DEVICE_TOKEN_KEY, fresh);
+    return fresh;
+  } catch (e) {
+    // Storage unavailable (private mode / quota) — a fresh, unpersisted
+    // token per call is still harmless: it only weakens rate-limit dimension,
+    // never breaks a request.
+    return 'dev-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+  }
+}
+
+var DINER_CHECKOUT_PROFILE_KEY = 'mesio_delivery_checkout_profile';
+
+/**
+ * Remembers name/phone/address between visits (docs/claude/delivery-web.md
+ * chunk 5: "Name, phone and address are remembered in localStorage for the
+ * next visit"). Every read/write wrapped in try/catch per the same spec
+ * ("localStorage read/write is wrapped in try/catch, because it can throw").
+ */
+function dinerLoadCheckoutProfile() {
+  try {
+    var raw = localStorage.getItem(DINER_CHECKOUT_PROFILE_KEY);
+    if (!raw) return {};
+    var parsed = JSON.parse(raw);
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function dinerSaveCheckoutProfile(profile) {
+  try {
+    localStorage.setItem(DINER_CHECKOUT_PROFILE_KEY, JSON.stringify(profile || {}));
+  } catch (e) {
+    // Non-fatal — the next visit just won't be pre-filled.
+  }
+}
+
+var DINER_LAST_ORDER_CODE_KEY = 'mesio_last_delivery_order_code';
+
+function dinerSaveLastOrderCode(code) {
+  try {
+    localStorage.setItem(DINER_LAST_ORDER_CODE_KEY, code || '');
+  } catch (e) {
+    // Non-fatal.
+  }
+}
+
+function dinerLoadLastOrderCode() {
+  try {
+    return localStorage.getItem(DINER_LAST_ORDER_CODE_KEY) || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Wraps navigator.geolocation.getCurrentPosition in a Promise that ALWAYS
+ * resolves (never rejects) with one of:
+ *   {ok: true, lat, lon}
+ *   {ok: false, reason: 'unsupported' | 'denied' | 'timeout' | 'unavailable'}
+ * so every caller handles every outcome explicitly (docs/claude/delivery-web.md
+ * chunk 5: "Geolocation: handle every outcome ... without hanging the page").
+ */
+function dinerGetGeolocation(timeoutMs) {
+  return new Promise(function (resolve) {
+    if (!('geolocation' in navigator)) {
+      resolve({ ok: false, reason: 'unsupported' });
+      return;
+    }
+    var settled = false;
+    var timer = setTimeout(function () {
+      if (settled) return;
+      settled = true;
+      resolve({ ok: false, reason: 'timeout' });
+    }, timeoutMs || 8000);
+
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ ok: true, lat: pos.coords.latitude, lon: pos.coords.longitude });
+      },
+      function (err) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        // PERMISSION_DENIED=1, POSITION_UNAVAILABLE=2, TIMEOUT=3
+        var reason = (err && err.code === 1) ? 'denied'
+          : (err && err.code === 3) ? 'timeout' : 'unavailable';
+        resolve({ ok: false, reason: reason });
+      },
+      { enableHighAccuracy: false, timeout: timeoutMs || 8000, maximumAge: 60000 }
+    );
+  });
+}
+
 function dinerLoadSession() {
   try {
     var raw = sessionStorage.getItem(DINER_SESSION_KEY);
@@ -69,6 +204,37 @@ function dinerClearSession() {
 
 function dinerHeaders() {
   return { 'Content-Type': 'application/json' };
+}
+
+/**
+ * Turns a non-2xx JSON body into an Error with a HUMAN message, whatever
+ * shape `detail` came in as. Most of app/routes/diner.py raises
+ * HTTPException(detail="plain string"), but the delivery/pickup checkout
+ * refusals (app/routes/diner_delivery.py::_refusal) raise
+ * detail={reason, message} on purpose — a machine-readable `reason` for the
+ * page's own field-level branching PLUS a Spanish `message` for display
+ * (chunk 5/checkout instructions: "shown as a clear Spanish message next to
+ * the right field — never a raw error"). Before this fix `new Error(detail)`
+ * on an OBJECT stringified to the useless literal "[object Object]" for
+ * every one of those refusals — this was a bug in existing code found while
+ * wiring the delivery checkout form, fixed here rather than worked around
+ * at each call site. `err.reason` is attached (null when detail was a plain
+ * string) so callers CAN branch on it without re-parsing the message text.
+ */
+function _dinerErrorFromResponse(data, status) {
+  var detail = data && data.detail;
+  var message;
+  var reason = null;
+  if (detail && typeof detail === 'object') {
+    message = detail.message || detail.reason || ('HTTP ' + status);
+    reason = detail.reason || null;
+  } else {
+    message = detail || (data && data.message) || ('HTTP ' + status);
+  }
+  var err = new Error(message);
+  err.reason = reason;
+  err.status = status;
+  return err;
 }
 
 /**
@@ -110,18 +276,43 @@ async function dinerFetch(path, method, body, token) {
   } catch (e) {
     // Empty or non-JSON body — leave data as null.
   }
-  if (!res.ok) {
-    var detail = (data && (data.detail || data.message)) || ('HTTP ' + res.status);
-    throw new Error(detail);
+  if (!res.ok) throw _dinerErrorFromResponse(data, res.status);
+  return data;
+}
+
+/**
+ * Multipart upload for POST /api/diner/delivery/payment-proof — the ONLY
+ * /api/diner/* call that isn't JSON (FastAPI File/Form), so it can't go
+ * through dinerFetch's JSON envelope. Same error-shape handling as above.
+ */
+async function dinerUploadProof(token, file) {
+  var form = new FormData();
+  form.append('token', token);
+  form.append('file', file);
+  var res = await fetch('/api/diner/delivery/payment-proof', { method: 'POST', body: form });
+  var data = null;
+  try {
+    data = await res.json();
+  } catch (e) {
+    // Empty or non-JSON body — leave data as null.
   }
+  if (!res.ok) throw _dinerErrorFromResponse(data, res.status);
   return data;
 }
 
 window.DinerSession = {
   getTableToken: dinerGetTableToken,
+  getEntryMode: dinerGetEntryMode,
+  getDeviceToken: dinerGetDeviceToken,
+  loadCheckoutProfile: dinerLoadCheckoutProfile,
+  saveCheckoutProfile: dinerSaveCheckoutProfile,
+  saveLastOrderCode: dinerSaveLastOrderCode,
+  loadLastOrderCode: dinerLoadLastOrderCode,
+  getGeolocation: dinerGetGeolocation,
   load: dinerLoadSession,
   save: dinerSaveSession,
   clear: dinerClearSession,
   headers: dinerHeaders,
   fetch: dinerFetch,
+  uploadProof: dinerUploadProof,
 };

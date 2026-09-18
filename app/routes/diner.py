@@ -69,7 +69,7 @@ from app.services import state_store
 from app.services import turnstile
 from app.services.agent import chat as agent_chat, _generate_join_code, _JOIN_CODE_RE
 from app.services.logging import get_logger
-from app.services.money import ZERO, currency_exponent, money_mul, money_sum, quantize_money, to_decimal
+from app.services.money import ZERO, format_money_es, money_mul, money_sum, quantize_money, to_decimal
 from app.services.table_order_commit import deduct_inventory_or_cancel, save_table_order_round
 from app.services.tenant_context import bypass_tenant_scope, tenant_scope
 from app.repositories import delivery_repo, diner_sessions_repo, tables_repo
@@ -414,6 +414,8 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
         restaurant_name = restaurant.get("name") or "nuestro restaurante"
         feats = _features_dict(restaurant.get("features"))
         currency = feats.get("currency", "COP")
+        sede_name = location.get("name") or restaurant_name
+        sede_phone = location.get("phone") or ""
 
         token = f"web:{uuid.uuid4()}"
         await diner_sessions_repo.create_session(
@@ -442,6 +444,18 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
         "table_id": None,
         "table_name": None,
         "restaurant_name": restaurant_name,
+        # The ordering page (docs/claude/delivery-web.md chunk 5) needs the
+        # SEDE'S own name/phone (not the org's) to show "te atenderá nuestra
+        # sede X" and a "llamar al restaurante" affordance, plus the
+        # already-resolved delivery config so the deterministic checkout form
+        # never has to re-derive it (get_delivery_config stays the single
+        # source of truth — the checkout endpoint re-resolves it again
+        # server-side regardless, this is display-only).
+        "sede_name": sede_name,
+        "sede_phone": sede_phone,
+        "payment_methods": cfg["payment_methods"],
+        "delivery_fee": float(cfg["delivery_fee"]),  # JSON boundary
+        "min_order": float(cfg["min_order"]),         # JSON boundary
         "currency": currency,
         "order_mode": body.order_mode,
         "requires_join_code": False,
@@ -1178,9 +1192,7 @@ def _claimed_order_ids(checks: list) -> set:
 
 
 def _checkout_amount_label(amount: Decimal, currency: str) -> str:
-    if currency_exponent(currency) == 0:
-        return f"${int(quantize_money(amount, currency)):,}"
-    return f"${quantize_money(amount, currency):,.2f}"
+    return format_money_es(amount, currency)
 
 
 @router.post("/checkout")

@@ -685,4 +685,128 @@ body {
   font-weight: 500;
 }
 .diner-checkout-status-card p { margin: 0; }
+
+/* ── Delivery/pickup mode (docs/claude/delivery-web.md chunk 5) ──────────
+ * body.pedir-mode is set once /pedir/{slug} has been detected (see
+ * diner-chat.js::startDeliveryEntry) — dine-in-only affordances (the table
+ * QR's "Tu mesa" panel, the join-code chip/banner, and the waiter FAB —
+ * there is no floor staff to page on a delivery/pickup order in Phase A)
+ * hide via CSS instead of every call site re-checking orderMode. */
+.pedir-mode #btn-open-table,
+.pedir-mode #diner-join-code-chip,
+.pedir-mode #diner-join-banner,
+.pedir-mode #waiter-fab {
+  display: none !important;
+}
+
+/* body.pedir-entry-open is set for as long as the pre-chat entry screen
+ * (GPS ask / sede resolution / sede picker) is showing — the normal chat
+ * chrome underneath stays hidden until a session actually opens
+ * (finishDeliveryEntry() removes this class). */
+.pedir-entry-open .diner-header,
+.pedir-entry-open .diner-log,
+.pedir-entry-open #diner-composer {
+  visibility: hidden;
+}
+
+.pedir-entry {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-4);
+  background: var(--bg);
+}
+.pedir-entry[hidden] { display: none; }
+.pedir-entry-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--s-5) var(--s-4);
+  box-shadow: var(--shadow-lg);
+}
+.pedir-entry-restaurant {
+  margin: 0 0 var(--s-4);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 20px;
+  text-align: center;
+}
+.pedir-entry-body { display: flex; flex-direction: column; gap: var(--s-3); }
+.pedir-entry-status { margin: 0; font-size: var(--body-sm); color: var(--text-2); text-align: center; }
+.pedir-entry-status--error { color: var(--danger, #d64545); }
+.pedir-entry-btn { width: 100%; }
+
+.pedir-assigned-card {
+  background: var(--brand-light);
+  border-radius: var(--radius);
+  padding: var(--s-4);
+  text-align: center;
+}
+.pedir-sede-name { margin: 4px 0; font-weight: 700; font-size: var(--body); }
+.pedir-sede-address { margin: 0; font-size: var(--body-sm); color: var(--text-3); }
+
+.pedir-sede-list { display: flex; flex-direction: column; gap: var(--s-2); }
+.pedir-sede-card {
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--s-3);
+  cursor: pointer;
+  font-family: inherit;
+}
+.pedir-sede-card:hover { border-color: var(--brand); }
+.pedir-sede-card:disabled { opacity: 0.5; cursor: not-allowed; }
+.pedir-sede-meta { margin: 4px 0 0; font-size: var(--caption); color: var(--text-3); }
+
+.pedir-turnstile { display: flex; justify-content: center; margin: var(--s-3) 0; }
+
+/* ── Delivery checkout sheet (deterministic form, chunk 5) ── */
+.diner-checkout-panel .diner-panel-body { display: flex; flex-direction: column; gap: 0; }
+.diner-toggle-row--wrap { flex-wrap: wrap; }
+.diner-toggle-row--wrap .diner-toggle-btn { flex: 1 1 auto; min-width: 90px; }
+.diner-checkout-payment-sub { margin-bottom: var(--s-2); }
+.diner-checkout-field-error {
+  margin: 6px 0 0;
+  font-size: var(--caption);
+  color: var(--danger, #d64545);
+}
+.diner-checkout-field-error[hidden] { display: none; }
+.diner-checkout-banner {
+  background: #fdecea;
+  color: var(--danger, #d64545);
+  border-radius: var(--radius);
+  padding: var(--s-3);
+  font-size: var(--body-sm);
+  margin-bottom: var(--s-4);
+}
+.diner-checkout-banner[hidden] { display: none; }
+.diner-checkout-file-input { display: block; margin: 4px 0; }
+.diner-checkout-upload-status { margin: 4px 0 0; font-size: var(--caption); color: var(--text-3); }
+.diner-checkout-summary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-4);
+}
+.diner-checkout-summary-row { display: flex; justify-content: space-between; margin: 4px 0; font-size: var(--body-sm); }
+.diner-checkout-summary-total { border-top: 1px solid var(--border); padding-top: var(--s-2); margin-top: var(--s-2); }
+.diner-checkout-submit-btn { width: 100%; }
+.diner-checkout-success { text-align: center; display: flex; flex-direction: column; gap: var(--s-3); align-items: center; }
+.diner-checkout-success span { font-size: 40px; }
+.diner-checkout-success-code-label { margin: 0; color: var(--text-3); font-size: var(--body-sm); }
+.diner-checkout-success-code {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: 1px;
+}
+.diner-checkout-status-link { width: 100%; }
 .diner-checkout-status-card--paid { background: var(--surface); border: 1px solid var(--brand); }

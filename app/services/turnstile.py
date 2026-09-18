@@ -33,6 +33,14 @@ def is_configured() -> bool:
     return bool(os.getenv("TURNSTILE_SECRET", "").strip())
 
 
+def get_site_key() -> str:
+    """The Turnstile SITE key — safe to hand to the browser (unlike
+    TURNSTILE_SECRET, which never leaves this module). Empty string when
+    unset, e.g. local/test — the ordering page then skips rendering the
+    widget entirely and this module's no-op verify() path applies."""
+    return os.getenv("TURNSTILE_SITE_KEY", "").strip()
+
+
 async def verify(token: str, remote_ip: str | None = None) -> bool:
     """Verify a Turnstile response token against Cloudflare's siteverify API.
 

@@ -187,8 +187,15 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "0"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     # WebAuthn (publickey-credentials-*) required for biometric staff clock-in.
+    # geolocation=(self) — NOT (): the delivery/pickup ordering page
+    # (docs/claude/delivery-web.md chunk 5, /pedir/{slug}) calls
+    # navigator.geolocation.getCurrentPosition() from OUR OWN origin to
+    # resolve the sede. An empty allowlist blocks that call in every browser
+    # that enforces Permissions-Policy (Chrome/Edge) with no visible error —
+    # the geolocation prompt just never appears — silently breaking the
+    # entire entry flow. `self` still denies every third-party/iframe embed.
     response.headers["Permissions-Policy"] = (
-        "geolocation=(), microphone=(), camera=(), "
+        "geolocation=(self), microphone=(), camera=(), "
         "publickey-credentials-get=*, publickey-credentials-create=*"
     )
     # HSTS — only set over HTTPS to avoid breaking local dev over plain HTTP
@@ -220,7 +227,9 @@ async def security_headers_middleware(request: Request, call_next):
             "script-src 'self' 'unsafe-inline' "
             "https://cdn.jsdelivr.net "
             "https://unpkg.com "
-            "https://cdnjs.cloudflare.com; "
+            "https://cdnjs.cloudflare.com "
+            "https://challenges.cloudflare.com; "
+            "frame-src 'self' https://challenges.cloudflare.com; "
             "style-src 'self' 'unsafe-inline' "
             "https://cdn.jsdelivr.net "
             "https://unpkg.com "

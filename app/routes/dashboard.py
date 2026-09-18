@@ -20,7 +20,7 @@ from pathlib import Path
 from pydantic import BaseModel, field_validator
 
 from app.services import database as db
-from app.repositories import restaurant_repo
+from app.repositories import delivery_repo, restaurant_repo
 from app.services import state_store
 from app.services.logging import get_logger
 from app.services.tenant_context import bypass_tenant_scope
@@ -162,6 +162,28 @@ async def diner_chat_page(table_id: str):
     /api/diner/* endpoints (app/routes/diner.py, blocks protocol) — this
     is NOT a separate menu-browsing page.
     """
+    p = STATIC / "html" / "diner-chat.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Chat no disponible</h1>", status_code=404)
+
+@router.get("/pedir/{slug}", response_class=HTMLResponse)
+async def diner_delivery_entry_page(slug: str):
+    """Public delivery/pickup ordering entry point (docs/claude/delivery-web.md
+    chunk 5), ONE public link per organization. Serves the EXACT SAME
+    diner-chat.html/diner-chat.js as /chat/{table_id} — the client-side code
+    tells the two entry points apart from the URL path (see
+    diner-session.js::dinerGetEntryMode) and runs a different bootstrap
+    (GPS + GET /api/diner/org/{slug} + POST /api/diner/order-mode/resolve
+    before ever opening a session) instead of forking a second chat page.
+
+    Unlike /chat/{table_id} (table_id is opaque and never validated
+    server-side before the page renders — the QR itself is the proof of
+    physical presence), THIS is a link the restaurant hands out or publishes,
+    so an unknown slug 404s here instead of silently rendering a broken page
+    that will only fail once the frontend calls the API.
+    """
+    org = await delivery_repo.db_get_org_by_slug(slug.strip())
+    if not org:
+        return HTMLResponse("<h1>Restaurante no encontrado</h1>", status_code=404)
     p = STATIC / "html" / "diner-chat.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Chat no disponible</h1>", status_code=404)
 

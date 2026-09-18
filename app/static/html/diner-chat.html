@@ -19,6 +19,20 @@
 
 <div class="diner-page" id="diner-page">
 
+  <!-- Delivery/pickup entry screen (docs/claude/delivery-web.md chunk 5),
+       shown ONLY when this page is reached via /pedir/{slug} — see
+       diner-session.js::dinerGetEntryMode and diner-chat.js's
+       startDeliveryEntry(). Built out below by JS (loading / GPS ask /
+       sede picker / result), mirroring how every other overlay on this
+       page (AddSheet, CheckoutSheet, ...) is JS-built rather than static
+       markup, so this container only needs a mount point + a11y role. -->
+  <div id="pedir-entry" class="pedir-entry" hidden>
+    <div class="pedir-entry-card" role="region" aria-label="Empezar tu pedido">
+      <p class="pedir-entry-restaurant" id="pedir-restaurant-name">Mesio</p>
+      <div id="pedir-entry-body" class="pedir-entry-body"></div>
+    </div>
+  </div>
+
   <header class="diner-header">
     <div class="diner-header-info">
       <p class="diner-header-restaurant" id="diner-restaurant-name">Mesio</p>

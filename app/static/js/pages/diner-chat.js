@@ -58,7 +58,29 @@ var state = {
   // setBusy()). Browsing the menu / adding to cart is still allowed.
   joinCode: '',
   joined: true,
+
+  // ── Delivery/pickup (docs/claude/delivery-web.md chunk 5) ──────────
+  // orderMode stays 'dine_in' for the /chat/{table_id} entry point (the
+  // ORIGINAL behavior above, untouched). /pedir/{slug} sets it to
+  // 'delivery' or 'pickup' once the sede-assignment ladder + session open
+  // finish (see startDeliveryEntry()/openDeliverySession() below) — every
+  // dine-in-only affordance (Tu mesa, join code, waiter FAB "la cuenta")
+  // keys off `document.body.classList.contains('pedir-mode')` (CSS) rather
+  // than re-checking orderMode at every call site.
+  orderMode: 'dine_in',
+  slug: null,
+  sedeName: '',
+  sedePhone: '',
+  deliveryConfig: { payment_methods: [], delivery_fee: 0, min_order: 0 },
+  turnstileSiteKey: null,
+  turnstileSessionToken: null,
+  turnstileCheckoutToken: null,
+  lastPos: null,
 };
+
+function isDeliveryOrderMode() {
+  return state.orderMode === 'delivery' || state.orderMode === 'pickup';
+}
 
 function dinerEl(id) { return document.getElementById(id); }
 
@@ -367,8 +389,10 @@ function renderCartSummaryBlock(block) {
     var sendBtn = document.createElement('button');
     sendBtn.type = 'button';
     sendBtn.className = 'm-btn m-btn--primary m-btn--sm diner-cart-card-btn';
-    sendBtn.textContent = 'Enviar pedido';
-    sendBtn.addEventListener('click', function () { SendOrderSheet.open(); });
+    sendBtn.textContent = isDeliveryOrderMode() ? 'Finalizar pedido' : 'Enviar pedido';
+    sendBtn.addEventListener('click', function () {
+      if (isDeliveryOrderMode()) { DeliveryCheckoutSheet.open(); } else { SendOrderSheet.open(); }
+    });
     actionsRow.appendChild(sendBtn);
   }
 
@@ -619,7 +643,14 @@ function renderHeader() {
   var tableEl = dinerEl('diner-table-label');
   var codeEl = dinerEl('diner-join-code-chip');
   if (nameEl) nameEl.textContent = state.restaurantName || 'Mesio';
-  if (tableEl) tableEl.textContent = state.tableLabel || '';
+  if (tableEl) {
+    if (isDeliveryOrderMode()) {
+      var modeLabel = state.orderMode === 'delivery' ? 'Domicilio' : 'Recoger en tienda';
+      tableEl.textContent = state.sedeName ? (modeLabel + ' · ' + state.sedeName) : modeLabel;
+    } else {
+      tableEl.textContent = state.tableLabel || '';
+    }
+  }
   if (codeEl) {
     if (state.joinCode) {
       codeEl.textContent = 'Código para invitar: ' + state.joinCode;
@@ -709,14 +740,70 @@ async function restoreSavedSession(tableId) {
 
   state.joined = true;
   renderHeader();
+  renderWelcomeBack();
   return true;
 }
 
-async function startSession() {
+/**
+ * Welcome-back turn for a RESTORED session (page reload, or coming back to
+ * the tab later). Restoring brings back the token and the cart, but the chat
+ * history is not persisted, so without this the diner landed on an empty
+ * chat with nothing but the text box — no categories, no way into the menu.
+ * On /pedir it also links the last order's status page: the code was saved
+ * to localStorage at checkout precisely so a returning customer can find it.
+ * Best-effort: if the menu can't be fetched, the plain greeting still shows.
+ */
+async function renderWelcomeBack() {
+  var chips = [];
+  try {
+    var menu = await DinerSession.fetch('/api/diner/menu', 'GET', null, getToken());
+    var cats = (menu && Array.isArray(menu.categories)) ? menu.categories : [];
+    cats.forEach(function (c) {
+      if (c && c.name) chips.push({ label: String(c.name), value: 'cat:' + c.name });
+    });
+  } catch (e) {
+    // Non-fatal: the greeting below still renders without chips.
+  }
+  var name = state.restaurantName ? (' a ' + state.restaurantName) : '';
+  processBotTurn({
+    message: '¡Hola de nuevo! Bienvenido otra vez' + name + '. ¿Qué se te antoja?',
+    blocks: chips.length ? [{ type: 'category_chips', chips: chips }] : [],
+  });
+
+  if (state.orderMode === 'delivery' || state.orderMode === 'pickup') {
+    var code = DinerSession.loadLastOrderCode();
+    if (code) {
+      var bubble = createBotBubble();
+      bubble.appendChild(createTextNode('Tu último pedido: ' + code));
+      var link = document.createElement('a');
+      link.className = 'm-btn m-btn--ghost';
+      link.href = '/pedido/' + encodeURIComponent(code);
+      link.textContent = 'Ver estado de mi pedido';
+      bubble.appendChild(link);
+      appendBubble(bubble);
+    }
+  }
+}
+
+/**
+ * Entry dispatcher — the ONE thing that tells /chat/{table_id} and
+ * /pedir/{slug} apart (docs/claude/delivery-web.md chunk 5: "Parameterize
+ * it (a mode flag, a different entry bootstrap) so one chat serves both").
+ * Everything downstream of this (blocks rendering, cart, dish cards,
+ * composer) is 100% shared, unchanged code.
+ */
+function startSession() {
+  var entry = DinerSession.getEntryMode();
+  if (entry.mode === 'pedir') {
+    return startDeliveryEntry(entry.slug);
+  }
+  return startDineInSession(entry.tableId);
+}
+
+async function startDineInSession(tableId) {
   setBusy(true);
   showTyping();
   showErrorBanner(null);
-  var tableId = DinerSession.getTableToken();
 
   if (!tableId) {
     hideTyping();
@@ -784,6 +871,387 @@ async function startSession() {
     setBusy(false);
     showErrorBanner('No pudimos conectar con el restaurante. Puedes llamar al mesero mientras tanto.');
   }
+}
+
+/* ── Delivery/pickup entry bootstrap (docs/claude/delivery-web.md chunk 5)
+ * /pedir/{slug} — GPS + GET /api/diner/org/{slug} + POST
+ * /api/diner/order-mode/resolve, THEN the exact same POST /api/diner/session
+ * the dine-in path uses (order_mode=delivery|pickup instead of dine_in —
+ * already wired server-side, see app/routes/diner.py
+ * _create_delivery_pickup_session). Everything after openDeliverySession()
+ * hands off into processBotTurn() — the SAME shared chat rendering the
+ * dine-in path uses, no fork.
+ * ════════════════════════════════════════════════════════════════════ */
+
+var TurnstileHelper = (function () {
+  var scriptPromise = null;
+
+  function ensureScript() {
+    if (scriptPromise) return scriptPromise;
+    scriptPromise = new Promise(function (resolve, reject) {
+      if (window.turnstile) { resolve(); return; }
+      var s = document.createElement('script');
+      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+      s.async = true;
+      s.defer = true;
+      s.addEventListener('load', function () { resolve(); });
+      s.addEventListener('error', function () { reject(new Error('turnstile_script_failed')); });
+      document.head.appendChild(s);
+    });
+    return scriptPromise;
+  }
+
+  // Renders a widget into `container` and calls onToken(token) whenever
+  // Turnstile issues/expires one. Never throws — a script-load failure
+  // just leaves the action gated by "site key present, no token yet",
+  // which every caller below already treats as "not ready", not a crash.
+  function renderInto(container, siteKey, onToken) {
+    if (!container || !siteKey) return;
+    container.textContent = '';
+    ensureScript().then(function () {
+      if (!window.turnstile) return;
+      window.turnstile.render(container, {
+        sitekey: siteKey,
+        callback: onToken,
+        'expired-callback': function () { onToken(null); },
+        'error-callback': function () { onToken(null); },
+      });
+    }).catch(function () { /* no-op — see docstring above */ });
+  }
+
+  return { renderInto: renderInto };
+})();
+
+var PedirEntry = (function () {
+  var REASON_TEXT = {
+    out_of_coverage: 'Tu ubicación quedó fuera de la zona de cobertura de domicilios. Puedes recoger tu pedido en una de estas sedes:',
+    all_closed: 'Nuestras sedes de domicilio están cerradas en este momento. Puedes recoger en una de estas sedes:',
+    delivery_disabled: 'Este restaurante no ofrece domicilios en este momento. Elige una sede para recoger tu pedido:',
+    no_gps: 'No pudimos acceder a tu ubicación. Elige la sede donde quieres recoger tu pedido:',
+  };
+
+  function clear(container) { if (container) container.textContent = ''; }
+
+  function renderLoading(container, text) {
+    clear(container);
+    var p = document.createElement('p');
+    p.className = 'pedir-entry-status';
+    p.textContent = text || 'Cargando...';
+    container.appendChild(p);
+  }
+
+  function renderError(container, text, retry) {
+    clear(container);
+    var p = document.createElement('p');
+    p.className = 'pedir-entry-status pedir-entry-status--error';
+    p.textContent = text;
+    container.appendChild(p);
+    if (retry) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'm-btn m-btn--primary m-btn--sm';
+      btn.textContent = 'Reintentar';
+      btn.addEventListener('click', retry);
+      container.appendChild(btn);
+    }
+  }
+
+  function buildTurnstileBox(container) {
+    var box = document.createElement('div');
+    box.className = 'pedir-turnstile';
+    container.appendChild(box);
+    if (state.turnstileSiteKey) {
+      TurnstileHelper.renderInto(box, state.turnstileSiteKey, function (token) {
+        state.turnstileSessionToken = token;
+      });
+    }
+  }
+
+  function guardTurnstileThen(fn) {
+    if (state.turnstileSiteKey && !state.turnstileSessionToken) {
+      mesioToast('Completa la verificación de seguridad para continuar.', 'error', 3500);
+      return;
+    }
+    fn();
+  }
+
+  function buildSedeCard(candidate, onSelect) {
+    var card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'pedir-sede-card';
+
+    var name = document.createElement('p');
+    name.className = 'pedir-sede-name';
+    name.textContent = candidate.name || 'Sede';
+    card.appendChild(name);
+
+    if (candidate.address) {
+      var addr = document.createElement('p');
+      addr.className = 'pedir-sede-address';
+      addr.textContent = candidate.address;
+      card.appendChild(addr);
+    }
+
+    var meta = document.createElement('p');
+    meta.className = 'pedir-sede-meta';
+    var bits = [];
+    if (typeof candidate.distance_km === 'number') bits.push(candidate.distance_km.toFixed(1) + ' km');
+    bits.push(candidate.open_now ? 'Abierto ahora' : 'Cerrado ahora');
+    meta.textContent = bits.join(' · ');
+    card.appendChild(meta);
+
+    card.addEventListener('click', function () { onSelect(candidate); });
+    return card;
+  }
+
+  function renderAssigned(container, slug, result) {
+    clear(container);
+
+    var card = document.createElement('div');
+    card.className = 'pedir-assigned-card';
+    var intro = document.createElement('p');
+    intro.className = 'pedir-entry-status';
+    intro.textContent = 'Te atenderá nuestra sede:';
+    card.appendChild(intro);
+    var name = document.createElement('p');
+    name.className = 'pedir-sede-name';
+    name.textContent = result.location.name || 'Sede';
+    card.appendChild(name);
+    if (result.location.address) {
+      var addr = document.createElement('p');
+      addr.className = 'pedir-sede-address';
+      addr.textContent = result.location.address;
+      card.appendChild(addr);
+    }
+    container.appendChild(card);
+    buildTurnstileBox(container);
+
+    var continueBtn = document.createElement('button');
+    continueBtn.type = 'button';
+    continueBtn.className = 'm-btn m-btn--primary pedir-entry-btn';
+    continueBtn.textContent = 'Continuar con domicilio';
+    continueBtn.addEventListener('click', function () {
+      guardTurnstileThen(function () { openDeliverySession(slug, result.location.location_id, 'delivery'); });
+    });
+    container.appendChild(continueBtn);
+
+    var pickupBtn = document.createElement('button');
+    pickupBtn.type = 'button';
+    pickupBtn.className = 'm-btn m-btn--ghost pedir-entry-btn';
+    pickupBtn.textContent = 'Prefiero recoger en tienda';
+    pickupBtn.addEventListener('click', function () { switchToPickup(container, slug); });
+    container.appendChild(pickupBtn);
+  }
+
+  function renderPickupList(container, slug, result) {
+    clear(container);
+
+    var intro = document.createElement('p');
+    intro.className = 'pedir-entry-status';
+    intro.textContent = (result.reason && REASON_TEXT[result.reason])
+      || 'Elige la sede donde quieres recoger tu pedido:';
+    container.appendChild(intro);
+
+    var candidates = Array.isArray(result.candidates) ? result.candidates : [];
+    if (!candidates.length) {
+      renderError(container, 'Este restaurante no tiene sedes disponibles para recoger en este momento.', null);
+      return;
+    }
+
+    var list = document.createElement('div');
+    list.className = 'pedir-sede-list';
+    candidates.forEach(function (candidate) {
+      list.appendChild(buildSedeCard(candidate, function (c) {
+        guardTurnstileThen(function () { openDeliverySession(slug, c.location_id, 'pickup'); });
+      }));
+    });
+    container.appendChild(list);
+    buildTurnstileBox(container);
+  }
+
+  async function switchToPickup(container, slug) {
+    renderLoading(container, 'Cargando sedes...');
+    try {
+      var reqBody = { slug: slug, mode: 'pickup', device_token: DinerSession.getDeviceToken() };
+      // Carry over the GPS fix from the delivery attempt (if any) so the
+      // pickup list still sorts nearest-first instead of losing distances
+      // just because the customer switched modes.
+      if (state.lastPos) { reqBody.lat = state.lastPos.lat; reqBody.lon = state.lastPos.lon; }
+      var result = await DinerSession.fetch('/api/diner/order-mode/resolve', 'POST', reqBody, null);
+      renderPickupList(container, slug, result);
+    } catch (e) {
+      renderError(container, 'No pudimos cargar las sedes. Intenta de nuevo.', function () { switchToPickup(container, slug); });
+    }
+  }
+
+  async function resolveAndRender(container, slug) {
+    renderLoading(container, 'Obteniendo tu ubicación...');
+    var geo = await DinerSession.getGeolocation(8000);
+    var deviceToken = DinerSession.getDeviceToken();
+    var result;
+    if (geo.ok) {
+      state.lastPos = { lat: geo.lat, lon: geo.lon };
+      try {
+        result = await DinerSession.fetch('/api/diner/order-mode/resolve', 'POST', {
+          slug: slug, mode: 'delivery', lat: geo.lat, lon: geo.lon, device_token: deviceToken,
+        }, null);
+      } catch (e) {
+        renderError(container, 'No pudimos calcular la cobertura de domicilios. Intenta de nuevo.',
+          function () { resolveAndRender(container, slug); });
+        return;
+      }
+    } else {
+      // Denied / timed out / unsupported (bot-rules.md #11 style exhaustive
+      // handling — every geolocation outcome lands somewhere, never a hang).
+      // Still ask for DELIVERY, just without coordinates: the server's ladder
+      // owns rung 4 ("GPS denied or unavailable -> pickup only") and answers
+      // with reason `no_gps`, so the customer is told WHY it is pickup-only.
+      // Asking for mode 'pickup' here made the server treat it as the
+      // customer's own choice (reason null) and the explanation never showed.
+      state.lastPos = null;
+      try {
+        result = await DinerSession.fetch('/api/diner/order-mode/resolve', 'POST', {
+          slug: slug, mode: 'delivery', device_token: deviceToken,
+        }, null);
+      } catch (e) {
+        renderError(container, 'No pudimos cargar las sedes. Intenta de nuevo.',
+          function () { resolveAndRender(container, slug); });
+        return;
+      }
+    }
+
+    if (result.mode === 'delivery') {
+      renderAssigned(container, slug, result);
+    } else {
+      renderPickupList(container, slug, result);
+    }
+  }
+
+  return { renderLoading: renderLoading, renderError: renderError, resolveAndRender: resolveAndRender };
+})();
+
+async function startDeliveryEntry(slug) {
+  state.slug = slug;
+  document.body.classList.add('pedir-mode', 'pedir-entry-open');
+  var entryWrap = dinerEl('pedir-entry');
+  if (entryWrap) entryWrap.hidden = false;
+  var entryBody = dinerEl('pedir-entry-body');
+
+  // Reload continuity — same slug, already-open session -> skip straight
+  // back into the chat instead of re-running GPS/resolve (mirrors
+  // restoreSavedSession()'s dine-in equivalent above).
+  var saved = DinerSession.load();
+  if (saved && saved.token && saved.entryMode === 'pedir' && saved.slug === slug) {
+    state.token = saved.token;
+    state.restaurantName = saved.restaurantName || '';
+    state.sedeName = saved.sedeName || '';
+    state.sedePhone = saved.sedePhone || '';
+    state.currency = saved.currency || 'COP';
+    state.locale = saved.locale || 'es-CO';
+    state.orderMode = saved.orderMode || 'delivery';
+    state.deliveryConfig = saved.deliveryConfig || { payment_methods: [], delivery_fee: 0, min_order: 0 };
+    state.lastPos = saved.lastPos || null;
+    connectDinerRealtime();
+    try {
+      var cartData = await cartLoad();
+      applyCartResult(cartData);
+      finishDeliveryEntry();
+      renderWelcomeBack();
+      return;
+    } catch (e) {
+      DinerSession.clear();
+      state.token = null;
+    }
+  }
+
+  setBusy(true);
+  PedirEntry.renderLoading(entryBody, 'Cargando...');
+
+  var orgInfo;
+  try {
+    orgInfo = await DinerSession.fetch('/api/diner/org/' + encodeURIComponent(slug), 'GET', null, null);
+  } catch (e) {
+    setBusy(false);
+    PedirEntry.renderError(entryBody, 'No pudimos cargar este restaurante. Verifica el enlace e intenta de nuevo.',
+      function () { startDeliveryEntry(slug); });
+    return;
+  }
+
+  state.restaurantName = orgInfo.name || 'Mesio';
+  state.currency = orgInfo.currency || 'COP';
+  state.turnstileSiteKey = orgInfo.turnstile_site_key || null;
+  var pedirNameEl = dinerEl('pedir-restaurant-name');
+  if (pedirNameEl) pedirNameEl.textContent = state.restaurantName;
+  var headerNameEl = dinerEl('diner-restaurant-name');
+  if (headerNameEl) headerNameEl.textContent = state.restaurantName;
+
+  if (!orgInfo.delivery_enabled && !orgInfo.pickup_enabled) {
+    setBusy(false);
+    PedirEntry.renderError(entryBody, 'Este restaurante no tiene domicilios ni recogida disponibles en este momento.', null);
+    return;
+  }
+
+  setBusy(false);
+  await PedirEntry.resolveAndRender(entryBody, slug);
+}
+
+var _openingDeliverySession = false;
+
+async function openDeliverySession(slug, locationId, orderMode) {
+  // Guards a double-tap on "Continuar"/a sede card while the request is
+  // in flight from minting two sessions (setBusy() alone only locks the
+  // composer, not these entry-screen buttons).
+  if (_openingDeliverySession) return;
+  _openingDeliverySession = true;
+  setBusy(true);
+  try {
+    var body = { order_mode: orderMode, slug: slug, location_id: locationId };
+    if (state.turnstileSessionToken) body.turnstile_token = state.turnstileSessionToken;
+    var data = await DinerSession.fetch('/api/diner/session', 'POST', body, null);
+    state.token = data.token || '';
+    if (!state.token) throw new Error('missing session token');
+    state.orderMode = data.order_mode || orderMode;
+    state.restaurantName = data.restaurant_name || state.restaurantName;
+    state.sedeName = data.sede_name || '';
+    state.sedePhone = data.sede_phone || '';
+    state.currency = data.currency || state.currency;
+    state.locale = data.locale || 'es-CO';
+    state.deliveryConfig = {
+      payment_methods: Array.isArray(data.payment_methods) ? data.payment_methods : [],
+      delivery_fee: Number(data.delivery_fee) || 0,
+      min_order: Number(data.min_order) || 0,
+    };
+    connectDinerRealtime();
+    DinerSession.save({
+      token: state.token,
+      entryMode: 'pedir',
+      slug: slug,
+      orderMode: state.orderMode,
+      restaurantName: state.restaurantName,
+      sedeName: state.sedeName,
+      sedePhone: state.sedePhone,
+      currency: state.currency,
+      locale: state.locale,
+      deliveryConfig: state.deliveryConfig,
+      // The checkout re-validates coverage on this pin server-side; without
+      // it a reloaded delivery session could never be checked out.
+      lastPos: state.lastPos || null,
+    });
+    finishDeliveryEntry();
+    processBotTurn(data);
+  } catch (e) {
+    mesioToast((e && e.message) || 'No pudimos abrir tu pedido. Intenta de nuevo.', 'error', 4500);
+    setBusy(false);
+  }
+}
+
+function finishDeliveryEntry() {
+  document.body.classList.remove('pedir-entry-open');
+  var entryWrap = dinerEl('pedir-entry');
+  if (entryWrap) entryWrap.hidden = true;
+  state.joined = true;
+  renderHeader();
+  setBusy(false);
 }
 
 /* ── Waiter call ──────────────────────────────────────────────────── */
@@ -1234,8 +1702,10 @@ var CartPanel = (function () {
     var sendBtn = document.createElement('button');
     sendBtn.type = 'button';
     sendBtn.className = 'm-btn m-btn--primary diner-cart-send-btn';
-    sendBtn.textContent = 'Enviar pedido';
-    sendBtn.addEventListener('click', function () { SendOrderSheet.open(); });
+    sendBtn.textContent = isDeliveryOrderMode() ? 'Finalizar pedido' : 'Enviar pedido';
+    sendBtn.addEventListener('click', function () {
+      if (isDeliveryOrderMode()) { DeliveryCheckoutSheet.open(); } else { SendOrderSheet.open(); }
+    });
     body.appendChild(sendBtn);
   }
 
@@ -1857,6 +2327,607 @@ var CheckoutSheet = (function () {
     } finally {
       confirmBtn.disabled = false;
     }
+  }
+
+  return { open: open, close: close };
+})();
+
+/* ── Delivery/pickup checkout sheet (docs/claude/delivery-web.md chunk 5) ──
+ * The DETERMINISTIC checkout form — "Finalizar pedido" on a delivery/pickup
+ * session opens THIS instead of SendOrderSheet (which posts to the kitchen
+ * via the dine-in-only /api/diner/order/send). Every field here is plain
+ * form input, never LLM-parsed (chunk 3/5 instructions). Submits
+ * POST /api/diner/delivery/checkout with a stable idempotency_key generated
+ * once per open() so a double-tap or a retry after a network hiccup can
+ * never create two orders (the backend also dedupes by key — belt+braces).
+ * ════════════════════════════════════════════════════════════════════ */
+
+var PAYMENT_METHOD_LABELS = {
+  efectivo: 'Efectivo', cash: 'Efectivo',
+  tarjeta: 'Tarjeta (datáfono)', card: 'Tarjeta (datáfono)', datafono: 'Tarjeta (datáfono)', terminal: 'Tarjeta (datáfono)',
+  nequi: 'Nequi', daviplata: 'Daviplata', bancolombia: 'Bancolombia', bold: 'Bold', wompi: 'Transferencia',
+};
+var CASH_PAYMENT_KEYS = ['efectivo', 'cash'];
+var CARD_PAYMENT_KEYS = ['tarjeta', 'card', 'datafono', 'terminal'];
+var TIP_SUGGEST_PCTS = [0, 0.05, 0.10, 0.15];
+
+function paymentMethodLabel(key) {
+  return PAYMENT_METHOD_LABELS[key] || (String(key).charAt(0).toUpperCase() + String(key).slice(1));
+}
+function isCashPaymentMethod(key) { return CASH_PAYMENT_KEYS.indexOf(key) !== -1; }
+function isCardPaymentMethod(key) { return CARD_PAYMENT_KEYS.indexOf(key) !== -1; }
+function isTransferPaymentMethod(key) { return !isCashPaymentMethod(key) && !isCardPaymentMethod(key); }
+
+var DeliveryCheckoutSheet = (function () {
+  var overlay = null;
+  var box = null;
+  var bodyEl = null;
+  var trap = null;
+  var pendingKey = null;
+  var selectedMethod = null;
+  var tipAmount = 0;
+  var proofUrl = null;
+  var proofUploading = false;
+  var submitting = false;
+  var gpsRetried = false;
+
+  // Field refs, rebuilt every open() (payment methods / mode can differ
+  // between opens if the session changed) — see render().
+  var refs = {};
+
+  function fmt(n) { return renderer().fmtPrice(n, state.locale, state.cart && state.cart.currency || state.currency); }
+
+  function subtotalValue() { return (state.cart && Number(state.cart.subtotal)) || 0; }
+  function deliveryFeeValue() { return state.orderMode === 'delivery' ? (Number(state.deliveryConfig.delivery_fee) || 0) : 0; }
+  function totalValue() { return subtotalValue() + deliveryFeeValue() + (Number(tipAmount) || 0); }
+
+  function ensureShell() {
+    if (overlay) return;
+    overlay = document.createElement('div');
+    overlay.className = 'diner-overlay diner-overlay--full';
+    box = document.createElement('div');
+    box.className = 'diner-panel diner-checkout-panel';
+
+    var header = document.createElement('div');
+    header.className = 'diner-panel-header';
+    var h2 = document.createElement('h2');
+    h2.id = 'delivery-checkout-title';
+    h2.textContent = 'Finalizar pedido';
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'diner-panel-close';
+    closeBtn.setAttribute('aria-label', 'Cerrar');
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', close);
+    header.appendChild(h2);
+    header.appendChild(closeBtn);
+
+    bodyEl = document.createElement('div');
+    bodyEl.className = 'diner-panel-body';
+
+    box.appendChild(header);
+    box.appendChild(bodyEl);
+    overlay.appendChild(box);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  var fieldSeq = 0;
+  function field(labelText, inputEl) {
+    // The <label> must be tied to its input (htmlFor), otherwise the field
+    // has no accessible name — screen readers announced "edit text" for
+    // name/phone/email — and tapping the label does not focus the input.
+    fieldSeq += 1;
+    if (!inputEl.id) inputEl.id = 'dc-field-' + fieldSeq;
+    var wrap = document.createElement('div');
+    wrap.className = 'diner-sheet-field';
+    var label = document.createElement('label');
+    label.className = 'diner-sheet-note-label';
+    label.htmlFor = inputEl.id;
+    label.textContent = labelText;
+    wrap.appendChild(label);
+    wrap.appendChild(inputEl);
+    var err = document.createElement('p');
+    err.className = 'diner-checkout-field-error';
+    err.id = inputEl.id + '-error';
+    err.setAttribute('role', 'alert');
+    err.hidden = true;
+    inputEl.setAttribute('aria-describedby', err.id);
+    wrap.appendChild(err);
+    return { wrap: wrap, input: inputEl, err: err };
+  }
+
+  function showFieldError(f, msg) {
+    if (!f) return;
+    f.err.textContent = msg;
+    f.err.hidden = !msg;
+    // Some refs are groups, not inputs (refs.payment has input: null) —
+    // an unguarded setAttribute threw inside validate()->clearFieldErrors()
+    // and silently killed every checkout submit.
+    if (f.input) f.input.setAttribute('aria-invalid', msg ? 'true' : 'false');
+  }
+
+  function clearFieldErrors() {
+    ['name', 'phone', 'street', 'payment', 'cashChangeFor', 'proof'].forEach(function (k) {
+      if (refs[k]) showFieldError(refs[k], null);
+    });
+  }
+
+  function showBanner(msg) {
+    if (!refs.banner) return;
+    refs.banner.textContent = msg || '';
+    refs.banner.hidden = !msg;
+  }
+
+  function renderSummary() {
+    if (!refs.summary) return;
+    refs.summary.textContent = '';
+    var rows = [['Subtotal', subtotalValue()]];
+    if (state.orderMode === 'delivery') rows.push(['Domicilio', deliveryFeeValue()]);
+    rows.push(['Propina', Number(tipAmount) || 0]);
+    rows.forEach(function (r) {
+      var row = document.createElement('p');
+      row.className = 'diner-checkout-summary-row';
+      var label = document.createElement('span');
+      label.textContent = r[0];
+      var value = document.createElement('span');
+      value.textContent = fmt(r[1]);
+      row.appendChild(label);
+      row.appendChild(value);
+      refs.summary.appendChild(row);
+    });
+    var totalRow = document.createElement('p');
+    totalRow.className = 'diner-checkout-summary-row diner-checkout-summary-total';
+    var totalLabel = document.createElement('strong');
+    totalLabel.textContent = 'Total';
+    var totalValueEl = document.createElement('strong');
+    totalValueEl.textContent = fmt(totalValue());
+    totalRow.appendChild(totalLabel);
+    totalRow.appendChild(totalValueEl);
+    refs.summary.appendChild(totalRow);
+  }
+
+  function setTip(amount) {
+    tipAmount = Math.max(0, Number(amount) || 0);
+    if (refs.tipCustom) refs.tipCustom.value = tipAmount ? String(tipAmount) : '';
+    if (refs.tipBtns) {
+      refs.tipBtns.forEach(function (b) { b.classList.toggle('diner-toggle-btn--active', Number(b.dataset.pct) * subtotalValue() === tipAmount && tipAmount !== 0 || (Number(b.dataset.pct) === 0 && tipAmount === 0)); });
+    }
+    renderSummary();
+  }
+
+  function buildPaymentSubfields(container) {
+    container.textContent = '';
+    if (!selectedMethod) return;
+
+    if (isCashPaymentMethod(selectedMethod)) {
+      var cashInput = document.createElement('input');
+      cashInput.type = 'number';
+      cashInput.min = '0';
+      cashInput.className = 'diner-sheet-input';
+      cashInput.placeholder = '0';
+      var cashField = field('¿Con cuánto vas a pagar?', cashInput);
+      refs.cashChangeFor = cashField;
+      container.appendChild(cashField.wrap);
+    } else if (isTransferPaymentMethod(selectedMethod)) {
+      var uploadWrap = document.createElement('div');
+      uploadWrap.className = 'diner-sheet-field';
+      var uploadLabel = document.createElement('label');
+      uploadLabel.className = 'diner-sheet-note-label';
+      uploadLabel.textContent = 'Comprobante de pago (foto o captura)';
+      uploadWrap.appendChild(uploadLabel);
+
+      var fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.className = 'diner-checkout-file-input';
+      uploadWrap.appendChild(fileInput);
+
+      var status = document.createElement('p');
+      status.className = 'diner-checkout-upload-status';
+      status.textContent = proofUrl ? 'Comprobante subido ✓' : 'Sube una foto clara de la transferencia antes de continuar.';
+      uploadWrap.appendChild(status);
+
+      var errEl = document.createElement('p');
+      errEl.className = 'diner-checkout-field-error';
+      errEl.hidden = true;
+      uploadWrap.appendChild(errEl);
+      refs.proof = { wrap: uploadWrap, input: fileInput, err: errEl };
+
+      fileInput.addEventListener('change', async function () {
+        var file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        proofUploading = true;
+        proofUrl = null;
+        status.textContent = 'Subiendo comprobante...';
+        try {
+          var res = await DinerSession.uploadProof(getToken(), file);
+          proofUrl = (res && res.proof_url) || null;
+          status.textContent = proofUrl ? 'Comprobante subido ✓' : 'No pudimos confirmar la subida.';
+        } catch (e) {
+          status.textContent = 'No pudimos subir el comprobante.';
+          showFieldError(refs.proof, (e && e.message) || 'Intenta con otra imagen.');
+        } finally {
+          proofUploading = false;
+        }
+      });
+
+      container.appendChild(uploadWrap);
+    }
+    // Card/datáfono methods need no extra subfield — the rider/cashier
+    // charges on the physical terminal, same posture as the dine-in
+    // CheckoutSheet's "Tarjeta" option.
+  }
+
+  function buildPaymentRow(container) {
+    var methods = Array.isArray(state.deliveryConfig.payment_methods) ? state.deliveryConfig.payment_methods : [];
+    var row = document.createElement('div');
+    row.className = 'diner-toggle-row diner-toggle-row--wrap';
+    var subfields = document.createElement('div');
+    subfields.className = 'diner-checkout-payment-sub';
+
+    if (!methods.length) {
+      var none = document.createElement('p');
+      none.className = 'pedir-entry-status pedir-entry-status--error';
+      none.textContent = 'Esta sede no tiene métodos de pago configurados. Llama al restaurante para completar tu pedido.';
+      container.appendChild(none);
+      return;
+    }
+
+    methods.forEach(function (m, idx) {
+      var key = String(m).trim().toLowerCase();
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'diner-toggle-btn' + (idx === 0 ? ' diner-toggle-btn--active' : '');
+      btn.textContent = paymentMethodLabel(key);
+      btn.addEventListener('click', function () {
+        selectedMethod = key;
+        proofUrl = null;
+        Array.prototype.forEach.call(row.children, function (b) { b.classList.remove('diner-toggle-btn--active'); });
+        btn.classList.add('diner-toggle-btn--active');
+        buildPaymentSubfields(subfields);
+      });
+      row.appendChild(btn);
+    });
+    selectedMethod = String(methods[0]).trim().toLowerCase();
+
+    var fieldWrap = document.createElement('div');
+    fieldWrap.className = 'diner-sheet-field';
+    // A button group, not a form control: a <label> cannot name it, so
+    // expose it as a labelled group for screen readers instead.
+    var label = document.createElement('p');
+    label.className = 'diner-sheet-note-label';
+    label.id = 'dc-payment-label';
+    label.textContent = '¿Cómo vas a pagar?';
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-labelledby', label.id);
+    fieldWrap.appendChild(label);
+    fieldWrap.appendChild(row);
+    var err = document.createElement('p');
+    err.className = 'diner-checkout-field-error';
+    err.hidden = true;
+    fieldWrap.appendChild(err);
+    refs.payment = { wrap: fieldWrap, input: null, err: err };
+
+    container.appendChild(fieldWrap);
+    container.appendChild(subfields);
+    buildPaymentSubfields(subfields);
+  }
+
+  function render() {
+    bodyEl.textContent = '';
+    refs = {};
+    proofUrl = null;
+    selectedMethod = null;
+    tipAmount = 0;
+
+    refs.banner = document.createElement('p');
+    refs.banner.className = 'diner-checkout-banner';
+    refs.banner.setAttribute('role', 'alert');
+    refs.banner.hidden = true;
+    bodyEl.appendChild(refs.banner);
+
+    var profile = DinerSession.loadCheckoutProfile();
+
+    var nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.maxLength = 100;
+    nameInput.className = 'diner-sheet-input';
+    nameInput.value = profile.name || '';
+    refs.name = field('Tu nombre', nameInput);
+    bodyEl.appendChild(refs.name.wrap);
+
+    var phoneInput = document.createElement('input');
+    phoneInput.type = 'tel';
+    phoneInput.maxLength = 30;
+    phoneInput.className = 'diner-sheet-input';
+    phoneInput.value = profile.phone || '';
+    refs.phone = field('Tu teléfono', phoneInput);
+    bodyEl.appendChild(refs.phone.wrap);
+
+    if (state.orderMode === 'delivery') {
+      var streetInput = document.createElement('input');
+      streetInput.type = 'text';
+      streetInput.maxLength = 150;
+      streetInput.className = 'diner-sheet-input';
+      streetInput.placeholder = 'Calle y número';
+      streetInput.value = profile.street || '';
+      refs.street = field('Dirección (calle y número)', streetInput);
+      bodyEl.appendChild(refs.street.wrap);
+
+      var barrioInput = document.createElement('input');
+      barrioInput.type = 'text';
+      barrioInput.maxLength = 100;
+      barrioInput.className = 'diner-sheet-input';
+      barrioInput.placeholder = 'Barrio';
+      barrioInput.value = profile.barrio || '';
+      refs.barrio = field('Barrio', barrioInput);
+      bodyEl.appendChild(refs.barrio.wrap);
+
+      var indicacionesInput = document.createElement('textarea');
+      indicacionesInput.rows = 2;
+      indicacionesInput.maxLength = 200;
+      indicacionesInput.className = 'diner-sheet-note';
+      indicacionesInput.placeholder = 'Ej: apto 301, torre 2, portería...';
+      indicacionesInput.value = profile.indicaciones || '';
+      refs.indicaciones = field('Indicaciones (opcional)', indicacionesInput);
+      bodyEl.appendChild(refs.indicaciones.wrap);
+    }
+
+    var emailInput = document.createElement('input');
+    emailInput.type = 'email';
+    emailInput.maxLength = 254;
+    emailInput.className = 'diner-sheet-input';
+    emailInput.value = profile.email || '';
+    refs.email = field('Correo (opcional)', emailInput);
+    bodyEl.appendChild(refs.email.wrap);
+
+    buildPaymentRow(bodyEl);
+
+    var tipWrap = document.createElement('div');
+    tipWrap.className = 'diner-sheet-field';
+    var tipLabel = document.createElement('p');
+    tipLabel.className = 'diner-sheet-note-label';
+    tipLabel.id = 'dc-tip-label';
+    tipLabel.textContent = 'Propina (opcional)';
+    tipWrap.appendChild(tipLabel);
+    var tipRow = document.createElement('div');
+    tipRow.className = 'diner-toggle-row';
+    tipRow.setAttribute('role', 'group');
+    tipRow.setAttribute('aria-labelledby', tipLabel.id);
+    refs.tipBtns = TIP_SUGGEST_PCTS.map(function (pct) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'diner-toggle-btn' + (pct === 0 ? ' diner-toggle-btn--active' : '');
+      btn.dataset.pct = String(pct);
+      btn.textContent = pct === 0 ? 'Sin propina' : Math.round(pct * 100) + '%';
+      btn.addEventListener('click', function () { setTip(Math.round(subtotalValue() * pct)); });
+      tipRow.appendChild(btn);
+      return btn;
+    });
+    tipWrap.appendChild(tipRow);
+    refs.tipCustom = document.createElement('input');
+    refs.tipCustom.type = 'number';
+    refs.tipCustom.min = '0';
+    refs.tipCustom.className = 'diner-sheet-input';
+    refs.tipCustom.placeholder = 'Otro monto';
+    refs.tipCustom.addEventListener('input', function () {
+      var v = Number(refs.tipCustom.value);
+      tipAmount = isFinite(v) && v > 0 ? v : 0;
+      renderSummary();
+    });
+    tipWrap.appendChild(refs.tipCustom);
+    bodyEl.appendChild(tipWrap);
+
+    var scheduleInput = document.createElement('input');
+    scheduleInput.type = 'time';
+    scheduleInput.className = 'diner-sheet-input';
+    refs.schedule = field('Programar para hoy a las (opcional)', scheduleInput);
+    bodyEl.appendChild(refs.schedule.wrap);
+
+    refs.summary = document.createElement('div');
+    refs.summary.className = 'diner-checkout-summary';
+    bodyEl.appendChild(refs.summary);
+    renderSummary();
+
+    if (state.turnstileSiteKey) {
+      var turnstileBox = document.createElement('div');
+      turnstileBox.className = 'pedir-turnstile';
+      bodyEl.appendChild(turnstileBox);
+      TurnstileHelper.renderInto(turnstileBox, state.turnstileSiteKey, function (token) {
+        state.turnstileCheckoutToken = token;
+      });
+    }
+
+    refs.submitBtn = document.createElement('button');
+    refs.submitBtn.type = 'button';
+    refs.submitBtn.className = 'm-btn m-btn--primary diner-checkout-submit-btn';
+    refs.submitBtn.textContent = 'Confirmar pedido';
+    refs.submitBtn.addEventListener('click', submit);
+    bodyEl.appendChild(refs.submitBtn);
+  }
+
+  function renderSuccess(data) {
+    bodyEl.textContent = '';
+    var card = document.createElement('div');
+    card.className = 'diner-checkout-success';
+    var icon = document.createElement('span');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '✅';
+    card.appendChild(icon);
+    var msg = document.createElement('p');
+    msg.textContent = data.message || 'Listo, tu pedido fue enviado al restaurante.';
+    card.appendChild(msg);
+    var codeLabel = document.createElement('p');
+    codeLabel.className = 'diner-checkout-success-code-label';
+    codeLabel.textContent = 'Tu código de pedido:';
+    card.appendChild(codeLabel);
+    var code = document.createElement('p');
+    code.className = 'diner-checkout-success-code';
+    code.textContent = data.public_code || '';
+    card.appendChild(code);
+    var link = document.createElement('a');
+    link.href = '/pedido/' + encodeURIComponent(data.public_code || '');
+    link.className = 'm-btn m-btn--secondary diner-checkout-status-link';
+    link.textContent = 'Ver estado de mi pedido';
+    card.appendChild(link);
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'm-btn m-btn--primary';
+    closeBtn.textContent = 'Listo';
+    closeBtn.addEventListener('click', close);
+    card.appendChild(closeBtn);
+    bodyEl.appendChild(card);
+  }
+
+  function validate() {
+    clearFieldErrors();
+    var ok = true;
+    var nameVal = refs.name.input.value.trim();
+    if (!nameVal) { showFieldError(refs.name, 'Escribe tu nombre.'); ok = false; }
+    var phoneVal = refs.phone.input.value.trim();
+    if (!phoneVal) { showFieldError(refs.phone, 'Escribe tu teléfono.'); ok = false; }
+    if (state.orderMode === 'delivery') {
+      var streetVal = refs.street.input.value.trim();
+      if (!streetVal) { showFieldError(refs.street, 'Escribe tu dirección.'); ok = false; }
+    }
+    if (!selectedMethod) {
+      // Never fail validation without saying why: the toast tells the
+      // customer to fix the fields "marked in red", so one must be.
+      showFieldError(refs.payment, 'Elige cómo vas a pagar.');
+      ok = false;
+    }
+    if (selectedMethod && isCashPaymentMethod(selectedMethod)) {
+      var changeVal = refs.cashChangeFor && Number(refs.cashChangeFor.input.value);
+      if (!changeVal || changeVal <= 0) {
+        showFieldError(refs.cashChangeFor, 'Indica con cuánto vas a pagar.');
+        ok = false;
+      }
+    }
+    if (selectedMethod && isTransferPaymentMethod(selectedMethod) && !proofUrl) {
+      showFieldError(refs.proof, 'Sube el comprobante de la transferencia antes de continuar.');
+      ok = false;
+    }
+    return ok;
+  }
+
+  function buildScheduledIso() {
+    var raw = refs.schedule && refs.schedule.input.value;
+    if (!raw) return null;
+    var parts = raw.split(':');
+    if (parts.length !== 2) return null;
+    var d = new Date();
+    d.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+    return d.toISOString();
+  }
+
+  async function submit() {
+    if (submitting || proofUploading) return;
+    showBanner(null);
+    if (!validate()) {
+      mesioToast('Revisa los campos marcados en rojo.', 'error', 3500);
+      return;
+    }
+    if (state.turnstileSiteKey && !state.turnstileCheckoutToken) {
+      showBanner('Completa la verificación de seguridad para continuar.');
+      return;
+    }
+
+    var profile = {
+      name: refs.name.input.value.trim(),
+      phone: refs.phone.input.value.trim(),
+      email: refs.email.input.value.trim(),
+    };
+    var address;
+    if (state.orderMode === 'delivery') {
+      var street = refs.street.input.value.trim();
+      var barrio = refs.barrio.input.value.trim();
+      var indicaciones = refs.indicaciones.input.value.trim();
+      profile.street = street;
+      profile.barrio = barrio;
+      profile.indicaciones = indicaciones;
+      address = street + (barrio ? ', ' + barrio : '') + (indicaciones ? ' - ' + indicaciones : '');
+    } else {
+      address = 'Recoger en tienda' + (state.sedeName ? ' - ' + state.sedeName : '');
+    }
+    DinerSession.saveCheckoutProfile(profile);
+
+    var body = {
+      token: getToken(),
+      idempotency_key: pendingKey,
+      customer_name: profile.name,
+      customer_phone: profile.phone,
+      address: address,
+      payment_method: selectedMethod,
+      tip_amount: Number(tipAmount) || 0,
+    };
+    if (profile.email) body.customer_email = profile.email;
+    if (state.lastPos) { body.lat = state.lastPos.lat; body.lon = state.lastPos.lon; }
+    if (isCashPaymentMethod(selectedMethod)) body.cash_change_for = Number(refs.cashChangeFor.input.value);
+    var scheduledIso = buildScheduledIso();
+    if (scheduledIso) body.scheduled_for = scheduledIso;
+    if (state.turnstileCheckoutToken) body.turnstile_token = state.turnstileCheckoutToken;
+    var deviceToken = DinerSession.getDeviceToken();
+    if (deviceToken) body.device_token = deviceToken;
+
+    submitting = true;
+    refs.submitBtn.disabled = true;
+    refs.submitBtn.textContent = 'Enviando...';
+    try {
+      var data = await DinerSession.fetch('/api/diner/delivery/checkout', 'POST', body, null);
+      state.cart = null;
+      updateCartChip();
+      CartPanel.refresh();
+      DinerSession.saveLastOrderCode(data.public_code);
+      renderSuccess(data);
+    } catch (e) {
+      var reason = e && e.reason;
+      var msg = (e && e.message) || 'No pudimos enviar tu pedido. Intenta de nuevo.';
+      if (reason === 'no_gps' && state.orderMode === 'delivery' && !gpsRetried) {
+        // The session lost its GPS fix (old saved session, cleared storage).
+        // The server needs the pin to check coverage, so ask again and retry
+        // ONCE with the same idempotency key — never a second order.
+        gpsRetried = true;
+        refs.submitBtn.textContent = 'Obteniendo tu ubicación...';
+        var geo = await DinerSession.getGeolocation(8000);
+        submitting = false;
+        if (geo.ok) {
+          state.lastPos = { lat: geo.lat, lon: geo.lon };
+          var saved = DinerSession.load();
+          if (saved) { saved.lastPos = state.lastPos; DinerSession.save(saved); }
+          return submit();
+        }
+        msg = 'Necesitamos tu ubicación para confirmar que llegamos a tu dirección. '
+          + 'Actívala en tu navegador, o recoge tu pedido en la sede.';
+      }
+      if (reason === 'payment_method_not_allowed') showFieldError(refs.payment, msg);
+      else if (reason === 'cash_change_for_required' || reason === 'cash_change_insufficient') showFieldError(refs.cashChangeFor, msg);
+      else showBanner(msg);
+      submitting = false;
+      refs.submitBtn.disabled = false;
+      refs.submitBtn.textContent = 'Confirmar pedido';
+    }
+  }
+
+  function open() {
+    var items = (state.cart && Array.isArray(state.cart.items)) ? state.cart.items : [];
+    if (!items.length) {
+      mesioToast('Tu pedido está vacío. Agrega algo primero.', 'error', 3000);
+      return;
+    }
+    ensureShell();
+    pendingKey = genIdempotencyKey();
+    submitting = false;
+    gpsRetried = false;
+    render();
+    overlay.classList.add('open');
+    trap = mesioFocusTrap(box, { onEscape: close, labelledBy: 'delivery-checkout-title' });
+  }
+
+  function close() {
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    if (trap) { trap.deactivate(); trap = null; }
   }
 
   return { open: open, close: close };
