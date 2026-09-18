@@ -11,35 +11,46 @@ here rather than re-deriving the mapping.
 
 Section keys match `window.MesioStaffSections` in
 app/static/js/staff/staff-shell.js:
-    cashier | waiter | kitchen | bar | courier | myshift
+    cashier | delivery | waiter | kitchen | bar | courier | myshift
+
+`delivery` is the "Domicilios" surface added in the web delivery/pickup wave
+(docs/claude/delivery-web.md, chunk 4) — the cashier's queue of delivery/
+pickup web orders (accept/reject/assign courier), a NEW section rather than a
+filter bolted onto an existing one. Granted to the same roles as `cashier`
+(caja/cashier/cajero) plus every admin role, per the locked product decision.
 
 Stored role values are Spanish (see CLAUDE.md): mesero, caja, cocina, bar,
 domiciliario, gerente, otro — plus the legacy/WA-era English aliases
 (waiter, cashier, cajero, cook, cocinero, delivery) that already appear
-scattered through auth_routes.py's `_ROLE_REDIRECT` / `_PAGE_ROLES`.
+scattered through auth_routes.py's `_ROLE_REDIRECT` / `_PAGE_ROLES`. Note the
+legacy role alias "delivery" (English for domiciliario/courier, a ROLE name)
+is unrelated to the new "delivery" SECTION key (Domicilios) below — same
+spelling, different namespace; a role is never compared against a section key.
 """
 from __future__ import annotations
 
 ADMIN_ROLES: frozenset[str] = frozenset({"owner", "admin", "gerente"})
 
-# Role (lowercase, as stored) -> single operational section it grants.
-# Admin roles are handled separately (they get every section).
-_ROLE_TO_SECTION: dict[str, str] = {
-    "mesero": "waiter",
-    "waiter": "waiter",
-    "caja": "cashier",
-    "cashier": "cashier",
-    "cajero": "cashier",
-    "cocina": "kitchen",
-    "cook": "kitchen",
-    "cocinero": "kitchen",
-    "bar": "bar",
-    "domiciliario": "courier",
-    "delivery": "courier",
+# Role (lowercase, as stored) -> the operational section(s) it grants.
+# Admin roles are handled separately (they get every section). Most roles
+# grant exactly one section; cashier roles additionally grant "delivery"
+# (Domicilios) per the locked product decision (docs/claude/delivery-web.md).
+_ROLE_TO_SECTION: dict[str, tuple[str, ...]] = {
+    "mesero": ("waiter",),
+    "waiter": ("waiter",),
+    "caja": ("cashier", "delivery"),
+    "cashier": ("cashier", "delivery"),
+    "cajero": ("cashier", "delivery"),
+    "cocina": ("kitchen",),
+    "cook": ("kitchen",),
+    "cocinero": ("kitchen",),
+    "bar": ("bar",),
+    "domiciliario": ("courier",),
+    "delivery": ("courier",),  # legacy ROLE alias — see module docstring
 }
 
 # All operational sections, in the order they should appear in the sidebar.
-ALL_OPERATIONAL_SECTIONS: tuple[str, ...] = ("cashier", "waiter", "kitchen", "bar", "courier")
+ALL_OPERATIONAL_SECTIONS: tuple[str, ...] = ("cashier", "delivery", "waiter", "kitchen", "bar", "courier")
 
 # Every section key that can ever be mounted, in sidebar order.
 ALL_SECTIONS: tuple[str, ...] = ALL_OPERATIONAL_SECTIONS + ("myshift",)
@@ -65,9 +76,9 @@ def sections_for_roles(roles: list[str] | tuple[str, ...] | set[str]) -> list[st
 
     sections: list[str] = []
     for role in normalized:
-        section = _ROLE_TO_SECTION.get(role)
-        if section and section not in sections:
-            sections.append(section)
+        for section in _ROLE_TO_SECTION.get(role, ()):
+            if section not in sections:
+                sections.append(section)
 
     # Keep sidebar order stable regardless of role iteration order.
     ordered = [s for s in ALL_OPERATIONAL_SECTIONS if s in sections]

@@ -42,7 +42,7 @@ class OrderCommitError(Exception):
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
-async def _deduct_inventory_in_tx(
+async def deduct_inventory_in_tx(
     conn,
     restaurant_id: int,
     items: list[dict],
@@ -56,6 +56,16 @@ async def _deduct_inventory_in_tx(
 
     Supports both escandallo (dish_recipes) and legacy linked_dishes paths,
     mirroring db_deduct_inventory_for_order — but WITHOUT the max(0, stock) clamp.
+
+    PUBLIC (chunk 4, docs/claude/delivery-web.md): this was originally a
+    private helper reachable only through commit_order_transaction below.
+    It takes just (conn, org_id, items) — no dependency on
+    commit_order_transaction's own fixed INSERT column list — so it is safe
+    to reuse verbatim from app.repositories.delivery_repo.db_create_delivery_order,
+    which does its own INSERT (with the delivery-specific columns
+    commit_order_transaction does not carry) and calls this helper against the
+    SAME already-open connection/transaction, so a stock failure rolls back
+    the order insert too instead of leaving an orphaned row.
     """
     for item in items:
         dish_name = item.get("name", "")
@@ -129,13 +139,29 @@ async def _deduct_inventory_in_tx(
 
         else:
             # ── 2. Legacy linked_dishes path ─────────────────────────────────
+            # P0 (found while wiring this function into delivery_repo.py for
+            # chunk 4, docs/claude/delivery-web.md): the pool's jsonb codec
+            # (app/services/database.py get_pool(), encoder=json.dumps)
+            # already serializes a Python list into a $N::jsonb parameter.
+            # Passing a PRE-dumped json.dumps() string here double-encoded it
+            # into a jsonb STRING SCALAR wrapping the array text, so
+            # `linked_dishes @> $2::jsonb` (array containment) silently NEVER
+            # matched any row — this exact function, reused unmodified by
+            # commit_order_transaction for every WhatsApp-era delivery/pickup
+            # order, never enforced or decremented stock for a restaurant on
+            # the legacy linked_dishes path (no dish_recipes escandallo). The
+            # identical bug was already found and fixed in the sibling
+            # implementation, app/repositories/inventory_repo.py's
+            # db_deduct_inventory_for_order (see its "P0 found 2026-09" note)
+            # but never applied to this copy. Pass the raw list so the codec
+            # encodes it exactly once, matching that fix.
             rows = await conn.fetch(
                 """SELECT id, current_stock, linked_dishes, min_stock
                    FROM inventory
                    WHERE org_id = $1
                      AND linked_dishes @> $2::jsonb
                    FOR UPDATE""",
-                restaurant_id, json.dumps([dish_name]),
+                restaurant_id, [dish_name],
             )
             for row in rows:
                 available = to_decimal(row["current_stock"])
@@ -169,6 +195,11 @@ async def _deduct_inventory_in_tx(
                 min_stock = to_decimal(row["min_stock"] or 0)
                 if new_stock <= min_stock and dishes:
                     await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
+
+
+# Backward-compatible private alias — tests/test_stock_autohide.py calls the
+# old private name directly. One implementation, two names; do not fork this.
+_deduct_inventory_in_tx = deduct_inventory_in_tx
 
 
 async def _sync_dish_availability_conn(
@@ -355,7 +386,7 @@ async def commit_order_transaction(
 
                 # 2. Deduct inventory (raises InsufficientStockError on shortage)
                 if items:
-                    await _deduct_inventory_in_tx(conn, restaurant_id, items)
+                    await deduct_inventory_in_tx(conn, restaurant_id, items)
 
                 # 3. Delete the cart row — phone is the cart PK column
                 await conn.execute(

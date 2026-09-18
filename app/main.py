@@ -42,10 +42,12 @@ from app.routes.team_routes import router as team_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
 from app.routes.diner import router as diner_router
+from app.routes.diner_delivery import router as diner_delivery_router
 from app.routes.billing import router as billing_router
 from app.routes import nps, inventory
 from app.routes.sync import router as sync_router
 from app.routes.staff import router as staff_router
+from app.routes.staff_delivery import router as staff_delivery_router
 from app.routes.staff_webauthn import router as staff_webauthn_router
 from app.routes.staff_comms import router as staff_comms_router
 from app.routes.loyalty import router as loyalty_router
@@ -126,6 +128,11 @@ async def lifespan(app):
         )
     else:
         _log.info("startup.crm_phone_id_configured", phone_id_prefix=crm_phone_id[:8])
+
+    # Turnstile (delivery/pickup diner entry, docs/claude/delivery-web.md) —
+    # logged ONCE here, never per request (app/services/turnstile.py).
+    from app.services.turnstile import log_startup_state as _turnstile_log_startup_state
+    _turnstile_log_startup_state()
 
     _log.info("app.started", version="6.0")
 
@@ -321,6 +328,7 @@ app.include_router(chat_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)
 app.include_router(diner_router)
+app.include_router(diner_delivery_router)
 app.include_router(billing_router)
 app.include_router(nps.router)
 app.include_router(inventory.router)
@@ -334,6 +342,7 @@ app.include_router(signup_router)
 
 # Feature-gated (disabled by default for MVP bot scope)
 _maybe_include("staff", staff_router)
+_maybe_include("staff_delivery", staff_delivery_router)
 _maybe_include("staff_webauthn", staff_webauthn_router)
 _maybe_include("staff_comms", staff_comms_router)
 _maybe_include("loyalty", loyalty_router)

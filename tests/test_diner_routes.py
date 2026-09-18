@@ -103,6 +103,15 @@ def _post(client, url, **kwargs):
 
 # ── Seed fixtures ────────────────────────────────────────────────────────────
 
+async def _scope(conn, org_id: int) -> None:
+    """Pin app.org_id on a seed connection so RLS-FORCEd tenant tables
+    accept the row. Session-scoped (is_local=False) because these seed
+    connections run in autocommit."""
+    await conn.execute(
+        "SELECT set_config('app.org_id', $1::text, false)", str(org_id)
+    )
+
+
 async def _make_org(conn, *, with_menu: bool) -> dict:
     suffix = uuid.uuid4().hex[:10]
     bot_number = f"573{suffix[:9]}"
@@ -128,6 +137,13 @@ async def _make_org(conn, *, with_menu: bool) -> dict:
         org_id, f"Sede {suffix}", bot_number,
     )
     table_id = f"t-{suffix}"
+    # restaurant_tables has RLS ENABLE + FORCE: its WITH CHECK requires
+    # app.org_id to already match the row being inserted (see
+    # docs/claude/testing.md). This seed connects as mesio_app, so the
+    # setting must be applied before the INSERT or every seed fails with
+    # "new row violates row-level security policy". Session-scoped (false)
+    # because this connection runs in autocommit and is closed right after.
+    await _scope(conn, org_id)
     await conn.execute(
         "INSERT INTO restaurant_tables (id, number, name, branch_id, location_id, org_id, active) "
         "VALUES ($1, $2, $3, $4, $5, $6, TRUE)",
@@ -142,6 +158,9 @@ async def _make_org(conn, *, with_menu: bool) -> dict:
 
 
 async def _drop_org(conn, org_id: int) -> None:
+    # Same RLS reason as _make_org: the DELETEs below hit tenant tables
+    # whose policy is invisible-row unless app.org_id matches.
+    await _scope(conn, org_id)
     await conn.execute("DELETE FROM waiter_alerts WHERE org_id = $1", org_id)
     await conn.execute("DELETE FROM diner_sessions WHERE org_id = $1", org_id)
     await conn.execute("DELETE FROM restaurant_tables WHERE org_id = $1", org_id)
@@ -402,6 +421,10 @@ def test_chat_unknown_token_returns_404(client):
 async def _fetch_latest_alert_async(org_id: int) -> dict:
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
+        # waiter_alerts is RLS-FORCEd: without app.org_id the SELECT policy
+        # hides every row and this helper silently returns None, which reads
+        # as "the endpoint never wrote the alert".
+        await _scope(conn, org_id)
         row = await conn.fetchrow(
             "SELECT * FROM waiter_alerts WHERE org_id = $1 ORDER BY id DESC LIMIT 1",
             org_id,

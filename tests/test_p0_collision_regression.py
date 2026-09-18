@@ -88,6 +88,20 @@ async def _seed_collision(conn) -> dict:
     )
     assert loc_l == org_b, "setup invariant: location id must equal the colliding org id"
 
+    # A forced explicit id does NOT advance the BIGSERIAL sequence. Without
+    # this, the sequence eventually reaches loc_l's id and the very next
+    # ordinary INSERT — here or in any later test sharing the database —
+    # dies on "duplicate key value violates unique constraint locations_pkey".
+    # That is how a deliberate-collision test passes alone and fails in a
+    # full-suite run.
+    await conn.execute(
+        "SELECT setval("
+        "  pg_get_serial_sequence('locations', 'id'),"
+        "  GREATEST($1::bigint, (SELECT COALESCE(last_value, 1) FROM locations_id_seq))"
+        ")",
+        loc_l,
+    )
+
     loc_b = await conn.fetchval(
         "INSERT INTO locations (org_id, name, code, active) VALUES ($1, $2, 'principal', true) RETURNING id",
         org_b, "Sede B Principal",

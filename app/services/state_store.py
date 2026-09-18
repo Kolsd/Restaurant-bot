@@ -253,6 +253,77 @@ async def order_send_result_set(cache_key: str, result: dict, ttl_seconds: int =
     _fb_set(_fb_order_send, key, result, ttl_seconds, family="order_send")
 
 
+# ── Delivery/pickup checkout idempotency (chunk 3) ──────────────────────────
+# Same pattern as order_send_result_get/set above, kept as its own key
+# family (never reused across the two flows) — keyed by (diner token,
+# client-generated idempotency_key).
+
+_fb_delivery_checkout: dict[str, tuple[float, Any]] = {}
+
+
+def _delivery_checkout_redis_key(cache_key: str) -> str:
+    return f"mesio:delivery_checkout_result:{cache_key}"
+
+
+async def delivery_checkout_result_get(cache_key: str) -> dict | None:
+    key = _delivery_checkout_redis_key(cache_key)
+    r = await _rc.get_redis()
+    if r is not None:
+        raw = await r.get(key)
+        return _rc.decode(raw)
+    _maybe_warn("delivery_checkout")
+    value = _fb_get(_fb_delivery_checkout, key)
+    return copy.deepcopy(value) if isinstance(value, dict) else value
+
+
+async def delivery_checkout_result_set(cache_key: str, result: dict, ttl_seconds: int = 300) -> None:
+    key = _delivery_checkout_redis_key(cache_key)
+    r = await _rc.get_redis()
+    if r is not None:
+        await r.set(key, _rc.encode(result), ex=ttl_seconds)
+        return
+    _maybe_warn("delivery_checkout")
+    _fb_set(_fb_delivery_checkout, key, result, ttl_seconds, family="delivery_checkout")
+
+
+# ── Delivery/pickup payment-proof binding (chunk 3) ─────────────────────────
+# A diner uploads a proof screenshot BEFORE checkout via
+# POST /api/diner/delivery/payment-proof, which returns a Cloudinary URL.
+# That URL is cached here keyed by the diner's OWN token so the checkout
+# endpoint can attach it to the new order WITHOUT ever trusting a
+# client-supplied proof_url value directly — the checkout request body has
+# no such field at all. The only way a URL reaches an order is by having
+# been uploaded, moments earlier, through this same token's own session
+# (docs/claude/delivery-web.md chunk 3: "the returned URL must only ever be
+# attachable to that session's own order").
+
+_fb_delivery_proof: dict[str, tuple[float, Any]] = {}
+_DELIVERY_PROOF_TTL = 1800  # 30 min — long enough to finish checkout
+
+
+def _delivery_proof_redis_key(token: str) -> str:
+    return f"mesio:delivery_proof:{token}"
+
+
+async def delivery_proof_set(token: str, url: str, ttl_seconds: int = _DELIVERY_PROOF_TTL) -> None:
+    key = _delivery_proof_redis_key(token)
+    r = await _rc.get_redis()
+    if r is not None:
+        await r.set(key, url, ex=ttl_seconds)
+        return
+    _maybe_warn("delivery_proof")
+    _fb_set(_fb_delivery_proof, key, url, ttl_seconds, family="delivery_proof")
+
+
+async def delivery_proof_get(token: str) -> str | None:
+    key = _delivery_proof_redis_key(token)
+    r = await _rc.get_redis()
+    if r is not None:
+        return await r.get(key)
+    _maybe_warn("delivery_proof")
+    return _fb_get(_fb_delivery_proof, key)
+
+
 # ── Table confirm cooldown ─────────────────────────────────────────────────────
 
 def _cooldown_redis_key(table_id: str, bot_number: str) -> str:

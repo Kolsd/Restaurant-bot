@@ -2091,6 +2091,18 @@ async def db_get_delivery_orders_for_cashier() -> list:
     Return pending delivery/pickup orders for the kitchen/caja view (last 24h,
     excluding terminal statuses).
 
+    Bug fix (chunk 4, docs/claude/delivery-web.md): the web delivery/pickup
+    wave introduced two new pre-kitchen statuses — 'pendiente_aceptacion'
+    (the cashier hasn't accepted yet) and 'rechazado' (the cashier rejected
+    it) — that did not exist when this exclusion list was written. Neither
+    was excluded, so BEFORE the cashier accepts a web order it was already
+    visible on this same kitchen/caja screen (violating "only after
+    acceptance does the ticket reach the kitchen KDS",
+    docs/claude/delivery-web.md "Order lifecycle"), and a REJECTED order
+    would keep showing here for the rest of its 24h window. Found while
+    verifying that POST /api/staff/delivery/orders/{id}/accept actually
+    releases the ticket to this screen — see tests/test_delivery_cashier.py.
+
     # Requires active tenant_scope(org_id). RLS filters rows by org_id.
     """
     async with tenant_connection() as conn:
@@ -2098,7 +2110,10 @@ async def db_get_delivery_orders_for_cashier() -> list:
             """SELECT * FROM orders
                WHERE order_type IN ('domicilio','recoger')
                AND created_at >= NOW() - INTERVAL '24 hours'
-               AND status NOT IN ('en_camino', 'en_puerta', 'entregado', 'cancelado')
+               AND status NOT IN (
+                   'pendiente_aceptacion', 'rechazado',
+                   'en_camino', 'en_puerta', 'entregado', 'cancelado'
+               )
                ORDER BY created_at DESC"""
         )
     return [dict(r) for r in rows]

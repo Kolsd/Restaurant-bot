@@ -146,6 +146,27 @@ def _make_order_payload(
     }
 
 
+async def _register_prod_jsonb_codec(conn) -> None:
+    """Register the SAME jsonb codec app/services/database.py's real
+    get_pool() registers on every production connection (encoder=json.dumps,
+    decoder=json.loads).
+
+    conftest.py's shared `db_conn` fixture does NOT register this — its bare
+    asyncpg connection uses asyncpg's default jsonb handling, which requires
+    an ALREADY-serialized string. Production requires the opposite (a raw
+    dict/list, encoded exactly once by the codec) — passing a pre-dumped
+    string there double-encodes it (see the P0 note now in both
+    orders_repo.deduct_inventory_in_tx and inventory_repo.
+    db_deduct_inventory_for_order). Since `_make_pool_for_conn` below is
+    this test module's stand-in for the REAL get_pool(), it must behave
+    like it, including this codec — call this right before that patch so
+    every setup INSERT above it (which correctly used a pre-dumped string
+    for the then-bare connection) is unaffected, and only the
+    commit_order_transaction call after it sees the codec.
+    """
+    await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
+
+
 def _make_pool_for_conn(conn):
     """Return a fake pool whose .acquire() yields `conn` without touching it."""
 
@@ -188,6 +209,7 @@ async def test_happy_path_order_committed(db_conn):
     pool = _make_pool_for_conn(db_conn)
     payload = _make_order_payload(order_id, phone, bot_number, items)
 
+    await _register_prod_jsonb_codec(db_conn)
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(restaurant_id):
             await commit_order_transaction(
@@ -241,6 +263,7 @@ async def test_insufficient_stock_raises_and_rolls_back(db_conn):
     pool = _make_pool_for_conn(db_conn)
     payload = _make_order_payload(order_id, phone, bot_number, items, subtotal=Decimal("15000"), total=Decimal("15000"))
 
+    await _register_prod_jsonb_codec(db_conn)
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(restaurant_id):
             with pytest.raises(InsufficientStockError) as exc_info:
@@ -391,6 +414,7 @@ async def test_cart_not_deleted_on_insufficient_stock(db_conn):
     pool = _make_pool_for_conn(db_conn)
     payload = _make_order_payload(order_id, phone, bot_number, items)
 
+    await _register_prod_jsonb_codec(db_conn)
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(restaurant_id):
             with pytest.raises(InsufficientStockError):

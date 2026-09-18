@@ -165,6 +165,85 @@ def build_transform_url(cloudinary_url: str, variant: str) -> str:
     return cloudinary_url.replace("/upload/", f"/upload/{transform}/", 1)
 
 
+# ── Delivery/pickup payment-proof upload (docs/claude/delivery-web.md chunk 3) ─
+#
+# Distinct from sign_upload_params() above: menu photos use a browser-direct
+# upload (the server never touches the bytes) because they're an authenticated
+# admin action with no reason to route large files through our own process. A
+# payment-proof screenshot is different — it's PUBLIC unauthenticated input
+# (a diner_sessions token, not an admin JWT) and the spec requires the SERVER
+# to actually validate "this is really an image" before trusting it, which is
+# only possible if the server receives the bytes. Same Cloudinary account,
+# same config — NOT a second uploader.
+
+_MAX_PROOF_BYTES = 8 * 1024 * 1024  # 8 MB
+_ALLOWED_PROOF_CONTENT_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"}
+
+# Real magic-byte checks — never trust the client's declared Content-Type
+# alone, since that header is fully attacker-controlled.
+_JPEG_MAGIC = b"\xff\xd8\xff"
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_GIF_MAGICS = (b"GIF87a", b"GIF89a")
+_WEBP_RIFF = b"RIFF"
+_WEBP_TAG = b"WEBP"
+
+
+def _looks_like_image(data: bytes) -> bool:
+    if not data:
+        return False
+    if data.startswith(_JPEG_MAGIC) or data.startswith(_PNG_MAGIC):
+        return True
+    if any(data.startswith(m) for m in _GIF_MAGICS):
+        return True
+    if data.startswith(_WEBP_RIFF) and len(data) >= 12 and data[8:12] == _WEBP_TAG:
+        return True
+    return False
+
+
+def upload_delivery_proof(org_id: int, file_bytes: bytes, content_type: str) -> dict:
+    """Server-side upload of a Nequi/Bancolombia transfer-proof screenshot.
+
+    Validates size and that the bytes are ACTUALLY an image (magic-byte
+    check — the declared Content-Type is advisory only) before ever calling
+    Cloudinary. Returns {"secure_url": ..., "public_id": ...} on success, or
+    {"error": <reason>} — reasons: "config_missing", "empty_file",
+    "file_too_large", "not_an_image", "upload_failed". Never raises.
+
+    The caller (app/routes/diner_delivery.py) is responsible for binding the
+    returned URL to the uploading diner's OWN session before it can ever be
+    attached to an order — this function knows nothing about sessions/orders.
+    """
+    if not all([_CLOUD_NAME, _API_KEY, _API_SECRET]):
+        log.warning("image_host.upload_delivery_proof.config_missing", org_id=org_id)
+        return {"error": "config_missing"}
+    if not file_bytes:
+        return {"error": "empty_file"}
+    if len(file_bytes) > _MAX_PROOF_BYTES:
+        return {"error": "file_too_large"}
+    if not _looks_like_image(file_bytes):
+        log.warning(
+            "image_host.upload_delivery_proof.not_an_image",
+            org_id=org_id, declared_content_type=content_type,
+        )
+        return {"error": "not_an_image"}
+
+    try:
+        import cloudinary.uploader  # type: ignore[import]
+        import cloudinary           # type: ignore[import]
+
+        cloudinary.config(cloud_name=_CLOUD_NAME, api_key=_API_KEY, api_secret=_API_SECRET)
+        folder = f"mesio/r_{org_id}/delivery_proof"
+        result = cloudinary.uploader.upload(file_bytes, folder=folder, resource_type="image")
+        secure_url = result.get("secure_url")
+        if not secure_url:
+            log.warning("image_host.upload_delivery_proof.no_url_returned", org_id=org_id)
+            return {"error": "upload_failed"}
+        return {"secure_url": secure_url, "public_id": result.get("public_id")}
+    except Exception as exc:
+        log.exception("image_host.upload_delivery_proof.exception", org_id=org_id, error=str(exc))
+        return {"error": "upload_failed"}
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _make_signature(params: dict) -> str:

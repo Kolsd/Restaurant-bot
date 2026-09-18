@@ -39,7 +39,10 @@ def test_waiter_only_sees_waiter_and_myshift():
 
 
 def test_cashier_only_sees_cashier_and_myshift():
-    assert sections_for_roles(["caja"]) == ["cashier", "myshift"]
+    """Cashier roles also grant "delivery" (Domicilios, chunk 4 of the web
+    delivery/pickup wave — docs/claude/delivery-web.md) — a cashier logs
+    into ONE section key that shows both queues, not two separate logins."""
+    assert sections_for_roles(["caja"]) == ["cashier", "delivery", "myshift"]
 
 
 def test_kitchen_only_sees_kitchen_and_myshift():
@@ -58,6 +61,7 @@ def test_multi_role_caja_mesero_sees_both_plus_myshift():
     """A user with roles.staff = ['caja', 'mesero'] must see BOTH sections."""
     sections = sections_for_roles(["caja", "mesero"])
     assert "cashier" in sections
+    assert "delivery" in sections  # caja also grants Domicilios (chunk 4)
     assert "waiter" in sections
     assert "myshift" in sections
     # No section the user doesn't have a role for.
@@ -87,8 +91,8 @@ def test_legacy_english_role_aliases_map_correctly():
     in the codebase (auth_routes._ROLE_REDIRECT) must resolve the same as
     their Spanish canonical role."""
     assert sections_for_roles(["waiter"]) == ["waiter", "myshift"]
-    assert sections_for_roles(["cashier"]) == ["cashier", "myshift"]
-    assert sections_for_roles(["cajero"]) == ["cashier", "myshift"]
+    assert sections_for_roles(["cashier"]) == ["cashier", "delivery", "myshift"]
+    assert sections_for_roles(["cajero"]) == ["cashier", "delivery", "myshift"]
     assert sections_for_roles(["cook"]) == ["kitchen", "myshift"]
     assert sections_for_roles(["cocinero"]) == ["kitchen", "myshift"]
     assert sections_for_roles(["delivery"]) == ["courier", "myshift"]

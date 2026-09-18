@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v13.0 (head `0081_users_org_location`; 1772 tests with DB)
+# Mesio Restaurant Bot — v13.0 (head `0084_orders_customer_email`; 1920 tests with DB, run as `postgres`)
 
 Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_use). Product: the diner's own web channel (QR → `/chat/{table_id}`); WhatsApp is being retired.
 
@@ -18,6 +18,7 @@ Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_
 | `agent*.py`, `orders.py`, `orders_repo.py`, `inbox_worker.py`, `state_store.py`, `chat.py` | `bot-rules.md` (MANDATORY) |
 | Repos, deps, tenant scope, alembic, org/location, branches | `rls-multitenant.md` |
 | Structure, DB, webhook/inbox, Redis, scheduler, Decimal, feature flags | `architecture.md` |
+| Delivery / pickup web wave, `/pedir`, `/pedido` | `delivery-web.md` (MANDATORY) |
 | Wompi / Bold / payments | `payments.md` |
 | New tests, DB fixtures, frontend lint | `testing.md` |
 | `app/static/**`, visual catalog | `frontend.md` |
@@ -32,7 +33,7 @@ Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_
 1c. ~~Unified staff app `/staff`~~ (2026-09-17, d18118b: admin-dashboard shell, sections per role; old role pages removed; demo seed `scripts/dev/seed_staff_app_demo.py`). Open: SW never registered + static max-age 24h → tablets may run stale JS after deploy; orders-rescued metric must bucket days in the restaurant's timezone.
 2. ~~Real-time SSE + Redis pub/sub~~ (2026-09-17, bce415a: `app/services/realtime.py`, `/api/staff/stream`, `/api/diner/stream`, `mesio-realtime.js`; polling stays as a 60s net). Prod needs `REDIS_URL` (4 workers).
 2b. ~~POS quick-invoice P1~~ (2026-09-17: no org_id + NULL table_id → 500; branch_id fell back to the org id; the check was never claimed so it stayed unpaid).
-3. Web delivery wave (decisions closed 2026-09-12): per-organization link + GPS assigns location, Turnstile, pickup + delivery, cashier accepts first, live map (Mapbox), live chat with cashier, staff with `location_id`, turn off delivery via WhatsApp.
+3. Web delivery wave — spec `docs/claude/delivery-web.md`. Phase A backend done (2026-09-18, chunks 1-4: data model, `/pedir` entry + sede ladder, checkout, cashier endpoints; staff JWT now carries `location_id`). Next: customer page `/pedir/{slug}`, status page `/pedido/{code}`, cashier + courier UI, per-sede config UI, delete `agent_external.py`. Phase B (Mapbox map, live chat) later.
 4. First customer: 8-day trial via `comp_until`.
 5. Sweep `json.dumps()` passed to `$n::jsonb`.
 6. Turn off remaining WhatsApp (migrate e2e harness first).

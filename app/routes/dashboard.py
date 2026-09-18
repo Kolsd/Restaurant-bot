@@ -280,16 +280,6 @@ class QrClaimRequest(BaseModel):
         return digits
 
 
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Haversine formula — same as db_resolve_location_by_gps."""
-    from math import radians, sin, cos, asin, sqrt
-    r1, r2 = radians(lat1), radians(lat2)
-    dlat = r2 - r1
-    dlon = radians(lon2 - lon1)
-    a = sin(dlat / 2) ** 2 + cos(r1) * cos(r2) * sin(dlon / 2) ** 2
-    return 6371.0 * 2 * asin(sqrt(a))
-
-
 @router.post("/api/qr-claim")
 async def post_qr_claim(request: Request, body: QrClaimRequest):
     """Register a pre-binding between a phone and a table QR scan.
@@ -326,7 +316,7 @@ async def post_qr_claim(request: Request, body: QrClaimRequest):
         loc_lon = rest.get("longitude")
         if loc_lat is not None and loc_lon is not None:
             try:
-                distance_km = _haversine_km(
+                distance_km = restaurant_repo.haversine_km(
                     float(body.geo_lat), float(body.geo_lon),
                     float(loc_lat), float(loc_lon),
                 )

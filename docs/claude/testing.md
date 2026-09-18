@@ -90,3 +90,27 @@ Agent 2 (stats_repo) left 6 metrics as `null` in `db_branches_comparison` becaus
 Agent 3 (loyalty_repo) left 2:
 - `roi_multiple` = null (missing campaign spend tracking — future optional field)
 - `birthdays` segment count = 0 if the schema has no birthday column (conditional)
+
+## The test DB role decides whether RLS is even exercised (learned 2026-09-17)
+
+`pytest tests/ --ignore=tests/e2e --ignore=tests/ai_sim` is green (1845 passed)
+ONLY when `TEST_DATABASE_URL` / `DATABASE_URL` point at the **`postgres`
+superuser**. Point them at `mesio_app` instead — the role RLS actually applies
+to — and ~140 tests fail or error with
+`new row violates row-level security policy for table "restaurant_tables"`.
+
+Cause: most seed helpers open their own `asyncpg.connect(TEST_DB_URL)` and
+INSERT into RLS-FORCEd tenant tables without first pinning `app.org_id`.
+A superuser bypasses RLS entirely, so the gap is invisible; `mesio_app` is not
+exempt even as table owner, because those tables are FORCE.
+
+What this means in practice:
+- Run the suite as `postgres` — that is the documented, green convention.
+- A seed helper that connects on its own MUST call
+  `SELECT set_config('app.org_id', $1::text, false)` before touching a tenant
+  table, and before reading one back (an unscoped SELECT returns no rows, which
+  reads as "the endpoint never wrote it" — that is a lying test, not a passing
+  one). `tests/test_diner_routes.py` was fixed this way.
+- New tests for RLS behaviour should connect as `mesio_app`
+  (`SET LOCAL ROLE mesio_app`) on purpose, like `tests/test_delivery_repo.py`,
+  so the policy is genuinely under test instead of bypassed.

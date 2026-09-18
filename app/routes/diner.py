@@ -58,19 +58,21 @@ from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.services import blocks
 from app.services import database as db
+from app.services import delivery as delivery_service
 from app.services import orders
 from app.services import realtime
 from app.services import state_store
+from app.services import turnstile
 from app.services.agent import chat as agent_chat, _generate_join_code, _JOIN_CODE_RE
 from app.services.logging import get_logger
 from app.services.money import ZERO, currency_exponent, money_mul, money_sum, quantize_money, to_decimal
 from app.services.table_order_commit import deduct_inventory_or_cancel, save_table_order_round
 from app.services.tenant_context import bypass_tenant_scope, tenant_scope
-from app.repositories import diner_sessions_repo, tables_repo
+from app.repositories import delivery_repo, diner_sessions_repo, tables_repo
 
 log = get_logger(__name__)
 
@@ -128,8 +130,41 @@ def _parse_items_list(raw) -> list:
 
 # ── Request models ──────────────────────────────────────────────────────────
 
+_ORDER_MODES = ("dine_in", "delivery", "pickup")
+
+
 class DinerSessionRequest(BaseModel):
-    table_id: str = Field(..., min_length=1, max_length=100)
+    """QR entry (order_mode="dine_in", the original/default shape — table_id
+    required) OR delivery/pickup entry (docs/claude/delivery-web.md chunk 2):
+    the frontend has already called GET /api/diner/org/{slug} and
+    POST /api/diner/order-mode/resolve, so this call carries the already-
+    resolved slug + location_id, never raw GPS — this endpoint does NOT
+    re-run the sede-assignment ladder, it only opens the session."""
+
+    order_mode: str = Field(default="dine_in", max_length=20)
+    table_id: str | None = Field(default=None, min_length=1, max_length=100)
+    slug: str | None = Field(default=None, min_length=1, max_length=100)
+    location_id: int | None = Field(default=None, gt=0)
+    turnstile_token: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("order_mode")
+    @classmethod
+    def _valid_order_mode(cls, v: str) -> str:
+        if v not in _ORDER_MODES:
+            raise ValueError(f"order_mode must be one of {_ORDER_MODES}")
+        return v
+
+    @model_validator(mode="after")
+    def _cross_field_requirements(self) -> "DinerSessionRequest":
+        if self.order_mode == "dine_in":
+            if not self.table_id:
+                raise ValueError("table_id is required for order_mode=dine_in")
+        else:
+            if self.table_id:
+                raise ValueError(f"table_id must not be set for order_mode={self.order_mode}")
+            if not self.slug or not self.location_id:
+                raise ValueError(f"slug and location_id are required for order_mode={self.order_mode}")
+        return self
 
 
 class DinerChatRequest(BaseModel):
@@ -300,23 +335,121 @@ def _cart_error_to_http(error: str) -> HTTPException:
     return HTTPException(status_code=422, detail=error or "No pudimos actualizar tu pedido")
 
 
-async def _opening_turn(bot_number: str, restaurant_name: str, table_name: str) -> dict:
+async def _opening_turn(bot_number: str, restaurant_name: str, table_name: str | None = None) -> dict:
     """Deterministic opening turn (greeting + category chips) — shared by a
-    fresh scan on a free table (create_diner_session) and a participant who
-    just supplied the right join code (diner_join). No LLM round-trip for a
-    fixed template. Caller must already be inside tenant_scope(org_id)."""
+    fresh scan on a free table (create_diner_session), a participant who
+    just supplied the right join code (diner_join), and a delivery/pickup
+    session (no table_name — docs/claude/delivery-web.md chunk 2). No LLM
+    round-trip for a fixed template. Caller must already be inside
+    tenant_scope(org_id)."""
     menu = await db.db_get_menu(bot_number) or {}
     categories = [c for c, dishes in menu.items() if isinstance(dishes, list) and dishes]
     reply_blocks = []
     if categories:
         reply_blocks.append(blocks.build_category_chips_block(categories))
+    greeting = (
+        f"¡Hola! Bienvenido a {restaurant_name}, {table_name}. Esto es lo que tenemos hoy:"
+        if table_name else
+        f"¡Hola! Bienvenido a {restaurant_name}. Esto es lo que tenemos hoy:"
+    )
     return {
-        "message": f"¡Hola! Bienvenido a {restaurant_name}, {table_name}. Esto es lo que tenemos hoy:",
+        "message": greeting,
         "blocks": reply_blocks,
     }
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
+
+async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) -> dict:
+    """order_mode=delivery|pickup entry (docs/claude/delivery-web.md chunk 2).
+
+    Unlike the dine-in path, the sede is already resolved by the time this
+    is called — the frontend calls GET /api/diner/org/{slug} and
+    POST /api/diner/order-mode/resolve first, so `body.slug` +
+    `body.location_id` are trusted-shape but still HOSTILE input (public,
+    unauthenticated) that must be validated against the real org/location
+    relationship, never assumed. table_id stays NULL; location_id carries
+    the resolved sede (docs/claude/delivery-web.md, item C.3).
+    """
+    # Cloudflare Turnstile — delivery/pickup only, never the dine-in QR path
+    # (item D). No-op success when TURNSTILE_SECRET is unset (local/test).
+    if turnstile.is_configured():
+        if not body.turnstile_token or not await turnstile.verify(body.turnstile_token, remote_ip=ip):
+            raise HTTPException(status_code=422, detail="Verificación de seguridad fallida. Intenta de nuevo.")
+
+    # Pre-tenant lookup — org unknown until the slug resolves (mirrors the
+    # dine-in path's table lookup below; db_get_org_by_slug enters
+    # bypass_tenant_scope internally, so this is never nested in a second one).
+    org = await delivery_repo.db_get_org_by_slug(body.slug.strip())
+    if not org:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    org_id = int(org["id"])
+    location_id = int(body.location_id)
+
+    with tenant_scope(org_id):
+        # org_id and location_id are DISTINCT integers — never trust the
+        # caller's pairing without checking the location actually belongs to
+        # this org (same P0 shape as the deleted db_get_restaurant_by_id).
+        location = await db.db_get_location_by_id(location_id)
+        if not location or int(location.get("org_id") or -1) != org_id:
+            raise HTTPException(status_code=404, detail="Sede no encontrada")
+
+        # db_get_location_by_id() does not select delivery_config (chunk 1
+        # added that column to `locations` but did not touch restaurant_repo's
+        # generic getters) — fetch it through delivery_repo, the single
+        # source of truth for that JSONB, and hand it to get_delivery_config()
+        # exactly as docs/claude/delivery-web.md requires ("call the config
+        # resolver, never re-read the JSONB yourself").
+        raw_delivery_config = await delivery_repo.db_get_location_delivery_config(org_id, location_id)
+        cfg = delivery_service.get_delivery_config(org, {**location, "delivery_config": raw_delivery_config})
+        if body.order_mode == "delivery" and not cfg["delivery_enabled"]:
+            raise HTTPException(status_code=422, detail="Esta sede no tiene domicilios activos")
+        if body.order_mode == "pickup" and not cfg["pickup_enabled"]:
+            raise HTTPException(status_code=422, detail="Esta sede no tiene recogida en tienda activa")
+
+        restaurant = await _resolve_diner_restaurant(org_id, location_id)
+        if not restaurant or not restaurant.get("whatsapp_number"):
+            raise HTTPException(status_code=404, detail="Restaurante no configurado para esta sede")
+        bot_number = str(restaurant["whatsapp_number"]).split("_b")[0]
+        restaurant_name = restaurant.get("name") or "nuestro restaurante"
+        feats = _features_dict(restaurant.get("features"))
+        currency = feats.get("currency", "COP")
+
+        token = f"web:{uuid.uuid4()}"
+        await diner_sessions_repo.create_session(
+            token=token,
+            org_id=org_id,
+            bot_number=bot_number,
+            location_id=location_id,
+            table_id=None,
+            table_name=None,
+            order_mode=body.order_mode,
+        )
+
+        turn = await _opening_turn(bot_number, restaurant_name)
+
+    log.info(
+        "diner_session.opened",
+        org_id=org_id,
+        location_id=location_id,
+        order_mode=body.order_mode,
+    )
+
+    return {
+        "token": token,
+        "org_id": org_id,
+        "location_id": location_id,
+        "table_id": None,
+        "table_name": None,
+        "restaurant_name": restaurant_name,
+        "currency": currency,
+        "order_mode": body.order_mode,
+        "requires_join_code": False,
+        "join_code": None,
+        "message": turn["message"],
+        "blocks": turn["blocks"],
+    }
+
 
 @router.post("/session")
 async def create_diner_session(request: Request, body: DinerSessionRequest):
@@ -335,6 +468,11 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
     requires_join_code=True so the UI asks for the code and calls
     POST /api/diner/join. The diner_sessions row (token) is still created so
     that join call has something to resolve.
+
+    order_mode=delivery|pickup (docs/claude/delivery-web.md chunk 2) is
+    delegated to _create_delivery_pickup_session — a materially different
+    flow (no table, a pre-resolved sede, Turnstile) that would only clutter
+    this docstring/branch if inlined here.
     """
     ip = _client_ip(request)
     allowed = await state_store.rate_limit_check(
@@ -342,6 +480,9 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
     )
     if not allowed:
         raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+
+    if body.order_mode != "dine_in":
+        return await _create_delivery_pickup_session(body, ip)
 
     table_id = body.table_id.strip()
 
@@ -400,6 +541,7 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
                 "table_name": table_name,
                 "restaurant_name": restaurant_name,
                 "currency": currency,
+                "order_mode": "dine_in",
                 "requires_join_code": True,
                 "message": "",
                 "blocks": [],
@@ -433,6 +575,7 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         "table_name": table_name,
         "restaurant_name": restaurant_name,
         "currency": currency,
+        "order_mode": "dine_in",
         "requires_join_code": False,
         "join_code": join_code,
         "message": turn["message"],

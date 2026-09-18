@@ -2010,7 +2010,8 @@ async def db_get_default_location(org_id: int) -> dict | None:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, org_id, name, code, address, latitude, longitude,
+                SELECT id, org_id, name, code, address, phone,
+                       latitude, longitude,
                        whatsapp_number, wa_phone_id, wa_access_token,
                        active, timezone, opening_hours,
                        created_at, updated_at
@@ -2070,7 +2071,7 @@ async def db_get_location_by_id(location_id: int) -> dict | None:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, org_id, name, code, address, latitude, longitude,
+                SELECT id, org_id, name, code, address, phone, latitude, longitude,
                        whatsapp_number, wa_phone_id, wa_access_token,
                        active, timezone, opening_hours,
                        created_at, updated_at
@@ -2093,6 +2094,37 @@ async def db_get_location_by_id(location_id: int) -> dict | None:
     return d
 
 
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Standard Haversine great-circle distance in kilometers.
+
+    Single source of truth for this calculation — the delivery/pickup web
+    wave's sede-assignment ladder (app/services/delivery.py) reuses this
+    EXACT function instead of writing a second implementation (see
+    docs/claude/delivery-web.md: "do not write a second haversine").
+
+    It is the true haversine (asin/sqrt form), not the spherical law of
+    cosines (acos form) this function used to compute despite its name. The
+    acos form loses precision at short distances — acos near 1 amplifies float
+    error — and one caller is the 50 m QR-scan geofence in
+    app/routes/dashboard.py, which previously kept its own copy for exactly
+    that reason. One stable formula now serves both the km-scale delivery
+    radii and the metre-scale geofence.
+    """
+    import math  # noqa: PLC0415
+
+    lat1_r = math.radians(lat1)
+    lat2_r = math.radians(lat2)
+    dlat = lat2_r - lat1_r
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(lat1_r) * math.cos(lat2_r) * math.sin(dlon / 2) ** 2
+    )
+    # Clamp to [0, 1] to guard against floating-point drift before sqrt/asin.
+    a = max(0.0, min(1.0, a))
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
 async def db_resolve_location_by_gps(
     org_id: int,
     lat: float,
@@ -2103,19 +2135,10 @@ async def db_resolve_location_by_gps(
 
     Returns None if no active Location of the Org is within range.
 
-    Uses the standard Haversine formula:
-      distance_km = 6371 * acos(
-        cos(radians(lat1)) * cos(radians(lat2))
-        * cos(radians(lon2) - radians(lon1))
-        + sin(radians(lat1)) * sin(radians(lat2))
-      )
-
-    For orgs with few locations (typical: 1-5), we fetch all active locations
-    with GPS and filter in Python — simpler and avoids earthdistance extension
-    dependency.
+    Uses haversine_km() (see that function's docstring). For orgs with few
+    locations (typical: 1-5), we fetch all active locations with GPS and
+    filter in Python — simpler and avoids earthdistance extension dependency.
     """
-    import math  # noqa: PLC0415
-
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     pool = await _get_pool()
@@ -2139,24 +2162,10 @@ async def db_resolve_location_by_gps(
     if not rows:
         return None
 
-    # Haversine filter in Python
-    def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        lat1_r = math.radians(lat1)
-        lat2_r = math.radians(lat2)
-        cos_product = (
-            math.cos(lat1_r)
-            * math.cos(lat2_r)
-            * math.cos(math.radians(lon2) - math.radians(lon1))
-            + math.sin(lat1_r) * math.sin(lat2_r)
-        )
-        # Clamp to [-1, 1] to guard against floating-point drift
-        cos_product = max(-1.0, min(1.0, cos_product))
-        return 6371.0 * math.acos(cos_product)
-
     best: dict | None = None
     best_dist = float("inf")
     for row in rows:
-        dist = _haversine(lat, lon, float(row["latitude"]), float(row["longitude"]))
+        dist = haversine_km(lat, lon, float(row["latitude"]), float(row["longitude"]))
         if dist <= radius_km and dist < best_dist:
             best_dist = dist
             best = row
@@ -2267,7 +2276,7 @@ async def db_update_location(location_id: int, **fields) -> dict | None:
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     _ALLOWED_LOC_FIELDS = {
-        "name", "code", "address", "latitude", "longitude",
+        "name", "code", "address", "phone", "latitude", "longitude",
         "whatsapp_number", "wa_phone_id", "wa_access_token",
         "active", "opening_hours", "timezone",
     }
@@ -2295,7 +2304,8 @@ async def db_update_location(location_id: int, **fields) -> dict | None:
 
     sql = (
         f"UPDATE locations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted
-        f"WHERE id = ${idx} RETURNING id, org_id, name, code, address, latitude, longitude, "
+        f"WHERE id = ${idx} RETURNING id, org_id, name, code, address, phone, "
+        f"latitude, longitude, "
         f"whatsapp_number, wa_phone_id, wa_access_token, active, timezone, "
         f"opening_hours, created_at, updated_at"
     )
@@ -2331,7 +2341,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     _ALLOWED_CREATE_FIELDS = {
-        "code", "address", "latitude", "longitude",
+        "code", "address", "phone", "latitude", "longitude",
         "whatsapp_number", "wa_phone_id", "wa_access_token",
         "active", "opening_hours", "timezone",
     }
@@ -2356,7 +2366,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
     sql = (
         f"INSERT INTO locations ({', '.join(col_names)}) "  # noqa: S608 — col names are whitelisted
         f"VALUES ({', '.join(placeholders)}) "
-        f"RETURNING id, org_id, name, code, address, latitude, longitude, "
+        f"RETURNING id, org_id, name, code, address, phone, latitude, longitude, "
         f"whatsapp_number, wa_phone_id, wa_access_token, active, timezone, "
         f"opening_hours, created_at, updated_at"
     )

@@ -52,6 +52,25 @@ def _make_pool_for_conn(conn):
     return pool
 
 
+async def _register_prod_jsonb_codec(conn) -> None:
+    """Register the SAME jsonb codec app/services/database.py's real
+    get_pool() registers on every production connection (encoder=json.dumps,
+    decoder=json.loads).
+
+    conftest.py's shared `db_conn` fixture does NOT register this — its bare
+    asyncpg connection needs an ALREADY-serialized string for a $n::jsonb
+    param. Production requires the opposite (a raw dict/list, encoded
+    exactly once by the codec) — this is the exact P0 double-encoding bug
+    class documented in orders_repo.deduct_inventory_in_tx and
+    inventory_repo.db_deduct_inventory_for_order. `_make_pool_for_conn`
+    above is this test module's stand-in for the REAL get_pool(), so it
+    must behave like it. Call this right before that patch — every setup
+    write above it (which correctly used a pre-dumped string for the
+    then-bare connection) is unaffected; only what runs after sees the
+    codec."""
+    await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
+
+
 # ── Tiny helpers ──────────────────────────────────────────────────────────────
 
 def _uid() -> str:
@@ -328,6 +347,7 @@ class TestDeliveryOrderFlow:
         from app.repositories import orders_repo
 
         fake_pool = _make_pool_for_conn(conn)
+        await _register_prod_jsonb_codec(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=fake_pool)):
             with tenant_scope(rid):
                 await orders_repo.commit_order_transaction(
@@ -394,6 +414,7 @@ class TestDeliveryOrderFlow:
         }
 
         fake_pool = _make_pool_for_conn(conn)
+        await _register_prod_jsonb_codec(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=fake_pool)):
             with tenant_scope(rid):
                 with pytest.raises(InsufficientStockError) as exc_info:
@@ -460,6 +481,7 @@ class TestDeliveryOrderFlow:
         }
 
         fake_pool = _make_pool_for_conn(conn)
+        await _register_prod_jsonb_codec(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=fake_pool)):
             with tenant_scope(rid):
                 await orders_repo.commit_order_transaction(

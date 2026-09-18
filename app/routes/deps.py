@@ -64,8 +64,21 @@ async def get_current_user(request: Request) -> dict:
                 # downstream code that treats this value as "restaurant_id" still works.
                 # The JOIN to restaurants is dropped: parent_restaurant_id is unused by
                 # callers (staff is always scoped to an Org/Location, not a legacy branch).
+                # s.location_id — added to `staff` back in migration 0035
+                # (NOT NULL) — was never selected here despite CLAUDE.md
+                # documenting a "default_location_id" as already resolved:
+                # that value is computed ONLY at login time (app/services/
+                # auth.py) and handed to the frontend once; this per-request
+                # auth dependency (used by get_current_user_scoped on every
+                # authenticated call) was hard-coding location_id=None below
+                # regardless, so no staff-scoped endpoint could ever actually
+                # enforce "your own sede" from the JWT alone. Found and fixed
+                # for chunk 4 (docs/claude/delivery-web.md) — the delivery
+                # cashier endpoints are the first callers that need this to
+                # be real. See memory/mesero-location-gap.md for the same gap
+                # previously observed from the waiter-alerts side.
                 query = """
-                    SELECT s.org_id AS restaurant_id, s.role, s.roles,
+                    SELECT s.org_id AS restaurant_id, s.location_id, s.role, s.roles,
                            NULL::int AS parent_restaurant_id
                     FROM staff s
                     WHERE s.id::text = $1
@@ -100,7 +113,7 @@ async def get_current_user(request: Request) -> dict:
                     # Explicit tenant key (P0 fix 2026-09) — staff.org_id is
                     # always the org id, never ambiguous like users.branch_id.
                     "org_id": staff_member["restaurant_id"],
-                    "location_id": None,
+                    "location_id": staff_member["location_id"],
                     "role": combined_role
                 }
 
