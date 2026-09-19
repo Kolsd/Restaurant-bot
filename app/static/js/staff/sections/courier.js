@@ -144,6 +144,7 @@
   // ── State ───────────────────────────────────────────
   let _activeTab = 'hoy';
   let _currentHash = null;
+  let _lastWebSignature = null;
   let _allOrders = [];
 
   // ── XSS helper ──────────────────────────────────────
@@ -159,7 +160,10 @@
     return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
   }
 
-  function _wazeLink(address) {
+  function _wazeLink(address, lat, lng) {
+    // The GPS pin is what the rider navigates by (docs/claude/delivery-web.md:
+    // the typed address is only guidance) — use it whenever the order has one.
+    if (lat != null && lng != null) return `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
     if (!address) return 'https://waze.com/ul?q=';
     const mapsMatch = address.match(/[?&]q=([-\d.]+),([-\d.]+)/);
     if (mapsMatch) return `https://waze.com/ul?ll=${mapsMatch[1]},${mapsMatch[2]}&navigate=yes`;
@@ -187,8 +191,9 @@
 
     const nameEl = document.getElementById('dom-staff-name');
     if (nameEl) {
-      const staffName = localStorage.getItem('rb_staff_name') || 'Tú';
-      nameEl.textContent = `Hola, ${staffName} 👋`;
+      const fullName = (localStorage.getItem('rb_staff_name') || '').trim();
+      const firstName = fullName ? fullName.split(/\s+/)[0] : '';
+      nameEl.textContent = firstName ? `Hola, ${firstName} 👋` : 'Hola 👋';
     }
     const setEl = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
     setEl('dom-stat-delivered', done.length);
@@ -220,7 +225,7 @@
       activeEl.innerHTML = `
         <div class="active-badge" style="color:#F59E0B;">
           <span class="dot" style="background:#F59E0B;box-shadow:0 0 0 4px rgba(245,158,11,0.15);"></span>
-          Listo para recoger · #${_esc(String(readyOrder.id).slice(0,6))}
+          Listo para recoger · #${_esc(_orderLabel(readyOrder))}
         </div>
         <div class="active-name">${_esc(readyOrder.customer_name || readyOrder.phone || 'Cliente')}</div>
         <div class="active-addr">${safeAddr}</div>
@@ -245,15 +250,21 @@
 
     const cleanPhone = (inRoute.phone || '').replace(/\D/g, '');
     const mapsUrl = _mapsLink(inRoute.lat, inRoute.lng, inRoute.address);
-    const wazeUrl = _wazeLink(inRoute.address);
+    const wazeUrl = _wazeLink(inRoute.address, inRoute.lat, inRoute.lng);
 
     const isPickup = inRoute.status === 'en_camino';
     const isAtDoor = inRoute.status === 'en_puerta';
+    // The new web delivery lifecycle (chunk 7, app/routes/staff_delivery.py)
+    // has no en_puerta step of its own — only en-route and delivered exist,
+    // and the backend already accepts "delivered" straight from en_camino
+    // for these orders — so a web order skips the legacy "Llegué" middle
+    // step and goes straight to the Entregado action.
+    const isWebOrder = inRoute._source === 'web';
+    const showDelivered = isAtDoor || isWebOrder;
 
     let etaText = '';
     if (inRoute.dispatched_at) {
-      const iso = inRoute.dispatched_at.endsWith('Z') ? inRoute.dispatched_at : inRoute.dispatched_at + 'Z';
-      const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+      const mins = Math.floor((Date.now() - mesioParseServerDate(inRoute.dispatched_at).getTime()) / 60000);
       etaText = `${mins} min en ruta`;
     }
 
@@ -266,7 +277,7 @@
     const safeNotes = notesEl.innerHTML;
 
     activeEl.innerHTML = `
-      <div class="active-badge"><span class="dot"></span>Entrega en curso · #${_esc(String(inRoute.id).slice(0,6))}</div>
+      <div class="active-badge"><span class="dot"></span>Entrega en curso · #${_esc(_orderLabel(inRoute))}</div>
       <div class="active-name">${_esc(inRoute.customer_name || inRoute.phone || 'Cliente')}</div>
       <div class="active-addr">${safeAddr}</div>
       ${safeNotes ? `<div class="active-note">"${safeNotes}"</div>` : ''}
@@ -277,7 +288,7 @@
             <div class="step-dot"></div>
             <div class="step-text"><strong>Pickup en restaurante</strong></div>
           </div>
-          <div class="step ${isPickup || isAtDoor ? 'cur' : ''}">
+          <div class="step ${isPickup || showDelivered ? 'cur' : ''}">
             <div class="step-dot"></div>
             <div class="step-text"><strong>En camino</strong><div class="step-sub">${etaText}</div></div>
           </div>
@@ -290,7 +301,11 @@
 
       <div class="cta-row">
         <a class="cta-btn outline" href="tel:+${_esc(cleanPhone)}" aria-label="Llamar" style="flex:0 0 50px;font-size:18px;">📞</a>
-        ${isAtDoor
+        ${isWebOrder
+          ? `<a class="cta-btn outline dom-maps-btn" href="${_esc(mapsUrl)}" target="_blank" rel="noopener" style="flex:0 0 50px;text-align:center;font-size:18px;">🗺️</a>
+             <a class="cta-btn outline" href="${_esc(wazeUrl)}" target="_blank" rel="noopener" style="flex:0 0 60px;font-size:13px;">Waze</a>
+             <button class="cta-btn dom-action-btn" data-action="entregado" data-id="${_esc(String(inRoute.id))}">✅ Entregado</button>`
+          : isAtDoor
           ? `<button class="cta-btn dom-action-btn" data-action="entregado" data-id="${_esc(String(inRoute.id))}">✅ Entregado</button>`
           : `<a class="cta-btn outline dom-maps-btn" href="${_esc(mapsUrl)}" target="_blank" rel="noopener" style="flex:0 0 50px;text-align:center;font-size:18px;">🗺️</a>
              <a class="cta-btn outline" href="${_esc(wazeUrl)}" target="_blank" rel="noopener" style="flex:0 0 60px;font-size:13px;">Waze</a>
@@ -328,10 +343,20 @@
     let items = inRoute.items || [];
     if (typeof items === 'string') { try { items = JSON.parse(items); } catch(_){items=[]; } }
 
-    itemsEl.innerHTML = items.map(i => `<div class="item-row">
-      <div><span class="item-qty">${_esc(String(i.quantity || i.qty || 1))}×</span>${_esc(i.name || '')}</div>
-      <div class="item-price">${mesioFmt((i.price || 0) * (i.quantity || i.qty || 1))}</div>
-    </div>`).join('');
+    // A web delivery/pickup line's own total lives in `subtotal` (cart-line
+    // shape — see app/routes/diner_delivery.py's `_public_order_items_view`
+    // docstring), not `price` — the legacy WhatsApp shape uses `price`.
+    // Falling back to `(i.price || 0) * qty` alone would silently show $0
+    // for every web order's items.
+    itemsEl.innerHTML = items.map(i => {
+      const qty = i.quantity || i.qty || 1;
+      const lineTotal = i.subtotal != null ? i.subtotal : (i.price != null ? i.price * qty : 0);
+      const note = i.note || i.notes;
+      return `<div class="item-row">
+      <div><span class="item-qty">${_esc(String(qty))}×</span>${_esc(i.name || '')}${note ? ` <em>"${_esc(note)}"</em>` : ''}</div>
+      <div class="item-price">${mesioFmt(lineTotal)}</div>
+    </div>`;
+    }).join('');
 
     if (totalEl) {
       const total = inRoute.total || items.reduce((s,i)=>s+(i.price||0)*(i.quantity||i.qty||1),0);
@@ -419,7 +444,7 @@
     if (!done.length) { el.innerHTML = '<div class="dom-list-empty">Sin entregas completadas hoy</div>'; return; }
     el.innerHTML = done.map(o => `<div class="hist-card">
       <div>
-        <div class="hist-id">#${_esc(String(o.id).slice(0,6))} · ${_esc(o.customer_name || o.phone || '')}</div>
+        <div class="hist-id">#${_esc(_orderLabel(o))} · ${_esc(o.customer_name || o.phone || '')}</div>
         <div class="hist-addr">${_esc(o.address || '')}</div>
       </div>
       <div>
@@ -430,27 +455,125 @@
   }
 
   // ── Update order status ───────────────────────────────
+  // A rider may have BOTH a legacy WhatsApp-era delivery (PATCH .../status,
+  // any status string) and a new web delivery/pickup order (chunk 7 —
+  // POST .../en-route or .../delivered, sede+ownership enforced server-side
+  // by app/routes/staff_delivery.py::_require_can_transition) in the same
+  // list — _normalizeWebOrder tags the latter with `_source: 'web'` so this
+  // dispatches to the right API instead of guessing from the id shape.
   async function updateStatus(orderId, status) {
+    const order = _allOrders.find(o => String(o.id) === String(orderId));
+    const isWeb = !!(order && order._source === 'web');
     try {
-      const res = await fetch(`/api/delivery/orders/${orderId}/status`, {
-        method: 'PATCH', headers: mesioHeaders(),
-        body: JSON.stringify({ status })
-      });
-      if (res.ok) { await fetchOrders(); }
-      else { mesioToast('Error al actualizar', 'error'); }
+      let res;
+      if (isWeb) {
+        const path = status === 'en_camino' ? '/en-route' : '/delivered';
+        // Plain string concat (not a template literal) so the two dynamic
+        // segments don't collapse into one unmatchable {PARAM}{PARAM} token
+        // for scripts/lint_frontend.py's FETCH check (see its own
+        // '/api/x/' + id example) — normalizes to the same
+        // /api/staff/delivery/orders/{PARAM}/... prefix as delivery.js's
+        // _postDelivery.
+        res = await fetch('/api/staff/delivery/orders/' + orderId + path, {
+          method: 'POST', headers: mesioHeaders(),
+        });
+      } else {
+        res = await fetch(`/api/delivery/orders/${orderId}/status`, {
+          method: 'PATCH', headers: mesioHeaders(),
+          body: JSON.stringify({ status })
+        });
+      }
+      if (res.ok) { await fetchOrders(); return; }
+      let detail = 'Error al actualizar';
+      try {
+        const data = await res.json();
+        if (data && typeof data.detail === 'string') detail = data.detail;
+      } catch (_) { /* non-JSON error body */ }
+      mesioToast(detail, 'error');
     } catch (_) { mesioToast('Error de conexión', 'error'); }
+  }
+
+  // ── Normalize a web delivery/pickup order (app/routes/staff_delivery.py's
+  // _cashier_order_view shape) into the SAME field names this file's
+  // render functions already expect from the legacy /api/delivery/orders
+  // shape, so _renderHero/_renderActive/etc. need no branching per source.
+  // dispatched_at has no exact web-order equivalent (the web model tracks
+  // WHO/WHEN a courier was assigned, not a separate "left for delivery"
+  // timestamp) — courier_assigned_at is the closest available proxy.
+  // The code the customer sees on /pedido/{code} and says on the phone —
+  // not a slice of the internal id ("#WEB-49"), which nobody can match.
+  function _orderLabel(o) {
+    return o.public_code ? String(o.public_code) : String(o.id).slice(0, 6);
+  }
+
+  function _normalizeWebOrder(o) {
+    return {
+      id: o.id,
+      public_code: o.public_code,
+      status: o.status,
+      order_type: o.order_type,
+      customer_name: o.customer_name,
+      phone: o.customer_phone,
+      address: o.address,
+      lat: o.delivery_lat,
+      lng: o.delivery_lon,
+      notes: o.notes,
+      items: o.items,
+      total: o.total,
+      tip_amount: o.tip_amount,
+      paid: !!o.paid,
+      payment_method: o.payment_method,
+      dispatched_at: o.courier_assigned_at,
+      delivered_at: o.delivered_at,
+      created_at: o.created_at,
+      _source: 'web',
+    };
+  }
+
+  // GET /orders/mine returns the courier's FULL history (no date filter —
+  // the endpoint's job is ownership scoping, not a time window), unlike the
+  // legacy /api/delivery/orders. Without this filter, "entregadas" in the
+  // hero stats and the "Completados hoy" history tab would grow across every
+  // day this rider has ever worked. Uses the BROWSER's local date, not the
+  // sede's own timezone (docs/claude/status.md already flags per-timezone
+  // day-bucketing as an open item elsewhere) — good enough for "today" on a
+  // rider's own phone, not sede-timezone-exact.
+  function _isTodayIso(iso) {
+    const d = mesioParseServerDate(iso);
+    if (!d) return false;
+    const now = new Date();
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  }
+
+  // ── Fetch the courier's OWN web delivery/pickup orders (chunk 7) — the
+  // smallest sede-scoped endpoint added for this: GET
+  // /api/staff/delivery/orders/mine, filtered server-side to
+  // courier_staff_id = the caller (never another rider's queue, and never
+  // client-filtered — see app/routes/staff_delivery.py::list_my_delivery_orders).
+  async function fetchWebOrders() {
+    try {
+      const res = await fetch('/api/staff/delivery/orders/mine', { headers: mesioHeaders() });
+      mesioTrackFetch(res.ok);
+      if (res.status === 401) { window.location.href = '/login'; return []; }
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.orders || [])
+        .filter(o => o.status !== 'entregado' || _isTodayIso(o.delivered_at))
+        .map(_normalizeWebOrder);
+    } catch (_) { mesioTrackFetch(false); return []; }
   }
 
   // ── Fetch orders ──────────────────────────────────────
   async function fetchOrders() {
-    try {
-      const res = await fetch('/api/delivery/orders', { headers: mesioHeaders() });
-      mesioTrackFetch(res.ok);
-      if (!res.ok) { if (res.status === 401) { window.location.href = '/login'; } return; }
-      const data = await res.json();
-      _allOrders = data.orders || [];
-      _render();
-    } catch (_) { mesioTrackFetch(false); }
+    // ONLY the courier's own orders, scoped on the server (courier + sede).
+    // This used to also merge the WhatsApp-era GET /api/delivery/orders,
+    // which returns EVERY delivery order of the org — any sede, any courier,
+    // with customer name/phone/address — so a rider saw everyone's orders
+    // and every web order twice. WhatsApp delivery is switched off in this
+    // wave (docs/claude/delivery-web.md), so that list has nothing of this
+    // rider's that /orders/mine does not already return.
+    _allOrders = await fetchWebOrders();
+    _render();
   }
 
   function _render() {
@@ -465,16 +588,38 @@
   }
 
   // ── Hash check for efficient polling ─────────────────
+  // The legacy hash endpoint only covers WhatsApp-era orders, so a
+  // web-order-only change (e.g. the cashier assigns/reassigns a courier)
+  // would never flip `data.hash` and this rider would miss it. Web orders
+  // have no server-side hash of their own (the smallest addition for this
+  // chunk was the /orders/mine list endpoint, not a second hash endpoint —
+  // its own payload is tiny, so a cheap client-side signature is enough).
+  function _webOrdersSignature(orders) {
+    return orders.map(o => o.id + ':' + o.status + ':' + (o.courier_staff_id || '')).sort().join('|');
+  }
+
   async function checkUpdates() {
+    let legacyChanged = false;
     try {
       const res = await fetch('/api/delivery/check-updates', { headers: mesioHeaders() });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.hash !== _currentHash) {
-        _currentHash = data.hash;
-        fetchOrders();
+      if (res.ok) {
+        const data = await res.json();
+        if (data.hash !== _currentHash) { _currentHash = data.hash; legacyChanged = true; }
       }
     } catch (_) { /* silent: mobile network */ }
+
+    let webChanged = false;
+    try {
+      const res = await fetch('/api/staff/delivery/orders/mine', { headers: mesioHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        const sig = _webOrdersSignature(data.orders || []);
+        webChanged = sig !== _lastWebSignature;
+        _lastWebSignature = sig;
+      }
+    } catch (_) { /* silent: mobile network */ }
+
+    if (legacyChanged || webChanged) fetchOrders();
   }
 
   // ── Status bar clock (was courier.html's inline <script>) ──────────
@@ -488,6 +633,7 @@
     container.innerHTML = TEMPLATE;
     _activeTab = 'hoy';
     _currentHash = null;
+    _lastWebSignature = null;
 
     document.querySelectorAll('.dom-tab').forEach(btn => {
       btn.addEventListener('click', () => switchTab(btn.dataset.tab));

@@ -73,6 +73,11 @@ def _post(client, url, **kwargs):
     return client.post(url, **kwargs)
 
 
+def _patch(client, url, **kwargs):
+    _reset_pool()
+    return client.patch(url, **kwargs)
+
+
 def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
@@ -693,5 +698,78 @@ def test_non_cashier_non_admin_role_is_refused(client):
 
         resp = _get(client, "/api/staff/delivery/orders", headers=_auth(token))
         assert resp.status_code == 403
+    finally:
+        _run(_teardown_org(org_id))
+
+
+# ── Kitchen "Listo" on a WEB order (PATCH /api/kitchen/delivery-orders/{id}/status) ──
+# The legacy handler let the kitchen set any status, never told the
+# customer's status page, and sent WhatsApp (+ the WhatsApp NPS) to the
+# order's `phone` — a `web:<uuid>` identity for web orders.
+
+
+def test_kitchen_marks_a_web_order_ready_without_whatsapp_and_notifies_the_customer(client):
+    from unittest.mock import AsyncMock, patch
+
+    org_id = _run(_seed_org("Kitchen Ready Org"))
+    try:
+        loc = _run(_seed_location(org_id))
+        cook = _run(_seed_staff(org_id, loc, role="cocina"))
+        token = _run(_create_staff_token(cook))
+        order_id = _run(_seed_order(
+            org_id=org_id, location_id=loc, status="en_preparacion", channel="web_chat",
+        ))
+
+        with patch("app.routes.tables.send_wa_msg", new=AsyncMock()) as wa, \
+             patch("app.routes.tables.trigger_nps", new=AsyncMock()) as nps, \
+             patch("app.services.realtime.publish_delivery_status", new=AsyncMock()) as pub:
+            resp = _patch(client, 
+                f"/api/kitchen/delivery-orders/{order_id}/status",
+                json={"status": "listo"}, headers=_auth(token),
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert _run(_fetch_order(order_id))["status"] == "listo"
+        wa.assert_not_called()
+        nps.assert_not_called()
+        pub.assert_awaited_once()
+        assert pub.await_args.args[2] == order_id, "the customer's page must be told about THIS order"
+    finally:
+        _run(_teardown_org(org_id))
+
+
+def test_kitchen_cannot_move_a_web_order_to_any_other_status(client):
+    org_id = _run(_seed_org("Kitchen Other Status Org"))
+    try:
+        loc = _run(_seed_location(org_id))
+        token = _run(_create_staff_token(_run(_seed_staff(org_id, loc, role="cocina"))))
+        order_id = _run(_seed_order(
+            org_id=org_id, location_id=loc, status="en_preparacion", channel="web_chat",
+        ))
+        for status in ("en_camino", "entregado", "cancelado", "confirmado"):
+            resp = _patch(client, 
+                f"/api/kitchen/delivery-orders/{order_id}/status",
+                json={"status": status}, headers=_auth(token),
+            )
+            assert resp.status_code == 409, (status, resp.text)
+        assert _run(_fetch_order(order_id))["status"] == "en_preparacion"
+    finally:
+        _run(_teardown_org(org_id))
+
+
+def test_kitchen_cannot_mark_ready_before_the_cashier_accepts(client):
+    org_id = _run(_seed_org("Kitchen Before Accept Org"))
+    try:
+        loc = _run(_seed_location(org_id))
+        token = _run(_create_staff_token(_run(_seed_staff(org_id, loc, role="cocina"))))
+        order_id = _run(_seed_order(
+            org_id=org_id, location_id=loc, status="pendiente_aceptacion", channel="web_chat",
+        ))
+        resp = _patch(client, 
+            f"/api/kitchen/delivery-orders/{order_id}/status",
+            json={"status": "listo"}, headers=_auth(token),
+        )
+        assert resp.status_code == 409, resp.text
+        assert _run(_fetch_order(order_id))["status"] == "pendiente_aceptacion"
     finally:
         _run(_teardown_org(org_id))

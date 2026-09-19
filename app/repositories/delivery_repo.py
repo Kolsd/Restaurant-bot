@@ -656,6 +656,41 @@ async def db_mark_en_route(
     return dict(row) if row else None
 
 
+async def db_mark_ready(org_id: int, order_id: str) -> Optional[dict]:
+    """Kitchen marks a web delivery/pickup order ready (`listo`). Only from
+    `en_preparacion` — i.e. only after the cashier accepted it — enforced in
+    the WHERE, so the kitchen can never jump a web order past acceptance or
+    straight to delivered.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            f"""
+            UPDATE orders SET status = $3
+             WHERE id = $1 AND org_id = $2 AND status = $4
+            RETURNING {_ORDER_FIELDS}
+            """,
+            order_id, org_id, STATUS_READY, STATUS_IN_PREPARATION,
+        )
+    if row:
+        log.info("delivery.order_ready", org_id=org_id, order_id=order_id)
+    return dict(row) if row else None
+
+
+async def db_get_order_channel(org_id: int, order_id: str) -> Optional[dict]:
+    """Just enough of an order to route it: channel, status, location_id.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT channel, status, location_id FROM orders WHERE id = $1 AND org_id = $2",
+            order_id, org_id,
+        )
+    return dict(row) if row else None
+
+
 async def db_claim_order_nps(org_id: int, order_id: str) -> bool:
     """Atomically record that the customer answered this order's survey
     (rated or skipped). True only for the FIRST call on a delivered order;
@@ -717,6 +752,58 @@ async def db_mark_delivered(
     if row:
         log.info("delivery.order_delivered", org_id=org_id, order_id=order_id)
     return dict(row) if row else None
+
+
+# ── Courier's own queue + roster (chunk 7) ──────────────────────────────────
+
+# Role names (Spanish + legacy English alias) that grant the courier
+# section — mirrors app/routes/staff_delivery.py::_COURIER_ROLES. Kept as a
+# local tuple (not imported) to avoid a routes -> repositories import.
+_COURIER_ROLE_NAMES = ("domiciliario", "delivery")
+
+
+async def db_list_delivery_orders_for_courier(
+    org_id: int, location_id: int, courier_staff_id: str
+) -> list[dict]:
+    """List delivery/pickup orders assigned to ONE courier, in ONE sede —
+    the courier section's "my orders" feed (docs/claude/delivery-web.md,
+    chunk 7). Never another courier's orders: filtered by courier_staff_id
+    in the SQL, not just by what the frontend chooses to render.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT {_ORDER_FIELDS} FROM orders
+            WHERE org_id = $1 AND location_id = $2 AND courier_staff_id = $3
+            ORDER BY created_at DESC
+            """,
+            org_id, location_id, courier_staff_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def db_list_couriers_for_sede(org_id: int, location_id: int) -> list[dict]:
+    """Active staff with a courier role (domiciliario/delivery) in ONE sede
+    — feeds the cashier's 'Asignar domiciliario' picker (chunk 7). Role
+    matching mirrors app/routes/staff_delivery.py::_roles_from_staff_row:
+    the `roles` jsonb array when present, else the single `role` column.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id::text, name
+            FROM staff
+            WHERE org_id = $1 AND location_id = $2 AND active = true
+              AND (role = ANY($3::text[]) OR roles ?| $3::text[])
+            ORDER BY name ASC
+            """,
+            org_id, location_id, list(_COURIER_ROLE_NAMES),
+        )
+    return [dict(r) for r in rows]
 
 
 # ── Courier validation (chunk 4) ────────────────────────────────────────────

@@ -606,7 +606,16 @@ def test_every_cashier_and_courier_transition_publishes_delivery_topic():
         location_id = _run(_seed_location(org_id))
         cashier_id = _run(_seed_staff(org_id, location_id, role="caja"))
         courier_id = _run(_seed_staff(org_id, location_id, role="domiciliario"))
-        scope = {"user": {}, "org_id": org_id, "location_id": location_id, "staff_id": cashier_id}
+        # Chunk 7 (docs/claude/delivery-web.md) added is_admin/is_cashier/
+        # is_courier to the scope dict delivery_scope() resolves — the
+        # per-endpoint role gates (_require_cashier_or_admin,
+        # _require_can_transition) read them directly. This hand-built scope
+        # bypasses that dependency (see the docstring above for why), so it
+        # must mirror a CASHIER's resolved scope by hand.
+        scope = {
+            "user": {}, "org_id": org_id, "location_id": location_id, "staff_id": cashier_id,
+            "is_admin": False, "is_cashier": True, "is_courier": False,
+        }
 
         async def _drain_topics(queue, n=2):
             topics = set()

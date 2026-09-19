@@ -852,6 +852,17 @@
         localStorage.removeItem('rb_staff_id');
       }
 
+      // The staff sections greet by name from rb_staff_name / rb_name, but no
+      // login ever wrote them, so every rider saw "Hola, Tú". Clear them when
+      // absent so a previous user's name never lingers on a shared device.
+      if (data.name) {
+        localStorage.setItem('rb_staff_name', String(data.name));
+        localStorage.setItem('rb_name', String(data.name));
+      } else {
+        localStorage.removeItem('rb_staff_name');
+        localStorage.removeItem('rb_name');
+      }
+
       if (resolvedRestaurantId) {
         localStorage.setItem('rb_staff_restaurant_id', String(resolvedRestaurantId));
       }

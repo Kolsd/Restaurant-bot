@@ -417,6 +417,20 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/status",
         ],
     },
+    "staff:delivery": {
+        "js": "staff/sections/delivery.js",
+        "required_button_labels": [
+            "Aceptar",
+            "Rechazar",
+            "Asignar",
+            "En camino",
+            "Entregado",
+        ],
+        "required_fetches": [
+            "/api/staff/delivery/orders",
+            "/api/staff/delivery/couriers",
+        ],
+    },
     "staff:waiter": {
         "js": "staff/sections/waiter.js",
         "required_button_labels": [

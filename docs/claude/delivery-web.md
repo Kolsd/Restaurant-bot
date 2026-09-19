@@ -145,6 +145,20 @@ pendiente_aceptacion → cancelado (customer, only before acceptance)
 - Delete `app/services/agent_external.py` and the delivery/pickup routing that
   reaches it from `app/services/agent.py`, plus the tests that exist only to
   cover that flow.
+- **Also delete or lock down `GET /api/delivery/orders`** (`app/routes/orders_routes.py`).
+  It returns EVERY delivery order of the org — any sede, any courier, with
+  customer name/phone/address — to any authenticated staff member. The courier
+  screen stopped using it in chunk 7 (it now reads the server-scoped
+  `/api/staff/delivery/orders/mine`); nothing web-side depends on it.
+
+### Known open items found during verification (not yet fixed)
+- The kitchen KDS delivery feed (`tables_repo.db_get_delivery_orders_for_cashier`,
+  `/api/kitchen/delivery-orders`) is scoped by org only, not by sede: in a
+  multi-sede org every kitchen sees every sede's delivery tickets. Same gap
+  class as the waiter alerts (memory: mesero-location-gap). Staff JWTs carry
+  `location_id` since chunk 4, so the data to filter by now exists.
+- Multi-sede orgs have no UI to assign a sede to staff yet; until then their
+  new staff have `location_id` NULL and the Domicilios section refuses them.
 - Do NOT touch the Meta/Twilio webhooks or the salon WhatsApp flow yet: those are
   removed in the next step, only AFTER `tests/e2e` is migrated to the web
   channel. Never delete before the equivalent harness exists.

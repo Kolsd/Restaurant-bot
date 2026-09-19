@@ -22,6 +22,8 @@
   var SECTION_META = {
     cashier: { label: 'Caja',       jsFile: 'cashier.js',
       icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1"/><path d="M2 7h12M5 10h2M9 10h2"/></svg>' },
+    delivery: { label: 'Domicilios', jsFile: 'delivery.js',
+      icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h7v6H2z"/><path d="M9 7h3l2 2.5V10h-5z"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="12.5" r="1.5"/></svg>' },
     waiter:  { label: 'Mesero',     jsFile: 'waiter.js',
       icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>' },
     kitchen: { label: 'Cocina',     jsFile: 'kitchen.js',
@@ -33,7 +35,11 @@
     myshift: { label: 'Mi turno',   jsFile: 'myshift.js',
       icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l2.5 1.5"/></svg>' },
   };
-  var SECTION_ORDER = ['cashier', 'waiter', 'kitchen', 'bar', 'courier', 'myshift'];
+  // Mirrors app.services.staff_sections.ALL_SECTIONS ordering exactly
+  // (cashier, delivery, waiter, kitchen, bar, courier, myshift) — "delivery"
+  // (Domicilios) sits right after "cashier" since it's granted to the same
+  // roles (docs/claude/delivery-web.md, "Cashier UI").
+  var SECTION_ORDER = ['cashier', 'delivery', 'waiter', 'kitchen', 'bar', 'courier', 'myshift'];
   var LAST_SECTION_KEY = 'rb_staff_last_section';
 
   var _currentSection = null;
@@ -152,11 +158,31 @@
     var label = document.createElement('span');
     label.textContent = meta.label; // textContent — safe even though this string is static
     a.appendChild(label);
+    // Unread-count pill — hidden by default, styling from .sb-item .badge
+    // in shared.css (already used by the admin dashboard's sidebar.js).
+    // A section fills this in via MesioStaffShell.setBadge(key, n) from its
+    // own mount()/checkUpdates() loop; the shell itself never counts anything.
+    var badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.style.display = 'none';
+    a.appendChild(badge);
     a.addEventListener('click', function (e) {
       e.preventDefault();
       switchSection(key, _allowedSectionsCache || [key]);
     });
     return a;
+  }
+
+  // ── Sidebar unread badges (e.g. Domicilios "por aceptar" count) ────────
+  // Sections call this from their own polling/SSE handlers; the shell just
+  // owns the DOM element it already renders in _navItem above.
+  function setBadge(key, count) {
+    var item = document.querySelector('.sidebar [data-section="' + key + '"]');
+    var badge = item && item.querySelector('.badge');
+    if (!badge) return;
+    var n = Number(count) || 0;
+    if (n > 0) { badge.textContent = n > 99 ? '99+' : String(n); badge.style.display = ''; }
+    else { badge.style.display = 'none'; }
   }
 
   var _allowedSectionsCache = null;
@@ -298,7 +324,38 @@
 
     var initial = _readInitialSection(sections);
     switchSection(initial, sections);
+
+    // "A new order arriving must be impossible to miss" (docs/claude/
+    // delivery-web.md, chunk 7) means the Domicilios badge has to update
+    // even while the cashier is working the Caja section, not only while
+    // Domicilios itself is mounted — a per-section poll alone would freeze
+    // the count the moment they switch away. Lives here (not in
+    // delivery.js) because this is the one place that already owns a
+    // page-lifetime SSE connection; delivery.js still drives the badge
+    // directly (and more precisely) whenever it IS the mounted section.
+    if (sections.indexOf('delivery') !== -1) {
+      _watchDeliveryBadge();
+    }
   }
+
+  function _watchDeliveryBadge() {
+    function refresh() {
+      if (_currentSection === 'delivery') return; // delivery.js owns it while mounted
+      fetch('/api/staff/delivery/orders?status=pendiente_aceptacion', { headers: mesioHeaders() })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) { if (data) setBadge('delivery', (data.orders || []).length); })
+        .catch(function () { /* best-effort — never blocks the rest of the shell */ });
+    }
+    refresh();
+    mesioLiveInterval(refresh, 15000);
+    if (window.MesioRealtime) {
+      ['order.created', 'order.updated', 'resync'].forEach(function (topic) {
+        MesioRealtime.on(topic, refresh);
+      });
+    }
+  }
+
+  window.MesioStaffShell = { setBadge: setBadge };
 
   document.addEventListener('DOMContentLoaded', boot);
 })();

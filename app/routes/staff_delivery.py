@@ -77,11 +77,16 @@ async def delivery_scope(
     request: Request, user: dict = Depends(get_current_user_scoped),
 ) -> dict:
     """Resolve the caller's org_id + the ONE sede they may act on for every
-    Domicilios endpoint below. Raises:
+    Domicilios endpoint below. Cashier, admin AND courier roles all resolve
+    through here (chunk 7 extends this from cashier/admin-only so the
+    courier's own "my orders" / en-route / delivered calls get the same
+    sede enforcement) — per-endpoint role gates (`_require_cashier_or_admin`,
+    `_require_can_transition`) then decide what each role may actually DO
+    with that scope. Raises:
       403 — role has no access to Domicilios at all.
       400 — admin role, no X-Location-ID header.
       403 — admin's X-Location-ID does not belong to their own org.
-      403 — cashier role with no location_id on their own staff row.
+      403 — cashier/courier role with no location_id on their own staff row.
     """
     roles = _roles_from_role_string(user.get("role"))
     org_id = user.get("org_id") or user.get("restaurant_id") or user.get("branch_id")
@@ -91,7 +96,8 @@ async def delivery_scope(
 
     is_admin = bool(roles & ADMIN_ROLES)
     is_cashier = bool(roles & _CASHIER_ROLES)
-    if not (is_admin or is_cashier):
+    is_courier = bool(roles & _COURIER_ROLES)
+    if not (is_admin or is_cashier or is_courier):
         raise HTTPException(status_code=403, detail="No tienes acceso a Domicilios")
 
     if is_admin:
@@ -106,12 +112,42 @@ async def delivery_scope(
         if not loc or int(loc.get("org_id") or -1) != org_id:
             raise HTTPException(status_code=403, detail="Esa sede no pertenece a tu organización")
     else:
+        # Cashier or courier: their OWN staff row's sede — never client input.
         raw_location_id = user.get("location_id")
         if not raw_location_id:
             raise HTTPException(status_code=403, detail="Tu usuario no tiene una sede asignada")
         location_id = int(raw_location_id)
 
-    return {"user": user, "org_id": org_id, "location_id": location_id, "staff_id": _staff_id_from_user(user)}
+    return {
+        "user": user,
+        "org_id": org_id,
+        "location_id": location_id,
+        "staff_id": _staff_id_from_user(user),
+        "is_admin": is_admin,
+        "is_cashier": is_cashier,
+        "is_courier": is_courier,
+    }
+
+
+def _require_cashier_or_admin(scope: dict) -> None:
+    """Gate for the cashier-only actions (list/accept/reject/assign-courier/
+    couriers) — a courier-only caller is refused even though `delivery_scope`
+    resolved their sede for the endpoints they DO get (orders/mine,
+    en-route, delivered)."""
+    if not (scope["is_admin"] or scope["is_cashier"]):
+        raise HTTPException(status_code=403, detail="Acción exclusiva de caja/administración")
+
+
+def _require_can_transition(scope: dict, order: dict) -> None:
+    """en-route/delivered are shared by cashier/admin (any order in their
+    sede) AND the assigned courier (docs/claude/delivery-web.md, chunk 7:
+    'the rider marks picked up / delivered'). A courier-only caller who is
+    NOT the order's own courier_staff_id is refused — enforced here, not
+    just by hiding the button client-side."""
+    if scope["is_admin"] or scope["is_cashier"]:
+        return
+    if str(order.get("courier_staff_id") or "") != str(scope["staff_id"] or ""):
+        raise HTTPException(status_code=403, detail="Este pedido no está asignado a ti")
 
 
 # ── Pydantic bodies ──────────────────────────────────────────────────────────
@@ -158,6 +194,12 @@ def _cashier_order_view(row: dict) -> dict:
         "delivery_fee": _money(row.get("delivery_fee")),
         "tip_amount": _money(row.get("tip_amount")),
         "total": _money(row.get("total")),
+        # Chunk 7: the courier section's "(pagado)/(cobrar)" label (extended
+        # from the legacy courier.js, which already renders this) needs to
+        # know whether the order was already paid (online/card) or is cash
+        # still to collect — `paid` was already in _ORDER_FIELDS but never
+        # surfaced here.
+        "paid": bool(row.get("paid")),
         "payment_method": row.get("payment_method"),
         "cash_change_for": _money(row.get("cash_change_for")),
         "proof_url": row.get("proof_url"),
@@ -170,6 +212,12 @@ def _cashier_order_view(row: dict) -> dict:
         ),
         "rejected_at": _iso(row.get("rejected_at")),
         "rejection_reason": row.get("rejection_reason"),
+        # Chunk 7: the cashier's "Cerrados hoy" group needs SOME terminal
+        # timestamp for a cancelled order too (a customer can cancel before
+        # acceptance) — these two were already selected by _ORDER_FIELDS but
+        # never surfaced here.
+        "cancelled_at": _iso(row.get("cancelled_at")),
+        "cancelled_reason": row.get("cancelled_reason"),
         "courier_staff_id": str(row["courier_staff_id"]) if row.get("courier_staff_id") else None,
         "courier_assigned_at": _iso(row.get("courier_assigned_at")),
         "delivered_at": _iso(row.get("delivered_at")),
@@ -215,11 +263,39 @@ async def list_delivery_orders(
     status: str | None = Query(default=None, max_length=300),
     scope: dict = Depends(delivery_scope),
 ):
-    """The sede's delivery/pickup queue, newest first, optionally filtered
-    by a comma-separated status list."""
+    """The sede's FULL delivery/pickup queue, newest first, optionally
+    filtered by a comma-separated status list. Cashier/admin only — a
+    courier gets only their OWN assigned orders, at GET /orders/mine below,
+    never this org-wide-per-sede view."""
+    _require_cashier_or_admin(scope)
     statuses = [s.strip() for s in status.split(",") if s.strip()] if status else None
     rows = await delivery_repo.db_list_delivery_orders(scope["org_id"], scope["location_id"], statuses)
     return {"orders": [_cashier_order_view(r) for r in rows]}
+
+
+@router.get("/orders/mine")
+async def list_my_delivery_orders(scope: dict = Depends(delivery_scope)):
+    """The COURIER's own assigned orders in their own sede — never another
+    courier's queue (docs/claude/delivery-web.md, chunk 7). Courier role
+    only; cashier/admin have the broader GET /orders above."""
+    if not scope["is_courier"] or scope["is_admin"] or scope["is_cashier"]:
+        raise HTTPException(status_code=403, detail="Esta vista es solo para domiciliarios")
+    if not scope["staff_id"]:
+        raise HTTPException(status_code=403, detail="No se pudo resolver tu identidad de staff")
+    rows = await delivery_repo.db_list_delivery_orders_for_courier(
+        scope["org_id"], scope["location_id"], scope["staff_id"],
+    )
+    return {"orders": [_cashier_order_view(r) for r in rows]}
+
+
+@router.get("/couriers")
+async def list_couriers(scope: dict = Depends(delivery_scope)):
+    """Active staff with a courier role (domiciliario/delivery) in the
+    caller's own sede — feeds the cashier's 'Asignar domiciliario' picker.
+    Cashier/admin only."""
+    _require_cashier_or_admin(scope)
+    rows = await delivery_repo.db_list_couriers_for_sede(scope["org_id"], scope["location_id"])
+    return {"couriers": [{"id": r["id"], "name": r["name"]} for r in rows]}
 
 
 @router.post("/orders/{order_id}/accept")
@@ -230,7 +306,8 @@ async def accept_delivery_order(
     pendiente_aceptacion — this is what releases the ticket to the kitchen
     KDS (app/repositories/tables_repo.py::db_get_delivery_orders_for_cashier,
     fixed in this same chunk to actually exclude pendiente_aceptacion until
-    now — see that function's docstring)."""
+    now — see that function's docstring). Cashier/admin only."""
+    _require_cashier_or_admin(scope)
     await _require_owned_order(scope, order_id)
     row = await delivery_repo.db_accept_order(
         scope["org_id"], order_id, scope["staff_id"], body.eta_minutes,
@@ -246,7 +323,9 @@ async def accept_delivery_order(
 async def reject_delivery_order(
     order_id: str, body: RejectOrderRequest, scope: dict = Depends(delivery_scope),
 ):
-    """Reject with a mandatory reason. Only from pendiente_aceptacion."""
+    """Reject with a mandatory reason. Only from pendiente_aceptacion.
+    Cashier/admin only."""
+    _require_cashier_or_admin(scope)
     reason = body.reason.strip()
     if not reason:
         raise HTTPException(status_code=422, detail="El motivo de rechazo es obligatorio")
@@ -272,7 +351,8 @@ async def assign_courier(
     Ownership of the ORDER is checked first (404 if it's not even in the
     caller's org+sede) so a cashier can never learn anything about a
     courier-validation rule for an order they cannot see in the first
-    place."""
+    place. Cashier/admin only."""
+    _require_cashier_or_admin(scope)
     await _require_owned_order(scope, order_id)
 
     courier_id = body.courier_staff_id.strip()
@@ -301,8 +381,11 @@ async def assign_courier(
 @router.post("/orders/{order_id}/en-route")
 async def mark_en_route(order_id: str, scope: dict = Depends(delivery_scope)):
     """Move to en_camino — the rider picked it up. Only from
-    en_preparacion/listo."""
-    await _require_owned_order(scope, order_id)
+    en_preparacion/listo. Cashier/admin can act on any order in their sede;
+    a courier may only act on an order assigned to THEM (chunk 7 —
+    `_require_can_transition`, not just a hidden button)."""
+    order = await _require_owned_order(scope, order_id)
+    _require_can_transition(scope, order)
     row = await delivery_repo.db_mark_en_route(
         scope["org_id"], order_id, location_id=scope["location_id"],
     )
@@ -314,8 +397,11 @@ async def mark_en_route(order_id: str, scope: dict = Depends(delivery_scope)):
 
 @router.post("/orders/{order_id}/delivered")
 async def mark_delivered(order_id: str, scope: dict = Depends(delivery_scope)):
-    """Mark entregado (sets delivered_at). Only from en_camino/en_puerta."""
-    await _require_owned_order(scope, order_id)
+    """Mark entregado (sets delivered_at). Only from en_camino/en_puerta
+    (delivery) or en_preparacion/listo (pickup). Same cashier/admin-or-
+    assigned-courier gate as en-route above."""
+    order = await _require_owned_order(scope, order_id)
+    _require_can_transition(scope, order)
     row = await delivery_repo.db_mark_delivered(
         scope["org_id"], order_id, location_id=scope["location_id"],
     )

@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from app.services import database as db
 from app.services import billing
+from app.services import realtime
 from app.services import state_store
 from app.services.agent import trigger_nps
 from app.routes.deps import require_auth, get_current_user, get_current_restaurant, get_current_restaurant_scoped
@@ -19,6 +20,7 @@ from app.services.tenant_db import tenant_connection
 from app.services import loyalty as loyalty_svc
 from app.services.money import to_decimal, money_mul, quantize_money, money_sum
 from app.services.logging import get_logger
+from app.repositories import delivery_repo
 from app.repositories import tables_repo as tr
 
 log = get_logger(__name__)
@@ -677,6 +679,32 @@ async def update_delivery_order_status(request: Request, order_id: str):
     # Without this, any authenticated admin could PATCH any tenant's order.
     restaurant = await get_current_restaurant(request)
     org_id = restaurant["id"]
+
+    # Web delivery/pickup orders (docs/claude/delivery-web.md) have their own
+    # lifecycle: the cashier accepts, the kitchen only marks them ready, the
+    # courier/cashier close them. The legacy path below would (a) let the
+    # kitchen set ANY status, skipping acceptance, (b) never tell the
+    # customer's status page, and (c) send WhatsApp messages and the WhatsApp
+    # NPS to the order's `phone`, which for a web order is a `web:<uuid>`
+    # identity — i.e. call Meta with an invalid number.
+    with tenant_scope(org_id):
+        routing = await delivery_repo.db_get_order_channel(org_id, order_id)
+    if routing and routing.get("channel") == "web_chat":
+        if new_status != "listo":
+            raise HTTPException(
+                status_code=409,
+                detail="Este pedido se gestiona desde Domicilios; la cocina solo lo marca listo.",
+            )
+        with tenant_scope(org_id):
+            ready = await delivery_repo.db_mark_ready(org_id, order_id)
+        if not ready:
+            raise HTTPException(
+                status_code=409,
+                detail="El pedido ya no está en preparación. Actualiza la pantalla.",
+            )
+        await realtime.publish_delivery_status(org_id, ready.get("location_id"), order_id)
+        return {"success": True}
+
     with tenant_scope(org_id):
         await tr.db_update_delivery_order_status(order_id, new_status)
 

@@ -15,6 +15,24 @@ var MESIO_LOCATIONS_KEY        = 'rb_locations';
 var MESIO_CURRENT_LOCATION_KEY = 'rb_current_location_id';
 
 // ── Org/Location helpers ─────────────────────────
+/**
+ * Parse a timestamp from the API into a Date.
+ *
+ * The API sends two shapes: naive TIMESTAMP columns ("2026-09-18T21:12:49")
+ * which are UTC but carry no designator, and TIMESTAMPTZ columns
+ * ("2026-09-18T21:12:49+00:00"). Appending "Z" to everything that does not
+ * end in "Z" turned the second shape into "...+00:00Z" — an Invalid Date —
+ * so every filter on accepted_at / delivered_at / rejected_at / cancelled_at
+ * silently matched nothing. Only append "Z" when there is no zone at all.
+ */
+function mesioParseServerDate(iso) {
+  if (!iso) return null;
+  var s = String(iso);
+  var hasZone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(s);
+  var d = new Date(hasZone ? s : s + 'Z');
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function mesioSetOrg(org, locations, defaultLocationId) {
   try {
     localStorage.setItem(MESIO_ORG_KEY, JSON.stringify(org || {}));
