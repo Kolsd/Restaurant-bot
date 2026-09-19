@@ -2086,7 +2086,7 @@ async def db_verify_branch_is_child(branch_id: int, parent_id: int) -> bool:
     return row is not None
 
 
-async def db_get_delivery_orders_for_cashier() -> list:
+async def db_get_delivery_orders_for_cashier(location_id: int | None = None) -> list:
     """
     Return pending delivery/pickup orders for the kitchen/caja view (last 24h,
     excluding terminal statuses).
@@ -2103,6 +2103,14 @@ async def db_get_delivery_orders_for_cashier() -> list:
     verifying that POST /api/staff/delivery/orders/{id}/accept actually
     releases the ticket to this screen — see tests/test_delivery_cashier.py.
 
+    location_id (chunk 8, "Known open items"): this feed was org-scoped
+    only, so every kitchen of a multi-sede org saw every sede's delivery
+    tickets — same gap class as the waiter alerts (memory:
+    mesero-location-gap). None (the default) keeps the old org-wide
+    behaviour for callers that legitimately want every sede (an admin with
+    no X-Location-ID header — see app/routes/tables.py); a concrete int
+    filters to just that sede.
+
     # Requires active tenant_scope(org_id). RLS filters rows by org_id.
     """
     async with tenant_connection() as conn:
@@ -2114,7 +2122,9 @@ async def db_get_delivery_orders_for_cashier() -> list:
                    'pendiente_aceptacion', 'rechazado',
                    'en_camino', 'en_puerta', 'entregado', 'cancelado'
                )
-               ORDER BY created_at DESC"""
+               AND ($1::bigint IS NULL OR location_id = $1)
+               ORDER BY created_at DESC""",
+            location_id,
         )
     return [dict(r) for r in rows]
 

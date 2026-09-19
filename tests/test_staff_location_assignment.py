@@ -164,3 +164,17 @@ async def test_db_create_staff_persists_the_sede(db_conn):
         )
     assert member["location_id"] == loc
     assert stored == loc
+
+
+async def test_branches_list_carries_each_sedes_own_name(db_conn):
+    """The /locations page (GET /api/team/branches -> db_get_branches) showed
+    the ORGANIZATION's name on every sede card: the legacy `restaurants` view
+    exposes the org name as `name`. Each row must carry the sede's own name."""
+    from app.repositories.restaurant_repo import db_get_branches
+
+    org, locs = await _seed_org(db_conn, 2)
+    with tenant_scope(org):
+        rows = await db_get_branches(org)
+    by_id = {int(r["id"]): r for r in rows}
+    assert by_id[locs[0]]["location_name"] == "Sede 1"
+    assert by_id[locs[1]]["location_name"] == "Sede 2"

@@ -656,23 +656,41 @@ async def db_mark_en_route(
     return dict(row) if row else None
 
 
-async def db_mark_ready(org_id: int, order_id: str) -> Optional[dict]:
+async def db_mark_ready(
+    org_id: int, order_id: str, location_id: Optional[int] = None,
+) -> Optional[dict]:
     """Kitchen marks a web delivery/pickup order ready (`listo`). Only from
     `en_preparacion` — i.e. only after the cashier accepted it — enforced in
     the WHERE, so the kitchen can never jump a web order past acceptance or
     straight to delivered.
 
+    location_id (chunk 8, "Known open items"): optional, defaults to None
+    (no sede filter) so existing callers/tests keep working unchanged —
+    mirrors every other transition in this module (db_accept_order,
+    db_reject_order, ...). app/routes/tables.py passes it so a kitchen can
+    never mark another sede's order ready.
+
     # Requires active tenant_scope(org_id).
     """
     async with tenant_connection() as conn:
-        row = await conn.fetchrow(
-            f"""
-            UPDATE orders SET status = $3
-             WHERE id = $1 AND org_id = $2 AND status = $4
-            RETURNING {_ORDER_FIELDS}
-            """,
-            order_id, org_id, STATUS_READY, STATUS_IN_PREPARATION,
-        )
+        if location_id is not None:
+            row = await conn.fetchrow(
+                f"""
+                UPDATE orders SET status = $3
+                 WHERE id = $1 AND org_id = $2 AND location_id = $5 AND status = $4
+                RETURNING {_ORDER_FIELDS}
+                """,
+                order_id, org_id, STATUS_READY, STATUS_IN_PREPARATION, location_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                f"""
+                UPDATE orders SET status = $3
+                 WHERE id = $1 AND org_id = $2 AND status = $4
+                RETURNING {_ORDER_FIELDS}
+                """,
+                order_id, org_id, STATUS_READY, STATUS_IN_PREPARATION,
+            )
     if row:
         log.info("delivery.order_ready", org_id=org_id, order_id=order_id)
     return dict(row) if row else None

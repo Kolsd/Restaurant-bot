@@ -47,6 +47,20 @@ _LEGACY_KEY_MAP = {
 
 _MONEY_KEYS = ("delivery_fee", "min_order", "radius_km")
 
+# The ONLY payment method keys the web checkout understands (chunk 8,
+# docs/claude/delivery-web.md "Per-sede delivery configuration"). These are
+# the same keys already hardcoded on the frontend's label map
+# (app/static/js/pages/diner-chat.js PAYMENT_METHOD_LABELS /
+# CASH_PAYMENT_KEYS / CARD_PAYMENT_KEYS) and the only ones
+# app/routes/diner_delivery.py's checkout can present to a customer as a
+# real choice — never invent a second set. The locations-UI config form
+# (chunk 8) is the only place these get WRITTEN into a location's
+# delivery_config; the checkout route itself stays config-driven (it
+# accepts whatever the sede's own payment_methods list contains) rather
+# than hardcoding this tuple, so this lives here as the single source of
+# truth for "what a restaurant is allowed to turn on".
+ALLOWED_PAYMENT_METHODS: tuple[str, ...] = ("efectivo", "tarjeta", "nequi", "bancolombia")
+
 
 def _as_dict(value: Any) -> dict:
     """Normalize a JSONB value that may come back as a dict or a JSON string.
@@ -114,6 +128,17 @@ def get_delivery_config(org: Optional[dict], location: Optional[dict]) -> dict:
     resolved["payment_methods"] = list(methods) if isinstance(methods, (list, tuple)) else []
 
     return resolved
+
+
+def get_org_default_config(org: Optional[dict]) -> dict:
+    """The config a location would resolve to if it had NO sede-level
+    override at all — i.e. legacy `organizations.features` values, falling
+    back to the hardcoded defaults. Used by the locations-UI config endpoint
+    (chunk 8) to show the restaurant which effective values are actually
+    "inherited from the org" versus set on the sede itself, without
+    duplicating get_delivery_config()'s precedence logic a second time.
+    """
+    return get_delivery_config(org, None)
 
 
 def delivery_config_to_json(config: dict) -> dict:

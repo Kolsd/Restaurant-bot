@@ -43,6 +43,7 @@ from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
 from app.routes.diner import router as diner_router
 from app.routes.diner_delivery import router as diner_delivery_router
+from app.routes.location_delivery import router as location_delivery_router
 from app.routes.billing import router as billing_router
 from app.routes import nps, inventory
 from app.routes.sync import router as sync_router
@@ -338,6 +339,7 @@ app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)
 app.include_router(diner_router)
 app.include_router(diner_delivery_router)
+app.include_router(location_delivery_router)
 app.include_router(billing_router)
 app.include_router(nps.router)
 app.include_router(inventory.router)

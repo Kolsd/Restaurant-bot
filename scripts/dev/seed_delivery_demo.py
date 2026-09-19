@@ -91,6 +91,9 @@ MENU = {
 SOLD_OUT_DISH = "Ajiaco Santafereño"
 
 FEATURES = {
+    # /api/staff (create/list staff, the /team screen) is gated by this
+    # superadmin module; without it the owner cannot add a cashier or rider.
+    "staff_tips": True,
     "bot_active": True,
     "domicilio_active": True,
     "recoger_active": True,
@@ -103,6 +106,8 @@ CASHIER_NAME = "Camila Torres"
 CASHIER_PIN = "3333"
 COURIER_NAME = "Julián Restrepo"
 COURIER_PIN = "4444"
+OWNER_USERNAME = "dueno.delivery.demo"
+OWNER_PASSWORD = "demo12345"
 
 
 def _forbid_prod(database_url: str) -> None:
@@ -173,6 +178,28 @@ async def _seed_staff(
         )
 
 
+async def _seed_owner(conn: asyncpg.Connection, org_id: int, location_id: int) -> None:
+    """An owner login for the org, so /locations and /team can be exercised
+    (the delivery config and staff sede picker are owner/admin screens).
+    Uses the app's own password hasher so /api/auth/login accepts it."""
+    from app.services.password_hash import hash_password  # noqa: PLC0415
+
+    pw_hash = hash_password(OWNER_PASSWORD)
+    existing = await conn.fetchval("SELECT 1 FROM users WHERE username = $1", OWNER_USERNAME)
+    if existing:
+        await conn.execute(
+            "UPDATE users SET password_hash = $2, role = 'owner', org_id = $3, location_id = $4 "
+            "WHERE username = $1",
+            OWNER_USERNAME, pw_hash, org_id, location_id,
+        )
+    else:
+        await conn.execute(
+            """INSERT INTO users (username, password_hash, restaurant_name, role, org_id, location_id)
+               VALUES ($1, $2, $3, 'owner', $4, $5)""",
+            OWNER_USERNAME, pw_hash, ORG_NAME, org_id, location_id,
+        )
+
+
 async def seed(conn: asyncpg.Connection) -> dict:
     async with conn.transaction():
         org_row = await conn.fetchrow(
@@ -209,6 +236,7 @@ async def seed(conn: asyncpg.Connection) -> dict:
 
         await _seed_staff(conn, org_id, centro_id, CASHIER_NAME, "camila.torres", "caja", CASHIER_PIN)
         await _seed_staff(conn, org_id, centro_id, COURIER_NAME, "julian.restrepo", "domiciliario", COURIER_PIN)
+        await _seed_owner(conn, org_id, centro_id)
 
     return {"org_id": org_id, "centro_id": centro_id, "chapinero_id": chapinero_id}
 
@@ -242,6 +270,7 @@ async def main() -> None:
           f"with org_id={result['org_id']}):")
     print(f"    Cashier:  name='{CASHIER_NAME}'  pin={CASHIER_PIN}  -> sees Cashier + Domicilios")
     print(f"    Courier:  name='{COURIER_NAME}'  pin={COURIER_PIN}  -> sees Courier")
+    print(f"    Owner:    /login  user='{OWNER_USERNAME}'  password={OWNER_PASSWORD}  -> /locations, /team")
     print()
     print("  Ordering page:")
     print(f"    /pedir/{ORG_SLUG}")

@@ -632,17 +632,55 @@ async def force_delete_conversation(request: Request, phone: str):
     return {"success": True}
 
 # ── DELIVERY ORDERS ───────────────────────────────────────────────────
+
+
+def _kitchen_delivery_location_filter(request: Request, user: dict) -> int | None:
+    """Resolve which sede's delivery tickets a kitchen/caja/admin caller may
+    see (docs/claude/delivery-web.md, "Known open items": this feed was
+    org-scoped only, so every kitchen of a multi-sede org saw every sede's
+    delivery tickets). Mirrors the X-Location-ID / own-staff.location_id
+    convention app/routes/staff_delivery.py::delivery_scope already uses —
+    same header name, same "admin picks explicitly, everyone else gets their
+    own sede" shape — rather than inventing a second one.
+
+    Unlike that stricter cashier-only surface, an admin caller here who sends
+    NO header keeps this feed's EXISTING default (every sede) instead of
+    being refused outright — this screen has always been usable org-wide by
+    an admin, and chunk 8 only closes the "sees ANOTHER sede without asking"
+    gap, not that existing convenience.
+
+    Returns None (no filter -> every sede) only for an admin role with no
+    header. Every other caller (kitchen/cocina/bar/caja/mesero/... or an
+    admin WITH a header) gets a concrete int, or the call raises 403 when a
+    non-admin has no sede of their own.
+    """
+    from app.services.staff_sections import ADMIN_ROLES, normalize_role  # noqa: PLC0415
+
+    roles = {normalize_role(r) for r in (user.get("role") or "").split(",") if r.strip()}
+    is_admin = bool(roles & ADMIN_ROLES)
+    header = request.headers.get("X-Location-ID", "").strip()
+
+    if is_admin:
+        return int(header) if header.isdigit() else None
+
+    raw_location_id = user.get("location_id")
+    if not raw_location_id:
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene una sede asignada")
+    return int(raw_location_id)
+
+
 @router.get("/api/kitchen/delivery-orders")
 async def get_delivery_orders(request: Request):
-    await require_auth(request)
+    user = await get_current_user(request)
     import json as _json
 
     # Tenant-scope the read so RLS filters to the authenticated admin's org.
     # Without this, db_get_delivery_orders_for_cashier returned ALL tenants' orders.
     restaurant = await get_current_restaurant(request)
     org_id = restaurant["id"]
+    location_filter = _kitchen_delivery_location_filter(request, user)
     with tenant_scope(org_id):
-        rows = await tr.db_get_delivery_orders_for_cashier()
+        rows = await tr.db_get_delivery_orders_for_cashier(location_filter)
     orders = []
     for r in rows:
         items = r["items"]
@@ -667,11 +705,11 @@ async def get_delivery_orders(request: Request):
 
 @router.patch("/api/kitchen/delivery-orders/{order_id}/status")
 async def update_delivery_order_status(request: Request, order_id: str):
-    await require_auth(request)
+    user = await get_current_user(request)
     body = await request.json()
     new_status = body.get("status", "")
     valid = ["pendiente_pago", "confirmado", "en_preparacion", "listo", "en_camino", "entregado", "cancelado"]
-    
+
     if new_status not in valid:
         raise HTTPException(status_code=400, detail="Estado inválido")
 
@@ -679,6 +717,7 @@ async def update_delivery_order_status(request: Request, order_id: str):
     # Without this, any authenticated admin could PATCH any tenant's order.
     restaurant = await get_current_restaurant(request)
     org_id = restaurant["id"]
+    location_filter = _kitchen_delivery_location_filter(request, user)
 
     # Web delivery/pickup orders (docs/claude/delivery-web.md) have their own
     # lifecycle: the cashier accepts, the kitchen only marks them ready, the
@@ -690,13 +729,19 @@ async def update_delivery_order_status(request: Request, order_id: str):
     with tenant_scope(org_id):
         routing = await delivery_repo.db_get_order_channel(org_id, order_id)
     if routing and routing.get("channel") == "web_chat":
+        # Chunk 8: a kitchen must not act on another sede's order — same
+        # "doesn't exist for you" 404 treatment delivery_repo.py's own
+        # docstrings use for a caller who can't even see a row (as opposed
+        # to a 409 for a real state conflict on a row they DO own).
+        if location_filter is not None and int(routing.get("location_id") or -1) != location_filter:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado en tu sede.")
         if new_status != "listo":
             raise HTTPException(
                 status_code=409,
                 detail="Este pedido se gestiona desde Domicilios; la cocina solo lo marca listo.",
             )
         with tenant_scope(org_id):
-            ready = await delivery_repo.db_mark_ready(org_id, order_id)
+            ready = await delivery_repo.db_mark_ready(org_id, order_id, location_filter)
         if not ready:
             raise HTTPException(
                 status_code=409,

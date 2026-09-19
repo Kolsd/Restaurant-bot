@@ -794,7 +794,7 @@ async def db_get_branches(org_id: int) -> list[dict]:
     async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """
-            SELECT r.*
+            SELECT r.*, l.name AS location_name
             FROM restaurants r
             JOIN locations l ON l.id = r.id
             WHERE l.org_id = $1
@@ -2062,6 +2062,13 @@ async def db_get_location_by_id(location_id: int) -> dict | None:
 
     Includes org_id so the caller can validate ownership (e.g. in
     get_current_location dep — prevent cross-org location spoofing).
+
+    Includes delivery_config (migration 0082) so callers that need the
+    location's own raw config (e.g. app/routes/location_delivery.py, chunk 8)
+    don't need a second query — normalized to a plain dict here the same way
+    opening_hours already is below. Never a second parser of this JSONB
+    elsewhere: app/services/delivery.get_delivery_config() is still the only
+    place that resolves the EFFECTIVE (org-fallback-applied) value.
     """
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
@@ -2072,7 +2079,7 @@ async def db_get_location_by_id(location_id: int) -> dict | None:
                 """
                 SELECT id, org_id, name, code, address, phone, latitude, longitude,
                        whatsapp_number, wa_phone_id, wa_access_token,
-                       active, timezone, opening_hours,
+                       active, timezone, opening_hours, delivery_config,
                        created_at, updated_at
                 FROM locations
                 WHERE id = $1
@@ -2090,6 +2097,14 @@ async def db_get_location_by_id(location_id: int) -> dict | None:
             d["opening_hours"] = {}
     elif val is None:
         d["opening_hours"] = {}
+    cfg = d.get("delivery_config")
+    if isinstance(cfg, str):
+        try:
+            d["delivery_config"] = _json.loads(cfg)
+        except Exception:
+            d["delivery_config"] = {}
+    elif cfg is None:
+        d["delivery_config"] = {}
     return d
 
 

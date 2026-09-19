@@ -141,7 +141,10 @@
     ];
 
     container.innerHTML = branches.map(function (b, idx) {
-      const name = b.name || b.branch_name || b.location_name || ('Sucursal ' + (b.id || idx + 1));
+      // location_name is the SEDE's own name; `name` comes from the legacy
+      // restaurants view and is the ORGANIZATION's name — with several sedes
+      // every card (and the delivery-config modal) read the same.
+      const name = b.location_name || b.branch_name || b.name || ('Sucursal ' + (b.id || idx + 1));
       const addr = b.address || b.location || '';
       const tables = b.table_count || b.tables || '';
       const nps = b.nps_score || b.nps || '';
@@ -177,10 +180,11 @@
         const card = btn.closest('.branch-card');
         const nameEl = card ? card.querySelector('.branch-name') : null;
         const name = nameEl ? nameEl.textContent.trim() : 'sucursal';
+        const branchId = btn.dataset.branchId;
         if (action === 'dashboard') {
           if (typeof mesioToast === 'function') mesioToast('Dashboard de ' + name, 'info', 1500);
         } else if (action === 'settings') {
-          if (typeof mesioToast === 'function') mesioToast('Configuración de ' + name + ' — próximamente', 'info', 1500);
+          if (branchId) { openDeliveryConfigModal(branchId, name); }
         }
       });
     });
@@ -202,6 +206,170 @@
   }
 
   loadLocations();
+
+  // ── Delivery/pickup config modal (per-sede, docs/claude/delivery-web.md
+  //    chunk 8) — GET/PUT /api/locations/{id}/delivery-config. Shows the
+  //    EFFECTIVE values (chunk 1's resolver) and marks which of them are
+  //    inherited from the org default vs set on this sede. ─────────────
+  const PAYMENT_METHOD_LABELS_DC = {
+    efectivo: 'Efectivo', tarjeta: 'Tarjeta (datáfono)', nequi: 'Nequi', bancolombia: 'Bancolombia'
+  };
+  let _dcLocationId = null;
+
+  function _dcFmtMoney(n) {
+    return typeof mesioFmt === 'function' ? mesioFmt(n) : ('$' + n);
+  }
+
+  function _dcSetInherited(spanId, isOverridden, orgValueLabel) {
+    const el = document.getElementById(spanId);
+    if (!el) return;
+    if (isOverridden) {
+      el.textContent = '';
+      el.style.display = 'none';
+    } else {
+      el.textContent = 'Heredado de la organización' + (orgValueLabel ? ' (' + orgValueLabel + ')' : '');
+      el.style.display = '';
+      el.style.cssText += 'font-size:11px;color:var(--text-3);display:block;margin-top:2px;';
+    }
+  }
+
+  function openDeliveryConfigModal(locationId, name) {
+    _dcLocationId = locationId;
+    const modal = document.getElementById('deliveryConfigModal');
+    const nameEl = document.getElementById('dcSedeName');
+    const errEl = document.getElementById('dcError');
+    if (nameEl) nameEl.textContent = name || '';
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (modal) modal.classList.add('open');
+    _dcLoad(locationId);
+  }
+
+  function closeDeliveryConfigModal() {
+    const modal = document.getElementById('deliveryConfigModal');
+    if (modal) modal.classList.remove('open');
+    _dcLocationId = null;
+  }
+
+  async function _dcLoad(locationId) {
+    try {
+      const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
+      const res = await fetch('/api/locations/' + encodeURIComponent(locationId) + '/delivery-config', { headers });
+      if (!res.ok) {
+        const err = await res.json().catch(function () { return {}; });
+        throw new Error(err.detail || 'HTTP ' + res.status);
+      }
+      const data = await res.json();
+      _dcFill(data);
+    } catch (e) {
+      mesioToast('Error al cargar configuración: ' + e.message, 'error');
+      closeDeliveryConfigModal();
+    }
+  }
+
+  function _dcFill(data) {
+    const eff = data.effective || {};
+    const orgDefault = data.org_default || {};
+    const overrides = data.overrides || {};
+
+    document.getElementById('dcDeliveryEnabled').checked = !!eff.delivery_enabled;
+    document.getElementById('dcPickupEnabled').checked = !!eff.pickup_enabled;
+    document.getElementById('dcDeliveryFee').value = eff.delivery_fee != null ? eff.delivery_fee : 0;
+    document.getElementById('dcMinOrder').value = eff.min_order != null ? eff.min_order : 0;
+    document.getElementById('dcRadiusKm').value = eff.radius_km != null ? eff.radius_km : 5;
+    document.getElementById('dcPrepMinutes').value = eff.prep_minutes != null ? eff.prep_minutes : 30;
+    document.getElementById('dcPhone').value = data.phone || '';
+    document.getElementById('dcPublicLink').value = data.public_link
+      ? (window.location.origin + data.public_link) : '';
+
+    const methods = Array.isArray(eff.payment_methods) ? eff.payment_methods : [];
+    document.querySelectorAll('.dc-pm').forEach(function (cb) {
+      cb.checked = methods.indexOf(cb.value) !== -1;
+    });
+
+    _dcSetInherited('dcDeliveryEnabledInherited', !!overrides.delivery_enabled, orgDefault.delivery_enabled ? 'activo' : 'inactivo');
+    _dcSetInherited('dcPickupEnabledInherited', !!overrides.pickup_enabled, orgDefault.pickup_enabled ? 'activo' : 'inactivo');
+    _dcSetInherited('dcDeliveryFeeInherited', !!overrides.delivery_fee, _dcFmtMoney(orgDefault.delivery_fee || 0));
+    _dcSetInherited('dcMinOrderInherited', !!overrides.min_order, _dcFmtMoney(orgDefault.min_order || 0));
+    _dcSetInherited('dcRadiusKmInherited', !!overrides.radius_km, (orgDefault.radius_km || 0) + ' km');
+    _dcSetInherited('dcPrepMinutesInherited', !!overrides.prep_minutes, (orgDefault.prep_minutes || 0) + ' min');
+    const orgMethods = Array.isArray(orgDefault.payment_methods) ? orgDefault.payment_methods : [];
+    const orgMethodsLabel = orgMethods.map(function (m) { return PAYMENT_METHOD_LABELS_DC[m] || m; }).join(', ') || 'ninguno';
+    _dcSetInherited('dcPaymentMethodsInherited', !!overrides.payment_methods, orgMethodsLabel);
+  }
+
+  async function submitDeliveryConfig() {
+    if (!_dcLocationId) return;
+    const errEl = document.getElementById('dcError');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+
+    const selectedMethods = Array.from(document.querySelectorAll('.dc-pm:checked')).map(function (cb) { return cb.value; });
+    const payload = {
+      delivery_enabled: document.getElementById('dcDeliveryEnabled').checked,
+      pickup_enabled: document.getElementById('dcPickupEnabled').checked,
+      delivery_fee: Number(document.getElementById('dcDeliveryFee').value || 0),
+      min_order: Number(document.getElementById('dcMinOrder').value || 0),
+      radius_km: Number(document.getElementById('dcRadiusKm').value || 0),
+      prep_minutes: parseInt(document.getElementById('dcPrepMinutes').value || '0', 10),
+      payment_methods: selectedMethods,
+      phone: document.getElementById('dcPhone').value.trim()
+    };
+
+    try {
+      const headers = Object.assign(
+        { 'Content-Type': 'application/json' },
+        typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token }
+      );
+      const res = await fetch('/api/locations/' + encodeURIComponent(_dcLocationId) + '/delivery-config', {
+        method: 'PUT', headers: headers, body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(function () { return {}; });
+        throw new Error(err.detail || 'HTTP ' + res.status);
+      }
+      const data = await res.json();
+      _dcFill(data);
+      mesioToast('Configuración de domicilios guardada', 'success');
+      closeDeliveryConfigModal();
+    } catch (e) {
+      if (errEl) { errEl.textContent = e.message; errEl.style.display = ''; }
+      else { mesioToast('Error: ' + e.message, 'error'); }
+    }
+  }
+
+  (function bindDeliveryConfigModal() {
+    const cancelBtn = document.getElementById('deliveryConfigModalCancel');
+    const closeBtn = document.getElementById('deliveryConfigModalClose');
+    const submitBtn = document.getElementById('deliveryConfigModalSubmit');
+    const copyBtn = document.getElementById('dcCopyLinkBtn');
+    const overlay = document.getElementById('deliveryConfigModal');
+
+    if (cancelBtn) cancelBtn.addEventListener('click', closeDeliveryConfigModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeDeliveryConfigModal);
+    if (submitBtn) submitBtn.addEventListener('click', submitDeliveryConfig);
+    if (overlay) {
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) closeDeliveryConfigModal();
+      });
+    }
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function () {
+        const input = document.getElementById('dcPublicLink');
+        const url = input ? input.value : '';
+        if (!url) { mesioToast('No hay enlace disponible aún', 'error'); return; }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url).then(function () {
+            mesioToast('Enlace copiado', 'success');
+          }).catch(function () {
+            input.select();
+            try { document.execCommand('copy'); mesioToast('Enlace copiado', 'success'); } catch (_) { /* best-effort */ }
+          });
+        } else {
+          input.select();
+          try { document.execCommand('copy'); mesioToast('Enlace copiado', 'success'); } catch (_) { /* best-effort */ }
+        }
+      });
+    }
+  })();
 
   // ── Consolidated KPIs ────────────────────────────────────────────
 

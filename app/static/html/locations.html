@@ -117,6 +117,75 @@
   </div>
 </div>
 
+<!-- ── Delivery/pickup config modal (per-sede, docs/claude/delivery-web.md chunk 8) ── -->
+<div class="m-modal-overlay" id="deliveryConfigModal" role="dialog" aria-modal="true" aria-labelledby="deliveryConfigModalTitle">
+  <div class="m-modal-box" id="deliveryConfigModalBox" style="max-width:520px;">
+    <h3 id="deliveryConfigModalTitle">Domicilios y recogida — <span id="dcSedeName"></span></h3>
+
+    <div class="form-field">
+      <label><input type="checkbox" id="dcDeliveryEnabled"> Domicilio activo</label>
+      <span class="dc-inherited" id="dcDeliveryEnabledInherited"></span>
+    </div>
+    <div class="form-field">
+      <label><input type="checkbox" id="dcPickupEnabled"> Recogida activa</label>
+      <span class="dc-inherited" id="dcPickupEnabledInherited"></span>
+    </div>
+
+    <div class="form-field">
+      <label for="dcDeliveryFee">Tarifa de domicilio</label>
+      <input id="dcDeliveryFee" class="form-input" type="number" min="0" step="100">
+      <span class="dc-inherited" id="dcDeliveryFeeInherited"></span>
+    </div>
+    <div class="form-field">
+      <label for="dcMinOrder">Pedido mínimo</label>
+      <input id="dcMinOrder" class="form-input" type="number" min="0" step="100">
+      <span class="dc-inherited" id="dcMinOrderInherited"></span>
+    </div>
+    <div class="form-field">
+      <label for="dcRadiusKm">Radio de cobertura (km)</label>
+      <input id="dcRadiusKm" class="form-input" type="number" min="0.1" step="0.5">
+      <span class="dc-inherited" id="dcRadiusKmInherited"></span>
+    </div>
+    <div class="form-field">
+      <label for="dcPrepMinutes">Tiempo de preparación (min)</label>
+      <input id="dcPrepMinutes" class="form-input" type="number" min="1" step="5">
+      <span class="dc-inherited" id="dcPrepMinutesInherited"></span>
+    </div>
+
+    <div class="form-field">
+      <label>Métodos de pago aceptados</label>
+      <div id="dcPaymentMethods" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:4px;">
+        <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" class="dc-pm" value="efectivo"> Efectivo</label>
+        <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" class="dc-pm" value="tarjeta"> Datáfono (tarjeta)</label>
+        <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" class="dc-pm" value="nequi"> Nequi</label>
+        <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" class="dc-pm" value="bancolombia"> Bancolombia</label>
+      </div>
+      <span class="dc-inherited" id="dcPaymentMethodsInherited"></span>
+    </div>
+
+    <div class="form-field">
+      <label for="dcPhone">Teléfono público de la sede</label>
+      <input id="dcPhone" class="form-input" type="text" placeholder="3001234567">
+    </div>
+
+    <div class="form-field">
+      <label for="dcPublicLink">Enlace de pedidos (uno por organización)</label>
+      <div style="display:flex;gap:8px;">
+        <input id="dcPublicLink" class="form-input" type="text" readonly>
+        <button class="btn" id="dcCopyLinkBtn" type="button">Copiar</button>
+      </div>
+    </div>
+
+    <div id="dcError" style="color:#e5484d;font-size:13px;margin-top:8px;display:none;"></div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+      <button class="btn" id="deliveryConfigModalCancel">Cancelar</button>
+      <button class="btn brand" id="deliveryConfigModalSubmit">Guardar</button>
+    </div>
+    <button class="icon-btn" id="deliveryConfigModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">&#x2715;</button>
+  </div>
+</div>
+
 <script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/pages/sidebar.js"></script>
 <script src="/static/js/pages/locations.js"></script>

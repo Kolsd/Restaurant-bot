@@ -183,13 +183,20 @@ async def _generate_username(name: str, exclude_id: str | None = None) -> str:
 async def db_get_staff(restaurant_id: int) -> list:
     """Return all active (and inactive) staff members for a restaurant.
 
+    Includes location_id + location_name (LEFT JOIN — a staff member with no
+    sede assigned yet, location_id IS NULL, still comes back rather than
+    being silently dropped) so the Team admin UI can flag unassigned staff
+    ("Sin sede") in a multi-sede org (docs/claude/delivery-web.md chunk 8).
+
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
         rows = await conn.fetch(
-            "SELECT id::text, org_id, name, username, role, roles, active, phone, "
-            "document_number, created_at, updated_at FROM staff "
-            "WHERE org_id=$1 ORDER BY name ASC",
+            "SELECT s.id::text, s.org_id, s.name, s.username, s.role, s.roles, s.active, "
+            "s.phone, s.document_number, s.location_id, l.name AS location_name, "
+            "s.created_at, s.updated_at "
+            "FROM staff s LEFT JOIN locations l ON l.id = s.location_id "
+            "WHERE s.org_id=$1 ORDER BY s.name ASC",
             restaurant_id,
         )
     return [_serialize(dict(r)) for r in rows]
@@ -346,7 +353,7 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    allowed = {"name", "username", "role", "roles", "pin", "phone", "active", "document_number"}
+    allowed = {"name", "username", "role", "roles", "pin", "phone", "active", "document_number", "location_id"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return None
@@ -372,7 +379,7 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
             f"UPDATE staff SET {', '.join(set_parts)}, updated_at=NOW() "
             f"WHERE id=$1::uuid AND org_id=$2 "
             f"RETURNING id::text, org_id, name, username, role, roles, active, phone, "
-            f"document_number, created_at, updated_at"
+            f"document_number, location_id, created_at, updated_at"
         )
         row = await conn.fetchrow(sql, staff_id, restaurant_id, *values)
     return _serialize(dict(row)) if row else None

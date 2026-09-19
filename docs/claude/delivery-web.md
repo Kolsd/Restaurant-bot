@@ -157,8 +157,15 @@ pendiente_aceptacion → cancelado (customer, only before acceptance)
   multi-sede org every kitchen sees every sede's delivery tickets. Same gap
   class as the waiter alerts (memory: mesero-location-gap). Staff JWTs carry
   `location_id` since chunk 4, so the data to filter by now exists.
-- Multi-sede orgs have no UI to assign a sede to staff yet; until then their
-  new staff have `location_id` NULL and the Domicilios section refuses them.
+- ~~Multi-sede orgs have no UI to assign a sede to staff~~ — done in chunk 8
+  (team invite/edit sede selector, "Sin sede" badge); ~~kitchen feed not
+  sede-scoped~~ — done in chunk 8.
+- **Open PM decision:** the whole `/api/staff` router (create/list staff, the
+  `/team` screen) is gated by the superadmin module `staff_tips` ("Staff &
+  Propinas", off by default, never enabled by signup/CRM/billing). Without it
+  an owner cannot create a cashier or a rider, so delivery cannot run.
+- **Open PM decision:** the per-sede delivery config endpoint admits owner and
+  admin but not `gerente`.
 - Do NOT touch the Meta/Twilio webhooks or the salon WhatsApp flow yet: those are
   removed in the next step, only AFTER `tests/e2e` is migrated to the web
   channel. Never delete before the equivalent harness exists.

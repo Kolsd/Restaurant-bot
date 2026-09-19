@@ -66,6 +66,7 @@ class StaffUpdate(BaseModel):
     phone:           str | None       = Field(None, max_length=30)
     active:          bool | None      = None
     document_number: str | None       = Field(None, max_length=50)
+    location_id:     int | None       = Field(None, description="Sede del empleado")
 
 class StaffPinLoginRequest(BaseModel):
     restaurant_id: int
@@ -134,7 +135,14 @@ async def list_staff(
     """
     org_id = restaurant["id"]
     staff = await db.db_get_staff(org_id)
-    return {"staff": staff}
+
+    # multi_sede tells the Team admin UI whether "Sin sede" is even a
+    # meaningful thing to flag — a single-sede org auto-assigns every staff
+    # member (docs/claude/delivery-web.md chunk 8: "single-sede orgs: no
+    # selector needed"), so an unassigned row there would just be noise.
+    from app.repositories import restaurant_repo  # noqa: PLC0415
+    locations = await restaurant_repo.db_get_org_locations(org_id)
+    return {"staff": staff, "multi_sede": len(locations) > 1}
 
 
 async def _resolve_new_staff_location(org_id: int, requested: int | None) -> int | None:
@@ -197,7 +205,24 @@ async def create_staff(
         location_id=location_id,
     )
     return {"staff": member}
-    
+
+
+@router.get("/locations", dependencies=_MODULE_DEPS)
+async def list_staff_locations(
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Org's active sedes, for the sede picker on the Team admin UI (creating
+    or editing a staff member — docs/claude/delivery-web.md chunk 8). A
+    single-sede org has nothing to pick (the frontend auto-assigns, per the
+    locked decision: "single-sede orgs: no selector needed"), but still gets
+    a real answer here rather than a 404/empty special case.
+    """
+    from app.repositories import restaurant_repo  # noqa: PLC0415
+
+    locations = await restaurant_repo.db_get_org_locations(restaurant["id"])
+    return {"locations": [{"id": loc["id"], "name": loc["name"]} for loc in locations]}
+
+
 _PIN_MAX_ATTEMPTS = 10
 _PIN_WINDOW = 900  # 15 minutes
 # Defense-in-depth: a global per-IP cap stops distributed brute force across
@@ -366,6 +391,15 @@ async def update_staff(
         patch["roles"] = [r.strip().lower() for r in patch["roles"] if r.strip()]
         if patch["roles"] and "role" not in patch:
             patch["role"] = patch["roles"][0]
+
+    if "location_id" in patch:
+        # Same ownership validation as _resolve_new_staff_location — never
+        # trust a client-sent location id without checking it belongs to
+        # this org (rls-multitenant.md: org_id/location_id can collide
+        # across tenants). `requested` is never None here (StaffUpdate's
+        # location_id is excluded above when absent), so the "auto-pick the
+        # org's only sede" branch of that helper never fires on this path.
+        patch["location_id"] = await _resolve_new_staff_location(restaurant["id"], patch["location_id"])
 
     if not patch:
         raise HTTPException(status_code=422, detail="No fields to update.")

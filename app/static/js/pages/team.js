@@ -17,6 +17,9 @@ var _schedules = [];
 var _tipsPool = null;
 var _refreshTimer = null;
 var _activeRoleFilter = 'all';
+var _locations = [];       // org's sedes — GET /api/staff/locations
+var _multiSede = false;    // > 1 active sede — gates the sede selector (docs/claude/delivery-web.md chunk 8)
+var _editingStaffId = null;
 
 // ── Week helpers ──────────────────────────────────────────────────
 function getWeekStart() {
@@ -56,15 +59,25 @@ async function apiFetch(path, opts) {
 // ── Load all data ─────────────────────────────────────────────────
 async function loadAll() {
   try {
-    var [staffData, schedulesData, tipsData] = await Promise.all([
+    var [staffData, schedulesData, tipsData, locationsData] = await Promise.all([
       apiFetch('/api/staff'),
       apiFetch('/api/staff/schedules?week_start=' + _isoDateStr(getWeekStart())),
-      apiFetch('/api/stats/tips-pool').catch(function () { return null; })
+      apiFetch('/api/stats/tips-pool').catch(function () { return null; }),
+      apiFetch('/api/staff/locations').catch(function () { return null; })
     ]);
 
     _staff = Array.isArray(staffData) ? staffData : (staffData && staffData.staff ? staffData.staff : []);
     _schedules = Array.isArray(schedulesData) ? schedulesData : (schedulesData && schedulesData.schedules ? schedulesData.schedules : []);
     _tipsPool = tipsData;
+
+    _locations = (locationsData && Array.isArray(locationsData.locations)) ? locationsData.locations : [];
+    // multi_sede on the staff response is the authoritative source (server
+    // knows every active sede, including ones this call to /locations might
+    // have raced with); fall back to counting _locations if it's missing.
+    _multiSede = (staffData && typeof staffData.multi_sede === 'boolean')
+      ? staffData.multi_sede
+      : (_locations.length > 1);
+    populateLocationSelects();
 
     renderMetrics();
     renderShiftGrid();
@@ -76,6 +89,29 @@ async function loadAll() {
     console.warn('equipo load failed:', e);
     mesioToast('Error cargando datos del equipo', 'error');
   }
+}
+
+// ── Sede selectors (invite + edit modals) ────────────────────────
+function populateLocationSelects() {
+  var inviteField = document.getElementById('inviteLocationField');
+  var inviteSelect = document.getElementById('inviteLocation');
+  var editField = document.getElementById('editStaffLocationField');
+  var editSelect = document.getElementById('editStaffLocation');
+
+  [inviteSelect, editSelect].forEach(function (sel) {
+    if (!sel) return;
+    sel.innerHTML = '';
+    _locations.forEach(function (loc) {
+      var opt = document.createElement('option');
+      opt.value = loc.id;
+      opt.textContent = loc.name || ('Sede ' + loc.id);
+      sel.appendChild(opt);
+    });
+  });
+
+  // Single-sede orgs: no selector needed — never add friction there.
+  if (inviteField) inviteField.style.display = _multiSede ? '' : 'none';
+  if (editField) editField.style.display = _multiSede ? '' : 'none';
 }
 
 // ── Metrics row ───────────────────────────────────────────────────
@@ -358,6 +394,22 @@ function renderMembersTable() {
     // Role
     var tdRole = document.createElement('td');
     tdRole.textContent = s.role || '—';
+    // Multi-sede orgs: make an unassigned staff member obvious so the owner
+    // can fix it (docs/claude/delivery-web.md chunk 8) — such staff are
+    // refused by the Domicilios section until given a sede.
+    if (_multiSede) {
+      var sedeBadge = document.createElement('div');
+      if (s.location_id) {
+        sedeBadge.className = 'badge';
+        sedeBadge.style.cssText = 'margin-top:4px;font-weight:400;';
+        sedeBadge.textContent = s.location_name || ('Sede #' + s.location_id);
+      } else {
+        sedeBadge.className = 'badge';
+        sedeBadge.style.cssText = 'margin-top:4px;font-weight:400;color:#B45309;background:rgba(245,158,11,.15);';
+        sedeBadge.textContent = 'Sin sede';
+      }
+      tdRole.appendChild(sedeBadge);
+    }
     tr.appendChild(tdRole);
 
     // Status
@@ -428,7 +480,7 @@ function renderMembersTable() {
     menuBtn.textContent = '⋯';
     menuBtn.dataset.staffId = s.id;
     menuBtn.addEventListener('click', function () {
-      mesioToast('Opciones de miembro — próximamente', 'info');
+      openEditStaffModal(s);
     });
     tdActions.appendChild(menuBtn);
     tr.appendChild(tdActions);
@@ -449,19 +501,30 @@ function openInviteModal() {
 function closeInviteModal() {
   var modal = document.getElementById('inviteModal');
   if (modal) { modal.classList.remove('open'); }
+  var pw = document.getElementById('invitePassword');
+  if (pw) { pw.value = ''; }
 }
 
 async function submitInvite() {
   var name = document.getElementById('inviteName');
   var role = document.getElementById('inviteRole');
   var doc = document.getElementById('inviteDoc');
+  var password = document.getElementById('invitePassword');
+  var locationSel = document.getElementById('inviteLocation');
   if (!name || !name.value.trim()) { mesioToast('Nombre requerido', 'warn'); return; }
+  if (!password || password.value.length < 4) { mesioToast('Contraseña de al menos 4 caracteres requerida', 'warn'); return; }
 
   var payload = {
     name: name.value.trim(),
     role: role ? role.value : 'mesero',
-    document_number: doc ? doc.value.trim() : ''
+    document_number: doc ? doc.value.trim() : '',
+    password: password.value
   };
+  // Sede — only sent for multi-sede orgs; a single-sede org auto-assigns
+  // its only sede server-side (_resolve_new_staff_location).
+  if (_multiSede && locationSel && locationSel.value) {
+    payload.location_id = parseInt(locationSel.value, 10);
+  }
 
   try {
     var res = await fetch('/api/staff', {
@@ -475,6 +538,66 @@ async function submitInvite() {
     }
     mesioToast('Miembro invitado correctamente', 'success');
     closeInviteModal();
+    loadAll();
+  } catch (e) {
+    mesioToast('Error: ' + e.message, 'error');
+  }
+}
+
+// ── Edit member modal ────────────────────────────────────────────
+function openEditStaffModal(staff) {
+  _editingStaffId = staff.id;
+  var nameEl = document.getElementById('editStaffName');
+  var roleEl = document.getElementById('editStaffRole');
+  var activeEl = document.getElementById('editStaffActive');
+  var locationEl = document.getElementById('editStaffLocation');
+
+  if (nameEl) nameEl.value = staff.name || staff.username || '';
+  if (roleEl) roleEl.value = staff.role || 'mesero';
+  if (activeEl) activeEl.checked = staff.status !== 'inactive' && staff.active !== false;
+  if (locationEl && staff.location_id) { locationEl.value = String(staff.location_id); }
+
+  var modal = document.getElementById('editStaffModal');
+  if (modal) { modal.classList.add('open'); }
+}
+
+function closeEditStaffModal() {
+  var modal = document.getElementById('editStaffModal');
+  if (modal) { modal.classList.remove('open'); }
+  _editingStaffId = null;
+}
+
+async function submitEditStaff() {
+  if (!_editingStaffId) return;
+  var nameEl = document.getElementById('editStaffName');
+  var roleEl = document.getElementById('editStaffRole');
+  var activeEl = document.getElementById('editStaffActive');
+  var locationEl = document.getElementById('editStaffLocation');
+
+  var payload = {
+    name: nameEl ? nameEl.value.trim() : undefined,
+    role: roleEl ? roleEl.value : undefined,
+    active: activeEl ? activeEl.checked : undefined
+  };
+  if (_multiSede && locationEl && locationEl.value) {
+    payload.location_id = parseInt(locationEl.value, 10);
+  }
+  // Strip undefined keys — PUT /api/staff/{id} treats an omitted field as
+  // "leave unchanged" (StaffUpdate.model_dump(exclude_none=True)).
+  Object.keys(payload).forEach(function (k) { if (payload[k] === undefined) delete payload[k]; });
+
+  try {
+    var res = await fetch('/api/staff/' + encodeURIComponent(_editingStaffId), {
+      method: 'PUT',
+      headers: mesioHeaders(),
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      var err = await res.json().catch(function () { return {}; });
+      throw new Error(err.detail || 'HTTP ' + res.status);
+    }
+    mesioToast('Miembro actualizado', 'success');
+    closeEditStaffModal();
     loadAll();
   } catch (e) {
     mesioToast('Error: ' + e.message, 'error');
@@ -521,6 +644,21 @@ document.addEventListener('DOMContentLoaded', function () {
   if (modalOverlay) {
     modalOverlay.addEventListener('click', function (e) {
       if (e.target === modalOverlay) closeInviteModal();
+    });
+  }
+
+  // Edit member modal
+  var editClose = document.getElementById('editStaffModalClose');
+  var editCancel = document.getElementById('editStaffModalCancel');
+  var editSubmit = document.getElementById('editStaffModalSubmit');
+  var editOverlay = document.getElementById('editStaffModal');
+
+  if (editClose) editClose.addEventListener('click', closeEditStaffModal);
+  if (editCancel) editCancel.addEventListener('click', closeEditStaffModal);
+  if (editSubmit) editSubmit.addEventListener('click', submitEditStaff);
+  if (editOverlay) {
+    editOverlay.addEventListener('click', function (e) {
+      if (e.target === editOverlay) closeEditStaffModal();
     });
   }
 
