@@ -290,9 +290,15 @@ async def db_create_staff(
     roles: list = None,
     document_number: str = "",
     username: str = "",
+    location_id: int | None = None,
 ) -> dict:
     """Insert a new staff member. Returns the created row.
     username is auto-generated from name if not provided.
+
+    `location_id` is the sede the staff member works at. It is what scopes
+    them to their own sede's orders (the staff JWT carries it); leaving it
+    NULL makes sede-scoped sections refuse them. Callers resolve and
+    validate it — this function never guesses one.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -302,11 +308,12 @@ async def db_create_staff(
         username = await _generate_username(name)
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO staff (org_id, name, username, role, pin, phone, roles, document_number)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
-               RETURNING id::text, org_id, name, username, role, roles, active, phone,
+            """INSERT INTO staff (org_id, name, username, role, pin, phone, roles, document_number, location_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+               RETURNING id::text, org_id, location_id, name, username, role, roles, active, phone,
                          document_number, created_at, updated_at""",
             restaurant_id, name, username, role, pin_hash, phone, json.dumps(roles), document_number,
+            location_id,
         )
     return _serialize(dict(row))
 

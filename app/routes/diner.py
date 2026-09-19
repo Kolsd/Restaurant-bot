@@ -1490,34 +1490,70 @@ async def _resolve_diner_stream_session(request: Request) -> dict:
     return session
 
 
-def _make_diner_filter(table_id: str | None):
+def _make_diner_filter(table_id: str | None, delivery_order_ids: frozenset[str] | None = None):
     """Build the per-connection topic_filter for GET /api/diner/stream.
 
     Standalone (module-level) so it's directly unit-testable — see
     tests/test_realtime.py — without spinning up a request. `resync` is
     NOT special-cased here: app.services.realtime.event_stream() already
     lets `resync` bypass any topic_filter unconditionally.
+
+    Two branches, per docs/claude/delivery-web.md ("Realtime — two
+    defects, both verified by the lead"):
+
+    1. "delivery_order.updated" — a delivery/pickup session (table_id is
+       always None for these — see diner_sessions_repo's order_mode
+       convention) is scoped to entity_id membership in
+       `delivery_order_ids` (the set of order ids THIS token owns, computed
+       once at stream-open time — see delivery_repo.db_get_order_ids_for_
+       phone). An empty/None set matches nothing, never "any" — the
+       previous bug let a None table_id match ANY event published without
+       one (`event.table_id == table_id` with both sides None), which
+       would have handed every delivery customer of the org every other
+       delivery customer's invalidation events.
+    2. Every other allowlisted topic (dine-in: table_order.*, check.updated,
+       nps.updated) requires table_id to be a real, non-None value that
+       equals the event's own table_id — `table_id is not None` is the
+       actual fix: a delivery/pickup session (table_id=None) can now never
+       match a table-scoped event even if that event's own table_id also
+       happened to be None.
     """
     def _filter(event: dict) -> bool:
-        return event.get("topic") in realtime.DINER_ALLOWLIST and event.get("table_id") == table_id
+        topic = event.get("topic")
+        if topic not in realtime.DINER_ALLOWLIST:
+            return False
+        if topic == "delivery_order.updated":
+            return bool(delivery_order_ids) and event.get("entity_id") in delivery_order_ids
+        return table_id is not None and event.get("table_id") == table_id
     return _filter
 
 
 @router.get("/stream")
 async def diner_stream(request: Request):
-    """Real-time SSE feed for the diner's own table (Mesio-native chat).
+    """Real-time SSE feed for the diner's own table OR the diner's own
+    delivery/pickup order(s) (docs/claude/delivery-web.md chunk 6, "Customer
+    status page").
 
-    Streams only the allowlisted topics (table_order.*, check.updated,
-    nps.updated) for the diner's own table_id — see
-    app.services.realtime.DINER_ALLOWLIST. `resync` events always pass
-    through regardless of the filter.
+    Streams only the allowlisted topics for the diner's own scope — see
+    app.services.realtime.DINER_ALLOWLIST and _make_diner_filter's docstring
+    for exactly how "own" is enforced for each case. `resync` events always
+    pass through regardless of the filter.
     """
     session = await _resolve_diner_stream_session(request)
     org_id = int(session["org_id"])
     table_id = session.get("table_id")
 
+    delivery_order_ids: frozenset[str] | None = None
+    if session.get("order_mode") in ("delivery", "pickup"):
+        with tenant_scope(org_id):
+            owned_ids = await delivery_repo.db_get_order_ids_for_phone(org_id, session.get("token") or "")
+        delivery_order_ids = frozenset(owned_ids)
+
     return StreamingResponse(
-        realtime.event_stream(request.is_disconnected, org_id, topic_filter=_make_diner_filter(table_id)),
+        realtime.event_stream(
+            request.is_disconnected, org_id,
+            topic_filter=_make_diner_filter(table_id, delivery_order_ids),
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

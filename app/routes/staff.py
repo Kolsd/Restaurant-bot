@@ -55,6 +55,7 @@ class StaffCreate(BaseModel):
     password:        str       = Field(..., min_length=4, max_length=100)
     phone:           str       = Field("", max_length=30)
     document_number: str       = Field("", max_length=50)
+    location_id:     int | None = Field(None, description="Sede del empleado")
 
 
 class StaffUpdate(BaseModel):
@@ -136,6 +137,30 @@ async def list_staff(
     return {"staff": staff}
 
 
+async def _resolve_new_staff_location(org_id: int, requested: int | None) -> int | None:
+    """Which sede a new staff member belongs to.
+
+    - An explicit `requested` sede must belong to this org (403 otherwise —
+      never trust a client-sent location id).
+    - With none requested, an org with exactly ONE active sede gets that sede:
+      there is nothing to choose, and leaving it NULL would lock the person out
+      of every sede-scoped section (the cashier's Domicilios refuses a staff
+      member without a sede).
+    - With several sedes and none requested, stay NULL: picking one would be a
+      guess. The team UI assigns it.
+    """
+    from app.repositories import restaurant_repo  # noqa: PLC0415
+
+    locations = await restaurant_repo.db_get_org_locations(org_id)
+    if requested is not None:
+        if not any(int(loc["id"]) == int(requested) for loc in locations):
+            raise HTTPException(status_code=403, detail="Esa sede no pertenece a tu organización")
+        return int(requested)
+    if len(locations) == 1:
+        return int(locations[0]["id"])
+    return None
+
+
 @router.post("", dependencies=_MODULE_DEPS, status_code=201)
 async def create_staff(
     request: Request,
@@ -159,6 +184,8 @@ async def create_staff(
     roles = [r.strip().lower() for r in body.roles if r.strip()] if body.roles else [body.role.strip().lower()]
     full_name = f"{body.name.strip()} {body.last_name.strip()}".strip() if body.last_name else body.name.strip()
 
+    location_id = await _resolve_new_staff_location(org_id, body.location_id)
+
     member = await db.db_create_staff(
         restaurant_id=org_id,
         name=full_name,
@@ -167,6 +194,7 @@ async def create_staff(
         phone=body.phone,
         roles=roles or ["mesero"],
         document_number=body.document_number,
+        location_id=location_id,
     )
     return {"staff": member}
     

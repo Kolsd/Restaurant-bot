@@ -115,6 +115,38 @@ def test_diner_filter_blocks_non_allowlisted_topic():
     assert filt({"topic": "waiter_alert.created", "table_id": "MESA-7"}) is False
 
 
+def test_diner_filter_none_table_never_matches_a_none_event_table():
+    """The bug this chunk fixes (docs/claude/delivery-web.md chunk 6,
+    "Realtime — two defects"): a delivery/pickup diner_sessions row has
+    table_id=None. Before the fix, `event.table_id == table_id` let a None
+    session match ANY event published without a table_id (None == None),
+    which would have handed every delivery customer of the org every other
+    delivery customer's table-scoped invalidation events."""
+    filt = _make_diner_filter(None)
+    assert filt({"topic": "table_order.updated", "table_id": None}) is False
+    assert filt({"topic": "check.updated", "table_id": None}) is False
+
+
+def test_diner_filter_delivery_topic_scoped_to_owned_order_ids():
+    filt = _make_diner_filter(None, frozenset({"ORDER-A"}))
+    assert filt({"topic": "delivery_order.updated", "entity_id": "ORDER-A"}) is True
+    assert filt({"topic": "delivery_order.updated", "entity_id": "ORDER-B"}) is False
+
+
+def test_diner_filter_delivery_topic_without_owned_ids_matches_nothing():
+    filt = _make_diner_filter(None)
+    assert filt({"topic": "delivery_order.updated", "entity_id": "ANYTHING"}) is False
+    filt_empty = _make_diner_filter(None, frozenset())
+    assert filt_empty({"topic": "delivery_order.updated", "entity_id": "ANYTHING"}) is False
+
+
+def test_diner_filter_dine_in_session_never_matches_delivery_topic():
+    """A dine-in session (a real table_id) must never see the delivery
+    topic either — it's simply never in that session's owned-order set."""
+    filt = _make_diner_filter("MESA-7")
+    assert filt({"topic": "delivery_order.updated", "entity_id": "ORDER-A"}) is False
+
+
 async def test_event_stream_resync_bypasses_any_filter():
     """resync must reach the client even though the diner filter would
     otherwise block every event on this (mismatched) table_id."""

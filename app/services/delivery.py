@@ -18,7 +18,7 @@ appears at a JSON boundary and is explicitly marked as such.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone as _dt_timezone
+from datetime import datetime, timedelta, timezone as _dt_timezone
 from decimal import Decimal
 from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -435,3 +435,38 @@ def validate_schedule(
     if not is_location_open(location, now=scheduled):
         return REASON_SCHEDULE_OUTSIDE_HOURS
     return None
+
+
+# ── Customer status page ETA (chunk 6, docs/claude/delivery-web.md) ────────
+
+
+def compute_eta(
+    accepted_at: Optional[datetime], estimated_minutes: Optional[int], location: Optional[dict],
+) -> Optional[dict]:
+    """ETA = accepted_at + estimated_minutes, rendered in the SEDE'S OWN
+    timezone — never UTC, never the server's local time (same convention as
+    is_location_open() / validate_schedule() above; docs/claude/delivery-web.md
+    chunk 6 test requirement: "ETA is computed in the sede's timezone").
+
+    Returns None when the order hasn't been accepted yet (no accepted_at) or
+    the cashier hasn't typed an ETA — the customer status page shows
+    "Esperando confirmación del restaurante" in that case instead.
+
+    Returns {"iso": <UTC instant, JSON boundary>, "local_label": "HH:MM",
+    "timezone": "<IANA name>"} — the ISO instant for anything that wants to
+    do further arithmetic, plus a ready-to-display sede-local HH:MM label so
+    the frontend never has to reimplement timezone conversion.
+    """
+    if accepted_at is None or estimated_minutes is None:
+        return None
+    instant = accepted_at
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=_dt_timezone.utc)
+    eta_instant = instant + timedelta(minutes=int(estimated_minutes))
+    tz = _location_timezone(location)
+    local = eta_instant.astimezone(tz)
+    return {
+        "iso": eta_instant.isoformat(),
+        "local_label": local.strftime("%H:%M"),
+        "timezone": str(tz),
+    }

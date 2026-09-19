@@ -49,13 +49,30 @@ TOPICS = frozenset({
     "waiter_alert.created", "waiter_alert.updated",
     "check.updated",
     "nps.updated",
+    # Delivery/pickup web wave chunk 6 (docs/claude/delivery-web.md, "Customer
+    # status page") — a DEDICATED topic for the diner-facing /pedido/{code}
+    # page, published ALONGSIDE (never instead of) "order.updated" on every
+    # status transition. Kept separate from "order.updated" on purpose: that
+    # topic is staff-only (the unfiltered /api/staff/stream — see
+    # app/routes/auth_routes.py::staff_stream) and carries no ownership
+    # scoping, whereas this one is DINER_ALLOWLIST-gated to the connecting
+    # session's own orders (see app/routes/diner.py::_make_diner_filter).
+    "delivery_order.updated",
 })
 
-# Topics a diner's own /api/diner/stream connection may ever see, and only
-# when the event's table_id matches the diner session's own table (enforced
-# by the caller — see app/routes/diner.py::diner_stream).
+# Topics a diner's own /api/diner/stream connection may ever see.
+#   - table_order.*/check.updated/nps.updated: gated by an EXACT, non-None
+#     table_id match against the diner session's own table (dine-in only —
+#     see app/routes/diner.py::_make_diner_filter, which also fixes the bug
+#     where a delivery/pickup session's table_id=None used to match ANY
+#     event published without a table_id).
+#   - delivery_order.updated: gated by entity_id membership in the set of
+#     order ids the connecting session's own token actually owns (see
+#     delivery_repo.db_get_order_ids_for_phone) — never by table_id, since a
+#     delivery/pickup diner_sessions row has no table at all.
 DINER_ALLOWLIST = frozenset({
     "table_order.created", "table_order.updated", "check.updated", "nps.updated",
+    "delivery_order.updated",
 })
 
 _QUEUE_MAXSIZE = 100
@@ -146,6 +163,25 @@ async def publish(
             await _deliver_in_process(org_id, event)
     except Exception:
         log.warning("realtime.publish.failed", topic=topic, org_id=org_id, exc_info=True)
+
+
+async def publish_delivery_status(org_id: int, location_id: Optional[int], order_id: str) -> None:
+    """Fan out a delivery/pickup order's status change to BOTH audiences at
+    once (docs/claude/delivery-web.md, "Customer status page" — "publish it
+    from EVERY status transition"):
+      - "order.updated" — the existing staff-only topic (unfiltered
+        /api/staff/stream) that the cashier's Domicilios queue and the
+        kitchen KDS already listen on (app/routes/staff_delivery.py,
+        app/repositories/orders_repo.py use this same topic for the
+        `orders` table).
+      - "delivery_order.updated" — the new diner-facing topic for the
+        customer's own /pedido/{code} status page.
+    Single call site for every transition (cashier accept/reject/assign/
+    en-route/delivered AND the customer's own cancel) so the two publishes
+    can never drift apart. Never raises — publish() itself never does.
+    """
+    await publish(org_id, "order.updated", location_id=location_id, entity_id=order_id)
+    await publish(org_id, "delivery_order.updated", location_id=location_id, entity_id=order_id)
 
 
 async def _deliver_in_process(org_id: int, event: dict) -> None:

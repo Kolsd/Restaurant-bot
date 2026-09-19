@@ -23,10 +23,11 @@ sede's orders"):
 
 Every transition below reuses the SQL writers already in
 app/repositories/delivery_repo.py (chunk 1), extended in this chunk to also
-filter by location_id, and publishes the existing realtime invalidation
-topic "order.updated" (app/services/realtime.py) so the kitchen/courier/
-customer-status screens refresh without polling — the same topic vocabulary
-chunk 3 already uses for "order.created".
+filter by location_id, and publishes via
+realtime.publish_delivery_status() (chunk 6), which fans out BOTH the
+existing staff-only "order.updated" topic (kitchen/courier queues, unfiltered
+/api/staff/stream) AND the diner-facing "delivery_order.updated" topic that
+the customer's own /pedido/{code} status page listens on.
 """
 from __future__ import annotations
 
@@ -237,7 +238,7 @@ async def accept_delivery_order(
     )
     if not row:
         raise HTTPException(status_code=409, detail=_WRONG_STATE_DETAIL)
-    await realtime.publish(scope["org_id"], "order.updated", location_id=scope["location_id"], entity_id=order_id)
+    await realtime.publish_delivery_status(scope["org_id"], scope["location_id"], order_id)
     return _cashier_order_view(row)
 
 
@@ -255,7 +256,7 @@ async def reject_delivery_order(
     )
     if not row:
         raise HTTPException(status_code=409, detail=_WRONG_STATE_DETAIL)
-    await realtime.publish(scope["org_id"], "order.updated", location_id=scope["location_id"], entity_id=order_id)
+    await realtime.publish_delivery_status(scope["org_id"], scope["location_id"], order_id)
     return _cashier_order_view(row)
 
 
@@ -293,7 +294,7 @@ async def assign_courier(
     )
     if not row:
         raise HTTPException(status_code=409, detail=_WRONG_STATE_DETAIL)
-    await realtime.publish(scope["org_id"], "order.updated", location_id=scope["location_id"], entity_id=order_id)
+    await realtime.publish_delivery_status(scope["org_id"], scope["location_id"], order_id)
     return _cashier_order_view(row)
 
 
@@ -307,7 +308,7 @@ async def mark_en_route(order_id: str, scope: dict = Depends(delivery_scope)):
     )
     if not row:
         raise HTTPException(status_code=409, detail=_WRONG_STATE_DETAIL)
-    await realtime.publish(scope["org_id"], "order.updated", location_id=scope["location_id"], entity_id=order_id)
+    await realtime.publish_delivery_status(scope["org_id"], scope["location_id"], order_id)
     return _cashier_order_view(row)
 
 
@@ -320,5 +321,5 @@ async def mark_delivered(order_id: str, scope: dict = Depends(delivery_scope)):
     )
     if not row:
         raise HTTPException(status_code=409, detail=_WRONG_STATE_DETAIL)
-    await realtime.publish(scope["org_id"], "order.updated", location_id=scope["location_id"], entity_id=order_id)
+    await realtime.publish_delivery_status(scope["org_id"], scope["location_id"], order_id)
     return _cashier_order_view(row)

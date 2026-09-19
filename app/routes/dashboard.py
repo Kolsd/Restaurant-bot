@@ -187,6 +187,28 @@ async def diner_delivery_entry_page(slug: str):
     p = STATIC / "html" / "diner-chat.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Chat no disponible</h1>", status_code=404)
 
+@router.get("/pedido/{public_code}", response_class=HTMLResponse)
+async def diner_delivery_status_page(public_code: str):
+    """Public customer status page (docs/claude/delivery-web.md chunk 6),
+    `/pedido/{public_code}`. Same "unknown -> 404 here" posture as
+    /pedir/{slug} above: the public_code is a real secret a customer either
+    typed correctly or followed from a link/email, not a QR scan whose mere
+    existence proves anything — so an unknown code 404s at the PAGE level
+    too, not just from the API the page will go on to call.
+
+    Deliberately does NOT enter tenant_scope/bypass_tenant_scope here: this
+    route only needs to know "does ANY order have this code", which
+    db_get_order_by_public_code already resolves entirely on its own
+    (pre-tenant, bypass_tenant_scope internally) — see that function's
+    docstring for why the code space is GLOBAL, not per-org.
+    """
+    order = await delivery_repo.db_get_order_by_public_code(public_code.strip())
+    if not order:
+        return HTMLResponse("<h1>Pedido no encontrado</h1>", status_code=404)
+    p = STATIC / "html" / "pedido.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no disponible</h1>", status_code=404)
+
+
 @router.get("/privacy", response_class=HTMLResponse)
 async def privacy_page():
     return (STATIC / "html" / "privacy.html").read_text(encoding="utf-8")

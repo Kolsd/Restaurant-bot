@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0">
+<title>Estado de tu pedido — Mesio</title>
+<meta name="description" content="Sigue el estado de tu pedido en tiempo real">
+<meta name="theme-color" content="#1D9E75">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/pedido.css">
+</head>
+<body>
+
+<div class="pedido-page" id="pedido-page">
+  <div id="pedido-loading" class="pedido-loading-state">Cargando tu pedido...</div>
+  <div id="pedido-content" hidden></div>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/mesio-realtime.js"></script>
+<script src="/static/js/diner-session.js"></script>
+<script src="/static/js/pages/pedido.js"></script>
+</body>
+</html>

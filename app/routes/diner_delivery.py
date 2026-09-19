@@ -41,11 +41,13 @@ identity is opaque everywhere else in this codebase).
 """
 from __future__ import annotations
 
+import asyncio
+import html as _html_lib
 from datetime import datetime, timezone as dt_timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.repositories import delivery_repo, diner_sessions_repo
 from app.repositories.orders_repo import InsufficientStockError
@@ -56,7 +58,7 @@ from app.services import orders
 from app.services import realtime
 from app.services import state_store
 from app.services import turnstile
-from app.services.logging import get_logger
+from app.services.logging import get_logger, mask_email
 from app.services.money import money_sum, quantize_money, to_decimal
 from app.services.tenant_context import tenant_scope
 
@@ -65,6 +67,18 @@ log = get_logger(__name__)
 router = APIRouter(prefix="/api/diner", tags=["diner-delivery"])
 
 _VALID_MODES = ("delivery", "pickup")
+
+# Fire-and-forget background tasks (chunk 6's confirmation email) MUST be
+# held by a strong reference somewhere, or asyncio is free to garbage-collect
+# an in-flight Task before it finishes (a well-known asyncio.create_task
+# gotcha) — see https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _fire_and_forget(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 # Anti-abuse cap — docs/claude/delivery-web.md chunk 3: "a cap on
 # simultaneously OPEN orders per customer phone".
@@ -308,6 +322,40 @@ async def diner_delivery_payment_proof(
     return {"proof_url": result["secure_url"]}
 
 
+async def _send_order_confirmation_email(to: str, org_name: str, public_code: str) -> None:
+    """Best-effort order-confirmation email (docs/claude/delivery-web.md
+    chunk 6: "when a checkout succeeds and the customer gave an email, send
+    one message with the code and the /pedido/{code} link"). Fired via
+    _fire_and_forget AFTER the checkout's own DB transaction has committed —
+    never awaited by the checkout response, so a slow or failing provider
+    can never make checkout fail or feel slow.
+
+    app.services.email.send_email() itself already never raises; the extra
+    try/except here only guards the HTML-building code above it, so a bug
+    there becomes a logged warning instead of an "exception was never
+    retrieved" asyncio warning with no context.
+    """
+    try:
+        from app.services import email as email_service  # noqa: PLC0415 — lazy, mirrors image_host's own pattern
+
+        link = f"/pedido/{public_code}"
+        safe_org = _html_lib.escape(org_name or "Mesio")
+        safe_code = _html_lib.escape(public_code)
+        html = (
+            f"<p>Gracias por tu pedido en {safe_org}.</p>"
+            f"<p>Tu código de pedido es <strong>{safe_code}</strong>.</p>"
+            f"<p>Puedes ver el estado de tu pedido aquí: <a href=\"{link}\">{link}</a></p>"
+        )
+        text = f"Gracias por tu pedido en {org_name or 'Mesio'}. Código: {public_code}. Estado: {link}"
+        ok = await email_service.send_email(
+            to=to, subject=f"Tu pedido en {org_name or 'Mesio'}", html=html, text=text,
+        )
+        if not ok:
+            log.warning("diner.delivery_confirmation_email_failed", to=mask_email(to))
+    except Exception:
+        log.warning("diner.delivery_confirmation_email_error", to=mask_email(to), exc_info=True)
+
+
 @router.post("/delivery/checkout")
 async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutRequest):
     """Deterministic checkout — NEVER LLM-parsed (docs/claude/delivery-web.md).
@@ -537,6 +585,12 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
     # committed by here (same convention as orders_repo.commit_order_transaction).
     await realtime.publish(org_id, "order.created", location_id=location_id, entity_id=created["id"])
 
+    if body.customer_email:
+        # Fire-and-forget — see _send_order_confirmation_email's docstring.
+        # Never awaited: a slow/broken email provider must not delay or
+        # fail this response.
+        _fire_and_forget(_send_order_confirmation_email(body.customer_email, org.get("name") or "", public_code))
+
     response = {
         "order_id": created["id"],
         "public_code": public_code,
@@ -559,3 +613,268 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
         org_id=org_id, location_id=location_id, order_id=created["id"], order_type=order_type,
     )
     return response
+
+
+# ── Chunk 6: the customer status page /pedido/{public_code} ────────────────
+#
+# docs/claude/delivery-web.md, "Customer status page". PUBLIC (no auth) —
+# the public_code itself is "effectively a bearer secret" (module docstring
+# for db_get_order_by_public_code): globally unique, not sequential, minted
+# from a 32-symbol alphabet at 6 chars (~1e9 combinations). Every endpoint
+# below is rate-limited per IP AND per code through state_store (Redis,
+# cross-worker — never a module-level counter) to make guessing impractical
+# on top of the keyspace itself.
+
+_STATUS_WINDOW = 60
+_STATUS_READ_IP_MAX = 30
+_STATUS_READ_CODE_MAX = 40
+_STATUS_READ_404_IP_MAX = 8  # a burst of misses from one IP looks like enumeration
+_STATUS_CANCEL_IP_MAX = 10
+_STATUS_CANCEL_CODE_MAX = 5
+_STATUS_NPS_IP_MAX = 10
+_STATUS_NPS_CODE_MAX = 5
+
+
+def _iso_or_none(value) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _money_or_none(value) -> float | None:
+    return float(value) if value is not None else None  # JSON boundary
+
+
+async def _resolve_order_by_code_or_404(public_code: str) -> dict:
+    order = await delivery_repo.db_get_order_by_public_code(public_code.strip())
+    if not order:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    return order
+
+
+def _public_order_items_view(items: list) -> list[dict]:
+    """Only what the status page needs per line: name, quantity, note, its
+    own subtotal. Never sku/category/line_id — internal cart bookkeeping the
+    customer's own status page has no use for."""
+    out = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        out.append({
+            "name": item.get("name") or "",
+            "quantity": item.get("quantity") if item.get("quantity") is not None else item.get("qty") or 1,
+            "note": item.get("note") or "",
+            "subtotal": _money_or_none(item.get("subtotal")) or 0.0,
+        })
+    return out
+
+
+def _public_order_view(order: dict, org: dict, location: dict, currency: str, nps_already_submitted: bool) -> dict:
+    """Everything (and ONLY what) /pedido/{code} needs to render.
+
+    Deliberately EXCLUDES: customer_phone, customer_email (chunk-6
+    instructions — the code is a bearer secret, so these would otherwise
+    leak to anyone who guesses/finds a link), customer_name (same PII
+    surface — the customer already knows their own name, the page doesn't
+    need to echo it back), every internal id except the public_code itself
+    (no order id, no org_id, no location_id), and any staff/courier data
+    (no courier name — Phase A's customer-facing status vocabulary per
+    docs/claude/delivery-web.md is limited to the order's own lifecycle
+    states, not who is assigned to it).
+    """
+    order_type = order.get("order_type")
+    status = order.get("status")
+    return {
+        "public_code": order.get("public_code"),
+        "org_name": org.get("name") or "",
+        "location_name": location.get("name") or "",
+        "location_phone": location.get("phone") or None,
+        "order_type": order_type,
+        "status": status,
+        "items": _public_order_items_view(order.get("items")),
+        "currency": currency,
+        "subtotal": _money_or_none(order.get("subtotal")),
+        "delivery_fee": _money_or_none(order.get("delivery_fee")),
+        "tip_amount": _money_or_none(order.get("tip_amount")),
+        "total": _money_or_none(order.get("total")),
+        "payment_method": order.get("payment_method"),
+        # Address only for delivery orders (chunk-6 instructions) — a pickup
+        # order's "address" column is always empty anyway, but this keeps
+        # the contract explicit rather than incidental.
+        "address": order.get("address") if order_type == "domicilio" else None,
+        "created_at": _iso_or_none(order.get("created_at")),
+        "accepted_at": _iso_or_none(order.get("accepted_at")),
+        "estimated_minutes": order.get("estimated_minutes"),
+        "eta": delivery.compute_eta(order.get("accepted_at"), order.get("estimated_minutes"), location),
+        "rejected_at": _iso_or_none(order.get("rejected_at")),
+        "rejection_reason": order.get("rejection_reason"),
+        "cancelled_at": _iso_or_none(order.get("cancelled_at")),
+        "delivered_at": _iso_or_none(order.get("delivered_at")),
+        "can_cancel": status == delivery_repo.STATUS_PENDING_ACCEPTANCE,
+        "nps": {
+            "eligible": status == delivery_repo.STATUS_DELIVERED,
+            "already_submitted": nps_already_submitted,
+        },
+    }
+
+
+@router.get("/order/{public_code}")
+async def diner_order_public_status(public_code: str, request: Request):
+    """The public read behind /pedido/{public_code}. See _public_order_view's
+    docstring for the exact field list and what is deliberately left out."""
+    ip = _client_ip(request)
+    code = public_code.strip()
+    if not await state_store.rate_limit_check(
+        f"diner_order_read_ip:{ip}", max_requests=_STATUS_READ_IP_MAX, window_seconds=_STATUS_WINDOW,
+    ):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+    if not await state_store.rate_limit_check(
+        f"diner_order_read_code:{code}", max_requests=_STATUS_READ_CODE_MAX, window_seconds=_STATUS_WINDOW,
+    ):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes para este pedido. Intenta más tarde.")
+
+    order = await delivery_repo.db_get_order_by_public_code(code)
+    if not order:
+        # A burst of distinct-code misses from the same IP looks like code
+        # enumeration — logged WITHOUT the guessed code itself (never log a
+        # full public_code — docs/claude/delivery-web.md chunk 6).
+        if not await state_store.rate_limit_check(
+            f"diner_order_read_404_ip:{ip}", max_requests=_STATUS_READ_404_IP_MAX, window_seconds=_STATUS_WINDOW,
+        ):
+            log.warning("diner.order_read_enumeration_suspected", ip=ip)
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+    org_id = int(order["org_id"])
+    location_id = order.get("location_id")
+    with tenant_scope(org_id):
+        org = await db.db_get_org_by_id(org_id)
+        location = await db.db_get_location_by_id(location_id) if location_id else None
+        already_submitted = order.get("nps_answered_at") is not None
+
+    if not org or not location or int(location.get("org_id") or -1) != org_id:
+        # Same defensive shape as diner_delivery_checkout above — org_id and
+        # location_id are distinct integers, never trusted paired together
+        # without checking (bot-rules.md / rls-multitenant.md).
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+    currency = _features_dict(org.get("features")).get("currency", "COP")
+    return _public_order_view(order, org, location, currency, already_submitted)
+
+
+class DinerOrderCancelRequest(BaseModel):
+    # Optional on purpose — a device holding only the link (no session
+    # token) still gets a real 403 with a helpful message instead of a
+    # validation error (chunk-6 instructions: "the page tells them to call
+    # the restaurant").
+    token: str | None = Field(default=None, max_length=200)
+
+
+@router.post("/order/{public_code}/cancel")
+async def diner_order_cancel(public_code: str, body: DinerOrderCancelRequest, request: Request):
+    """Only from pendiente_aceptacion, only by the diner_sessions token that
+    CREATED the order (orders.phone IS that token — see the module
+    docstring's "web:<uuid4>" convention). Anyone else — including another
+    device that only has the link — is refused with a message pointing at
+    calling the restaurant, never a silent no-op."""
+    ip = _client_ip(request)
+    code = public_code.strip()
+    if not await state_store.rate_limit_check(
+        f"diner_order_cancel_ip:{ip}", max_requests=_STATUS_CANCEL_IP_MAX, window_seconds=_STATUS_WINDOW,
+    ):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+    if not await state_store.rate_limit_check(
+        f"diner_order_cancel_code:{code}", max_requests=_STATUS_CANCEL_CODE_MAX, window_seconds=_STATUS_WINDOW,
+    ):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+
+    order = await _resolve_order_by_code_or_404(code)
+    token = (body.token or "").strip()
+    if not token or order.get("phone") != token:
+        log.warning("diner.order_cancel_wrong_token", order_id=order["id"])
+        raise HTTPException(
+            status_code=403,
+            detail="No puedes cancelar este pedido desde este dispositivo. Llama al restaurante para cancelarlo.",
+        )
+
+    org_id = int(order["org_id"])
+    with tenant_scope(org_id):
+        row = await delivery_repo.db_cancel_order(org_id, order["id"])
+    if not row:
+        raise HTTPException(
+            status_code=409,
+            detail="Tu pedido ya fue aceptado por el restaurante y no se puede cancelar. Llama al restaurante.",
+        )
+
+    # Publish OUTSIDE tenant_scope — the UPDATE already committed (same
+    # convention as every other transition in this wave). This is what makes
+    # the cashier's Domicilios queue drop the order without polling
+    # (docs/claude/delivery-web.md: "A cancel emits the realtime event so
+    # the cashier's queue drops it").
+    await realtime.publish_delivery_status(org_id, row.get("location_id"), row["id"])
+    log.info("diner.order_cancelled_by_customer", org_id=org_id, order_id=row["id"])
+    return {"status": row["status"], "cancelled_at": _iso_or_none(row.get("cancelled_at"))}
+
+
+class DinerOrderNpsRequest(BaseModel):
+    token: str | None = Field(default=None, max_length=200)
+    score: int | None = Field(default=None, ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=500)
+    skip: bool = Field(default=False)
+
+    @model_validator(mode="after")
+    def _score_required_unless_skipping(self):
+        if not self.skip and self.score is None:
+            raise ValueError("score is required unless skip=true")
+        return self
+
+
+@router.post("/order/{public_code}/nps")
+async def diner_order_nps(public_code: str, body: DinerOrderNpsRequest, request: Request):
+    """1-5 survey on the status page, once the order is entregado. Reuses the
+    SAME storage path the WhatsApp-era bot flow writes to
+    (conversations_repo.db_save_nps_response, re-exported as
+    db.db_save_nps_response), attributed to the order's sede. Deduplicated
+    PER ORDER by orders.nps_answered_at (migration 0087) — not by the
+    per-token state_store flag, because the web session token is reused
+    across orders and that flag let a returning customer rate only once.
+
+    Deliberately does NOT go through agent.trigger_nps / tables.py's
+    _farewell_and_nps: those also fire send_wa_interactive_nps(phone, ...)
+    for ANY phone, which is exactly the trap this chunk was told to avoid —
+    calling Meta with an invalid number for a `web:` identity
+    (docs/claude/delivery-web.md chunk 6). This handler never imports or
+    calls anything WhatsApp-related; it only ever touches the DB write +
+    the state_store dedup flag directly. See
+    tests/test_delivery_status_page.py::test_nps_submit_never_sends_whatsapp.
+    """
+    ip = _client_ip(request)
+    code = public_code.strip()
+    if not await state_store.rate_limit_check(
+        f"diner_order_nps_ip:{ip}", max_requests=_STATUS_NPS_IP_MAX, window_seconds=_STATUS_WINDOW,
+    ):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+    if not await state_store.rate_limit_check(
+        f"diner_order_nps_code:{code}", max_requests=_STATUS_NPS_CODE_MAX, window_seconds=_STATUS_WINDOW,
+    ):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+
+    order = await _resolve_order_by_code_or_404(code)
+    token = (body.token or "").strip()
+    if not token or order.get("phone") != token:
+        raise HTTPException(status_code=403, detail="No puedes calificar este pedido desde este dispositivo.")
+    if order.get("status") != delivery_repo.STATUS_DELIVERED:
+        raise HTTPException(status_code=422, detail="Todavía no puedes calificar este pedido.")
+
+    phone, bot_number = order["phone"], order["bot_number"]
+    org_id = int(order["org_id"])
+    with tenant_scope(org_id):
+        # Claim first: the conditional UPDATE is the once-per-order guard,
+        # race-safe and durable (not a per-token TTL flag in Redis).
+        if not await delivery_repo.db_claim_order_nps(org_id, order["id"]):
+            raise HTTPException(status_code=409, detail="Ya calificaste este pedido.")
+        if not body.skip:
+            await db.db_save_nps_response(
+                phone, bot_number, body.score, (body.comment or "").strip(),
+                location_id=order.get("location_id"),
+            )
+
+    log.info("diner.order_nps_submitted", org_id=org_id, order_id=order["id"], skipped=body.skip)
+    return {"ok": True, "skipped": body.skip}

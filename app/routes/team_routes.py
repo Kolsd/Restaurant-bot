@@ -306,6 +306,10 @@ async def team_invite(request: Request, body: TeamInviteRequest):
             pin_hash=pin_hash,
             phone=body.phone,
             roles=roles,
+            # branch_id was resolved and checked against my_org_id above.
+            # Without it the staff member had no sede, and every
+            # sede-scoped section (the cashier's Domicilios) refused them.
+            location_id=branch_id,
         )
 
     return {"success": True}

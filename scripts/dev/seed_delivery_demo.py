@@ -150,20 +150,26 @@ async def _seed_location(conn: asyncpg.Connection, org_id: int, sede: dict) -> i
     return location_id
 
 
-async def _seed_staff(conn: asyncpg.Connection, org_id: int, name: str, username: str, role: str, pin: str) -> None:
+async def _seed_staff(
+    conn: asyncpg.Connection, org_id: int, location_id: int,
+    name: str, username: str, role: str, pin: str,
+) -> None:
+    # location_id matters: sede-scoped sections (the cashier's Domicilios)
+    # refuse a staff member without a sede.
     pin_hash = pin_bcrypt.hash(pin)
     existing = await conn.fetchrow("SELECT id FROM staff WHERE org_id = $1 AND name = $2", org_id, name)
     roles_json = json.dumps([role])
     if existing:
         await conn.execute(
-            "UPDATE staff SET pin = $2, role = $3, roles = $4::jsonb, active = true WHERE id = $1",
-            existing["id"], pin_hash, role, roles_json,
+            "UPDATE staff SET pin = $2, role = $3, roles = $4::jsonb, active = true, "
+            "location_id = $5 WHERE id = $1",
+            existing["id"], pin_hash, role, roles_json, location_id,
         )
     else:
         await conn.execute(
-            """INSERT INTO staff (org_id, name, username, role, pin, phone, roles, document_number)
-               VALUES ($1, $2, $3, $4, $5, '', $6::jsonb, '')""",
-            org_id, name, username, role, pin_hash, roles_json,
+            """INSERT INTO staff (org_id, name, username, role, pin, phone, roles, document_number, location_id)
+               VALUES ($1, $2, $3, $4, $5, '', $6::jsonb, '', $7)""",
+            org_id, name, username, role, pin_hash, roles_json, location_id,
         )
 
 
@@ -201,8 +207,8 @@ async def seed(conn: asyncpg.Connection) -> dict:
             SOLD_OUT_DISH, org_id,
         )
 
-        await _seed_staff(conn, org_id, CASHIER_NAME, "camila.torres", "caja", CASHIER_PIN)
-        await _seed_staff(conn, org_id, COURIER_NAME, "julian.restrepo", "domiciliario", COURIER_PIN)
+        await _seed_staff(conn, org_id, centro_id, CASHIER_NAME, "camila.torres", "caja", CASHIER_PIN)
+        await _seed_staff(conn, org_id, centro_id, COURIER_NAME, "julian.restrepo", "domiciliario", COURIER_PIN)
 
     return {"org_id": org_id, "centro_id": centro_id, "chapinero_id": chapinero_id}
 

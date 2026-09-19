@@ -219,7 +219,13 @@ async def db_cleanup_old_conversations(days: int = 7, bot_number: str = None):
 # ── NPS — per-conversation state ──────────────────────────────────────
 # (Restaurant-wide analytics db_get_nps_stats/db_get_nps_responses stay in database.py)
 
-async def db_save_nps_response(phone: str, bot_number: str, score: int, comment: str):
+async def db_save_nps_response(
+    phone: str, bot_number: str, score: int, comment: str,
+    location_id: int | None = None,
+):
+    """`location_id` attributes a rating that has no table session behind it
+    (a web delivery/pickup order knows its own sede). Without it such
+    ratings were stored with no sede and vanished from per-sede NPS."""
     async with _tenant_connection() as conn:
         # 1. Resolve branch_id + table_session_id in ONE query. The session is the
         #    customer's last dine-in sitting — gives us both the sede and the FK
@@ -234,15 +240,20 @@ async def db_save_nps_response(phone: str, bot_number: str, score: int, comment:
         """, phone)
         session_id = row["session_id"] if row else None
         branch_id  = row["branch_id"]  if row else None
+        if location_id is not None:
+            # The caller knows exactly which sede served this order — that
+            # beats inferring it from a table session (there is none).
+            branch_id = location_id
 
         # 2. Save the rating tied to that branch + session
         await conn.execute("""
             INSERT INTO nps_responses
-                (phone, bot_number, score, comment, branch_id, table_session_id, org_id, created_at)
+                (phone, bot_number, score, comment, branch_id, table_session_id, org_id,
+                 location_id, created_at)
             VALUES ($1, $2, $3, $4, $5, $6,
                     NULLIF(current_setting('app.org_id', true), '')::bigint,
-                    NOW())
-        """, phone, bot_number, score, comment, branch_id, session_id)
+                    $7, NOW())
+        """, phone, bot_number, score, comment, branch_id, session_id, location_id)
 
 
 async def db_save_nps_pending(phone: str, bot_number: str, score: int) -> int:

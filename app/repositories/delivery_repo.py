@@ -77,7 +77,7 @@ _ORDER_FIELDS = """
     rejected_at, rejection_reason,
     cancelled_at, cancelled_reason,
     courier_staff_id, courier_assigned_at, delivered_at,
-    scheduled_pickup_at, created_at
+    scheduled_pickup_at, nps_answered_at, created_at
 """
 
 
@@ -352,6 +352,36 @@ async def db_create_delivery_order(
     return dict(row)
 
 
+async def db_get_order_ids_for_phone(org_id: int, phone: str, limit: int = 20) -> list[str]:
+    """Order ids this diner-session TOKEN (the `orders.phone` routing key,
+    NOT the customer's real phone number — see the module docstring's
+    "web:<uuid4>" convention) has created in this org, most recent first.
+
+    Used ONLY to scope the diner SSE stream's delivery-order topic filter
+    (app/routes/diner.py::_make_diner_filter / diner_stream) to orders the
+    connecting token actually owns — realtime events carry no personal data
+    to filter on directly (docs/claude/delivery-web.md, "Realtime — two
+    defects"), so the filter needs its own allowlist of entity_ids computed
+    once when the stream opens.
+
+    NOT an authorization check by itself: the actual cancel/NPS endpoints
+    re-read the order's own `phone` column directly on every call
+    (app/routes/diner_delivery.py) rather than trusting this list, which is
+    only ever used to decide whether to forward an already-content-free
+    invalidation event to a live connection.
+
+    # Requires active tenant_scope(org_id).
+    """
+    if not phone:
+        return []
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT id FROM orders WHERE org_id = $1 AND phone = $2 ORDER BY created_at DESC LIMIT $3",
+            org_id, phone, limit,
+        )
+    return [r["id"] for r in rows]
+
+
 async def db_count_open_orders_for_phone(org_id: int, customer_phone: str) -> int:
     """Count this org's orders for customer_phone that are still "open" — not
     yet in a terminal status (docs/claude/delivery-web.md: "an order is open
@@ -624,6 +654,30 @@ async def db_mark_en_route(
     if row:
         log.info("delivery.order_en_route", org_id=org_id, order_id=order_id)
     return dict(row) if row else None
+
+
+async def db_claim_order_nps(org_id: int, order_id: str) -> bool:
+    """Atomically record that the customer answered this order's survey
+    (rated or skipped). True only for the FIRST call on a delivered order;
+    any later or concurrent call gets False — the conditional UPDATE is the
+    guard, so two simultaneous submits cannot both pass.
+
+    Per ORDER, not per customer: the web session token is reused across
+    orders, so a per-token flag let a returning customer rate only once ever.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        claimed = await conn.fetchval(
+            """
+            UPDATE orders SET nps_answered_at = NOW()
+             WHERE id = $1 AND org_id = $2
+               AND status = $3 AND nps_answered_at IS NULL
+            RETURNING id
+            """,
+            order_id, org_id, STATUS_DELIVERED,
+        )
+    return claimed is not None
 
 
 async def db_mark_delivered(
