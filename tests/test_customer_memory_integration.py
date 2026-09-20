@@ -96,17 +96,18 @@ class TestCustomerMemoryIntegration:
     # ── 1. Tool registration & schema ────────────────────────────────────────
 
     def test_remember_tool_present_in_salon_and_external(self):
-        """remember_customer_preference is in TOOLS_SALON, TOOLS_EXTERNAL, and ALL_TOOLS
-        with the required input_schema fields (key, value, reason all required)."""
-        from app.services.agent_tools import TOOLS_SALON, TOOLS_EXTERNAL, ALL_TOOLS
+        """remember_customer_preference is in TOOLS_SALON and ALL_TOOLS with
+        the required input_schema fields (key, value, reason all required).
+
+        TOOLS_SALON is the only tool list since chunk 9 (docs/claude/
+        delivery-web.md) deleted TOOLS_EXTERNAL along with the WhatsApp
+        delivery/pickup funnel."""
+        from app.services.agent_tools import TOOLS_SALON, ALL_TOOLS
 
         salon_names = {t["name"] for t in TOOLS_SALON}
-        external_names = {t["name"] for t in TOOLS_EXTERNAL}
 
         assert "remember_customer_preference" in salon_names, \
             "remember_customer_preference missing from TOOLS_SALON"
-        assert "remember_customer_preference" in external_names, \
-            "remember_customer_preference missing from TOOLS_EXTERNAL"
         assert "remember_customer_preference" in ALL_TOOLS, \
             "remember_customer_preference missing from ALL_TOOLS"
 
@@ -536,7 +537,13 @@ class TestCustomerMemoryIntegration:
         monkeypatch.setattr("app.services.agent.state_store.checkout_get",
                             AsyncMock(return_value=None))
 
-        result = _run(agent_mod.chat("+573001234567", "Hola", bot_number))
+        # "web:" identity (the web ordering channel's synthetic phone) — a
+        # real WhatsApp number with no table_context now gets a deterministic
+        # reply before the LLM/profile-loading path is ever reached (chunk 9,
+        # docs/claude/delivery-web.md: WhatsApp delivery/pickup retired). The
+        # web channel still uses the LLM for menu conversation, so it's the
+        # right shape to exercise this profile-loading wiring.
+        result = _run(agent_mod.chat("web:test-uuid-profile-1", "Hola", bot_number))
 
         assert isinstance(result, dict), "chat() should return a dict"
         assert upsert_mock.called, "upsert_profile_from_message was not called"
@@ -584,8 +591,10 @@ class TestCustomerMemoryIntegration:
         monkeypatch.setattr("app.services.agent.state_store.checkout_get",
                             AsyncMock(return_value=None))
 
+        # "web:" identity — see test_chat_loads_customer_profile_at_start for
+        # why a real WhatsApp number no longer reaches this code path.
         # Must NOT raise — the chat should still succeed
-        result = _run(agent_mod.chat("+573001234567", "Hola", bot_number))
+        result = _run(agent_mod.chat("web:test-uuid-profile-2", "Hola", bot_number))
 
         assert isinstance(result, dict), \
             "chat() should return dict even when profile load fails"

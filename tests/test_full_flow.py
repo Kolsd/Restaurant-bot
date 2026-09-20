@@ -561,75 +561,16 @@ class TestWaiterFlows:
 # ===========================================================================
 
 class TestDeliveryRiderFlows:
-    """Section C: Delivery rider flows."""
+    """Section C: Delivery rider flows.
 
-    def test_list_delivery_orders(self, client, monkeypatch):
-        """GET /api/delivery/orders returns pending delivery orders."""
-        patch_auth(monkeypatch, role="domiciliario")
-        monkeypatch.setattr(db, "db_get_delivery_orders", AsyncMock(return_value=[
-            _mock_delivery_order()
-        ]))
-
-        resp = client.get(
-            "/api/delivery/orders",
-            headers={"Authorization": "Bearer fake"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "orders" in data
-        assert len(data["orders"]) == 1
-
-    def test_update_status_to_en_camino(self, client, monkeypatch):
-        """PATCH status → en_camino succeeds."""
-        patch_auth(monkeypatch, role="domiciliario")
-        order = _mock_delivery_order(status="listo")
-        monkeypatch.setattr(db, "db_get_order", AsyncMock(return_value=order))
-        monkeypatch.setattr(db, "db_update_order_status", AsyncMock())
-
-        with patch("app.routes.orders_routes.asyncio.create_task"):
-            resp = client.patch(
-                "/api/delivery/orders/del-001/status",
-                json={"status": "en_camino"},
-                headers={"Authorization": "Bearer fake"},
-            )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert data["new_status"] == "en_camino"
-
-    def test_update_status_to_entregado(self, client, monkeypatch):
-        """PATCH status → entregado marks order as delivered."""
-        patch_auth(monkeypatch, role="domiciliario")
-        order = _mock_delivery_order(status="en_camino")
-        monkeypatch.setattr(db, "db_get_order", AsyncMock(return_value=order))
-        monkeypatch.setattr(db, "db_update_order_status", AsyncMock())
-
-        with patch("app.routes.orders_routes.asyncio.create_task"):
-            resp = client.patch(
-                "/api/delivery/orders/del-001/status",
-                json={"status": "entregado"},
-                headers={"Authorization": "Bearer fake"},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["new_status"] == "entregado"
-
-    def test_rider_cannot_cancel_directly(self, client, monkeypatch):
-        """Attempt to set status=cancelado triggers update (business-level, no 400 from route)."""
-        # The /delivery/orders/{id}/status route does not block 'cancelado' at HTTP level;
-        # it simply calls db_update_order_status. We verify it returns 200 and passes the status.
-        patch_auth(monkeypatch, role="domiciliario")
-        order = _mock_delivery_order(status="confirmado")
-        monkeypatch.setattr(db, "db_get_order", AsyncMock(return_value=order))
-        monkeypatch.setattr(db, "db_update_order_status", AsyncMock())
-
-        with patch("app.routes.orders_routes.asyncio.create_task"):
-            resp = client.patch(
-                "/api/delivery/orders/del-001/status",
-                json={"status": "cancelado"},
-                headers={"Authorization": "Bearer fake"},
-            )
-        # Route-level: passes through; KDS-level cancel validation is separate
-        assert resp.status_code == 200
+    The rider tests that hit GET/PATCH /api/delivery/orders* were removed in
+    chunk 9 (docs/claude/delivery-web.md) — those endpoints only ever served
+    the retired WhatsApp delivery/pickup flow and were org-wide (not
+    sede-scoped), leaking every order's customer PII to any staff member.
+    The new sede-scoped rider surface is app/routes/staff_delivery.py
+    (/api/staff/delivery/*). GET /api/orders/{id} is untouched (still a
+    generic order lookup, not delivery-specific) so its tests stay.
+    """
 
     def test_get_single_delivery_order(self, client, monkeypatch):
         """GET /api/orders/{id} returns full order details."""
@@ -658,54 +599,6 @@ class TestDeliveryRiderFlows:
         )
         assert resp.status_code == 200
         assert "Cra 7" in resp.json()["address"]
-
-    def test_update_status_correct_bot_number(self, client, monkeypatch):
-        """bot_number from the order is propagated to WA notification."""
-        patch_auth(monkeypatch, role="domiciliario")
-        order = _mock_delivery_order(status="listo")
-        monkeypatch.setattr(db, "db_get_order", AsyncMock(return_value=order))
-        monkeypatch.setattr(db, "db_update_order_status", AsyncMock())
-
-        captured_bot = []
-
-        async def fake_notify(phone, status, bot_number="", order_type="domicilio"):
-            captured_bot.append(bot_number)
-
-        with patch("app.routes.orders_routes.send_delivery_notification", fake_notify), \
-             patch("app.routes.orders_routes.asyncio.create_task", lambda coro: asyncio.ensure_future(coro)):
-            resp = client.patch(
-                "/api/delivery/orders/del-001/status",
-                json={"status": "en_camino"},
-                headers={"Authorization": "Bearer fake"},
-            )
-        assert resp.status_code == 200
-
-    def test_delivery_unauthenticated_returns_401(self, client, monkeypatch):
-        """Delivery endpoint without valid token → 401."""
-        from fastapi import HTTPException as _HTTPException
-        monkeypatch.setattr(
-            "app.routes.deps.verify_token",
-            AsyncMock(side_effect=_HTTPException(status_code=401, detail="Unauthorized")),
-        )
-
-        resp = client.get("/api/delivery/orders", headers={"Authorization": "Bearer bad"})
-        assert resp.status_code == 401
-
-    def test_multiple_orders_same_restaurant(self, client, monkeypatch):
-        """Multiple delivery orders returned correctly."""
-        patch_auth(monkeypatch, role="domiciliario")
-        orders = [
-            _mock_delivery_order(order_id=f"del-{i}", status="confirmado")
-            for i in range(3)
-        ]
-        monkeypatch.setattr(db, "db_get_delivery_orders", AsyncMock(return_value=orders))
-
-        resp = client.get(
-            "/api/delivery/orders",
-            headers={"Authorization": "Bearer fake"},
-        )
-        assert resp.status_code == 200
-        assert len(resp.json()["orders"]) == 3
 
     def test_order_not_found_returns_404(self, client, monkeypatch):
         """GET /api/orders/{id} for unknown id → 404."""
@@ -1066,9 +959,14 @@ class TestBotWhatsAppFlows:
         save_mock = AsyncMock()
         monkeypatch.setattr(db, "db_save_history", save_mock)
 
+        # "web:" identity: a real WhatsApp phone with no active table now gets
+        # a deterministic reply before the LLM/history-save path is ever
+        # reached (chunk 9, docs/claude/delivery-web.md — WhatsApp delivery/
+        # pickup retired). The web channel still calls the LLM, so it's the
+        # right shape to exercise this history-saving wiring.
         resp = client.post(
             "/api/chat",
-            json={"phone": "573001234567", "message": "Buenas tardes", "bot_number": bot_number},
+            json={"phone": "web:test-uuid-history", "message": "Buenas tardes", "bot_number": bot_number},
         )
         assert resp.status_code == 200
         save_mock.assert_called_once()
@@ -1186,9 +1084,11 @@ class TestBotWhatsAppFlows:
         usage_mock = AsyncMock()
         monkeypatch.setattr(db, "db_check_usage_limits", usage_mock)
 
+        # "web:" identity — see test_bot_saves_conversation_history for why a
+        # real WhatsApp number no longer reaches call_claude()/usage checks.
         client.post(
             "/api/chat",
-            json={"phone": "573001234567", "message": "Hola", "bot_number": bot_number},
+            json={"phone": "web:test-uuid-usage", "message": "Hola", "bot_number": bot_number},
         )
         # db_check_usage_limits should be called with restaurant_id=1
         usage_mock.assert_called_once_with(1)

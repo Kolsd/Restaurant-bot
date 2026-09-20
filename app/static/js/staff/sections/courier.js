@@ -143,7 +143,6 @@
 
   // ── State ───────────────────────────────────────────
   let _activeTab = 'hoy';
-  let _currentHash = null;
   let _lastWebSignature = null;
   let _allOrders = [];
 
@@ -455,34 +454,24 @@
   }
 
   // ── Update order status ───────────────────────────────
-  // A rider may have BOTH a legacy WhatsApp-era delivery (PATCH .../status,
-  // any status string) and a new web delivery/pickup order (chunk 7 —
-  // POST .../en-route or .../delivered, sede+ownership enforced server-side
-  // by app/routes/staff_delivery.py::_require_can_transition) in the same
-  // list — _normalizeWebOrder tags the latter with `_source: 'web'` so this
-  // dispatches to the right API instead of guessing from the id shape.
+  // Every order in _allOrders comes exclusively from fetchWebOrders() (see
+  // fetchOrders() below) since chunk 9 (docs/claude/delivery-web.md) retired
+  // WhatsApp delivery/pickup entirely, so this always dispatches to the
+  // sede+ownership-enforced web endpoint (app/routes/staff_delivery.py::
+  // _require_can_transition) — the legacy PATCH .../status branch that used
+  // to run for WhatsApp-era orders was removed along with that flow.
   async function updateStatus(orderId, status) {
-    const order = _allOrders.find(o => String(o.id) === String(orderId));
-    const isWeb = !!(order && order._source === 'web');
     try {
-      let res;
-      if (isWeb) {
-        const path = status === 'en_camino' ? '/en-route' : '/delivered';
-        // Plain string concat (not a template literal) so the two dynamic
-        // segments don't collapse into one unmatchable {PARAM}{PARAM} token
-        // for scripts/lint_frontend.py's FETCH check (see its own
-        // '/api/x/' + id example) — normalizes to the same
-        // /api/staff/delivery/orders/{PARAM}/... prefix as delivery.js's
-        // _postDelivery.
-        res = await fetch('/api/staff/delivery/orders/' + orderId + path, {
-          method: 'POST', headers: mesioHeaders(),
-        });
-      } else {
-        res = await fetch(`/api/delivery/orders/${orderId}/status`, {
-          method: 'PATCH', headers: mesioHeaders(),
-          body: JSON.stringify({ status })
-        });
-      }
+      const path = status === 'en_camino' ? '/en-route' : '/delivered';
+      // Plain string concat (not a template literal) so the two dynamic
+      // segments don't collapse into one unmatchable {PARAM}{PARAM} token
+      // for scripts/lint_frontend.py's FETCH check (see its own
+      // '/api/x/' + id example) — normalizes to the same
+      // /api/staff/delivery/orders/{PARAM}/... prefix as delivery.js's
+      // _postDelivery.
+      const res = await fetch('/api/staff/delivery/orders/' + orderId + path, {
+        method: 'POST', headers: mesioHeaders(),
+      });
       if (res.ok) { await fetchOrders(); return; }
       let detail = 'Error al actualizar';
       try {
@@ -495,8 +484,9 @@
 
   // ── Normalize a web delivery/pickup order (app/routes/staff_delivery.py's
   // _cashier_order_view shape) into the SAME field names this file's
-  // render functions already expect from the legacy /api/delivery/orders
-  // shape, so _renderHero/_renderActive/etc. need no branching per source.
+  // render functions already expected from the old WhatsApp-era delivery
+  // list shape (deleted in chunk 9, docs/claude/delivery-web.md), so
+  // _renderHero/_renderActive/etc. need no branching per source.
   // dispatched_at has no exact web-order equivalent (the web model tracks
   // WHO/WHEN a courier was assigned, not a separate "left for delivery"
   // timestamp) — courier_assigned_at is the closest available proxy.
@@ -532,7 +522,7 @@
 
   // GET /orders/mine returns the courier's FULL history (no date filter —
   // the endpoint's job is ownership scoping, not a time window), unlike the
-  // legacy /api/delivery/orders. Without this filter, "entregadas" in the
+  // old WhatsApp-era delivery list. Without this filter, "entregadas" in the
   // hero stats and the "Completados hoy" history tab would grow across every
   // day this rider has ever worked. Uses the BROWSER's local date, not the
   // sede's own timezone (docs/claude/status.md already flags per-timezone
@@ -566,8 +556,9 @@
   // ── Fetch orders ──────────────────────────────────────
   async function fetchOrders() {
     // ONLY the courier's own orders, scoped on the server (courier + sede).
-    // This used to also merge the WhatsApp-era GET /api/delivery/orders,
-    // which returns EVERY delivery order of the org — any sede, any courier,
+    // This used to also merge the WhatsApp-era org-wide delivery list
+    // endpoint (deleted in chunk 9), which returned EVERY
+    // delivery order of the org — any sede, any courier,
     // with customer name/phone/address — so a rider saw everyone's orders
     // and every web order twice. WhatsApp delivery is switched off in this
     // wave (docs/claude/delivery-web.md), so that list has nothing of this
@@ -599,15 +590,6 @@
   }
 
   async function checkUpdates() {
-    let legacyChanged = false;
-    try {
-      const res = await fetch('/api/delivery/check-updates', { headers: mesioHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.hash !== _currentHash) { _currentHash = data.hash; legacyChanged = true; }
-      }
-    } catch (_) { /* silent: mobile network */ }
-
     let webChanged = false;
     try {
       const res = await fetch('/api/staff/delivery/orders/mine', { headers: mesioHeaders() });
@@ -619,7 +601,7 @@
       }
     } catch (_) { /* silent: mobile network */ }
 
-    if (legacyChanged || webChanged) fetchOrders();
+    if (webChanged) fetchOrders();
   }
 
   // ── Status bar clock (was courier.html's inline <script>) ──────────
@@ -632,7 +614,6 @@
   function mount(container) {
     container.innerHTML = TEMPLATE;
     _activeTab = 'hoy';
-    _currentHash = null;
     _lastWebSignature = null;
 
     document.querySelectorAll('.dom-tab').forEach(btn => {

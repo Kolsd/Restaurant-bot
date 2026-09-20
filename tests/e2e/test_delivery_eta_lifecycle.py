@@ -3,12 +3,24 @@ tests/e2e/test_delivery_eta_lifecycle.py — E2E test: delivery ETA full lifecyc
 
 What this exercises (no Anthropic, no LLM):
   1. Seed restaurant + paid+confirmed delivery order with NO ETA yet.
-  2. Admin POST /api/delivery/orders/{id}/eta with minutes=30 → row updated,
-     eta_communicated=false (single-winner reset).
+  2. Set the ETA to 30 minutes via orders_repo.db_set_order_eta (repo call,
+     not HTTP — see note below), asserting eta_communicated resets to false
+     (single-winner reset).
   3. Drive scheduler._run_eta_communication() under bypass — it scans, finds
      the order, sends WA (intercepted via wa_capture), and atomically marks
      eta_communicated=true.
   4. Run scheduler again → no second send (idempotency).
+
+The manual admin endpoint this test used to drive step 2 through
+(POST /api/delivery/orders/{id}/eta) was deleted in chunk 9
+(docs/claude/delivery-web.md): it was org-wide (no sede scoping) and only
+ever served the WhatsApp delivery/pickup flow. `db_set_order_eta` itself has
+no remaining production caller either — the new sede-scoped acceptance flow
+(app/routes/staff_delivery.py::accept_delivery_order) sets estimated_minutes
+its own way and never flips `paid`, so a web order can never actually reach
+this scheduler today (a gap noted in delivery-web.md). This test keeps
+exercising the still-live scheduler half end-to-end by calling the repo
+function directly instead of going through the deleted route.
 
 Skipped automatically when TEST_DATABASE_URL or ANTHROPIC_API_KEY is unset.
 The actual test does NOT call Anthropic.
@@ -24,7 +36,6 @@ from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
     WACapture,
-    create_admin_token,
     seed_restaurant,
     truncate_e2e_data,
     _normalize_phone,
@@ -70,7 +81,7 @@ async def test_delivery_eta_full_lifecycle(
     ETA flow:
 
       Seed: paid + confirmado delivery order, no ETA
-      Action 1: admin POST /eta {minutes: 30} → row updated, eta_communicated=false
+      Action 1: db_set_order_eta(30) → row updated, eta_communicated=false
       Action 2: scheduler tick → finds order, sends WA, marks communicated=true
       Action 3: scheduler tick (again) → no second send (atomic single-winner)
     """
@@ -110,24 +121,18 @@ async def test_delivery_eta_full_lifecycle(
                 order_id, org_id, CUSTOMER_PHONE, bot_number,
             )
 
-    # ── Admin POST /eta — set ETA to 30 minutes ────────────────────────────────
-    owner_email = restaurant["owner_email"]
-    admin_token = await create_admin_token(pool, owner_email)
-    auth_headers = {"Authorization": f"Bearer {admin_token}"}
+    # ── Set ETA to 30 minutes via the repo directly (no HTTP route left — see
+    # module docstring) ─────────────────────────────────────────────────────
+    from app.repositories.orders_repo import db_set_order_eta
+    from app.services.tenant_context import tenant_scope
 
-    resp = await e2e_app.post(
-        f"/api/delivery/orders/{order_id}/eta",
-        json={"minutes": 30},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 200, (
-        f"POST /eta failed: {resp.status_code} {resp.text}"
-    )
-    body = resp.json()
-    assert body.get("estimated_minutes") == 30
+    with tenant_scope(org_id):
+        eta_row = await db_set_order_eta(order_id, 30)
+    assert eta_row is not None, f"db_set_order_eta returned None for order {order_id}"
+    assert eta_row.get("estimated_minutes") == 30
     # eta_communicated must reset to false on every set
-    assert body.get("eta_communicated") is False, (
-        f"Setting ETA must reset communicated flag, got {body!r}"
+    assert eta_row.get("eta_communicated") is False, (
+        f"Setting ETA must reset communicated flag, got {eta_row!r}"
     )
 
     # ── Verify in DB ───────────────────────────────────────────────────────────

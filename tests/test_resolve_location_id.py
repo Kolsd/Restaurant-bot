@@ -166,7 +166,7 @@ async def test_resolve_accepts_legacy_branch_id_in_routing_context():
     from app.services.agent import _resolve_location_id
 
     table_ctx = None
-    routing_ctx = {"branch_id": 88}  # legacy key, set by agent_external GPS routing
+    routing_ctx = {"branch_id": 88}  # legacy key, formerly set by the now-deleted agent_external GPS routing
 
     with patch(
         "app.repositories.conversations_repo.db_get_conversation_location_id",

@@ -832,6 +832,14 @@ async def db_get_orders_needing_eta_communication() -> list[dict]:
     notification path is handled by send_delivery_notification on status
     transitions, not by the ETA scheduler.
 
+    `phone NOT LIKE 'web:%'` excludes the web ordering channel's synthetic
+    identities (docs/claude/delivery-web.md) — there is no WhatsApp number to
+    message for those, and scheduler.py's caller passes `phone` straight to
+    Meta's send API with no other guard. Not reachable today (no web order
+    ever reaches paid=TRUE yet — chunk 9 found there is no proof-validation
+    endpoint for the new lifecycle), but left in place so it can't silently
+    misfire once one is added.
+
     # Requires active tenant_scope() (per-org wrap by the scheduler).
     """
     async with _tenant_connection() as conn:
@@ -843,6 +851,7 @@ async def db_get_orders_needing_eta_communication() -> list[dict]:
               AND status            IN ('confirmado', 'en_preparacion')
               AND estimated_minutes IS NOT NULL
               AND eta_communicated  = FALSE
+              AND phone NOT LIKE 'web:%'
             ORDER BY created_at ASC
             """,
         )

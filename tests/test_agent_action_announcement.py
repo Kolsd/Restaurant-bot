@@ -17,8 +17,10 @@ committed (tests/e2e/test_pickup_customer_arrived.py failed:
 
 ROUND 2 CORRECTION (post-review): a first pass added "listo,? vamos con" and
 "resumen:" directly into _ACTION_ANNOUNCEMENT_RE, unconditionally. That was
-too broad: STEP 5 of agent_external.py's system prompt explicitly instructs
-the model to "Summarize order, address, payment. Ask explicit confirmation."
+too broad: STEP 5 of agent_external.py's system prompt (that module was
+deleted in chunk 9, docs/claude/delivery-web.md — WhatsApp delivery/pickup
+retired) explicitly instructed the model to "Summarize order, address,
+payment. Ask explicit confirmation."
 — i.e. a LEGITIMATE pre-confirmation recap looks exactly like "Resumen: ...".
 Flagging it unconditionally meant CATEGORY A would swap out the recap the
 customer needs to read before confirming, replacing it with "Un momento,

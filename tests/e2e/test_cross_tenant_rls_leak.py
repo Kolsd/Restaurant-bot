@@ -270,12 +270,19 @@ async def test_admin_cannot_see_other_tenant_orders(
         "CRITICAL: tenant isolation broken — org_B reads org_A data."
     )
 
-    # ── Assertion C: admin_A PATCH order_B → non-200 ─────────────────────────
+    # ── Assertion C: admin_A mutates order_B → non-200 ───────────────────────
+    # Was PATCH /api/delivery/orders/{id}/status — that org-wide endpoint was
+    # deleted in chunk 9 (docs/claude/delivery-web.md; WhatsApp delivery/
+    # pickup retired). Its sede-scoped successor is
+    # app/routes/staff_delivery.py, which resolves the caller's own org+sede
+    # (X-Location-ID for an admin) and 404s on any order outside it via
+    # `_require_owned_order` — arguably a stronger tenant-isolation guarantee
+    # than the old ownership check, so we exercise that instead.
+    location_id_A = rest_A["branches"][0]["id"]
     log.info("e2e.rls.cross_tenant_patch_attempt", actor="admin_A", target_order=order_id_B)
-    patch_resp = await client.patch(
-        f"/api/delivery/orders/{order_id_B}/status",
-        json={"status": "confirmado"},
-        headers=headers_A,
+    patch_resp = await client.post(
+        f"/api/staff/delivery/orders/{order_id_B}/en-route",
+        headers={**headers_A, "X-Location-ID": str(location_id_A)},
     )
     log.info(
         "e2e.rls.cross_tenant_patch_result",

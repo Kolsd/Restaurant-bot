@@ -313,27 +313,30 @@ class TestBuildCompactMenuPhotoMarkers:
 
 
 class TestSendDishCardExternalFlow:
-    """send_dish_card MUST be exposed in TOOLS_EXTERNAL so delivery/pickup
-    customers can ask 'cómo se ve la bandeja paisa' and receive a photo.
+    """send_dish_card MUST be exposed in TOOLS_SALON so a customer can ask
+    'cómo se ve la bandeja paisa' and receive a photo, whether they're at a
+    table or (before chunk 9, docs/claude/delivery-web.md) using the retired
+    WhatsApp delivery/pickup funnel. TOOLS_SALON is the only tool list left
+    since that funnel's TOOLS_EXTERNAL was deleted.
 
     The handler in agent.py is flow-agnostic (no salon-only filtering on the
-    tool name), so being present in TOOLS_EXTERNAL is sufficient — exercising
-    execute_action with a restaurant in external mode confirms parity.
+    tool name), so being present in TOOLS_SALON is sufficient — exercising
+    execute_action with table_context=None (no active table) confirms parity.
     """
 
     def test_tool_definition_present_in_external(self):
-        from app.services.agent_tools import TOOLS_EXTERNAL, ALL_TOOLS
+        from app.services.agent_tools import TOOLS_SALON, ALL_TOOLS
 
-        names = [t["name"] for t in TOOLS_EXTERNAL]
-        assert "send_dish_card" in names, "send_dish_card MUST be in TOOLS_EXTERNAL for delivery/pickup mode"
+        names = [t["name"] for t in TOOLS_SALON]
+        assert "send_dish_card" in names, "send_dish_card MUST be in TOOLS_SALON"
 
         # Same definition should resolve from ALL_TOOLS lookup.
         assert ALL_TOOLS["send_dish_card"]["name"] == "send_dish_card"
         assert "dish_name" in ALL_TOOLS["send_dish_card"]["input_schema"]["properties"]
 
     def test_external_flow_can_use_send_dish_card(self, monkeypatch):
-        """execute_action invoked with an EXTERNAL-mode restaurant returns the
-        LLM reply just like the salon path — handler is flow-agnostic."""
+        """execute_action invoked with table_context=None returns the LLM
+        reply just like the salon path — handler is flow-agnostic."""
         monkeypatch.setattr(
             state_store, "rate_limit_check", AsyncMock(return_value=True)
         )

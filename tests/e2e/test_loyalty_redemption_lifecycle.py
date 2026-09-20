@@ -8,7 +8,9 @@ What this exercises (no Anthropic, no LLM):
      same code path the production tool_use dispatcher would call.
   4. Assert: ledger row inserted (delta = -points), customer balance decremented,
      orders.loyalty_redeemed_points + loyalty_discount_cop populated.
-  5. Caja-side visibility: GET /api/delivery/orders/{id} surfaces the discount.
+  5. Caja-side visibility: the discount lands on the row caja's pending-orders
+     query reads from (GET /api/delivery/orders itself was deleted in chunk
+     9 — see the note near that assertion).
 
 Why a real E2E:
   Production flow is bot tool_use → execute_action → _execute_redeem_loyalty →
@@ -32,7 +34,6 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    create_admin_token,
     seed_restaurant,
     truncate_e2e_data,
     _normalize_phone,
@@ -77,7 +78,7 @@ async def test_loyalty_canje_full_lifecycle(
         - balance: 200 → 150
         - ledger: row(delta=-50, reason='redeem', order_id=<order>)
         - order.loyalty_redeemed_points = 50, loyalty_discount_cop > 0
-        - caja-visible via /api/delivery/orders endpoint
+        - discount fields land on the row caja's pending-orders query reads from
     """
     pool = test_pool
 
@@ -201,38 +202,38 @@ async def test_loyalty_canje_full_lifecycle(
                     pass
                 raise
 
-    # ── Caja visibility: /api/delivery/orders should surface the discount ──────
-    # Authenticate as restaurant owner.
-    owner_email = restaurant["owner_email"]
-    admin_token = await create_admin_token(pool, owner_email)
-    auth_headers = {"Authorization": f"Bearer {admin_token}"}
-
-    resp = await e2e_app.get(
-        "/api/delivery/orders?status=pendiente",
-        headers=auth_headers,
+    # ── Caja visibility: the discount must be persisted and queryable ─────────
+    # This used to go through GET /api/delivery/orders, deleted in chunk 9
+    # (docs/claude/delivery-web.md) — it was org-wide (no sede scoping) and
+    # only ever served the WhatsApp delivery/pickup flow. The sede-scoped
+    # replacement (app/routes/staff_delivery.py's GET /api/staff/delivery/
+    # orders) does not surface loyalty fields at all yet — a gap for a
+    # follow-up chunk, not something to paper over here. What we can still
+    # honestly assert is that the discount landed on the row caja's queries
+    # read from.
+    with bypass_tenant_scope("e2e_loyalty_caja_visibility_check"):
+        async with pool.acquire() as conn:
+            await conn.execute("SET LOCAL ROLE mesio_app")
+            await conn.execute(
+                "SELECT set_config('app.org_id', $1::text, true)", str(org_id),
+            )
+            order_row = await conn.fetchrow(
+                "SELECT loyalty_redeemed_points, loyalty_discount_cop "
+                "FROM orders WHERE id = $1 AND status = 'pendiente'",
+                order_id,
+            )
+    assert order_row is not None, (
+        f"Order {order_id} not found in status='pendiente' — "
+        "caja's pending-orders queries would not see it."
     )
-    assert resp.status_code == 200, f"GET orders failed: {resp.status_code} {resp.text}"
-    payload = resp.json()
-    orders_list = payload.get("orders") or payload  # endpoint may wrap
-    if isinstance(orders_list, dict):
-        orders_list = orders_list.get("orders", [])
-
-    # Find our order
-    matching = [o for o in orders_list if o.get("id") == order_id]
-    assert matching, (
-        f"Caja /api/delivery/orders did not return our order {order_id}. "
-        f"Got {len(orders_list)} orders."
-    )
-    o = matching[0]
-    # The discount must be exposed somewhere visible to caja
-    points_field = o.get("loyalty_redeemed_points")
-    discount_field = o.get("loyalty_discount_cop")
+    points_field = order_row["loyalty_redeemed_points"]
+    discount_field = order_row["loyalty_discount_cop"]
     assert points_field == 50, (
-        f"Caja view missing loyalty_redeemed_points (got {points_field!r}). "
+        f"Order row missing loyalty_redeemed_points (got {points_field!r}). "
         "Caja staff cannot see the discount → real money will be charged."
     )
     assert discount_field is not None and float(discount_field) > 0, (
-        f"Caja view missing loyalty_discount_cop (got {discount_field!r})"
+        f"Order row missing loyalty_discount_cop (got {discount_field!r})"
     )
 
     log.info(

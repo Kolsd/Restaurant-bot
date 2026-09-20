@@ -184,7 +184,7 @@ Requires Colombian financial regulation. Viable alternative: extend loyalty as "
 3. **Dropping plaintext `sessions.token`** — blocked on ~2 weeks of observation with `session.legacy_lookup=0` before migrating.
 
 **QA / testing:**
-4. **`run_ai_sim.py` E2E unvalidated** post-Wave-2 — the smoke flag works (`python run_ai_sim.py --smoke` passes without Anthropic). Full E2E (20 scenarios) requires `ANTHROPIC_API_KEY` + budget (~$2-5).
+4. **`run_ai_sim.py` E2E unvalidated** post-Wave-2 — the smoke flag works (`python run_ai_sim.py --smoke` passes without Anthropic). Full E2E (9 scenarios since the delivery/pickup suites were retired with the WhatsApp funnel — chunk 9 of the web delivery wave) requires `ANTHROPIC_API_KEY` + budget.
 5. **`test_staff_self_tips` integration fixtures** (Sprint Y) — 4 tests skipped due to datetime tz + `table_checks` NOT NULL. Core logic validated by unit tests with a mocked pool. Trivial fix (~15 min) when convenient.
 
 **Deferred features:**

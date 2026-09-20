@@ -4,7 +4,7 @@
 
 ## Bot Rules — DO NOT BREAK (learned from 79 bugs across 4 audits)
 
-These rules protect the WhatsApp bot's critical flows. Any change to `agent.py`, `agent_salon.py`, `agent_external.py`, `orders.py`, `orders_repo.py`, `inbox_worker.py`, `state_store.py`, or `chat.py` MUST comply with ALL of these rules.
+These rules protect the WhatsApp bot's critical flows. Any change to `agent.py`, `agent_salon.py`, `orders.py`, `orders_repo.py`, `inbox_worker.py`, `state_store.py`, or `chat.py` MUST comply with ALL of these rules. (`agent_external.py` — the WhatsApp delivery/pickup "external" flow — was deleted in chunk 9 of the web delivery wave; see `delivery-web.md`.)
 
 ### 1. Serialization: Decimal NEVER in state_store
 - `state_store` serializes with `json.dumps`. `Decimal` is not JSON-serializable.
@@ -17,7 +17,7 @@ These rules protect the WhatsApp bot's critical flows. Any change to `agent.py`,
 - `qty` MUST be parsed with try/except, defaulting to 1. Claude can return `"two"` or `null`.
 - `items` MUST be validated as a `list` before iterating.
 - `guests` in reservations MUST be `int > 0`.
-- The dedup guard MUST cover `place_order`, `create_delivery_order` AND `create_pickup_order`.
+- The dedup guard MUST cover `place_order` (the only order-creating tool left — `create_delivery_order`/`create_pickup_order` were removed in chunk 9, docs/claude/delivery-web.md).
 - When dedup blocks a call, return a NEUTRAL message ("this is already being processed"), NEVER the LLM's reply (which says "order confirmed").
 
 ### 3. Checkout Flow: Complete state machine
@@ -106,8 +106,8 @@ These rules protect the WhatsApp bot's critical flows. Any change to `agent.py`,
 
 ### 16. Single-location restaurants: don't ask which branch
 - `agent.py` injects `[UBICACION_UNICA: ...]` into the context when `db_get_branches` returns an empty list (single-location tenant). This is the explicit counterpart to the `[SUCURSALES: ...]` block used in the multi-location case.
-- `agent_external.py` STEP 2 has a `CRITICAL — SINGLE-LOCATION RULE` that says "if there is NO [SUCURSALES] block, there is only ONE location; NEVER ask which branch".
-- Without these hints the LLM would ask "which branch?" at single-location restaurants, breaking the pickup/delivery flow. If you touch the system prompt or the context injection, KEEP both hints.
+- (Historical: `agent_external.py` STEP 2 had the same `CRITICAL — SINGLE-LOCATION RULE` for the WhatsApp delivery/pickup funnel; that file was deleted in chunk 9 — delivery/pickup ordering moved to the web channel, docs/claude/delivery-web.md.)
+- Without this hint the LLM would ask "which branch?" at single-location restaurants when a customer places a dine-in order across multiple sedes. If you touch the system prompt or the context injection, KEEP it.
 
 ### 17. Bill request fires waiter_alert instantly (doesn't wait for full checkout)
 - The `agent_salon.py` checkout flow calls `db.db_create_waiter_alert(alert_type='bill', ...)` **the moment the customer asks for the bill**, BEFORE the checkout state machine (split → tip → method → factura) finishes.

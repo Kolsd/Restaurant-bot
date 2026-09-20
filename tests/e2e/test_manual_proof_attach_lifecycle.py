@@ -1,13 +1,17 @@
 """
-tests/e2e/test_manual_proof_attach_lifecycle.py — E2E: image proof attach + caja validation.
+tests/e2e/test_manual_proof_attach_lifecycle.py — E2E: image proof attach (bot side).
 
 What this exercises (no Anthropic, no LLM):
   1. Seed restaurant + 1 pending unpaid delivery order.
   2. Customer sends an image message via POST /api/webhook/meta.
   3. chat.py's image shortcut fires `db_attach_order_proof`, updates
      orders.proof_url, and queues a confirmation WA back to the customer.
-  4. Caja validates the proof via POST /api/delivery/orders/{id}/validate.
-  5. Order flips to paid+confirmado; loyalty accrual fires once (mocked).
+
+The caja-validates-the-proof half of this test (POST /api/delivery/orders/
+{id}/validate → paid+confirmado, loyalty accrual) was removed in chunk 9
+(docs/claude/delivery-web.md): that endpoint was org-wide (no sede scoping)
+and only ever served the WhatsApp delivery/pickup flow this order simulates.
+See the note near the end of the test body for the resulting gap.
 
 Skipped automatically when TEST_DATABASE_URL or ANTHROPIC_API_KEY is unset.
 The test does NOT actually call Anthropic — `_is_image_safe` is monkeypatched
@@ -20,7 +24,7 @@ import hmac
 import json
 import os
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import asyncpg
 import pytest
@@ -29,7 +33,6 @@ from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
     WACapture,
-    create_admin_token,
     seed_restaurant,
     truncate_e2e_data,
     _normalize_phone,
@@ -72,13 +75,12 @@ async def test_manual_proof_attach_full_lifecycle(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """
-    Manual-proof flow:
+    Manual-proof flow (bot side only — see module docstring for the
+    caja-validates half removed in chunk 9):
 
       Seed: 1 pending unpaid delivery order
-      Action 1: customer sends image → chat.py shortcut → db_attach_order_proof
+      Action: customer sends image → chat.py shortcut → db_attach_order_proof
       Assert: orders.proof_url populated, customer received "comprobante recibido"
-      Action 2: caja POST /validate → order flips to paid+confirmado
-      Assert: order paid=true, status=confirmado; loyalty accrual ran once
     """
     pool = test_pool
 
@@ -88,16 +90,6 @@ async def test_manual_proof_attach_full_lifecycle(
     from app.routes import chat as chat_module
     monkeypatch.setattr(
         chat_module, "_is_image_safe", AsyncMock(return_value=True)
-    )
-
-    # ── Mock loyalty accrual side effect (counted, not executed) ──────────────
-    # We need the caja validate endpoint to succeed without depending on
-    # the loyalty accrual schema being seeded.
-    from app.routes import orders_routes as ord_routes
-    accrual_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(ord_routes, "db_accrue_loyalty_points", accrual_mock)
-    monkeypatch.setattr(
-        ord_routes, "send_delivery_notification", AsyncMock(return_value=None)
     )
 
     # ── Seed restaurant ────────────────────────────────────────────────────────
@@ -214,61 +206,19 @@ async def test_manual_proof_attach_full_lifecycle(
             captured_msgs=customer_msgs,
         )
 
-    # ── Action 2: caja validates the proof ────────────────────────────────────
-    owner_email = restaurant["owner_email"]
-    admin_token = await create_admin_token(pool, owner_email)
-    auth_headers = {"Authorization": f"Bearer {admin_token}"}
-
-    validate_resp = await e2e_app.post(
-        f"/api/delivery/orders/{order_id}/validate",
-        json={"proof_media_id": image_id, "notes": "verified by E2E"},
-        headers=auth_headers,
-    )
-    assert validate_resp.status_code == 200, (
-        f"Caja validate failed: {validate_resp.status_code} {validate_resp.text}"
-    )
-    j = validate_resp.json()
-    assert j["success"] is True
-    assert j.get("order_id") == order_id
-    assert not j.get("already_paid"), (
-        f"First validate must flip the order, got already_paid response: {j}"
-    )
-
-    # ── Assert: order is paid + confirmado ────────────────────────────────────
-    with bypass_tenant_scope("e2e_proof_validate_verify"):
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT paid, status FROM orders WHERE id=$1", order_id,
-            )
-            assert row["paid"] is True, "Order should be paid after caja validate"
-            assert row["status"] == "confirmado", (
-                f"Expected status=confirmado, got {row['status']!r}"
-            )
-
-    # ── Assert: loyalty accrual fired once ────────────────────────────────────
-    assert accrual_mock.call_count == 1, (
-        f"Loyalty accrual should fire exactly once on payment confirmation, "
-        f"got {accrual_mock.call_count} calls"
-    )
-
-    # ── Idempotency: second validate must NOT double-accrue ───────────────────
-    accrual_mock.reset_mock()
-    validate_resp_2 = await e2e_app.post(
-        f"/api/delivery/orders/{order_id}/validate",
-        json={"proof_media_id": image_id, "notes": "double click"},
-        headers=auth_headers,
-    )
-    assert validate_resp_2.status_code == 200
-    j2 = validate_resp_2.json()
-    assert j2["already_paid"] is True
-    assert accrual_mock.call_count == 0, (
-        f"Second validate must NOT call loyalty accrual again, "
-        f"got {accrual_mock.call_count} calls (would double-credit points)"
-    )
+    # Caja proof-validation ("Action 2" in the original version of this test)
+    # used to continue here via POST /api/delivery/orders/{id}/validate.
+    # That endpoint was deleted in chunk 9 (docs/claude/delivery-web.md) — it
+    # was org-wide (no sede scoping) and only ever served the WhatsApp
+    # delivery/pickup flow this order simulates. The new sede-scoped API
+    # (app/routes/staff_delivery.py) has no equivalent "mark proof
+    # validated/paid" action yet (see delivery-web.md's chunk 9 notes) —
+    # a real gap, not something this test can cover today. What remains
+    # alive and tested above is the webhook→db_attach_order_proof shortcut
+    # itself (chat.py's image handler), which is unaffected by that deletion.
 
     log.info(
         "e2e.manual_proof_attach_lifecycle.passed",
         order_id=order_id,
         proof_url=expected_proof_url,
-        accrual_calls=1,
     )

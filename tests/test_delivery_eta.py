@@ -14,8 +14,14 @@ This test module:
      rolled back at the end of each test, so the production schema is
      untouched.
   2. Tests db_set_order_eta, db_get_orders_needing_eta_communication,
-     db_mark_eta_communicated.
-  3. Hits POST /api/delivery/orders/{order_id}/eta to verify range / auth.
+     db_mark_eta_communicated — the repo layer behind scheduler.py's ETA
+     WhatsApp-communication sweep, which is still live for salon/legacy
+     phone orders. `db_set_order_eta` itself lost its only caller when the
+     manual POST /api/delivery/orders/{id}/eta endpoint was deleted in
+     chunk 9 (docs/claude/delivery-web.md — WhatsApp delivery/pickup
+     retired); kept here as a validated repo primitive, not wired to any
+     route today. That endpoint's own request-validation tests (range/auth)
+     lived in the now-deleted tests/test_delivery_eta_endpoint.py.
 
 Skipped automatically when TEST_DATABASE_URL is unset.
 """
@@ -312,7 +318,6 @@ async def test_mark_eta_communicated_is_single_winner(db_conn, org_id):
     )
 
 
-# Endpoint tests (range validation, auth gate) live in
-# tests/test_delivery_eta_endpoint.py — kept separate so they don't share the
-# raw asyncpg pool fixture with the repo tests above (running TestClient on the
-# same event loop as a held asyncpg pool causes pool / connection conflicts).
+# The manual POST /api/delivery/orders/{id}/eta endpoint (and its dedicated
+# range/auth tests in tests/test_delivery_eta_endpoint.py) was deleted in
+# chunk 9 — see the module docstring above.

@@ -388,7 +388,10 @@ async def seed_restaurant(
       - org.whatsapp_number = parent bot_number  (VIEW exposes this via the
         "sede principal" location whose l.whatsapp_number IS NULL)
       - each branch location: l.whatsapp_number = bot_number + _b{org_id}{i+1}
-        (the _b suffix convention is required by agent_external.py branch routing)
+        (the _b suffix just keeps each branch's whatsapp_number unique; it was
+        also read by the now-deleted agent_external.py branch routing, but
+        that stopped mattering when WhatsApp delivery/pickup was retired —
+        chunk 9, docs/claude/delivery-web.md)
 
     Returns:
         {
@@ -549,8 +552,8 @@ async def seed_restaurant(
 
             # ── Branch locations ──────────────────────────────────────────────
             # Each branch is a location with its own whatsapp_number override.
-            # The _b{org_id}{i+1} suffix is required by agent_external.py branch routing
-            # (see grep for '_b' in app/services/agent_external.py).
+            # The _b{org_id}{i+1} suffix just keeps each branch's whatsapp_number
+            # unique (see the docstring above).
             branches = []
             for i in range(num_branches):
                 lat, lon = branch_latlons[i] if i < len(branch_latlons) else (4.6, -74.1)

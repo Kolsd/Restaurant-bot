@@ -413,8 +413,13 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "Tomar",
         ],
         "required_fetches": [
-            "/api/delivery/orders",
-            "/status",
+            # The org-wide legacy '/api/delivery/orders' fetch (and its
+            # PATCH .../status sibling) was deleted in chunk 9
+            # (docs/claude/delivery-web.md) along with WhatsApp delivery/
+            # pickup ordering — courier.js now reads only the sede-scoped
+            # staff_delivery.py routes.
+            "/api/staff/delivery/orders/mine",
+            "/en-route",
         ],
     },
     "staff:delivery": {

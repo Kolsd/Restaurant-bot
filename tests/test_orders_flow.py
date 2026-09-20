@@ -1,21 +1,26 @@
 """
-Suite — Orders (delivery/recoger) + WhatsApp bot flow (50 tests)
+Suite — Orders (delivery/recoger) + WhatsApp bot flow
 tests/test_orders_flow.py
 
 Prefijos de rutas (según main.py include_router):
   chat_router    → prefix="/api"  → /api/webhook/meta, /api/chat
-  orders_router  → prefix="/api"  → /api/orders, /api/delivery/...
+  orders_router  → prefix="/api"  → /api/orders, /api/cart, /api/payment/...
   tables_router  → sin prefijo    → /api/tables, /api/pos/...
 
 Cubre:
-  A.  Listar y consultar órdenes de delivery                [1–7]
-  B.  Cambio de status de delivery + notificaciones         [8–14]
-  C.  Carrito (ver / limpiar)                               [15–18]
-  D.  Webhook Wompi — validación firma y flujos             [19–25]
-  E.  Bot WhatsApp — webhook Meta ingesta                   [26–33]
-  F.  Inbox worker dispatch                                 [34–38]
-  G.  Deduplicación WAM                                     [39–43]
-  H.  Commit de orden ACID (orders_repo)                    [44–50]
+  A.  Listar y consultar órdenes (/api/orders)
+  C.  Carrito (ver / limpiar)
+  D.  Webhook Wompi — validación firma y flujos
+  E.  Bot WhatsApp — webhook Meta ingesta
+  F.  Inbox worker dispatch
+  G.  Deduplicación WAM
+  H.  Commit de orden ACID (orders_repo)
+
+Section B (GET/PATCH /api/delivery/orders* — org-wide, no sede scoping) and
+the delivery-order rows in section A were deleted in chunk 9
+(docs/claude/delivery-web.md): WhatsApp delivery/pickup ordering was retired
+and those endpoints were removed (any staff still needing that data uses the
+sede-scoped /api/staff/delivery/* routes, app/routes/staff_delivery.py).
 """
 import hashlib
 import hmac
@@ -117,100 +122,6 @@ def test_get_single_order_not_found(client, monkeypatch):
     monkeypatch.setattr(db_mod, "db_get_order", AsyncMock(return_value=None))
     r = client.get("/api/orders/NOPE", headers=_HEADERS)
     assert r.status_code == 404
-
-
-def test_list_delivery_orders(client, monkeypatch):
-    """GET /api/delivery/orders → 200, lista."""
-    _auth(monkeypatch)
-    monkeypatch.setattr(db_mod, "db_get_delivery_orders", AsyncMock(return_value=[_ORDER]))
-    r = client.get("/api/delivery/orders", headers=_HEADERS)
-    assert r.status_code == 200
-    assert len(r.json()["orders"]) == 1
-
-
-def test_delivery_check_updates_returns_hash(client, monkeypatch):
-    """GET /api/delivery/check-updates → hash de estado."""
-    _auth(monkeypatch)
-    _mock_pool(monkeypatch, rows=[make_row({"id": "ord-001", "status": "pendiente"})])
-    r = client.get("/api/delivery/check-updates", headers=_HEADERS)
-    assert r.status_code == 200
-    assert "hash" in r.json()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# B. CAMBIO DE STATUS + NOTIFICACIONES
-# ══════════════════════════════════════════════════════════════════════════════
-
-def test_update_delivery_status_en_camino(client, monkeypatch):
-    """PATCH status → en_camino → 200."""
-    _auth(monkeypatch)
-    monkeypatch.setattr(db_mod, "db_get_order", AsyncMock(return_value=_ORDER))
-    monkeypatch.setattr(db_mod, "db_update_order_status", AsyncMock())
-    r = client.patch("/api/delivery/orders/ord-001/status",
-                     json={"status": "en_camino"}, headers=_HEADERS)
-    assert r.status_code == 200
-    assert r.json()["new_status"] == "en_camino"
-
-
-def test_update_delivery_status_entregado(client, monkeypatch):
-    """PATCH status → entregado → 200."""
-    _auth(monkeypatch)
-    monkeypatch.setattr(db_mod, "db_get_order", AsyncMock(return_value=_ORDER))
-    monkeypatch.setattr(db_mod, "db_update_order_status", AsyncMock())
-    r = client.patch("/api/delivery/orders/ord-001/status",
-                     json={"status": "entregado"}, headers=_HEADERS)
-    assert r.status_code == 200
-
-
-def test_update_delivery_status_cancelado(client, monkeypatch):
-    """PATCH status → cancelado → 200."""
-    _auth(monkeypatch)
-    monkeypatch.setattr(db_mod, "db_get_order", AsyncMock(return_value=_ORDER))
-    monkeypatch.setattr(db_mod, "db_update_order_status", AsyncMock())
-    r = client.patch("/api/delivery/orders/ord-001/status",
-                     json={"status": "cancelado"}, headers=_HEADERS)
-    assert r.status_code == 200
-
-
-def test_update_delivery_status_not_found(client, monkeypatch):
-    """Orden inexistente → 404."""
-    _auth(monkeypatch)
-    monkeypatch.setattr(db_mod, "db_get_order", AsyncMock(return_value=None))
-    r = client.patch("/api/delivery/orders/NOPE/status",
-                     json={"status": "en_camino"}, headers=_HEADERS)
-    assert r.status_code == 404
-
-
-def test_update_delivery_status_calls_db(client, monkeypatch):
-    """PATCH status llama a db_update_order_status con args correctos."""
-    _auth(monkeypatch)
-    monkeypatch.setattr(db_mod, "db_get_order", AsyncMock(return_value=_ORDER))
-    update_mock = AsyncMock()
-    monkeypatch.setattr(db_mod, "db_update_order_status", update_mock)
-    client.patch("/api/delivery/orders/ord-001/status",
-                 json={"status": "listo"}, headers=_HEADERS)
-    update_mock.assert_awaited_once_with("ord-001", "listo")
-
-
-def test_update_delivery_no_notification_for_listo(client, monkeypatch):
-    """Status 'listo' does not trigger a WhatsApp notification."""
-    _auth(monkeypatch)
-    monkeypatch.setattr(db_mod, "db_get_order", AsyncMock(return_value=_ORDER))
-    monkeypatch.setattr(db_mod, "db_update_order_status", AsyncMock())
-    # Si no lanza y devuelve 200, no se llamó send_delivery_notification sincrónicamente
-    r = client.patch("/api/delivery/orders/ord-001/status",
-                     json={"status": "listo"}, headers=_HEADERS)
-    assert r.status_code == 200
-
-
-def test_update_delivery_returns_new_status(client, monkeypatch):
-    """Response includes new_status."""
-    _auth(monkeypatch)
-    monkeypatch.setattr(db_mod, "db_get_order", AsyncMock(return_value=_ORDER))
-    monkeypatch.setattr(db_mod, "db_update_order_status", AsyncMock())
-    r = client.patch("/api/delivery/orders/ord-001/status",
-                     json={"status": "en_puerta"}, headers=_HEADERS)
-    assert r.json()["new_status"] == "en_puerta"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

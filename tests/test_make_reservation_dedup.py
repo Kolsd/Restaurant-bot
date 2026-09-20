@@ -31,7 +31,7 @@ _RESERVATION_INPUT = {
 # tests/test_agent_reservation_confirmation_guard.py for its dedicated
 # coverage). In real traffic make_reservation is only ever called after the
 # customer has already confirmed ("Use make_reservation only after customer
-# confirms ALL details" — agent_external.py/agent_salon.py system prompts),
+# confirms ALL details" — agent_salon.py's system prompt),
 # so every call in THIS file (which is testing the separate dedup guard, 3d)
 # must supply that confirmation in full_history — otherwise guard 3c would
 # intercept first and none of these tests would ever reach the dedup logic

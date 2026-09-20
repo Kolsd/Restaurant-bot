@@ -234,11 +234,12 @@
       <div class="caja-branch" id="caja-branch-name"></div>
     </div>
 
-    <!-- Tab chips (Mesas / Pickup / Domicilios / Chats / NPS) -->
+    <!-- Tab chips (Mesas / Chats / NPS). Pickup/Domicilios moved to the
+         dedicated "Domicilios" section (app/static/js/staff/sections/delivery.js,
+         sede-scoped /api/staff/delivery/*) in chunk 9 — see
+         docs/claude/delivery-web.md "WhatsApp removal". -->
     <div class="caja-tabs">
       <button class="seg-btn active" data-tab="mesas">Mesas</button>
-      <button class="seg-btn" data-tab="pickup">Para Recoger</button>
-      <button class="seg-btn" data-tab="proposals">Domicilios</button>
       <button class="seg-btn" data-tab="chats">Comprobantes</button>
       <button class="seg-btn" data-tab="nps">NPS</button>
     </div>
@@ -268,22 +269,6 @@
     <div data-view="mesas" style="display:flex;flex-direction:column;flex:1;min-height:0;">
       <div class="products" id="caja-products" role="list" aria-label="Productos">
         <div style="padding:40px;text-align:center;color:#6B7280;grid-column:1/-1;">Cargando…</div>
-      </div>
-    </div>
-
-    <!-- Pickup orders view -->
-    <div data-view="pickup" style="display:none;flex:1;overflow-y:auto;padding:16px;">
-      <div style="font-size:14px;font-weight:600;color:#E8EAEE;margin-bottom:12px;">🛍️ Pedidos Para Recoger</div>
-      <div id="pickup-list" style="display:flex;flex-wrap:wrap;gap:12px;">
-        <div style="color:#6B7280;font-size:13px;">Cargando…</div>
-      </div>
-    </div>
-
-    <!-- Delivery proposals view -->
-    <div data-view="proposals" style="display:none;flex:1;overflow-y:auto;padding:16px;">
-      <div style="font-size:14px;font-weight:600;color:#E8EAEE;margin-bottom:12px;">Domicilios Pendientes</div>
-      <div id="proposals-list" style="display:flex;flex-wrap:wrap;gap:12px;">
-        <div style="color:#6B7280;font-size:13px;">Cargando…</div>
       </div>
     </div>
 
@@ -980,8 +965,6 @@ function switchTab(tabId) {
     document.querySelectorAll('[data-view]').forEach(el => {
       el.style.display = el.dataset.view === tabId ? '' : 'none';
     });
-    if (tabId === 'pickup')    loadPickupOrders();
-    if (tabId === 'proposals') loadDeliveryProposals();
     if (tabId === 'chats')     loadChatsTab();
     if (tabId === 'nps')       loadRecentNpsTab();
   }
@@ -1779,203 +1762,6 @@ async function openPreBill() {
   }
 }
 
-// ── Pickup orders ─────────────────────────────────────
-async function loadPickupOrders() {
-  const el = document.getElementById('pickup-list');
-  if (!el) return;
-  el.innerHTML = '<div style="color:#6B7280;font-size:13px;">Cargando…</div>';
-  try {
-    const res = await fetch('/api/delivery/orders', { headers: mesioHeaders() });
-    if (!res.ok) { el.innerHTML = '<p style="color:#999;">Error al cargar.</p>'; return; }
-    const data = await res.json();
-    const orders = (data.orders || []).filter(o => o.order_type === 'recoger' || o.order_type === 'pickup');
-    if (!orders.length) {
-      el.innerHTML = '<p style="color:#6B7280;padding:20px;">Sin pedidos para recoger.</p>';
-      return;
-    }
-    el.innerHTML = '';
-    orders.forEach(o => {
-      const card = document.createElement('div');
-      card.className = 'order-proposal';
-      card.innerHTML = _pickupCardHtml(o);
-      card.querySelector('.pickup-confirm')?.addEventListener('click', () => confirmDeliveryOrder(o.id, 'entregado', el, loadPickupOrders));
-      card.querySelector('.pickup-reject')?.addEventListener('click', () => rejectDeliveryOrder(o.id, loadPickupOrders));
-      el.appendChild(card);
-    });
-  } catch (_) { el.innerHTML = '<p style="color:#999;">Error de red.</p>'; }
-}
-function _pickupCardHtml(o) {
-  const items = Array.isArray(o.items) ? o.items : [];
-  return `
-    <div style="font-weight:700;font-size:14px;color:#E8EAEE;">#${_esc(String(o.id || '').slice(0,8))}</div>
-    <div style="font-size:12px;color:#71717A;margin-top:2px;">${_esc(o.customer_name || o.phone || '')}</div>
-    <div style="font-size:11px;color:#6B7280;margin:4px 0;">${items.map(it => `${_esc(String(it.quantity||it.qty||1))}× ${_esc(it.name||it.dish||'')}`).join(', ')}</div>
-    <div style="font-size:15px;font-weight:700;color:var(--brand);margin-top:4px;">${mesioFmt(o.total||0)}</div>
-    <div style="display:flex;gap:6px;margin-top:8px;">
-      <button class="m-btn m-btn--primary m-btn--sm pickup-confirm" style="flex:1;">Entregar</button>
-      <button class="m-btn m-btn--ghost m-btn--sm pickup-reject" style="border-color:#7F1D1D;color:#F87171;">Rechazar</button>
-    </div>`;
-}
-
-// ── Delivery proposals ────────────────────────────────
-async function loadDeliveryProposals() {
-  const el = document.getElementById('proposals-list');
-  if (!el) return;
-  el.innerHTML = '<div style="color:#6B7280;font-size:13px;">Cargando…</div>';
-  try {
-    const res = await fetch('/api/delivery/orders', { headers: mesioHeaders() });
-    if (!res.ok) { el.innerHTML = '<p style="color:#999;">Error al cargar.</p>'; return; }
-    const data = await res.json();
-    const orders = (data.orders || []).filter(o => {
-      const t = o.order_type || '';
-      return t === 'domicilio' || t === 'delivery';
-    });
-    if (!orders.length) {
-      el.innerHTML = '<p style="color:#6B7280;padding:20px;">Sin domicilios pendientes.</p>';
-      return;
-    }
-    el.innerHTML = '';
-    orders.forEach(o => {
-      const card = document.createElement('div');
-      card.className = 'order-proposal';
-      card.innerHTML = _deliveryCardHtml(o);
-      card.querySelector('.del-confirm')?.addEventListener('click', () => confirmDeliveryOrder(o.id, 'confirmado', el, loadDeliveryProposals));
-      card.querySelector('.del-reject')?.addEventListener('click', () => rejectDeliveryOrder(o.id, loadDeliveryProposals));
-      // ETA send button
-      const etaBtn = card.querySelector('.del-eta-send');
-      if (etaBtn) {
-        etaBtn.addEventListener('click', () => {
-          const input = card.querySelector('.del-eta-input');
-          const minutes = input ? parseInt(input.value, 10) : NaN;
-          setDeliveryEta(o.id, minutes, loadDeliveryProposals);
-        });
-      }
-      // Proof image load
-      const proofImg = card.querySelector('.del-proof-img');
-      if (proofImg && o.proof_url) {
-        // proof_url is already stored as /api/media/{id}?bot={bot_number} — use directly.
-        proofImg.src = o.proof_url;
-      }
-      el.appendChild(card);
-    });
-  } catch (_) { el.innerHTML = '<p style="color:#999;">Error de red.</p>'; }
-}
-function _deliveryCardHtml(o) {
-  const items = Array.isArray(o.items) ? o.items : [];
-  const statusColors = { pendiente:'#F59E0B', confirmado:'#3B82F6', en_preparacion:'#8B5CF6', listo:'#10B981', en_camino:'#06B6D4', en_puerta:'#EC4899' };
-  const sc = statusColors[o.status] || '#9CA3AF';
-  const hasProof = o.proof_url || o.comprobante_url;
-  const loyaltyDiscount = Number(o.loyalty_discount_cop || 0);
-  const loyaltyPoints = Number(o.loyalty_redeemed_points || 0);
-  const grossTotal = Number(o.total || 0);
-  const netTotal = Math.max(0, grossTotal - loyaltyDiscount);
-  const loyaltyBlock = loyaltyDiscount > 0
-    ? `<div style="font-size:11px;color:#4ADE9E;margin-bottom:4px;font-weight:600;">Descuento puntos: -${mesioFmt(loyaltyDiscount)} (${_esc(String(loyaltyPoints))} puntos)</div>`
-    : '';
-  const totalLine = loyaltyDiscount > 0
-    ? `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;"><span style="font-size:11px;color:#6B7280;text-decoration:line-through;">${mesioFmt(grossTotal)}</span><span style="font-size:15px;font-weight:700;color:var(--brand);">${mesioFmt(netTotal)}</span></div>`
-    : `<div style="font-size:15px;font-weight:700;color:var(--brand);margin-bottom:8px;">${mesioFmt(grossTotal)}</div>`;
-  // ETA section: only shown when the order is paid + still active. Once an
-  // ETA has been communicated, the input is replaced by a confirmation line so
-  // the operator sees the customer was already notified.
-  const isActive = ['confirmado', 'en_preparacion'].includes(String(o.status || ''));
-  const showEta = isActive && (o.paid === true || o.paid === 'true');
-  const etaMinutes = Number(o.estimated_minutes || 0);
-  const etaCommunicated = o.eta_communicated === true || o.eta_communicated === 'true';
-  let etaBlock = '';
-  if (showEta) {
-    if (etaCommunicated && etaMinutes > 0) {
-      etaBlock = `<div class="del-eta-sent" style="font-size:11px;color:#4ADE9E;margin-bottom:6px;font-weight:600;">ETA enviada: ${etaMinutes} min</div>`;
-    } else {
-      etaBlock = `
-      <div class="del-eta-row" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-        <input class="del-eta-input" type="number" min="1" max="180" placeholder="ETA min" value="${etaMinutes > 0 ? etaMinutes : ''}" style="width:80px;padding:5px 8px;background:#0e1117;border:1px solid #2a2f3d;border-radius:6px;color:#E8EAEE;font-size:12px;">
-        <button class="m-btn m-btn--ghost m-btn--sm del-eta-send" style="font-size:11px;padding:5px 10px;">Enviar ETA al cliente</button>
-      </div>`;
-    }
-  }
-  return `
-    <div style="font-weight:700;font-size:14px;color:#E8EAEE;display:flex;align-items:center;justify-content:space-between;">
-      <span>#${_esc(String(o.id || '').slice(0,8))}</span>
-      <span style="font-size:10px;background:${sc}22;color:${sc};padding:2px 7px;border-radius:4px;font-weight:600;">${_esc(o.status||'')}</span>
-    </div>
-    <div style="font-size:12px;color:#71717A;margin-top:2px;">${_esc(o.customer_name || o.phone || '')}</div>
-    <div style="font-size:11px;color:#6B7280;margin:2px 0;">${_esc(o.address || '')}</div>
-    <div style="font-size:11px;color:#6B7280;margin-bottom:4px;">${items.map(it => `${_esc(String(it.quantity||it.qty||1))}× ${_esc(it.name||it.dish||'')}`).join(', ')}</div>
-    ${loyaltyBlock}
-    ${totalLine}
-    ${etaBlock}
-    ${hasProof ? `<img class="del-proof-img" src="" alt="Comprobante" style="width:100%;height:120px;object-fit:cover;border-radius:7px;background:#0e1117;margin-bottom:8px;display:block;" onerror="this.style.display='none'">` : ''}
-    <div style="display:flex;gap:6px;">
-      <button class="m-btn m-btn--primary m-btn--sm del-confirm" style="flex:1;">Confirmar pago</button>
-      <button class="m-btn m-btn--ghost m-btn--sm del-reject" style="border-color:#7F1D1D;color:#F87171;">Rechazar</button>
-    </div>`;
-}
-
-async function setDeliveryEta(orderId, minutes, reloadFn) {
-  if (!Number.isFinite(minutes) || minutes < 1 || minutes > 180) {
-    mesioToast('ETA debe estar entre 1 y 180 minutos', 'error');
-    return;
-  }
-  try {
-    const res = await fetch(`/api/delivery/orders/${encodeURIComponent(orderId)}/eta`, {
-      method: 'POST',
-      headers: mesioHeaders(),
-      body: JSON.stringify({ minutes }),
-    });
-    if (res.ok) {
-      mesioToast('ETA enviada al cliente', 'success');
-      if (typeof reloadFn === 'function') reloadFn();
-    } else {
-      const j = await res.json().catch(() => ({}));
-      mesioToast(j.detail || `Error ${res.status}`, 'error');
-    }
-  } catch (_) {
-    mesioToast('Error de red', 'error');
-  }
-}
-function _extractMediaId(url) {
-  if (!url) return null;
-  // /api/media/{id}?bot=... or just the raw media ID
-  const m = url.match(/\/api\/media\/([^?]+)/);
-  return m ? m[1] : null;
-}
-
-async function confirmDeliveryOrder(orderId, newStatus, containerEl, reloadFn) {
-  // "confirmado" = caja validated proof of payment. Use the dedicated endpoint
-  // that sets paid=TRUE atomically and fires loyalty + customer notification.
-  // Plain status PATCH would leave paid=FALSE — the Wompi path and manual
-  // validation must converge on the same post-conditions.
-  const isPaymentValidation = newStatus === 'confirmado';
-  const url = isPaymentValidation
-    ? `/api/delivery/orders/${encodeURIComponent(orderId)}/validate`
-    : `/api/delivery/orders/${encodeURIComponent(orderId)}/status`;
-  const method = isPaymentValidation ? 'POST' : 'PATCH';
-  const body = isPaymentValidation
-    ? JSON.stringify({})
-    : JSON.stringify({ status: newStatus });
-  try {
-    const res = await fetch(url, { method, headers: mesioHeaders(), body });
-    if (res.ok) {
-      const j = await res.json().catch(() => ({}));
-      const msg = isPaymentValidation
-        ? (j.already_paid ? 'La orden ya estaba validada' : 'Pago validado, cocina notificada')
-        : 'Estado actualizado';
-      mesioToast(msg, 'success');
-      reloadFn();
-    } else {
-      const j = await res.json().catch(() => ({}));
-      mesioToast(j.detail || `Error ${res.status}`, 'error');
-    }
-  } catch (_) { mesioToast('Error de red', 'error'); }
-}
-
-async function rejectDeliveryOrder(orderId, reloadFn) {
-  const confirmed = await mesioConfirm('¿Rechazar este pedido?', { confirmText: 'Rechazar', cancelText: 'Cancelar', danger: true });
-  if (!confirmed) return;
-  await confirmDeliveryOrder(orderId, 'cancelado', null, reloadFn);
-}
-
 // ── Chats tab (checkout proposals with proof) ─────────
 async function loadChatsTab() {
   const el = document.getElementById('chats-list');
@@ -2211,8 +1997,6 @@ function mount(container) {
 
 function _tabRefresh() {
   if (_currentTab === 'mesas') loadOpenTables();
-  else if (_currentTab === 'proposals') loadDeliveryProposals();
-  else if (_currentTab === 'pickup') loadPickupOrders();
   else if (_currentTab === 'chats') loadChatsTab();
   else if (_currentTab === 'nps') loadRecentNpsTab();
 }

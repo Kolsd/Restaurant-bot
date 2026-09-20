@@ -25,11 +25,7 @@ from app.services.agent_salon import (
     execute_salon_action,
     handle_checkout_flow,
 )
-from app.services.agent_external import (
-    build_external_prompt,
-    execute_external_action,
-)
-from app.services.agent_tools import TOOLS_SALON, TOOLS_EXTERNAL
+from app.services.agent_tools import TOOLS_SALON
 from app.services.plan_enforcement import (
     CapDecision,
     REDIRECT_MESSAGE,
@@ -260,11 +256,12 @@ _ACTION_ANNOUNCEMENT_RE = re.compile(
 
 # "Listo, vamos con tu pedido..." / "Resumen:" phrasing: Claude sometimes
 # presents a finalized-looking order recap (real-LLM run 2026-09-13,
-# delivery/pickup funnels) WITHOUT actually calling the order tool that turn.
-# BUT this same phrasing is also what STEP 5 of agent_external.py's system
-# prompt explicitly instructs the model to produce BEFORE confirmation
-# ("Summarize order, address, payment. Ask explicit confirmation."), so on
-# its own it is NOT a reliable signal — a real pre-confirmation recap always
+# delivery/pickup funnels, now retired — see docs/claude/delivery-web.md)
+# WITHOUT actually calling the order tool that turn. That retired funnel's
+# system prompt explicitly instructed the model to produce this phrasing
+# BEFORE confirmation ("Summarize order, address, payment. Ask explicit
+# confirmation."), so on its own it is NOT a reliable signal — a real
+# pre-confirmation recap always
 # also asks the customer something. These two patterns only count as a false
 # "already done" announcement when the reply does NOT also seek confirmation
 # (see _CONFIRMATION_SEEKING_RE + _is_false_action_announcement below).
@@ -295,7 +292,7 @@ def _is_false_action_announcement(reply: str) -> bool:
 
 # Actions that MUST have a corresponding tool call when announced
 _ANNOUNCED_ACTION_TOOLS = frozenset({
-    "place_order", "create_delivery_order", "create_pickup_order", "make_reservation",
+    "place_order", "make_reservation",
 })
 
 # ── Prompt-injection defense block (injected near the top of the system prompt) ──
@@ -998,10 +995,17 @@ async def build_system_prompt(
     restaurant_id: int | None = None,
     customer_context: str = "",
     order_history: list | None = None,
+    web_order_url: str = "",
 ) -> list:
     """
     Build the system prompt block list for Claude.
-    Routes to the salon or external prompt based on table_context.
+    Always builds the salon (dine-in) prompt — the old "external"
+    (delivery/pickup) prompt was retired in chunk 9 of the web delivery wave
+    (docs/claude/delivery-web.md); WhatsApp customers with no table are now
+    deflected before the LLM is ever called (see `_whatsapp_no_table_reply`).
+    `table_context` may still be None here for the web ordering chat
+    (order_mode delivery/pickup has no table), in which case
+    `build_salon_prompt` simply omits the table-greeting block.
     Appends an active-discount block when dynamic_discounts is enabled.
     Appends a customer memory block when customer_context is non-empty.
     Appends a customer history block when order_history has >= 2 items (Fase 5a).
@@ -1030,6 +1034,22 @@ async def build_system_prompt(
         except Exception:
             log.exception("build_system_prompt.discount_lookup_error", restaurant_id=restaurant_id)
 
+    # WhatsApp customer with no table: delivery and pickup are web-only since
+    # chunk 9, so the bot must hand out the link instead of offering to take
+    # the order. The keyword deflection in chat() catches the obvious
+    # phrasings before the LLM; this block covers the rest. It is guidance,
+    # not the guarantee — no delivery/pickup tool exists any more.
+    web_order_block = ""
+    if web_order_url:
+        web_order_block = (
+            "\n[PEDIDOS_A_DOMICILIO_Y_RECOGER]\n"
+            "Este restaurante YA NO toma pedidos a domicilio ni para recoger por WhatsApp. "
+            f"Se piden en {web_order_url}\n"
+            "Si el cliente quiere pedir a domicilio o para recoger, dale ese enlace de forma "
+            "natural y breve. NUNCA prometas tomar el pedido por aquí ni pidas dirección, "
+            "productos o método de pago para un domicilio."
+        )
+
     # Customer memory block — appended after injection-defense, never prepended
     customer_block = ""
     if customer_context:
@@ -1056,18 +1076,15 @@ async def build_system_prompt(
             "</customer_history>"
         )
 
-    if table_context:
-        prompt = build_salon_prompt(restrictions, table_context=table_context)
-    else:
-        prompt = build_external_prompt(restrictions)
+    prompt = build_salon_prompt(restrictions, table_context=table_context)
 
     # Append dynamic blocks as SEPARATE entries (no cache_control) so the
     # cached block's text stays byte-for-byte identical across calls.
     # Anthropic caches up to the last cache_control breakpoint; anything
     # appended after is charged as uncached input, which is cheap vs. the
     # cache-miss cost of mutating the cached text on every request.
-    if discount_block or customer_block or history_block:
-        combined = discount_block + customer_block + history_block
+    if discount_block or customer_block or history_block or web_order_block:
+        combined = discount_block + customer_block + history_block + web_order_block
         prompt.append({"type": "text", "text": combined})
 
     return prompt
@@ -1170,11 +1187,6 @@ _TOOL_TO_ACTION = {
     "place_order": "order",
     "request_bill": "bill",
     "call_waiter": "waiter",
-    "create_delivery_order": "delivery",
-    "create_pickup_order": "pickup",
-    "change_payment_method": "change_payment",
-    "cancel_order": "cancel",
-    "notify_arrival": "notify_arrival",
     "make_reservation": "reserve",
     "cancel_reservation": "cancel_reservation",
     "end_session": "end_session",
@@ -1197,20 +1209,6 @@ def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> 
         "notes": tool_input.get("notes", "") or tool_input.get("reason", ""),
         "separate_bill": tool_input.get("separate_bill", False),
     }
-
-    # External order fields
-    if action in ("delivery", "pickup"):
-        parsed["address"] = tool_input.get("address", "")
-        parsed["payment_method"] = tool_input.get("payment_method", "")
-        parsed["branch_id"] = tool_input.get("branch_id", 0)
-        if action == "pickup":
-            parsed["scheduled_pickup_at"] = tool_input.get("scheduled_pickup_at", None)
-
-    if action == "change_payment":
-        parsed["payment_method"] = tool_input.get("payment_method", "")
-
-    if action == "cancel":
-        parsed["reason"] = tool_input.get("reason", None)
 
     if action == "cancel_reservation":
         parsed["cancel_reason"] = tool_input.get("reason", "") or ""
@@ -1245,7 +1243,6 @@ def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> 
 # ── Pre-execution validation layer ───────────────────────────────────────────
 
 _SALON_ONLY_TOOLS = {"place_order", "request_bill", "call_waiter"}
-_EXTERNAL_ONLY_TOOLS = {"create_delivery_order", "create_pickup_order", "change_payment_method", "cancel_order", "notify_arrival"}
 
 
 def _make_order_fingerprint(items: list) -> str:
@@ -1309,7 +1306,7 @@ def _last_messages_have_confirmation(full_history: list) -> bool:
     return False
 
 
-_ORDER_TOOLS = frozenset({"place_order", "create_delivery_order", "create_pickup_order"})
+_ORDER_TOOLS = frozenset({"place_order"})
 
 
 async def _resolve_items_server_side(
@@ -1418,12 +1415,8 @@ async def _validate_tool_call(
         )
         return None, safe_reply, {}
 
-    if tool_name in _EXTERNAL_ONLY_TOOLS and table_context:
-        log.warning("guard.external_tool_at_table", tool=tool_name, phone=_obfuscate_phone(phone))
-        return None, reply, {}
-
     # 2. Empty items on order tools
-    if tool_name in ("place_order", "create_delivery_order", "create_pickup_order"):
+    if tool_name == "place_order":
         items = tool_input.get("items", [])
         if not isinstance(items, list):
             log.warning("guard.order_tool_items_not_list", tool=tool_name, phone=_obfuscate_phone(phone), items_type=type(items).__name__)
@@ -1458,7 +1451,7 @@ async def _validate_tool_call(
             )
         # Rebuild items in a normalized shape; unit_price/line_total remain Decimal
         # throughout the internal pipeline. JSON serialization happens at the boundary
-        # inside commit_order_transaction / execute_salon_action / execute_external_action.
+        # inside commit_order_transaction / execute_salon_action.
         tool_input = {
             **tool_input,
             "items": resolved_items,
@@ -1480,10 +1473,10 @@ async def _validate_tool_call(
     # IMPORTANT: this runs BEFORE the dedup guard so a call that returns
     # "awaiting_confirmation" does not burn the dedup counter — otherwise the
     # follow-up call after the user confirms would be blocked as a duplicate.
-    if tool_name in ("place_order", "create_delivery_order", "create_pickup_order"):
+    if tool_name == "place_order":
         _ss = session_state or {}
         _has_prior_order = _ss.get("has_order", False)
-        _is_salon_reorder = tool_name == "place_order" and table_context and _has_prior_order
+        _is_salon_reorder = table_context and _has_prior_order
         if not _is_salon_reorder:
             _hist = list(full_history or [])
             if user_message:
@@ -1578,20 +1571,6 @@ async def _validate_tool_call(
             )
             return None, "Tu reserva ya está siendo procesada. En un momento te confirmo.", {}
 
-    # 4. Delivery without address
-    if tool_name == "create_delivery_order":
-        address = tool_input.get("address", "").strip()
-        if not address:
-            log.warning("guard.delivery_no_address", phone=_obfuscate_phone(phone))
-            return None, reply + "\n\nNecesito tu dirección de entrega para procesar el pedido.", {}
-
-    # 5. Pickup/Delivery without payment method
-    if tool_name in ("create_delivery_order", "create_pickup_order"):
-        pm = tool_input.get("payment_method", "").strip()
-        if not pm:
-            log.warning("guard.order_no_payment", tool=tool_name, phone=_obfuscate_phone(phone))
-            return None, reply or "¿Con qué método de pago prefieres? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)", {}
-
     # 6. Reservation with missing required fields
     if tool_name == "make_reservation":
         missing = [f for f in ("name", "date", "time") if not str(tool_input.get(f, "")).strip()]
@@ -1637,24 +1616,15 @@ async def _validate_tool_call(
         tool_input = {**tool_input, "_resolved_dish": matched_dish}
 
     # 8. remember_customer_preference — validate key and rate-limit per conversation
-    # 9. cancel_order — validate tool_input is dict; reason is optional free text
-    if tool_name in ("notify_arrival", "call_waiter"):
+    # 9. call_waiter — validate tool_input is dict; cap free-text message field
+    if tool_name == "call_waiter":
         if not isinstance(tool_input, dict):
-            log.warning("guard.notify_arrival_input_not_dict", phone=_obfuscate_phone(phone), input_type=type(tool_input).__name__)
+            log.warning("guard.call_waiter_input_not_dict", phone=_obfuscate_phone(phone), input_type=type(tool_input).__name__)
             tool_input = {}
         # Cap free-text message field to prevent prompt-stuffing via waiter alerts
         _msg = tool_input.get("message")
         if isinstance(_msg, str) and len(_msg) > 500:
             tool_input = {**tool_input, "message": _msg[:500]}
-
-    if tool_name == "cancel_order":
-        if not isinstance(tool_input, dict):
-            log.warning("guard.cancel_order_input_not_dict", phone=_obfuscate_phone(phone), input_type=type(tool_input).__name__)
-            tool_input = {}
-        # Coerce reason to str or None — never keep arbitrary types
-        raw_reason = tool_input.get("reason")
-        if raw_reason is not None:
-            tool_input = {**tool_input, "reason": str(raw_reason)[:500]}
 
     if tool_name == "remember_customer_preference":
         from app.repositories.customer_profiles_repo import VALID_PREFERENCE_KEYS  # noqa: PLC0415
@@ -1974,10 +1944,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         return reply or fallback
 
     try:
-        # ── Shared: cart population (order, delivery, pickup all need it) ──
+        # ── Shared: cart population (dine-in "order" needs it) ──
         cart_errors = []
         _qty_parse_failed = False
-        if items and action in ("order", "delivery", "pickup"):
+        if items and action == "order":
             for item in items:
                 name = item.get("name", "")
                 raw_qty = item.get("qty", 1)
@@ -2061,17 +2031,6 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 blocks.push_block(blocks.build_waiter_ack_block(
                     "bill" if action == "bill" else "other", alert_message,
                 ))
-
-        # ── External actions (delivery, pickup, change_payment, cancel, notify_arrival) ──
-        elif action in ("delivery", "pickup", "change_payment", "cancel", "notify_arrival"):
-            result = await execute_external_action(
-                parsed, phone, bot_number, restaurant_obj,
-                routing_context or {}, reply,
-                location_id=location_id,
-            )
-            reply = result
-            if cart_errors and action not in ("cancel", "notify_arrival"):
-                reply += f" (Nota: No pude agregar '{', '.join(cart_errors)}')"
 
         # ── Reserve (shared, both flows) — with availability check ───────
         elif action == "reserve":
@@ -2278,7 +2237,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         log.exception("execute_action_failed", action=action, phone=_obfuscate_phone(phone), bot_number=bot_number)
         # For order-creating actions, returning the hallucinated reply is worse than returning
         # an error — the customer thinks the order was placed when it wasn't.
-        _ORDER_ACTIONS = {"delivery", "pickup", "place_order", "reserve", "reservation"}
+        _ORDER_ACTIONS = {"order", "place_order", "reserve", "reservation"}
         if action in _ORDER_ACTIONS:
             return "Lo sentimos, hubo un problema técnico al procesar tu pedido. Por favor intenta de nuevo en un momento."
 
@@ -2421,6 +2380,76 @@ async def _try_checkout_flow(user_phone: str, bot_number: str,
             result["blocks"] = _attach_blocks
         return result
     return None
+
+
+def _is_web_identity(phone: str) -> bool:
+    """True for the synthetic "web:<uuid4>" identity used by the web ordering
+    channel (diner_sessions — docs/claude/delivery-web.md). Real WhatsApp
+    numbers never carry this prefix, so this is how we tell the two channels
+    apart once table_context is None (see `_whatsapp_no_table_reply`)."""
+    return bool(phone) and phone.startswith("web:")
+
+
+# Words a customer uses to ask for delivery or pickup. Deliberately a plain
+# keyword match, not an LLM call: the deflection must be instant, free and
+# testable without credit. A false positive only means the customer is handed
+# the ordering link, which is the right answer for anything delivery-shaped;
+# anything this misses still reaches the LLM, which has no tool to create a
+# delivery order anyway (agent_tools.TOOLS_SALON).
+_DELIVERY_INTENT_RE = re.compile(
+    r"(domicili|a\s*domicilio|delivery|deliveri|env[ií]|"
+    r"a\s+(?:mi|la)\s+casa|"
+    r"mandar(?:me)?\s+(?:un|el|la|comida|pedido)|"
+    r"traer(?:me)?\s+(?:a|hasta|el|la|comida|pedido)|"
+    r"llevar\s+a\s+(?:mi|la|el)\s+\w+|"
+    r"para\s+llevar|pickup|pick\s*up|recoger|recojo|paso\s+por)",
+    re.IGNORECASE,
+)
+
+
+def _web_order_url(slug: str | None) -> str:
+    """Public ordering page for an org, or "" when it has no slug."""
+    if not slug:
+        return ""
+    base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
+    return f"{base_url}/pedir/{slug}" if base_url else f"/pedir/{slug}"
+
+
+def _is_delivery_intent(message: str) -> bool:
+    """True when a WhatsApp message is asking for delivery or pickup."""
+    return bool(message) and bool(_DELIVERY_INTENT_RE.search(message))
+
+
+async def _whatsapp_no_table_reply(bot_number: str) -> dict:
+    """Deterministic (no-LLM) reply for a WhatsApp customer with no active
+    table session.
+
+    Chunk 9 of the web delivery wave (docs/claude/delivery-web.md) retires
+    delivery/pickup ordering from WhatsApp entirely — it now lives only on
+    the web channel (`/pedir/{slug}`). A WhatsApp customer who used to be
+    routed into the LLM "external" funnel (agent_external.py, deleted) now
+    gets this static message instead: no LLM call, no tool_use loop, so it is
+    structurally impossible for this path to create an order.
+    """
+    restaurant_obj = await db.db_get_restaurant_by_bot_number(bot_number)
+    if restaurant_obj is None:
+        log.warning("agent.restaurant_not_found", bot_number=bot_number)
+        return {"message": "Este número aún no está configurado. Si eres el dueño del restaurante, contacta a soporte en mesio.co"}
+
+    order_url = _web_order_url(restaurant_obj.get("slug"))
+    if order_url:
+        message = (
+            "¡Hola! Los pedidos a domicilio y para recoger ahora los hacemos por nuestra "
+            f"página web:\n{order_url}\n\n"
+            "Ahí puedes ver el menú, hacer tu pedido y darle seguimiento fácilmente. 🙌"
+        )
+    else:
+        log.warning("agent.whatsapp_delivery_no_slug", bot_number=bot_number)
+        message = (
+            "Los pedidos a domicilio y para recoger ahora se hacen por nuestra página web. "
+            "Por favor comunícate directamente con el restaurante para más información."
+        )
+    return {"message": message}
 
 
 def _parse_features(raw_feats) -> dict:
@@ -2691,14 +2720,25 @@ async def _call_llm_and_execute(
         log.exception("customer.order_history_load_failed", phone=_obfuscate_phone(user_phone))
         order_history = []  # Graceful fallback — chat proceeds without history block
 
+    # A table-less WhatsApp conversation may still drift into delivery with
+    # wording the keyword deflection missed — tell the model the link.
+    web_order_url = ""
+    if not table_context and not _is_web_identity(user_phone):
+        web_order_url = _web_order_url(restaurant_obj.get("slug"))
+
     sys_prompt = await build_system_prompt(
         feats,
         table_context,
         restaurant_id=restaurant_obj.get("id"),
         customer_context=customer_ctx,
         order_history=order_history,
+        web_order_url=web_order_url,
     )
-    tools = TOOLS_SALON if table_context else TOOLS_EXTERNAL
+    # TOOLS_SALON is the only tool list since chunk 9 (delivery/pickup order
+    # tools were retired). `table_context` may still be None here for the web
+    # ordering chat (order_mode delivery/pickup, no table) — `_validate_tool_call`
+    # already deflects place_order/request_bill/call_waiter safely in that case.
+    tools = TOOLS_SALON
     try:
         result = await call_claude(
             sys_prompt, messages, model=MODEL_FAST,
@@ -2766,8 +2806,8 @@ async def _call_llm_and_execute(
     # ── Anti-conversational session nudge (CEO rule 2026-05-07) ──────────────
     # If no tool was called this turn, the customer isn't progressing toward an
     # order. Track consecutive non-productive turns and nudge/close accordingly.
-    # Tool calls that fire real actions (place_order, create_delivery_order,
-    # make_reservation, …) reset the counter to 0.
+    # Tool calls that fire real actions (place_order, make_reservation, …)
+    # reset the counter to 0.
     # Wrapped in try/except per Rule 17 — failure must NEVER block the reply.
     try:
         from app.repositories.conversations_repo import (  # noqa: PLC0415
@@ -2775,11 +2815,9 @@ async def _call_llm_and_execute(
             db_reset_turns_without_progress,
         )
         _PROGRESS_TOOLS = {
-            "place_order", "create_delivery_order", "create_pickup_order",
-            "make_reservation", "add_to_cart", "remove_from_cart",
+            "place_order", "make_reservation", "add_to_cart", "remove_from_cart",
             "request_bill", "call_waiter", "redeem_loyalty_points",
-            "send_dish_card", "change_payment_method", "cancel_order",
-            "notify_arrival",
+            "send_dish_card",
         }
         if tool_name and tool_name in _PROGRESS_TOOLS:
             await db_reset_turns_without_progress(user_phone, bot_number)
@@ -2870,7 +2908,10 @@ async def _resolve_location_id(
     Determine the location_id for history/order routing, in priority order:
       1. incoming_location_id  — resolved by inbox_worker (QR or phone override)
       2. table_context["location_id"]  — QR-embedded or session-resolved mesa
-      3. routing_context["location_id"]  — set by execute_external_action GPS routing
+      3. routing_context["location_id"]  — legacy GPS-routing slot, unused since
+         the WhatsApp delivery/pickup funnel that populated it was retired
+         (chunk 9, docs/claude/delivery-web.md); kept for callers that still
+         thread routing_context through
       4. conversations.location_id  — last known from prior turns in this conversation
       5. None  — exploratory chat; agent resolves lazily on order tool call
 
@@ -3140,6 +3181,25 @@ async def _chat_impl(
     checkout_result = await _try_checkout_flow(user_phone, bot_number, user_message_clean, table_context)
     if checkout_result is not None:
         return checkout_result
+
+    # 5b. WhatsApp delivery/pickup retired (chunk 9, docs/claude/delivery-web.md).
+    # A WhatsApp customer ASKING FOR DELIVERY OR PICKUP gets a deterministic
+    # reply pointing at the web ordering page — no LLM call on that path.
+    # Everything else a table-less WhatsApp customer writes (booking a table,
+    # cancelling one, asking the hours or the menu) still goes to the LLM as
+    # before: those are dine-in features that have nothing to do with this
+    # wave, and reservations are made precisely BEFORE arriving, i.e. always
+    # without a table session. The guarantee that no delivery order can be
+    # created from WhatsApp is structural — agent_tools no longer defines any
+    # order-creating delivery/pickup tool — not a matter of who answers.
+    # The web ordering chat (identity "web:<uuid4>") also has
+    # table_context=None and is excluded here.
+    if (
+        not table_context
+        and not _is_web_identity(user_phone)
+        and _is_delivery_intent(user_message_clean)
+    ):
+        return await _whatsapp_no_table_reply(bot_number)
 
     # 6. Load restaurant context (name, features, payment methods, branch override)
     ctx = await _load_restaurant_context(bot_number, table_context, user_phone, meta_phone_id)

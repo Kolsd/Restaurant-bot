@@ -42,9 +42,9 @@ it. push_block()/drain_blocks() never raise — a failure in this side channel
 must never silence or break the actual reply (Rule 8, "Nunca silencio al
 cliente").
 
-This module intentionally has NO import-time dependency on agent.py,
-agent_salon.py, or agent_external.py, so all three (plus routes/diner.py) can
-import it without creating a cycle.
+This module intentionally has NO import-time dependency on agent.py or
+agent_salon.py, so both (plus routes/diner.py) can import it without creating
+a cycle.
 """
 
 from __future__ import annotations

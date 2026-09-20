@@ -141,15 +141,79 @@ pendiente_aceptacion → cancelado (customer, only before acceptance)
   tip; the cashier reconciles.
 - No rider GPS broadcasting in Phase A — that is the Phase B map.
 
-### WhatsApp removal in this wave
-- Delete `app/services/agent_external.py` and the delivery/pickup routing that
-  reaches it from `app/services/agent.py`, plus the tests that exist only to
-  cover that flow.
-- **Also delete or lock down `GET /api/delivery/orders`** (`app/routes/orders_routes.py`).
-  It returns EVERY delivery order of the org — any sede, any courier, with
-  customer name/phone/address — to any authenticated staff member. The courier
-  screen stopped using it in chunk 7 (it now reads the server-scoped
-  `/api/staff/delivery/orders/mine`); nothing web-side depends on it.
+### WhatsApp removal in this wave — DONE (chunk 9, 2026-09-19)
+- Deleted `app/services/agent_external.py` (the whole "external" delivery/
+  pickup prompt + tool handlers) and every route into it from
+  `app/services/agent.py`: `TOOLS_EXTERNAL`/its 5 order-lifecycle tool defs
+  (`create_delivery_order`, `create_pickup_order`, `change_payment_method`,
+  `cancel_order`, `notify_arrival`) are gone from `app/services/agent_tools.py`
+  too, so the LLM can never again be offered a tool that creates or mutates a
+  delivery/pickup order. `TOOLS_SALON` is now the only tool list.
+- A WhatsApp customer with no active table session who ASKS FOR DELIVERY OR
+  PICKUP (`agent.py::_is_delivery_intent`, a plain keyword match) gets a
+  deterministic, no-LLM reply pointing at `/pedir/{organizations.slug}`
+  (`agent.py::_whatsapp_no_table_reply`) — or, if the org has no slug yet, a
+  reply telling them to call the restaurant.
+  The gate is deliberately narrow: it first deflected EVERY table-less
+  WhatsApp message, which also killed reservations (a customer books BEFORE
+  arriving, so a booking always comes from a phone with no table session) and
+  every ordinary question. Those still reach the LLM, which keeps
+  `TOOLS_SALON` — the guarantee that WhatsApp cannot create a delivery order
+  is structural (no such tool exists any more), not a matter of who answers.
+  For delivery wording the keyword list misses, `build_system_prompt` adds a
+  `[PEDIDOS_A_DOMICILIO_Y_RECOGER]` block with the link so the model hands it
+  over instead of offering to take the order.
+  The web ordering chat (order_mode delivery/pickup, also table_context None)
+  is excluded from the gate by the `web:` prefix check.
+- The `delivery` and `pickup` AI-sim suites and the two `mode="external"`
+  adversarial scenarios were retired with the funnel (`tests/ai_sim/`): they
+  drove the deleted tools and would only burn LLM credit. 9 scenarios remain.
+- **Deleted `GET /api/delivery/orders`** (`app/routes/orders_routes.py`) and
+  its now-dead siblings that only ever served the WhatsApp flow: `GET
+  /api/delivery/check-updates`, `POST /api/delivery/orders/{id}/validate`,
+  `POST /api/delivery/orders/{id}/eta`, `PATCH /api/delivery/orders/{id}/status`,
+  plus `send_delivery_notification()` (WhatsApp push on status change).
+  `orders_repo.db_get_delivery_orders` / `tables_repo.db_get_delivery_status_
+  hash_for_restaurant` (the repo functions those routes called) have no
+  remaining caller either, but were left in place — both have their own
+  direct Wave-2 org_id regression tests (`tests/test_wave2_org_id_join_fix.py`)
+  independent of the route, and `db_set_order_eta` (behind the deleted `/eta`
+  route) similarly stays for `tests/test_delivery_eta.py`.
+  `app/static/js/staff/sections/cashier.js` still had a duplicate "Para
+  Recoger"/"Domicilios" tab pair calling these routes (pre-dating the
+  dedicated `delivery.js` "Domicilios" section from chunks 5-8) — removed;
+  `courier.js` still had a legacy fallback branch and hash-polling call —
+  removed, `fetchOrders()` already only reads `/api/staff/delivery/orders/mine`.
+  **Known gap found while doing this:** the new sede-scoped API
+  (`app/routes/staff_delivery.py`) has no equivalent to the old manual
+  "validate Nequi/transfer proof → paid=true" action — a web order's `paid`
+  flag is never flipped to true by anything in the current build. Needs its
+  own chunk before non-cash web orders can be marked paid.
+- Defensive fix while auditing "never message a `web:` identity over
+  WhatsApp": `orders_repo.db_get_orders_needing_eta_communication` (feeds
+  `scheduler.py`'s WhatsApp ETA push, still alive for phone-based orders) now
+  excludes `phone LIKE 'web:%'` rows. Not reachable today (see the gap above:
+  no web order ever reaches `paid=TRUE`), but it would otherwise silently try
+  to WhatsApp a synthetic web identity the moment that gap is closed.
+
+### What remains for the full WhatsApp shutdown (CLAUDE.md item 6)
+Only delivery/pickup was retired in chunk 9. Still live and untouched:
+- The Meta/Twilio webhooks (`app/routes/chat.py`) and the salon (dine-in)
+  WhatsApp flow (`agent_salon.py`, `TOOLS_SALON`) — a customer who scanned a
+  table QR still orders, pays and reserves over WhatsApp exactly as before.
+- `db_attach_order_proof` / the chat.py photo-proof handler — now effectively
+  dead in practice for NEW orders (no WhatsApp order can exist to attach a
+  proof to any more) but left in place; it's a small, generic, still-tested
+  repo helper, not something this chunk was asked to remove.
+- `tests/e2e` still drives the salon flow via `simulate_whatsapp_inbound` —
+  per the standing rule, do not delete or touch the Meta/Twilio webhooks or
+  the salon flow until that harness has an equivalent web-channel path.
+- Reservation-without-a-table over WhatsApp is gone as a side effect of
+  deleting `agent_external.py` (it was the only place that let a table-less
+  WhatsApp customer call `make_reservation`) — dine-in reservations
+  (`table_context` present) are unaffected; this is a product-visible
+  change beyond delivery/pickup, called out for the PM here rather than
+  decided unilaterally.
 
 ### Known open items found during verification (not yet fixed)
 - The kitchen KDS delivery feed (`tables_repo.db_get_delivery_orders_for_cashier`,
