@@ -17,6 +17,10 @@ from __future__ import annotations
 import json
 
 from app.repositories.orders_repo import InsufficientStockError
+from app.services.logging import get_logger
+from app.services.money import to_decimal
+
+log = get_logger(__name__)
 
 
 # Lazy accessors — break circular import with app.services.database.
@@ -144,25 +148,57 @@ async def _recheck_dishes_for_ingredient_conn(
 
 # ── Inventory CRUD ────────────────────────────────────────────────────────────
 
-async def db_get_inventory(restaurant_id: int) -> list:
+# ── Per-sede stock (PM 2026-09-20) ───────────────────────────────────────────
+#
+# Stock belongs to ONE sede: "el inventario es uno por sede". Two rules run
+# through every query below.
+#
+# 1. A sede-scoped read is `location_id = $n OR location_id IS NULL`. The NULL
+#    half is not laziness — migration 0090 backfills what exists, but an org
+#    with no `locations` row cannot be backfilled, and a stock list that
+#    silently drops rows is worse than one that shows an unassigned item.
+#
+# 2. "The same product at another sede" is matched by `lower(name)` within the
+#    org. Inventory rows are per-sede, so sede A's "Tomate" and sede B's
+#    "Tomate" are two different rows with two different ids; name is the only
+#    thing that ties them together. Used by transfers AND by the order
+#    deduction path, which has to turn a recipe's ingredient_id (a row in
+#    whatever sede it was defined in) into the row of the sede that is
+#    actually cooking. One rule, both places.
+
+async def db_get_inventory(restaurant_id: int, location_id: int | None = None) -> list:
+    """Stock of ONE sede. None = every sede, which only owner/admin ever get
+    (app/routes/deps.py::resolve_sede_filter decides that, not this)."""
     async with _tenant_connection() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM inventory WHERE org_id = $1 ORDER BY name ASC",
-            restaurant_id
+            """SELECT * FROM inventory
+                WHERE org_id = $1
+                  AND ($2::bigint IS NULL OR location_id = $2 OR location_id IS NULL)
+                ORDER BY name ASC""",
+            restaurant_id, location_id,
         )
     return [_serialize(dict(r)) for r in rows]
 
 
 async def db_create_inventory_item(restaurant_id: int, name: str, unit: str,
                                     current_stock: float, min_stock: float,
-                                    linked_dishes: list, cost_per_unit: float = 0) -> dict:
+                                    linked_dishes: list, cost_per_unit: float = 0,
+                                    location_id: int | None = None) -> dict:
+    """Create a stock item IN a sede.
+
+    `location_id` is required in practice — the route refuses a create
+    without one, so an owner managing several sedes has to pick which fridge
+    they are filling instead of quietly adding to a shared pool that no
+    longer exists.
+    """
     async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO inventory
-               (org_id, name, unit, current_stock, min_stock, linked_dishes, cost_per_unit)
-               VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+               (org_id, location_id, name, unit, current_stock, min_stock,
+                linked_dishes, cost_per_unit)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
                RETURNING *""",
-            restaurant_id, name, unit, current_stock, min_stock,
+            restaurant_id, location_id, name, unit, current_stock, min_stock,
             json.dumps(linked_dishes), cost_per_unit
         )
         item = _serialize(dict(row))
@@ -255,10 +291,16 @@ async def db_adjust_inventory_stock(item_id: int, quantity_delta: float,
 
 
 async def db_get_inventory_item(item_id: int) -> dict | None:
-    """Gets an inventory item by ID. Tenant-scoped via RLS."""
+    """Gets an inventory item by ID. Tenant-scoped via RLS.
+
+    `location_id` is in the projection so callers can check the row belongs
+    to a sede they may touch — without it every ownership check in
+    app/routes/inventory.py could only compare org_id, which is how a cook
+    at sede A could edit sede B's stock.
+    """
     async with _tenant_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT id, org_id, name, unit, current_stock, min_stock, "
+            "SELECT id, org_id, location_id, name, unit, current_stock, min_stock, "
             "linked_dishes, cost_per_unit FROM inventory WHERE id = $1",
             item_id,
         )
@@ -277,19 +319,150 @@ async def db_get_inventory_history(item_id: int) -> list:
     return [_serialize(dict(r)) for r in rows]
 
 
-async def db_get_inventory_alerts(restaurant_id: int) -> list:
+async def db_get_inventory_alerts(restaurant_id: int, location_id: int | None = None) -> list:
+    """Low-stock items of ONE sede — a kitchen is alerted about its own
+    fridge, not about what another sede ran out of."""
     async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT * FROM inventory
                WHERE org_id = $1
+                 AND ($2::bigint IS NULL OR location_id = $2 OR location_id IS NULL)
                  AND current_stock <= min_stock
                ORDER BY current_stock ASC""",
-            restaurant_id
+            restaurant_id, location_id,
         )
     return [_serialize(dict(r)) for r in rows]
 
 
-async def db_deduct_inventory_for_order(bot_number: str, items: list):
+class SedeTransferError(Exception):
+    """Raised when a transfer's own arguments make no sense (same sede, no
+    quantity, destination outside the org). Distinct from
+    InsufficientStockError, which is about the stock itself — the route maps
+    one to 400 and the other to 409."""
+
+
+async def db_transfer_inventory(
+    org_id: int,
+    item_id: int,
+    to_location_id: int,
+    quantity,
+    note: str = "",
+) -> dict:
+    """Move stock of one product from its sede to another sede of the same org.
+
+    PM 2026-09-20: "se puede hacer intercambios de inventario por sede".
+
+    The destination row is the SAME product at the other sede, matched by
+    `lower(name)` within the org (see the module note). If that sede has
+    never stocked it, the row is created there with the source's unit,
+    min_stock, linked_dishes and cost — receiving a product you do not have
+    yet is the normal case for a transfer, and forcing the owner to
+    pre-create an empty item first would be busywork.
+
+    Everything happens in ONE transaction with the source row locked, so two
+    transfers of the last 5kg cannot both succeed. A transfer that would
+    overdraw the source raises InsufficientStockError and writes nothing.
+
+    Deliberately does NOT touch dish availability: `menu_availability` is
+    keyed `(dish_name, org_id)`, so flipping it here would enable or disable
+    a dish for the WHOLE organization because one sede's stock moved. A
+    transfer does not change the org's total stock anyway. Per-sede dish
+    availability is a separate gap (see docs/claude/rls-multitenant.md).
+
+    # Requires active tenant_scope(org_id).
+    """
+    qty = to_decimal(quantity)
+    if qty <= 0:
+        raise SedeTransferError("La cantidad a trasladar debe ser mayor que cero")
+
+    async with _tenant_connection() as conn:
+        src = await conn.fetchrow(
+            "SELECT * FROM inventory WHERE id = $1 AND org_id = $2 FOR UPDATE",
+            item_id, org_id,
+        )
+        if not src:
+            raise SedeTransferError("Producto no encontrado")
+        if src["location_id"] is not None and int(src["location_id"]) == int(to_location_id):
+            raise SedeTransferError("El origen y el destino son la misma sede")
+
+        dest_exists = await conn.fetchval(
+            "SELECT 1 FROM locations WHERE id = $1 AND org_id = $2",
+            to_location_id, org_id,
+        )
+        if not dest_exists:
+            raise SedeTransferError("La sede de destino no pertenece a tu organización")
+
+        moved = await conn.fetchrow(
+            """UPDATE inventory
+                  SET current_stock = current_stock - $1, updated_at = NOW()
+                WHERE id = $2 AND current_stock >= $1
+            RETURNING current_stock""",
+            qty, item_id,
+        )
+        if moved is None:
+            raise InsufficientStockError(
+                sku=src["name"],
+                requested=qty,
+                available=to_decimal(src["current_stock"]),
+            )
+
+        dest = await conn.fetchrow(
+            """SELECT * FROM inventory
+                WHERE org_id = $1 AND location_id = $2 AND lower(name) = lower($3)
+                ORDER BY id
+                LIMIT 1
+                FOR UPDATE""",
+            org_id, to_location_id, src["name"],
+        )
+        if dest is None:
+            dest = await conn.fetchrow(
+                """INSERT INTO inventory
+                   (org_id, location_id, name, unit, current_stock, min_stock,
+                    linked_dishes, cost_per_unit)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                   RETURNING *""",
+                org_id, to_location_id, src["name"], src["unit"], qty,
+                src["min_stock"], src["linked_dishes"], src["cost_per_unit"],
+            )
+        else:
+            dest = await conn.fetchrow(
+                """UPDATE inventory
+                      SET current_stock = current_stock + $1, updated_at = NOW()
+                    WHERE id = $2
+                RETURNING *""",
+                qty, dest["id"],
+            )
+
+        reason_out = f"traslado_salida:{to_location_id}"
+        reason_in = f"traslado_entrada:{src['location_id']}"
+        if note.strip():
+            reason_out = f"{reason_out} {note.strip()[:120]}"
+            reason_in = f"{reason_in} {note.strip()[:120]}"
+
+        await conn.execute(
+            """INSERT INTO inventory_history (inventory_id, quantity_delta, stock_after, reason)
+               VALUES ($1, $2, $3, $4)""",
+            item_id, -qty, moved["current_stock"], reason_out,
+        )
+        await conn.execute(
+            """INSERT INTO inventory_history (inventory_id, quantity_delta, stock_after, reason)
+               VALUES ($1, $2, $3, $4)""",
+            dest["id"], qty, dest["current_stock"], reason_in,
+        )
+
+    log.info(
+        "inventory.transferred",
+        org_id=org_id, item_id=item_id, to_location_id=to_location_id,
+        dest_item_id=dest["id"],
+    )
+    return {
+        "source": _serialize({**dict(src), "current_stock": moved["current_stock"]}),
+        "destination": _serialize(dict(dest)),
+    }
+
+
+async def db_deduct_inventory_for_order(bot_number: str, items: list,
+                                        location_id: int | None = None):
     """
     Deducts stock for each ordered dish, with support for recipes (dish_recipes).
     items = [{"name": "Hamburguesa Clásica", "quantity": 2}, ...]
@@ -300,6 +473,12 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
     NOTE: For delivery/pickup orders, use commit_order_transaction in
     app.repositories.orders_repo, which wraps this together with db_save_order and
     cart cleanup in a single transaction.
+
+    `location_id` is the sede that is cooking: stock is per sede
+    (PM 2026-09-20), so a table at sede B must not eat sede A's fridge. The
+    recipe's ingredient_id is resolved to the row of THIS sede by name - the
+    same rule transfers use, see the module note at the top of this file.
+    None keeps the old org-wide behaviour for callers with no sede in hand.
 
     Raises:
         InsufficientStockError: if an ingredient's stock is insufficient.
@@ -332,16 +511,30 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                 )
 
                 if recipe_rows:
-                    # Lock the ingredient rows before modifying
+                    # Lock THIS sede's row for each recipe ingredient (matched
+                    # by name across sedes). With location_id NULL the join
+                    # collapses to src = tgt, i.e. the old behaviour.
                     ingredient_ids = [r["ingredient_id"] for r in recipe_rows]
                     locked = await conn.fetch(
-                        """SELECT id, current_stock, min_stock, linked_dishes
-                           FROM inventory
-                           WHERE id = ANY($1::int[])
-                           FOR UPDATE""",
-                        ingredient_ids
+                        """SELECT src.id AS recipe_ingredient_id,
+                                  tgt.id, tgt.current_stock, tgt.min_stock,
+                                  tgt.linked_dishes
+                             FROM inventory src
+                             JOIN inventory tgt
+                               ON tgt.org_id = src.org_id
+                              AND lower(tgt.name) = lower(src.name)
+                              AND ($2::bigint IS NULL
+                                   OR tgt.location_id = $2
+                                   OR tgt.location_id IS NULL)
+                            WHERE src.id = ANY($1::int[])
+                              AND src.org_id = $3
+                         ORDER BY tgt.id
+                              FOR UPDATE OF tgt""",
+                        ingredient_ids, location_id, restaurant_id
                     )
-                    locked_map = {r["id"]: r for r in locked}
+                    locked_map = {}
+                    for r in locked:
+                        locked_map.setdefault(r["recipe_ingredient_id"], r)
 
                     for rline in recipe_rows:
                         ing_id    = rline["ingredient_id"]
@@ -349,6 +542,8 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                         inv       = locked_map.get(ing_id)
                         if not inv:
                             continue
+                        # This sede's row is what moves, not the recipe's.
+                        ing_id = inv["id"]
                         updated = await conn.fetchrow(
                             """UPDATE inventory
                                SET current_stock = current_stock - $1,

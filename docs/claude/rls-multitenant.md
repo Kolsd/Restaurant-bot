@@ -173,10 +173,43 @@ Covered so far: `/api/table-orders`, `/api/waiter-alerts`,
 `/api/team/users`, `/api/dashboard/*`, `/api/stats/*`, `/api/nps/*`,
 `/api/loyalty/*`, `/api/reservations/*`, `/api/pos/*` (via
 `get_current_restaurant`), plus delivery, which already had it.
-**Still org-only: `app/routes/inventory.py`** — the table has `location_id`
-but per-sede stock needs a product decision on the WRITE side (which sede
-owns a new item), so it was left rather than half-done. Marketing,
-discounts and reviews are untouched too.
+Inventory too, since the PM answered the write-side question (see below).
+Marketing, discounts and reviews are still untouched — owner-facing surfaces,
+not things a sede employee opens.
+
+### Inventory is per sede (PM 2026-09-20)
+
+"El inventario es uno por sede, se puede hacer intercambios de inventario por
+sede. Si el owner quiere añadir inventario deberá escoger la sede primero con
+un selector de sedes."
+
+- `inventory.location_id` is written on every create. The API refuses a create
+  with no sede (400) when the caller can span sedes and has not picked one;
+  for anyone else it is their own sede and a `location_id` in the body is
+  ignored. Migration 0090 backfills existing rows to the org's first location.
+- Reads (`/api/inventory`, `/api/inventory/alerts`, `/api/stats/inventory-critical`)
+  filter by sede. Editing, deleting, adjusting and reading history all go
+  through `_owned_item_or_404`, which checks the SEDE, not just the org.
+- **"The same product at another sede" is matched by `lower(name)` within the
+  org.** Rows are per-sede, so sede A's "Tomate" and sede B's "Tomate" are two
+  ids; the name is the only thing tying them together. This one rule is used
+  in two places — do not invent a second one:
+  1. `db_transfer_inventory` (POST `/api/inventory/{id}/transfer`), which moves
+     stock in a single transaction and CREATES the row at the destination sede
+     when that sede never stocked the product.
+  2. the order deduction path. `dish_recipes` stays org-level (a dish is made
+     the same way everywhere), so `ingredient_id` points at the row of
+     whichever sede the recipe was written in; `deduct_inventory_in_tx` and
+     `db_deduct_inventory_for_order` resolve it to the row of the sede that is
+     actually cooking, via `location_id`. Pass it — the default None is the old
+     org-wide behaviour, kept only for callers with no sede in hand.
+- Transfers: the SOURCE must be a sede the caller may act on (so a gerente
+  sends out of their own sede but cannot pull from another); the DESTINATION
+  can be any sede of the org.
+- **Known gap:** `menu_availability` is keyed `(dish_name, org_id)`, so
+  "sold out" is still org-wide. A transfer deliberately does not touch it —
+  flipping it would disable a dish everywhere because one sede's stock moved.
+  Per-sede dish availability is its own wave.
 
 ### Legacy notes
 - `db_calculate_tips_by_attendance` and `db_calculate_payroll` respect `branch_id` via `ANY($n::int[])`.

@@ -46,9 +46,24 @@ async def deduct_inventory_in_tx(
     conn,
     restaurant_id: int,
     items: list[dict],
+    location_id: int | None = None,
 ) -> None:
     """
     Deducts inventory inside an already-open transaction.
+
+    `location_id` is the sede that is actually cooking. Stock is per sede
+    (PM 2026-09-20), so an order at sede B must come out of sede B's fridge.
+    Recipes stay org-level - a dish is made the same way everywhere - which
+    means `dish_recipes.ingredient_id` points at the inventory row of
+    whichever sede the recipe happened to be written in. It is resolved to
+    the row of THIS sede by name, the same rule transfers use
+    (inventory_repo module note). An ingredient the sede does not stock at
+    all is skipped, exactly as a missing row already was: refusing the order
+    instead would take a restaurant offline the first time it forgot to
+    create one row.
+
+    location_id=None keeps the old org-wide behaviour, for the legacy
+    callers that have no sede to hand.
 
     Uses SELECT FOR UPDATE + WHERE current_stock >= deduct_amount RETURNING to
     ensure no negative stock ever reaches the DB. Raises InsufficientStockError
@@ -83,14 +98,29 @@ async def deduct_inventory_in_tx(
 
         if recipe_rows:
             ingredient_ids = [r["ingredient_id"] for r in recipe_rows]
+            # `src.id -> the same product at THIS sede`. With location_id NULL
+            # the join degenerates to src = tgt and this is the old behaviour.
             locked = await conn.fetch(
-                """SELECT id, current_stock, min_stock, linked_dishes
-                   FROM inventory
-                   WHERE id = ANY($1::int[])
-                   FOR UPDATE""",
-                ingredient_ids,
+                """SELECT src.id AS recipe_ingredient_id,
+                          tgt.id, tgt.current_stock, tgt.min_stock, tgt.linked_dishes
+                     FROM inventory src
+                     JOIN inventory tgt
+                       ON tgt.org_id = src.org_id
+                      AND lower(tgt.name) = lower(src.name)
+                      AND ($2::bigint IS NULL
+                           OR tgt.location_id = $2
+                           OR tgt.location_id IS NULL)
+                    WHERE src.id = ANY($1::int[])
+                      AND src.org_id = $3
+                 ORDER BY tgt.id
+                      FOR UPDATE OF tgt""",
+                ingredient_ids, location_id, restaurant_id,
             )
-            locked_map = {r["id"]: r for r in locked}
+            # One row per recipe ingredient: the first match wins, so a sede
+            # with a duplicate name deducts from one row rather than twice.
+            locked_map = {}
+            for r in locked:
+                locked_map.setdefault(r["recipe_ingredient_id"], r)
 
             for rline in recipe_rows:
                 ing_id = rline["ingredient_id"]
@@ -98,6 +128,9 @@ async def deduct_inventory_in_tx(
                 inv = locked_map.get(ing_id)
                 if not inv:
                     continue
+                # From here on it is THIS sede's row that moves, not the one
+                # the recipe names.
+                ing_id = inv["id"]
 
                 # Atomic check-and-update: only succeeds if stock is sufficient
                 updated = await conn.fetchrow(
@@ -160,8 +193,11 @@ async def deduct_inventory_in_tx(
                    FROM inventory
                    WHERE org_id = $1
                      AND linked_dishes @> $2::jsonb
+                     AND ($3::bigint IS NULL
+                          OR location_id = $3
+                          OR location_id IS NULL)
                    FOR UPDATE""",
-                restaurant_id, [dish_name],
+                restaurant_id, [dish_name], location_id,
             )
             for row in rows:
                 available = to_decimal(row["current_stock"])
@@ -386,7 +422,8 @@ async def commit_order_transaction(
 
                 # 2. Deduct inventory (raises InsufficientStockError on shortage)
                 if items:
-                    await deduct_inventory_in_tx(conn, restaurant_id, items)
+                    # location_id is this order's sede — stock is per sede.
+                    await deduct_inventory_in_tx(conn, restaurant_id, items, location_id=location_id)
 
                 # 3. Delete the cart row — phone is the cart PK column
                 await conn.execute(

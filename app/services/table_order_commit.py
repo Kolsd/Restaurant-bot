@@ -248,7 +248,8 @@ async def save_table_order_round(
     }
 
 
-async def deduct_inventory_or_cancel(bot_number: str, cart_items: list, saved_order_id: str | None) -> dict:
+async def deduct_inventory_or_cancel(bot_number: str, cart_items: list, saved_order_id: str | None,
+                                     location_id: int | None = None) -> dict:
     """Attempt inventory deduction for a just-saved table order round.
 
     On InsufficientStockError (NO-ROMPER #13): cancels the saved order(s)
@@ -265,7 +266,8 @@ async def deduct_inventory_or_cancel(bot_number: str, cart_items: list, saved_or
      "message": str}.
     """
     try:
-        await db.db_deduct_inventory_for_order(bot_number, cart_items)
+        # Stock is per sede — deduct from the sede this table belongs to.
+        await db.db_deduct_inventory_for_order(bot_number, cart_items, location_id=location_id)
         return {"success": True}
     except InsufficientStockError as exc:
         log.warning(

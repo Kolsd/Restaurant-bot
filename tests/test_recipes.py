@@ -182,7 +182,9 @@ async def test_deduct_uses_recipe_when_it_exists():
     recipe_row = _make_row({"ingredient_id": 10, "recipe_qty": 0.3})
     # locked inventory row: 5 kg stock
     locked_row = _make_row({
-        "id": 10, "current_stock": 5.0, "min_stock": 0.5,
+        # recipe_ingredient_id is what the recipe points at; id is the row of
+        # the sede actually cooking. Same value in a single-sede mock.
+        "recipe_ingredient_id": 10, "id": 10, "current_stock": 5.0, "min_stock": 0.5,
         "linked_dishes": json.dumps(["Pizza"])
     })
 
@@ -294,7 +296,7 @@ async def test_deduct_deactivates_dish_when_stock_runs_out():
 
     recipe_row = _make_row({"ingredient_id": 7, "recipe_qty": 0.5})
     locked_row = _make_row({
-        "id": 7, "current_stock": 0.5, "min_stock": 0.5,
+        "recipe_ingredient_id": 7, "id": 7, "current_stock": 0.5, "min_stock": 0.5,
         "linked_dishes": json.dumps(["Sopa del día"])
     })
 

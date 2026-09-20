@@ -1036,7 +1036,9 @@ async def diner_order_send(request: Request, body: DinerOrderSendRequest):
                         detail="Hubo un problema al registrar tu pedido. Por favor pide ayuda al mesero.",
                     )
 
-                inv = await deduct_inventory_or_cancel(bot_number, cart_items, commit["order_id"])
+                inv = await deduct_inventory_or_cancel(
+                    bot_number, cart_items, commit["order_id"], location_id=location_id,
+                )
                 if not inv["success"]:
                     # Deliberately does NOT clear the cart here (unlike the
                     # WhatsApp path, which wipes it — see agent_salon.py):

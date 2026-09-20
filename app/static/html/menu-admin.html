@@ -132,6 +132,15 @@
     </div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
       <input type="hidden" id="invModalId">
+      <!-- Sede picker: stock belongs to ONE sede, so an owner has to say
+           which fridge this is before saving. Hidden for staff, who only
+           have one sede anyway. -->
+      <div id="invModalSedeRow" style="display:none;">
+        <label class="form-label" for="invModalSede">Sede</label>
+        <select class="input" id="invModalSede">
+          <option value="">Elegí una sede…</option>
+        </select>
+      </div>
       <div>
         <label class="form-label" for="invModalName">Nombre</label>
         <input class="input" id="invModalName" placeholder="Ej. Papa criolla">
@@ -160,6 +169,38 @@
     <div class="modal-foot">
       <button class="btn ghost" id="invModalCancel">Cancelar</button>
       <button class="btn primary" id="invModalSave">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Traslado de inventario entre sedes -->
+<div id="invXferModal" class="modal-overlay" style="display:none;align-items:center;justify-content:center;">
+  <div class="modal" style="width:420px;max-width:96vw;">
+    <div class="modal-head">
+      <span id="invXferTitle">Trasladar a otra sede</span>
+      <button class="modal-close" id="invXferClose" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+      <input type="hidden" id="invXferId">
+      <p id="invXferFrom" class="muted" style="margin:0;font-size:13px;"></p>
+      <div>
+        <label class="form-label" for="invXferTo">Sede de destino</label>
+        <select class="input" id="invXferTo">
+          <option value="">Elegí una sede…</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label" for="invXferQty">Cantidad</label>
+        <input class="input" type="number" id="invXferQty" min="0" step="0.01" placeholder="0">
+      </div>
+      <div>
+        <label class="form-label" for="invXferNote">Nota (opcional)</label>
+        <input class="input" id="invXferNote" maxlength="200" placeholder="Ej. faltó para el fin de semana">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="invXferCancel">Cancelar</button>
+      <button class="btn primary" id="invXferSave">Trasladar</button>
     </div>
   </div>
 </div>

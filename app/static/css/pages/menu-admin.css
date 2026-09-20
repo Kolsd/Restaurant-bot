@@ -41,3 +41,42 @@
   /* Dish grid already uses auto-fill — just ensure min width doesn't overflow */
   .dish-grid { padding: 10px 12px 12px; grid-template-columns: 1fr; }
 }
+
+/* ── Modals ──────────────────────────────────────────────────────────────
+   `.modal-overlay` was only ever defined in pages/cashier.css, which this
+   page does not load — so the inventory modals (the existing "Nuevo
+   producto" one and the sede transfer added 2026-09-20) rendered inline in
+   the document flow instead of centred over the page, landing below the
+   fold. The markup already sets display:flex inline when opening, so these
+   rules only have to make it an overlay. */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 16px;
+  overflow-y: auto;
+}
+.modal-overlay .modal {
+  background: var(--surface, #fff);
+  color: var(--text, #1a1a1a);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  margin: auto;
+}
+.modal-overlay .modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 16px 18px;
+  border-bottom: 1px solid var(--border, #e5e5e0);
+  font-weight: 600;
+}
+.modal-overlay .modal-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 22px; line-height: 1; color: var(--text-3, #8a8a85);
+}
+.modal-overlay .modal-body { padding: 18px; }
+.modal-overlay .modal-foot {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border, #e5e5e0);
+}

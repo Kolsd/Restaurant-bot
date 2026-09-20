@@ -194,7 +194,9 @@ async def test_deduct_recipe_path_triggers_ingredient_sync():
     restaurant = {"id": 1}
     recipe_row = _row({"ingredient_id": 10, "recipe_qty": 2.0})
     locked_row = _row({
-        "id": 10, "current_stock": 2.0, "min_stock": 0.5,
+        # recipe_ingredient_id is what the recipe points at; id is the row of
+        # the sede actually cooking. Same value in a single-sede mock.
+        "recipe_ingredient_id": 10, "id": 10, "current_stock": 2.0, "min_stock": 0.5,
         "linked_dishes": json.dumps([]),
     })
 
@@ -413,7 +415,7 @@ async def test_deduct_inventory_in_tx_calls_ingredient_sync():
 
     recipe_row = _row({"ingredient_id": 20, "recipe_qty": 1.0})
     locked_row = _row({
-        "id": 20, "current_stock": 1.0, "min_stock": 0.0,
+        "recipe_ingredient_id": 20, "id": 20, "current_stock": 1.0, "min_stock": 0.0,
         "linked_dishes": json.dumps([]),
     })
 

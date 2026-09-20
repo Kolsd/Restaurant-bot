@@ -349,6 +349,59 @@
   // ── Inventory modal ────────────────────────────────────────────────
   var _invItems = [];
 
+  // Stock belongs to ONE sede (PM 2026-09-20), so the inventory screen has
+  // to know the org's sedes: to make the owner pick one before adding a
+  // product, and to offer a destination for a transfer. `_invSedes` stays
+  // empty for a single-sede restaurant and for staff, who never choose.
+  var _invSedes = [];
+  var _invCurrentSede = null;
+
+  async function loadInvSedes() {
+    try {
+      // /api/staff/locations, not /api/team/branches: the latter is
+      // owner-only, and a gerente also needs the list to pick a transfer
+      // destination. This one answers for anyone authenticated in the org.
+      var res = await fetch('/api/staff/locations', { headers: mesioHeaders() });
+      if (!res.ok) { _invSedes = []; return; }
+      var data = await res.json();
+      var list = data.branches || data.locations || data || [];
+      _invSedes = Array.isArray(list) ? list : [];
+    } catch (e) {
+      _invSedes = [];
+    }
+  }
+
+  function _fillSedeSelect(selectEl, selectedId, excludeId) {
+    if (!selectEl) return;
+    selectEl.innerHTML = '';
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Elegí una sede…';
+    selectEl.appendChild(placeholder);
+    _invSedes.forEach(function (sede) {
+      if (excludeId != null && String(sede.id) === String(excludeId)) return;
+      var opt = document.createElement('option');
+      opt.value = String(sede.id);
+      // textContent, never innerHTML — the sede name is user data.
+      opt.textContent = sede.name || ('Sede ' + sede.id);
+      if (selectedId != null && String(sede.id) === String(selectedId)) opt.selected = true;
+      selectEl.appendChild(opt);
+    });
+  }
+
+  function _sedeNameById(id) {
+    for (var i = 0; i < _invSedes.length; i++) {
+      if (String(_invSedes[i].id) === String(id)) return _invSedes[i].name || ('Sede ' + id);
+    }
+    return '';
+  }
+
+  // More than one sede AND no single sede pinned by the backend = an owner
+  // looking at everything. That is exactly who must choose before saving.
+  function _mustPickSede() {
+    return _invSedes.length > 1 && _invCurrentSede == null;
+  }
+
   function openInvModal(item, focusStock) {
     var modal = document.getElementById('invModal');
     if (!modal) return;
@@ -363,6 +416,17 @@
       ? (item.low_stock_threshold != null ? item.low_stock_threshold : (item.min_stock != null ? item.min_stock : ''))
       : '';
     document.getElementById('invModalCost').value = item ? (item.cost_per_unit != null ? item.cost_per_unit : '') : '';
+
+    // The sede row only appears when there is a real choice to make: a new
+    // product, several sedes, and no sede already pinned. Editing never
+    // moves a product between sedes — that is what a transfer is for.
+    var sedeRow = document.getElementById('invModalSedeRow');
+    var sedeSel = document.getElementById('invModalSede');
+    var needsSede = !item && _mustPickSede();
+    if (sedeRow) sedeRow.style.display = needsSede ? '' : 'none';
+    if (needsSede) _fillSedeSelect(sedeSel, null, null);
+    else if (sedeSel) sedeSel.value = '';
+
     modal.style.display = 'flex';
     if (focusStock) {
       setTimeout(function () { document.getElementById('invModalStock').focus(); }, 60);
@@ -384,6 +448,16 @@
 
     if (!name) { mesioToast('El nombre es requerido', 'warn'); return; }
 
+    // The backend refuses a create with no sede (400). Catching it here just
+    // saves the round-trip and points at the field.
+    var sedeSel = document.getElementById('invModalSede');
+    var sedeId = (!id && _mustPickSede()) ? (sedeSel ? sedeSel.value : '') : '';
+    if (!id && _mustPickSede() && !sedeId) {
+      mesioToast('Elegí la sede a la que pertenece este producto', 'warn');
+      if (sedeSel) sedeSel.focus();
+      return;
+    }
+
     var saveBtn = document.getElementById('invModalSave');
     if (saveBtn) saveBtn.disabled = true;
 
@@ -391,6 +465,7 @@
       var url = id ? '/api/inventory/' + id : '/api/inventory';
       var method = id ? 'PUT' : 'POST';
       var body = { name: name, unit: unit, current_stock: stock, min_stock: min, cost_per_unit: cost };
+      if (sedeId) body.location_id = parseInt(sedeId, 10);
       var res = await fetch(url, {
         method: method,
         headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
@@ -577,6 +652,9 @@
         '<div>' + statusLabel + '</div>' +
         '<div style="text-align:right;">' +
           '<button class="btn sm ghost" data-inv-action="restock" data-id="' + (item.id || '') + '">Reponer</button> ' +
+          (_invSedes.length > 1
+            ? '<button class="btn sm ghost" data-inv-action="transfer" data-id="' + (item.id || '') + '">Trasladar</button> '
+            : '') +
           '<button class="btn sm ghost" data-inv-action="edit" data-id="' + (item.id || '') + '">Editar</button>' +
         '</div>' +
       '</div>';
@@ -599,6 +677,9 @@
       if (action === 'restock') {
         // Open the inv modal prefilled, focused on stock field
         openInvModal(item || { id: itemId }, true);
+
+      } else if (action === 'transfer') {
+        openInvXferModal(item || { id: itemId });
 
       } else if (action === 'edit') {
         openInvModal(item || { id: itemId }, false);
@@ -624,12 +705,90 @@
     });
   }
 
+  // ── Transfer stock to another sede ─────────────────────────────────
+  //
+  // "Se puede hacer intercambios de inventario por sede" (PM 2026-09-20).
+  // The backend moves it in one transaction and creates the product at the
+  // destination if that sede never stocked it, so this only has to collect
+  // where and how much.
+  var _invXferItem = null;
+
+  function openInvXferModal(item) {
+    var modal = document.getElementById('invXferModal');
+    if (!modal || !item) return;
+    _invXferItem = item;
+
+    var from = item.location_id != null ? _sedeNameById(item.location_id) : '';
+    var stock = +(item.stock || item.current_stock || 0);
+    var fromEl = document.getElementById('invXferFrom');
+    if (fromEl) {
+      fromEl.textContent = (item.name || '') +
+        (from ? ' · en ' + from : '') +
+        ' · disponible ' + stock + ' ' + (item.unit || 'u');
+    }
+    document.getElementById('invXferId').value = item.id || '';
+    document.getElementById('invXferQty').value = '';
+    document.getElementById('invXferNote').value = '';
+    // Never offer the sede the stock already sits in.
+    _fillSedeSelect(document.getElementById('invXferTo'), null, item.location_id);
+    modal.style.display = 'flex';
+  }
+
+  function closeInvXferModal() {
+    var modal = document.getElementById('invXferModal');
+    if (modal) modal.style.display = 'none';
+    _invXferItem = null;
+  }
+
+  async function saveInvXfer() {
+    var itemId = document.getElementById('invXferId').value;
+    var to = document.getElementById('invXferTo').value;
+    var qty = parseFloat(document.getElementById('invXferQty').value);
+    var note = document.getElementById('invXferNote').value.trim();
+
+    if (!to) { mesioToast('Elegí la sede de destino', 'warn'); return; }
+    if (!qty || qty <= 0) { mesioToast('Indicá una cantidad mayor que cero', 'warn'); return; }
+
+    var btn = document.getElementById('invXferSave');
+    if (btn) btn.disabled = true;
+    try {
+      var res = await fetch('/api/inventory/' + itemId + '/transfer', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
+        body: JSON.stringify({ to_location_id: parseInt(to, 10), quantity: qty, note: note })
+      });
+      if (!res.ok) {
+        var err = await res.json().catch(function () { return {}; });
+        throw new Error(err.detail || 'HTTP ' + res.status);
+      }
+      mesioToast('Traslado registrado', 'success');
+      closeInvXferModal();
+      loadInventory();
+    } catch (e) {
+      mesioToast('Error: ' + e.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  var xferCloseBtn = document.getElementById('invXferClose');
+  if (xferCloseBtn) xferCloseBtn.addEventListener('click', closeInvXferModal);
+  var xferCancelBtn = document.getElementById('invXferCancel');
+  if (xferCancelBtn) xferCancelBtn.addEventListener('click', closeInvXferModal);
+  var xferSaveBtn = document.getElementById('invXferSave');
+  if (xferSaveBtn) xferSaveBtn.addEventListener('click', saveInvXfer);
+
   async function loadInventory() {
     try {
+      if (!_invSedes.length) await loadInvSedes();
       var res = await fetch('/api/inventory', { headers: mesioHeaders() });
       if (!res.ok) { return; }
       var data = await res.json();
       var items = data.inventory || data.items || data;
+      // The response says which sede it is scoped to: an int when the caller
+      // is pinned to one (staff, or an owner who picked one), null when they
+      // are seeing every sede.
+      _invCurrentSede = (data && typeof data.location_id === 'number') ? data.location_id : null;
       _invItems = Array.isArray(items) ? items : [];
       _buildCategoryPills(_invItems);
       renderInventory(_invItems);

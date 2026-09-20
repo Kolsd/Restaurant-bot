@@ -720,7 +720,10 @@ async def test_commit_zero_stock_raises(monkeypatch):
     conn.transaction = MagicMock(return_value=txn)
     # Escandallo path: primera fetch devuelve rows de receta
     recipe_row = make_row({"ingredient_id": 10, "recipe_qty": 1.0})
-    locked_row = make_row({"id": 10, "current_stock": 0.0, "min_stock": 0,
+    # recipe_ingredient_id is what dish_recipes points at; id is the row of
+    # the sede actually cooking (same here — one sede).
+    locked_row = make_row({"recipe_ingredient_id": 10, "id": 10,
+                           "current_stock": 0.0, "min_stock": 0,
                            "linked_dishes": "[]"})
     conn.fetch = AsyncMock(side_effect=[[recipe_row], [locked_row]])
     # fetchval → set_config GUC (tenant_connection)

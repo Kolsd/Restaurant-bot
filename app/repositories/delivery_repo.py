@@ -344,7 +344,8 @@ async def db_create_delivery_order(
             proof_url, scheduled_pickup_at, channel,
         )
         if items:
-            await deduct_inventory_in_tx(conn, org_id, items)
+            # The sede that will cook it — stock is per sede (PM 2026-09-20).
+            await deduct_inventory_in_tx(conn, org_id, items, location_id=location_id)
     log.info(
         "delivery.order_created",
         org_id=org_id, location_id=location_id, order_id=order_id, order_type=order_type,
