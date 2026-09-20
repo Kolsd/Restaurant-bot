@@ -78,6 +78,11 @@ def _patch_convert_deps(monkeypatch, *, org=None, loc=None, prospect=None,
     monkeypatch.setattr(restaurant_repo, "db_create_user",
                         AsyncMock(return_value=user_created))
 
+    # Free trial (organizations.comp_until) — patched so the convert path is
+    # exercised without a pool. Patched on the module the route imports from.
+    from app.repositories import plan_limits_repo
+    monkeypatch.setattr(plan_limits_repo, "db_set_comp_until", AsyncMock(return_value=None))
+
     # Audit log — best-effort, patch to avoid pool calls
     monkeypatch.setattr(
         "app.repositories.internal.audit_log_repo.db_log_audit_event",
@@ -136,6 +141,60 @@ class TestConvertWithOnboarding:
         restaurant_repo.db_create_organization.assert_awaited_once()
         call_kwargs = restaurant_repo.db_create_organization.await_args.kwargs
         assert call_kwargs.get("subscription_plan") == "restaurante"
+
+    def test_convert_starts_the_eight_day_free_trial(self, super_client, monkeypatch):
+        """Closed product decision (docs/claude/status.md #12): the sales hook
+        is 8 free days on top of the PAID plan via organizations.comp_until.
+        Nothing implemented it — db_set_comp_until had no caller at all, so
+        every converted customer started billable on day one."""
+        from datetime import datetime, timedelta, timezone
+        from app.repositories import plan_limits_repo
+        _patch_convert_deps(monkeypatch)
+
+        resp = super_client.post(
+            "/api/internal/crm/prospects/55/convert", json={}, headers=HEADERS,
+        )
+        assert resp.status_code == 200, resp.text
+
+        plan_limits_repo.db_set_comp_until.assert_awaited_once()
+        args = plan_limits_repo.db_set_comp_until.await_args.args
+        assert args[0] == 10, "the trial must be set on the org just created"
+        comp_until = args[1]
+        expected = datetime.now(tz=timezone.utc) + timedelta(days=8)
+        assert abs((comp_until - expected).total_seconds()) < 60, comp_until
+
+        # And the founder is told, so they can quote the end date to the customer.
+        assert resp.json()["comp_until"] is not None
+
+    def test_convert_trial_days_zero_starts_no_trial(self, super_client, monkeypatch):
+        """A customer who is already paying should not silently get 8 free days."""
+        from app.repositories import plan_limits_repo
+        _patch_convert_deps(monkeypatch)
+
+        resp = super_client.post(
+            "/api/internal/crm/prospects/55/convert",
+            json={"trial_days": 0}, headers=HEADERS,
+        )
+        assert resp.status_code == 200, resp.text
+        plan_limits_repo.db_set_comp_until.assert_not_awaited()
+        assert resp.json()["comp_until"] is None
+
+    def test_convert_survives_a_failed_trial_write(self, super_client, monkeypatch):
+        """The org already exists by then — never lose the conversion over the
+        trial, but do not claim a trial that was not written either."""
+        from app.repositories import plan_limits_repo
+        _patch_convert_deps(monkeypatch)
+        monkeypatch.setattr(
+            plan_limits_repo, "db_set_comp_until",
+            AsyncMock(side_effect=RuntimeError("boom")),
+        )
+
+        resp = super_client.post(
+            "/api/internal/crm/prospects/55/convert", json={}, headers=HEADERS,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["org_id"] == 10
+        assert resp.json()["comp_until"] is None
 
     def test_convert_skip_welcome_message(self, super_client, monkeypatch):
         """skip_welcome_message=True: creates org + user but does NOT call

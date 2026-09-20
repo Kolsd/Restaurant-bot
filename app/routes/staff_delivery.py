@@ -41,6 +41,7 @@ from app.repositories import delivery_repo
 from app.routes.deps import get_current_user_scoped
 from app.services import database as db
 from app.services import realtime
+from app.services.delivery import ALLOWED_PAYMENT_METHODS
 from app.services.logging import get_logger
 from app.services.staff_sections import ADMIN_ROLES, normalize_role
 
@@ -200,6 +201,10 @@ def _cashier_order_view(row: dict) -> dict:
         # still to collect — `paid` was already in _ORDER_FIELDS but never
         # surfaced here.
         "paid": bool(row.get("paid")),
+        "paid_at": _iso(row.get("paid_at")),
+        "paid_by_staff_id": (
+            str(row["paid_by_staff_id"]) if row.get("paid_by_staff_id") else None
+        ),
         "payment_method": row.get("payment_method"),
         "cash_change_for": _money(row.get("cash_change_for")),
         "proof_url": row.get("proof_url"),
@@ -391,6 +396,61 @@ async def mark_en_route(order_id: str, scope: dict = Depends(delivery_scope)):
     )
     if not row:
         raise HTTPException(status_code=409, detail=_WRONG_STATE_DETAIL)
+    await realtime.publish_delivery_status(scope["org_id"], scope["location_id"], order_id)
+    return _cashier_order_view(row)
+
+
+class MarkPaidRequest(BaseModel):
+    payment_method: str = Field(
+        ..., min_length=1, max_length=30,
+        description="Cómo pagó el cliente: efectivo, tarjeta, nequi o bancolombia",
+    )
+
+
+@router.post("/orders/{order_id}/mark-paid")
+async def mark_order_paid(
+    order_id: str, body: MarkPaidRequest, scope: dict = Depends(delivery_scope),
+):
+    """Record that the customer paid — cash at the door, the rider's card
+    reader, or a transfer whose receipt the cashier just checked against the
+    bank (proof_url is shown in the queue; approving it is this call).
+
+    Web orders had no way to reach paid = TRUE at all: the only writer was
+    the Wompi webhook, which is off. That left every delivery sale out of
+    the owner's totals, since stats_repo sums `orders.total WHERE paid`.
+
+    Same authorization as the en-route/delivered transitions: the sede's
+    cashier or an admin for any order, plus the order's OWN assigned courier
+    — the rider is who has the cash in their hand. `paid_by_staff_id` records
+    which of them did it, and stays NULL for an owner/admin account (it has
+    no `staff` row to point at — see _staff_id_from_user).
+
+    409 when the order is already paid, cancelled or rejected: the repo's
+    conditional UPDATE decides, so two tablets submitting at once cannot both
+    win, and the second one is told rather than shown a false success.
+    """
+    method = body.payment_method.strip().lower()
+    if method not in ALLOWED_PAYMENT_METHODS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Método de pago no reconocido: {body.payment_method}",
+        )
+
+    order = await _require_owned_order(scope, order_id)
+    _require_can_transition(scope, order)
+
+    row = await delivery_repo.db_mark_order_paid(
+        scope["org_id"], order_id,
+        location_id=scope["location_id"],
+        payment_method=method,
+        staff_id=scope["staff_id"],
+    )
+    if not row:
+        raise HTTPException(
+            status_code=409,
+            detail="Este pedido ya estaba pagado o fue cancelado",
+        )
+
     await realtime.publish_delivery_status(scope["org_id"], scope["location_id"], order_id)
     return _cashier_order_view(row)
 

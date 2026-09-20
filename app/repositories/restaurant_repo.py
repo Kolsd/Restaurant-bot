@@ -1731,6 +1731,32 @@ def _slugify(name: str) -> str:
     return s or 'restaurant'
 
 
+async def _unique_org_slug(conn, name: str) -> str:
+    """Return a slug derived from `name` that no organization uses yet.
+
+    `organizations.slug` is UNIQUE and nullable, and a NULL slug makes the
+    whole public ordering channel unreachable: `/pedir/{slug}` resolves via
+    db_get_org_by_slug, so an org without one can never hand out a link.
+    Every org therefore gets a slug at creation time (see
+    db_create_organization) instead of relying on a caller to pass one.
+
+    Collisions get a numeric suffix (`el-fogon`, `el-fogon-2`, ...) rather
+    than raising, because the org name is chosen by the restaurant and two
+    unrelated tenants with the same name is a normal case, not an error.
+    """
+    base = _slugify(name)[:60] or "restaurant"
+    candidate = base
+    n = 1
+    while True:
+        taken = await conn.fetchval(
+            "SELECT 1 FROM organizations WHERE slug = $1", candidate
+        )
+        if not taken:
+            return candidate
+        n += 1
+        candidate = f"{base}-{n}"
+
+
 async def db_get_restaurant_by_slug(slug: str) -> dict | None:
     """Return a restaurant row by its unique slug, or None if not found."""
     pool = await _get_pool()
@@ -2462,6 +2488,11 @@ async def db_create_organization(
     pool = await _get_pool()
     with bypass_tenant_scope_if_unset("db_create_organization_superadmin"):
         async with pool.acquire() as conn:
+            # A NULL slug leaves the org with no public ordering link at all
+            # (/pedir/{slug} 404s), so derive one from the name when the
+            # caller did not supply it. CRM conversion never supplies one.
+            if not (slug or "").strip():
+                slug = await _unique_org_slug(conn, name)
             row = await conn.fetchrow(
                 """
                 INSERT INTO organizations

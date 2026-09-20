@@ -3,7 +3,8 @@ Suite 4 — Staff & Tips
 tests/test_staff.py
 
 Covers:
-  1.  GET /api/staff without module → 403
+  1.  GET /api/staff without module → 200 (roster is NOT gated by staff_tips)
+  1b. GET /api/staff/open-shifts without module → 403 (shifts still are)
   2.  GET /api/staff with module enabled → 200, returns staff list
   3.  POST /api/staff creates member, PIN hashed (raw PIN not in response)
   4.  POST /api/staff invalid role → 422
@@ -71,10 +72,43 @@ _SHIFT_ROW = {
 # 1–2. Module gate
 # ══════════════════════════════════════════════════════════════════════════════
 
-def test_list_staff_without_module_returns_403(client, monkeypatch):
-    """staff_tips absent/False → 403."""
+def test_list_staff_without_module_is_allowed(client, monkeypatch):
+    """The roster is NOT behind staff_tips.
+
+    A restaurant cannot operate without creating a mesero/cajero/domiciliario,
+    and orgs are created with features={} — gating the roster locked every new
+    customer out of staffing their own restaurant. Reading it must work with
+    the module explicitly off.
+    """
     _auth(monkeypatch, features={"staff_tips": False})
+    import app.services.database as db_mod
+    monkeypatch.setattr(db_mod, "db_get_staff", AsyncMock(return_value=[_STAFF_ROW]))
+
     r = client.get("/api/staff", headers=_HEADERS)
+    assert r.status_code == 200
+    assert r.json()["staff"][0]["name"] == "Ana García"
+
+
+def test_create_staff_without_module_is_allowed(client, monkeypatch):
+    """Creating staff must work with staff_tips off — the onboarding path."""
+    _auth(monkeypatch, features={"staff_tips": False})
+    import app.services.database as db_mod
+    monkeypatch.setattr(db_mod, "db_create_staff", AsyncMock(return_value=_STAFF_ROW))
+    monkeypatch.setattr(
+        "app.routes.staff._resolve_new_staff_location", AsyncMock(return_value=None)
+    )
+
+    r = client.post("/api/staff", headers=_HEADERS, json={
+        "name": "Ana", "last_name": "García", "role": "mesero", "password": "1234",
+    })
+    assert r.status_code == 201
+
+
+def test_open_shifts_without_module_returns_403(client, monkeypatch):
+    """Shifts/tips/payroll ARE still behind staff_tips — the module is sold
+    for those, not for having employees at all."""
+    _auth(monkeypatch, features={"staff_tips": False})
+    r = client.get("/api/staff/open-shifts", headers=_HEADERS)
     assert r.status_code == 403
     assert "staff_tips" in r.json()["detail"]
 

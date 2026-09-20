@@ -241,7 +241,9 @@ def test_require_module_absent_flag_returns_403(client, monkeypatch):
     monkeypatch.setattr("app.services.database.db_check_module",
                         AsyncMock(return_value=False))
 
-    r = client.get("/api/staff", headers={"Authorization": "Bearer tok"})
+    # /api/staff itself is no longer gated (the roster must work on every
+    # plan); open-shifts is, so it is what exercises require_module here.
+    r = client.get("/api/staff/open-shifts", headers={"Authorization": "Bearer tok"})
     assert r.status_code == 403
     assert "staff_tips" in r.json()["detail"]
 
@@ -257,9 +259,9 @@ def test_require_module_flag_true_allows_access(client, monkeypatch):
 
     # Also mock the DB call inside the endpoint itself
     import app.services.database as db_mod
-    monkeypatch.setattr(db_mod, "db_get_staff", AsyncMock(return_value=[]))
+    monkeypatch.setattr(db_mod, "db_get_open_shifts", AsyncMock(return_value=[]))
 
-    r = client.get("/api/staff", headers={"Authorization": "Bearer tok"})
+    r = client.get("/api/staff/open-shifts", headers={"Authorization": "Bearer tok"})
     assert r.status_code == 200
 
 
@@ -271,7 +273,7 @@ def test_require_module_flag_false_returns_403(client, monkeypatch):
     monkeypatch.setattr("app.services.database.db_check_module",
                         AsyncMock(return_value=False))
 
-    r = client.get("/api/staff", headers={"Authorization": "Bearer tok"})
+    r = client.get("/api/staff/open-shifts", headers={"Authorization": "Bearer tok"})
     assert r.status_code == 403
 
 

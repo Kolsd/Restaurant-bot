@@ -70,6 +70,10 @@
 .deliv-actions button { flex: 1 1 auto; min-width: 100px; }
 .deliv-assign-row { display: flex; gap: 6px; align-items: center; }
 .deliv-assign-row select { flex: 1; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--border); font-family: inherit; font-size: 12.5px; background: var(--surface); color: var(--text); }
+.deliv-pay-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.deliv-pay-row select { flex: 1; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--border); font-family: inherit; font-size: 12.5px; background: var(--surface); color: var(--text); }
+.deliv-paid-yes { color: var(--success-text); font-weight: 600; }
+.deliv-paid-no { color: var(--warning-text); font-weight: 600; }
 .deliv-rejection-reason { font-size: 12px; color: var(--danger-text); background: var(--danger-light); border-radius: 6px; padding: 6px 8px; }
 
 .deliv-empty { text-align: center; padding: 40px 20px; color: var(--text-3); font-size: 13px; }
@@ -310,9 +314,37 @@ textarea.deliv-modal-input { min-height: 70px; resize: vertical; }
       var change = Number(o.cash_change_for) - Number(o.total || 0);
       if (change > 0) cash += '<div class="deliv-cash-note">Cambio: ' + mesioFmt(change) + '</div>';
     }
-    var methodLabel = { efectivo: 'Efectivo', nequi: 'Nequi', tarjeta: 'Tarjeta', transferencia: 'Transferencia' }[o.payment_method] || o.payment_method || '';
+    var methodLabel = _METHOD_LABELS[o.payment_method] || o.payment_method || '';
+    // Whether the money is actually IN is not the same question as which
+    // method the customer picked at checkout — a transfer with a receipt
+    // still pending review reads 'Nequi · Pendiente' until a cashier
+    // checks the bank and registers it.
+    var paidCls = o.paid ? 'deliv-paid-yes' : 'deliv-paid-no';
+    var paidLabel = o.paid ? 'Cobrado' : 'Pendiente';
     return '<div class="deliv-totals">' + lines + grand
-      + '<div class="deliv-row"><span>Pago</span><span>' + _esc(methodLabel) + '</span></div>' + cash + '</div>';
+      + '<div class="deliv-row"><span>Pago</span><span>' + _esc(methodLabel)
+        + ' · <span class="' + paidCls + '">' + paidLabel + '</span></span></div>' + cash + '</div>';
+  }
+
+  // Keys must match app/services/delivery.ALLOWED_PAYMENT_METHODS — the
+  // server rejects anything else with a 400.
+  var _METHOD_LABELS = {
+    efectivo: 'Efectivo', tarjeta: 'Tarjeta', nequi: 'Nequi', bancolombia: 'Bancolombia',
+  };
+
+  // Registering the payment is what closes the loop on a transfer: the
+  // customer uploads a receipt, the cashier checks the bank and confirms it
+  // here. Until this existed no web order could ever be paid, so delivery
+  // sales never reached the owner's totals at all.
+  function _payRowHtml(o) {
+    var options = Object.keys(_METHOD_LABELS).map(function (key) {
+      var selected = key === o.payment_method ? ' selected' : '';
+      return '<option value="' + _esc(key) + '"' + selected + '>' + _esc(_METHOD_LABELS[key]) + '</option>';
+    }).join('');
+    return '<div class="deliv-pay-row">'
+      + '<select data-order="' + _esc(o.id) + '" class="deliv-pay-select" aria-label="Cómo pagó el cliente">' + options + '</select>'
+      + '<button type="button" class="m-btn m-btn--secondary m-btn--sm" data-action="mark-paid" data-order="' + _esc(o.id) + '"' + (_inFlight[o.id] ? ' disabled' : '') + '>Registrar pago</button>'
+      + '</div>';
   }
 
   function _courierSelectHtml(o) {
@@ -351,6 +383,10 @@ textarea.deliv-modal-input { min-height: 70px; resize: vertical; }
       btns.push('<button type="button" class="m-btn m-btn--primary" data-action="delivered" data-order="' + _esc(o.id) + '"' + dis + '>Entregado</button>');
     }
     if (btns.length) html += '<div class="deliv-actions">' + btns.join('') + '</div>';
+    // Cancelled/rejected orders are not revenue — no payment to register.
+    if (!o.paid && o.status !== 'cancelado' && o.status !== 'rechazado') {
+      html += _payRowHtml(o);
+    }
     return html;
   }
 
@@ -546,6 +582,13 @@ textarea.deliv-modal-input { min-height: 70px; resize: vertical; }
     if (action === 'proof') { openProofModal(target.dataset.url); return; }
     if (action === 'en-route') { _runAction(orderId, function () { return _postDelivery(orderId, '/en-route'); }); return; }
     if (action === 'delivered') { _runAction(orderId, function () { return _postDelivery(orderId, '/delivered'); }); return; }
+    if (action === 'mark-paid') {
+      var paySelect = document.querySelector('select.deliv-pay-select[data-order="' + orderId + '"]');
+      var method = paySelect ? paySelect.value : '';
+      if (!method) { mesioToast('Elige cómo pagó el cliente', 'warning'); return; }
+      _runAction(orderId, function () { return _postDelivery(orderId, '/mark-paid', { payment_method: method }); });
+      return;
+    }
     if (action === 'assign') {
       var select = document.querySelector('select.deliv-courier-select[data-order="' + orderId + '"]');
       var courierId = select ? select.value : '';

@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v13.0 (head `0087_orders_nps_answered_at`; 2008 tests with DB, run as `postgres`)
+# Mesio Restaurant Bot — v13.0 (head `0089_orders_paid_by_staff`; 1999 passed / 6 skipped with DB, run as `postgres`)
 
 Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_use). Product: the diner's own web channel (QR → `/chat/{table_id}`); WhatsApp is being retired.
 
@@ -33,8 +33,8 @@ Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_
 1c. ~~Unified staff app `/staff`~~ (2026-09-17, d18118b: admin-dashboard shell, sections per role; old role pages removed; demo seed `scripts/dev/seed_staff_app_demo.py`). Open: SW never registered + static max-age 24h → tablets may run stale JS after deploy; orders-rescued metric must bucket days in the restaurant's timezone.
 2. ~~Real-time SSE + Redis pub/sub~~ (2026-09-17, bce415a: `app/services/realtime.py`, `/api/staff/stream`, `/api/diner/stream`, `mesio-realtime.js`; polling stays as a 60s net). Prod needs `REDIS_URL` (4 workers).
 2b. ~~POS quick-invoice P1~~ (2026-09-17: no org_id + NULL table_id → 500; branch_id fell back to the org id; the check was never claimed so it stayed unpaid).
-3. ~~Web delivery wave Phase A~~ (2026-09-19, chunks 1-9: data model, `/pedir/{slug}`, checkout, `/pedido/{code}`, cashier + courier UI, per-sede config, WhatsApp delivery/pickup switched off — spec `docs/claude/delivery-web.md`). Open gap found in chunk 9: no endpoint marks a web order's Nequi/transfer proof as paid. Phase B (Mapbox map, live chat) later.
-4. First customer: 8-day trial via `comp_until`.
+3. ~~Web delivery wave Phase A~~ (2026-09-19, chunks 1-9: data model, `/pedir/{slug}`, checkout, `/pedido/{code}`, cashier + courier UI, per-sede config, WhatsApp delivery/pickup switched off — spec `docs/claude/delivery-web.md`). Phase B (Mapbox map, live chat) later.
+4. ~~Onboarding blockers~~ (2026-09-20): orgs are born with a slug (`/pedir/{slug}` was unreachable for every customer created since 0034; 0088 backfills); the staff roster is no longer behind the `staff_tips` module; `gerente` configures their own sede's delivery; `POST /api/staff/delivery/orders/{id}/mark-paid` records cash/card/transfer (before it, NO web order could ever be `paid=TRUE`, so delivery sales were missing from `total_sales`); CRM convert starts the 8-day `comp_until` trial. **Still open for the first customer: `RESEND_API_KEY` in prod** — without it the welcome email carrying the owner's temp password only prints to the log.
 5. Sweep `json.dumps()` passed to `$n::jsonb`.
 6. Turn off remaining WhatsApp (migrate e2e harness first).
 7. Fix the Wompi webhook before reactivating it (its e2e test fails: invalid signature → 200, expects 401).

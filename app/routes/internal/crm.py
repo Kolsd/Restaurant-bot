@@ -205,6 +205,12 @@ class ConvertProspectBody(BaseModel):
     subscription_plan: str = "restaurante"  # legacy alias kept for compat
     features:        Optional[dict] = None
     skip_welcome_message: bool = False      # founder option to skip the welcome send on convert
+    trial_days:      int = 8                # Closed product decision (docs/claude/status.md #12):
+                                             # the sales hook is 8 free days ON TOP of the paid
+                                             # plan via organizations.comp_until — NOT a
+                                             # plan_code='free', which would have to be
+                                             # downgraded later. 0 disables the trial for a
+                                             # customer who is already paying.
 
 
 # ── Temp password generator ───────────────────────────────────────────────────
@@ -377,6 +383,27 @@ async def convert_prospect_to_restaurant(
             detail=f"Org #{org['id']} creada, pero falló creación de sede Principal.",
         )
 
+    # 2b. Start the free trial. The decision has existed since 2026-09-12 and
+    #     nothing implemented it: db_set_comp_until was in the repo with no
+    #     caller and no route, so every converted customer started billable on
+    #     day one and the "8 días gratis" the landing page offers was not a
+    #     thing the product could actually do.
+    trial_until = None
+    if body.trial_days and body.trial_days > 0:
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: PLC0415
+        from app.repositories import plan_limits_repo  # noqa: PLC0415
+        from app.services.tenant_context import bypass_tenant_scope as _bypass_scope  # noqa: PLC0415
+
+        trial_until = _dt.now(tz=_tz.utc) + _td(days=body.trial_days)
+        try:
+            with _bypass_scope("crm_convert_start_trial"):
+                await plan_limits_repo.db_set_comp_until(org["id"], trial_until)
+        except Exception:
+            # Non-fatal: the org exists and can operate; the founder can set
+            # the trial from the org screen. Never lose the conversion over it.
+            log.exception("crm.convert.trial_failed", prospect_id=pid, org_id=org["id"])
+            trial_until = None
+
     # 3. Create the first admin/owner user
     # Username = prospect email if available, else sanitized org name, else "owner"
     prospect_email = (prospect.get("email") or "").strip().lower()
@@ -525,6 +552,9 @@ async def convert_prospect_to_restaurant(
             "temp_password": temp_password,   # shown once to founder; NOT logged
         } if user_created else None,
         "welcome_message_sent": welcome_sent,
+        # None when the founder passed trial_days=0 or the write failed — the
+        # caller must be able to tell "no trial" from "trial started".
+        "comp_until":           trial_until.isoformat() if trial_until else None,
     }
 
 

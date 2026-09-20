@@ -70,7 +70,7 @@ _PRE_EN_ROUTE_STATUSES = (STATUS_IN_PREPARATION, STATUS_READY)
 _ORDER_FIELDS = """
     id, org_id, location_id, phone, bot_number, order_type, status,
     address, notes, items, subtotal, delivery_fee, total, paid,
-    payment_method, proof_url, channel,
+    paid_at, paid_by_staff_id, payment_method, proof_url, channel,
     public_code, customer_name, customer_phone, customer_email,
     delivery_lat, delivery_lon, tip_amount, cash_change_for,
     accepted_at, accepted_by_staff_id, estimated_minutes, eta_communicated,
@@ -769,6 +769,62 @@ async def db_mark_delivered(
         )
     if row:
         log.info("delivery.order_delivered", org_id=org_id, order_id=order_id)
+    return dict(row) if row else None
+
+
+async def db_mark_order_paid(
+    org_id: int,
+    order_id: str,
+    *,
+    location_id: Optional[int] = None,
+    payment_method: str,
+    staff_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Record that a web delivery/pickup order was paid, and by whom.
+
+    This is the ONLY way a web-channel order reaches paid = TRUE. Before it
+    existed, `paid` was written exclusively by orders_repo.db_confirm_payment
+    from the Wompi webhook — which is switched off — so cash at the door, the
+    rider's card reader and an uploaded transfer receipt all left the order
+    unpaid forever, and out of the owner's sales totals (stats_repo sums
+    `orders.total WHERE paid = TRUE`).
+
+    Idempotent and non-reversible by design, enforced in the WHERE, not by a
+    read-then-write the two tablets could interleave:
+      - `paid = FALSE` — a second submit returns None instead of overwriting
+        who collected the money or when.
+      - status NOT IN (cancelado, rechazado) — an order nobody will serve
+        must not be bookable as revenue.
+
+    Returns the updated row, or None when no row qualified. The caller maps
+    None to 409; it must NOT treat it as success, because "already paid" and
+    "cancelled" are both reachable and the cashier needs to know which.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            f"""
+            UPDATE orders
+               SET paid = TRUE,
+                   paid_at = NOW(),
+                   paid_by_staff_id = $4::uuid,
+                   payment_method = $5
+             WHERE id = $1 AND org_id = $2
+               AND ($3::bigint IS NULL OR location_id = $3)
+               AND paid = FALSE
+               AND NOT (status = ANY($6::text[]))
+            RETURNING {_ORDER_FIELDS}
+            """,
+            order_id, org_id, location_id, staff_id, payment_method,
+            [STATUS_CANCELLED, STATUS_REJECTED],
+        )
+    if row:
+        log.info(
+            "delivery.order_paid",
+            org_id=org_id, order_id=order_id,
+            payment_method=payment_method, by_staff=bool(staff_id),
+        )
     return dict(row) if row else None
 
 

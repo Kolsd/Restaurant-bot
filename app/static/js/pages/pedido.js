@@ -197,7 +197,12 @@
     card.appendChild(totals);
 
     if (data.payment_method) {
-      card.appendChild(textEl('p', 'pedido-status-sub', 'Pago: ' + data.payment_method));
+      // A customer who paid by transfer uploads a receipt and then waits. Say
+      // whether the restaurant took it as received, not just which method
+      // they picked — "Pago: nequi" alone told them nothing.
+      var payLine = 'Pago: ' + data.payment_method
+        + (data.paid ? ' · confirmado' : ' · pendiente de confirmar');
+      card.appendChild(textEl('p', 'pedido-status-sub', payLine));
     }
     if (data.order_type === 'domicilio' && data.address) {
       card.appendChild(textEl('p', 'pedido-status-sub', 'Dirección: ' + data.address));

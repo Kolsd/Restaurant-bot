@@ -696,6 +696,11 @@ def _public_order_view(order: dict, org: dict, location: dict, currency: str, np
         "tip_amount": _money_or_none(order.get("tip_amount")),
         "total": _money_or_none(order.get("total")),
         "payment_method": order.get("payment_method"),
+        # A customer who paid by transfer uploaded a receipt and then had no
+        # way to know the restaurant accepted it — the page showed only WHICH
+        # method was chosen, never whether the money was taken as received.
+        # Not PII and not an internal id: it is the state of their own order.
+        "paid": bool(order.get("paid")),
         # Address only for delivery orders (chunk-6 instructions) — a pickup
         # order's "address" column is always empty anyway, but this keeps
         # the contract explicit rather than incidental.

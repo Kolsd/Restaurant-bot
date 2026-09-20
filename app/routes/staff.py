@@ -1,9 +1,15 @@
 """
 Phase 6 — Staff, Shifts & Tips endpoints.
 
-All routes are protected by:
-  1. require_auth  (via get_current_restaurant)
-  2. require_module('staff_tips')  — restaurant must have features.staff_tips = true
+All routes are protected by require_auth (via get_current_restaurant).
+
+Most routes ALSO require the 'staff_tips' module (features.staff_tips = true).
+The roster itself — list/create/update/delete staff and list their sedes —
+deliberately does NOT: a restaurant cannot operate at all without creating
+a mesero, a cajero or a domiciliario, and gating that behind a paid module
+left every newly onboarded customer unable to staff their own restaurant.
+The module now covers what it is actually sold as: shifts, tips, payroll,
+schedules, deductions, contracts and attendance.
 
 Layer rules:
   - HTTP parsing / validation only here.
@@ -39,9 +45,10 @@ _pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 _VALID_ROLES = {"mesero", "cocina", "bar", "caja", "gerente", "domiciliario", "otro"}
 
-# All endpoints share these two dependencies:
+# Shifts/tips/payroll endpoints share these two dependencies:
 #   • get_current_restaurant — resolves + returns the restaurant dict
 #   • require_module         — raises 403 if staff_tips is not enabled
+# The roster CRUD above uses get_current_restaurant alone (see module docstring).
 
 _MODULE_DEPS = [Depends(require_module("staff_tips"))]
 
@@ -118,7 +125,7 @@ class TipCutRequest(BaseModel):
 
 # ── Staff roster ─────────────────────────────────────────────────────────────
 
-@router.get("", dependencies=_MODULE_DEPS)
+@router.get("")
 async def list_staff(
     request: Request,
     restaurant: dict = Depends(get_current_restaurant_scoped),
@@ -169,7 +176,7 @@ async def _resolve_new_staff_location(org_id: int, requested: int | None) -> int
     return None
 
 
-@router.post("", dependencies=_MODULE_DEPS, status_code=201)
+@router.post("", status_code=201)
 async def create_staff(
     request: Request,
     body: StaffCreate,
@@ -207,7 +214,7 @@ async def create_staff(
     return {"staff": member}
 
 
-@router.get("/locations", dependencies=_MODULE_DEPS)
+@router.get("/locations")
 async def list_staff_locations(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
@@ -375,7 +382,7 @@ async def staff_verify_pin(request: Request, body: StaffVerifyPinRequest):
     }
 
 
-@router.put("/{staff_id}", dependencies=_MODULE_DEPS)
+@router.put("/{staff_id}")
 async def update_staff(
     staff_id: str,
     body: StaffUpdate,
@@ -410,7 +417,7 @@ async def update_staff(
     return {"staff": updated}
 
 
-@router.delete("/{staff_id}", dependencies=_MODULE_DEPS, status_code=200)
+@router.delete("/{staff_id}", status_code=200)
 async def delete_staff(
     staff_id: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),

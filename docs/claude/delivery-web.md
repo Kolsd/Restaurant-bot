@@ -184,17 +184,32 @@ pendiente_aceptacion → cancelado (customer, only before acceptance)
   dedicated `delivery.js` "Domicilios" section from chunks 5-8) — removed;
   `courier.js` still had a legacy fallback branch and hash-polling call —
   removed, `fetchOrders()` already only reads `/api/staff/delivery/orders/mine`.
-  **Known gap found while doing this:** the new sede-scoped API
-  (`app/routes/staff_delivery.py`) has no equivalent to the old manual
-  "validate Nequi/transfer proof → paid=true" action — a web order's `paid`
-  flag is never flipped to true by anything in the current build. Needs its
-  own chunk before non-cash web orders can be marked paid.
+  **Gap found while doing this, CLOSED 2026-09-20:** the sede-scoped API had
+  no equivalent to the old manual "validate Nequi/transfer proof → paid=true"
+  action. It was worse than the transfer case: `orders.paid` was written by
+  `orders_repo.db_confirm_payment` alone, whose only caller is the switched-off
+  Wompi webhook, so cash at the door and the rider's card reader never marked
+  an order paid either — and `stats_repo` sums `orders.total WHERE paid=TRUE`,
+  so no delivery sale appeared in the owner's totals at all.
+  Now: `POST /api/staff/delivery/orders/{id}/mark-paid` with
+  `{payment_method}` (one of `app/services/delivery.ALLOWED_PAYMENT_METHODS`),
+  backed by `delivery_repo.db_mark_order_paid`. Same authorization as the
+  en-route/delivered transitions — the sede's cashier or an admin for any
+  order, plus the order's OWN assigned courier. The conditional UPDATE
+  (`paid = FALSE AND status NOT IN (cancelado, rechazado)`) makes it
+  idempotent, so a second submit gets a 409 instead of overwriting who
+  collected the money; migration 0089 adds `orders.paid_by_staff_id`.
+  UI: a method select + "Registrar pago" on the cashier's Domicilios card,
+  and "💵 Cobré efectivo" / "💳 Cobré con tarjeta" on the courier screen —
+  a transfer is confirmed against the bank by the cashier, never from a
+  phone at someone's door. `/pedido/{code}` now says
+  "Pago: nequi · confirmado / pendiente de confirmar".
 - Defensive fix while auditing "never message a `web:` identity over
   WhatsApp": `orders_repo.db_get_orders_needing_eta_communication` (feeds
   `scheduler.py`'s WhatsApp ETA push, still alive for phone-based orders) now
-  excludes `phone LIKE 'web:%'` rows. Not reachable today (see the gap above:
-  no web order ever reaches `paid=TRUE`), but it would otherwise silently try
-  to WhatsApp a synthetic web identity the moment that gap is closed.
+  excludes `phone LIKE 'web:%'` rows. Now that the gap above is closed and web
+  orders DO reach `paid=TRUE`, this exclusion is what actually stops the ETA
+  scheduler from handing a synthetic `web:<uuid>` identity to Meta's send API.
 
 ### What remains for the full WhatsApp shutdown (CLAUDE.md item 6)
 Only delivery/pickup was retired in chunk 9. Still live and untouched:
@@ -224,12 +239,19 @@ Only delivery/pickup was retired in chunk 9. Still live and untouched:
 - ~~Multi-sede orgs have no UI to assign a sede to staff~~ — done in chunk 8
   (team invite/edit sede selector, "Sin sede" badge); ~~kitchen feed not
   sede-scoped~~ — done in chunk 8.
-- **Open PM decision:** the whole `/api/staff` router (create/list staff, the
-  `/team` screen) is gated by the superadmin module `staff_tips` ("Staff &
-  Propinas", off by default, never enabled by signup/CRM/billing). Without it
-  an owner cannot create a cashier or a rider, so delivery cannot run.
-- **Open PM decision:** the per-sede delivery config endpoint admits owner and
-  admin but not `gerente`.
+- ~~`/api/staff` gated by `staff_tips`~~ — **PM decision 2026-09-20: the
+  roster ships on every plan.** `staff_tips` ("Staff & Propinas") now covers
+  only what it is sold as — shifts, tips, payroll, schedules, deductions,
+  contracts, attendance. List/create/update/delete staff and `/api/staff/locations`
+  carry `require_auth` alone, because a restaurant cannot operate without
+  creating a mesero, a cajero or a domiciliario and orgs are created with
+  `features = {}`.
+- ~~per-sede delivery config is owner/admin only~~ — **PM decision 2026-09-20:
+  `gerente` added, scoped to their OWN sede** (owner/admin keep every sede in
+  the org; a gerente with no `location_id` is refused, never defaulted).
+  `app/routes/location_delivery.py` now reuses
+  `staff_sections.ADMIN_ROLES` instead of its own narrower set — `owner` and
+  `admin` are the same authorization level product-wide.
 - Do NOT touch the Meta/Twilio webhooks or the salon WhatsApp flow yet: those are
   removed in the next step, only AFTER `tests/e2e` is migrated to the web
   channel. Never delete before the equivalent harness exists.

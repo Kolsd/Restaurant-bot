@@ -773,3 +773,181 @@ def test_kitchen_cannot_mark_ready_before_the_cashier_accepts(client):
         assert _run(_fetch_order(order_id))["status"] == "pendiente_aceptacion"
     finally:
         _run(_teardown_org(org_id))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Registering payment on a web order (POST .../mark-paid)
+#
+# Before this endpoint existed, `orders.paid` was written in exactly ONE
+# place — orders_repo.db_confirm_payment, called only by the Wompi webhook,
+# which is switched off. So no web delivery/pickup order could ever be paid:
+# not cash at the door, not the rider's card reader, not a transfer whose
+# receipt the cashier had already checked. stats_repo sums
+# `orders.total WHERE paid = TRUE`, so every delivery sale was also missing
+# from the owner's reports.
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_cashier_registers_payment_and_the_row_records_who_and_how(client):
+    org_id = _run(_seed_org("Pago Caja Org"))
+    try:
+        location_id = _run(_seed_location(org_id, "Sede Pago"))
+        cashier_id = _run(_seed_staff(org_id, location_id, role="caja"))
+        token = _run(_create_staff_token(cashier_id))
+        order_id = _run(_seed_order(
+            org_id=org_id, location_id=location_id,
+            status="en_preparacion", payment_method="nequi",
+        ))
+
+        before = _run(_fetch_order(order_id))
+        assert before["paid"] is False, "seed must start unpaid"
+
+        resp = _post(
+            client, f"/api/staff/delivery/orders/{order_id}/mark-paid",
+            json={"payment_method": "nequi"}, headers=_auth(token),
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["paid"] is True
+        assert body["payment_method"] == "nequi"
+        assert body["paid_by_staff_id"] == cashier_id
+        assert _recent_utc(body["paid_at"])
+
+        # Verified in the DB, not only in the response.
+        row = _run(_fetch_order(order_id))
+        assert row["paid"] is True
+        assert str(row["paid_by_staff_id"]) == cashier_id
+        assert row["payment_method"] == "nequi"
+        assert row["paid_at"] is not None
+    finally:
+        _run(_teardown_org(org_id))
+
+
+def test_registering_payment_twice_is_refused_not_silently_overwritten(client):
+    """The second submit must 409. Two tablets can hit this at once, and the
+    loser must not overwrite who collected the money or when."""
+    org_id = _run(_seed_org("Pago Doble Org"))
+    try:
+        location_id = _run(_seed_location(org_id, "Sede Pago"))
+        cashier_id = _run(_seed_staff(org_id, location_id, role="caja"))
+        token = _run(_create_staff_token(cashier_id))
+        order_id = _run(_seed_order(
+            org_id=org_id, location_id=location_id, status="en_preparacion",
+        ))
+
+        first = _post(
+            client, f"/api/staff/delivery/orders/{order_id}/mark-paid",
+            json={"payment_method": "efectivo"}, headers=_auth(token),
+        )
+        assert first.status_code == 200, first.text
+        first_paid_at = _run(_fetch_order(order_id))["paid_at"]
+
+        second = _post(
+            client, f"/api/staff/delivery/orders/{order_id}/mark-paid",
+            json={"payment_method": "tarjeta"}, headers=_auth(token),
+        )
+        assert second.status_code == 409, second.text
+
+        row = _run(_fetch_order(order_id))
+        assert row["payment_method"] == "efectivo", "the second call must not win"
+        assert row["paid_at"] == first_paid_at
+    finally:
+        _run(_teardown_org(org_id))
+
+
+def test_cancelled_order_cannot_be_registered_as_paid(client):
+    """An order nobody will serve is not revenue."""
+    org_id = _run(_seed_org("Pago Cancelado Org"))
+    try:
+        location_id = _run(_seed_location(org_id, "Sede Pago"))
+        cashier_id = _run(_seed_staff(org_id, location_id, role="caja"))
+        token = _run(_create_staff_token(cashier_id))
+        for status in ("cancelado", "rechazado"):
+            order_id = _run(_seed_order(
+                org_id=org_id, location_id=location_id, status=status,
+            ))
+            resp = _post(
+                client, f"/api/staff/delivery/orders/{order_id}/mark-paid",
+                json={"payment_method": "efectivo"}, headers=_auth(token),
+            )
+            assert resp.status_code == 409, f"{status}: {resp.text}"
+            assert _run(_fetch_order(order_id))["paid"] is False
+    finally:
+        _run(_teardown_org(org_id))
+
+
+def test_unknown_payment_method_is_refused(client):
+    org_id = _run(_seed_org("Pago Metodo Org"))
+    try:
+        location_id = _run(_seed_location(org_id, "Sede Pago"))
+        cashier_id = _run(_seed_staff(org_id, location_id, role="caja"))
+        token = _run(_create_staff_token(cashier_id))
+        order_id = _run(_seed_order(
+            org_id=org_id, location_id=location_id, status="en_preparacion",
+        ))
+
+        resp = _post(
+            client, f"/api/staff/delivery/orders/{order_id}/mark-paid",
+            json={"payment_method": "bitcoin"}, headers=_auth(token),
+        )
+        assert resp.status_code == 400, resp.text
+        assert _run(_fetch_order(order_id))["paid"] is False
+    finally:
+        _run(_teardown_org(org_id))
+
+
+def test_assigned_courier_may_register_payment_but_another_courier_may_not(client):
+    """The rider at the door is who holds the cash — but only for THEIR own
+    order (app/routes/staff_delivery.py::_require_can_transition)."""
+    org_id = _run(_seed_org("Pago Domiciliario Org"))
+    try:
+        location_id = _run(_seed_location(org_id, "Sede Pago"))
+        mine_id = _run(_seed_staff(org_id, location_id, role="domiciliario"))
+        other_id = _run(_seed_staff(org_id, location_id, role="domiciliario"))
+        # A fresh pool between the two token creations: each _run() spins up
+        # its own event loop, and sessions_repo's shared asyncpg pool cannot
+        # be reused across them ("another operation is in progress").
+        mine_token = _run(_create_staff_token(mine_id))
+        _reset_pool()
+        other_token = _run(_create_staff_token(other_id))
+        _reset_pool()
+        order_id = _run(_seed_order(
+            org_id=org_id, location_id=location_id,
+            status="en_camino", courier_staff_id=mine_id,
+        ))
+
+        refused = _post(
+            client, f"/api/staff/delivery/orders/{order_id}/mark-paid",
+            json={"payment_method": "efectivo"}, headers=_auth(other_token),
+        )
+        assert refused.status_code == 403, refused.text
+        assert _run(_fetch_order(order_id))["paid"] is False
+
+        ok = _post(
+            client, f"/api/staff/delivery/orders/{order_id}/mark-paid",
+            json={"payment_method": "efectivo"}, headers=_auth(mine_token),
+        )
+        assert ok.status_code == 200, ok.text
+        assert _run(_fetch_order(order_id))["paid"] is True
+    finally:
+        _run(_teardown_org(org_id))
+
+
+def test_cashier_cannot_register_payment_on_another_sede_order(client):
+    org_id = _run(_seed_org("Pago Sede Org"))
+    try:
+        mine = _run(_seed_location(org_id, "Sede Mia"))
+        other = _run(_seed_location(org_id, "Sede Ajena"))
+        cashier_id = _run(_seed_staff(org_id, mine, role="caja"))
+        token = _run(_create_staff_token(cashier_id))
+        order_id = _run(_seed_order(
+            org_id=org_id, location_id=other, status="en_preparacion",
+        ))
+
+        resp = _post(
+            client, f"/api/staff/delivery/orders/{order_id}/mark-paid",
+            json={"payment_method": "efectivo"}, headers=_auth(token),
+        )
+        assert resp.status_code == 404, resp.text
+        assert _run(_fetch_order(order_id))["paid"] is False
+    finally:
+        _run(_teardown_org(org_id))

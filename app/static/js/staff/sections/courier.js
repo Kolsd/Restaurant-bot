@@ -361,11 +361,53 @@
       const total = inRoute.total || items.reduce((s,i)=>s+(i.price||0)*(i.quantity||i.qty||1),0);
       const paid = inRoute.paid ? '(pagado)' : '(cobrar)';
       const method = inRoute.payment_method || '';
+      // The rider is the one holding the money on a cash or card-at-the-door
+      // order, so they are who registers it — not the cashier back at the
+      // restaurant. Only these two methods: a Nequi/Bancolombia transfer is
+      // confirmed against the bank by whoever can see the account, which is
+      // the cashier's Domicilios queue, not a phone at someone's door.
+      const payButtons = inRoute.paid ? '' : `
+      <div class="dom-pay-row">
+        <button class="cta-btn outline dom-pay-btn" data-method="efectivo" data-id="${_esc(String(inRoute.id))}">💵 Cobré efectivo</button>
+        <button class="cta-btn outline dom-pay-btn" data-method="tarjeta" data-id="${_esc(String(inRoute.id))}">💳 Cobré con tarjeta</button>
+      </div>`;
       totalEl.innerHTML = `<div class="total-row">
         <div>Total ${_esc(paid)} ${_esc(method)}</div>
         <div class="total-val">${mesioFmt(total)}</div>
-      </div>`;
+      </div>${payButtons}`;
+
+      // Listener per button (not a single querySelector like the cta-row
+      // above, which only ever renders ONE action button): both must work.
+      totalEl.querySelectorAll('.dom-pay-btn').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          await registerPayment(el.dataset.id, el.dataset.method);
+        });
+      });
     }
+  }
+
+  // Records the money as received on a web delivery/pickup order. The server
+  // (app/routes/staff_delivery.py::mark_order_paid) re-checks that this rider
+  // is the order's assigned courier and refuses a second registration with a
+  // 409 — never trust the button being hidden.
+  async function registerPayment(orderId, method) {
+    try {
+      const res = await fetch('/api/staff/delivery/orders/' + orderId + '/mark-paid', {
+        method: 'POST',
+        headers: mesioHeaders(),
+        body: JSON.stringify({ payment_method: method }),
+      });
+      if (res.ok) { mesioToast('Pago registrado', 'success'); await fetchOrders(); return; }
+      let detail = 'No se pudo registrar el pago';
+      try {
+        const data = await res.json();
+        if (data && typeof data.detail === 'string') detail = data.detail;
+      } catch (_) { /* non-JSON error body */ }
+      mesioToast(detail, 'error');
+      await fetchOrders();
+    } catch (_) { mesioToast('Error de conexión', 'error'); }
   }
 
   // ── Render customer section ───────────────────────────

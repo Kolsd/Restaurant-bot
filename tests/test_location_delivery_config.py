@@ -71,11 +71,15 @@ def _post(client, url, **kwargs):
 _AUTH_HEADERS = {"Authorization": "Bearer test-token"}
 
 
-def _auth_as(monkeypatch, org_id: int, role: str = "owner", username: str = "loc_cfg_owner"):
+def _auth_as(monkeypatch, org_id: int, role: str = "owner", username: str = "loc_cfg_owner",
+             location_id: int | None = None):
     """Make get_current_user resolve to a real org_id with the given role,
     without a `staff` row — mirrors tests/test_waiter_alerts_location.py's
-    _auth_as_location, but for a plain admin-dashboard `users` row (no
-    location_id — owner/admin manage every sede from this surface)."""
+    _auth_as_location, but for a plain admin-dashboard `users` row.
+
+    location_id defaults to None: owner/admin manage every sede from this
+    surface and are not bound to one. A `gerente` IS bound to theirs, so
+    those tests pass it explicitly."""
     from app.services import database as db
 
     async def _verify_token(token):
@@ -86,7 +90,7 @@ def _auth_as(monkeypatch, org_id: int, role: str = "owner", username: str = "loc
             return None
         return {
             "username": username, "branch_id": None,
-            "org_id": org_id, "location_id": None,
+            "org_id": org_id, "location_id": location_id,
             "role": role, "restaurant_name": "",
         }
 
@@ -417,6 +421,52 @@ def test_refuses_non_admin_caller(client, org_with_location, monkeypatch, role):
 
     resp2 = _get(client, f"/api/locations/{location_id}/delivery-config", headers=_AUTH_HEADERS)
     assert resp2.status_code == 403, resp2.text
+
+
+def test_gerente_may_configure_their_own_sede(client, org_with_location, monkeypatch):
+    """PM decision 2026-09-20: whoever runs the sede decides whether it takes
+    domicilios today, so a gerente reads AND writes their own sede's config."""
+    org_id = org_with_location["org_id"]
+    location_id = org_with_location["location_id"]
+    _auth_as(monkeypatch, org_id, role="gerente", username="gerente_own",
+             location_id=location_id)
+
+    resp = _put(client, f"/api/locations/{location_id}/delivery-config",
+                headers=_AUTH_HEADERS, json=_valid_payload(delivery_fee=7000))
+    assert resp.status_code == 200, resp.text
+
+    read = _get(client, f"/api/locations/{location_id}/delivery-config", headers=_AUTH_HEADERS)
+    assert read.status_code == 200, read.text
+    assert float(read.json()["effective"]["delivery_fee"]) == 7000.0
+
+
+def test_gerente_may_not_configure_another_sede(client, org_with_location, monkeypatch):
+    """Same org, different sede — a gerente is scoped to exactly one."""
+    org_id = org_with_location["org_id"]
+    other_id = _run(_seed_location(org_id, name="Sede Norte"))
+    mine = org_with_location["location_id"]
+    _auth_as(monkeypatch, org_id, role="gerente", username="gerente_other",
+             location_id=mine)
+
+    resp = _get(client, f"/api/locations/{other_id}/delivery-config", headers=_AUTH_HEADERS)
+    assert resp.status_code == 403, resp.text
+
+    resp2 = _put(client, f"/api/locations/{other_id}/delivery-config",
+                 headers=_AUTH_HEADERS, json=_valid_payload())
+    assert resp2.status_code == 403, resp2.text
+
+
+def test_gerente_without_a_sede_is_refused(client, org_with_location, monkeypatch):
+    """Never default to "some" sede — guessing between ids is the ambiguity
+    rls-multitenant.md forbids."""
+    org_id = org_with_location["org_id"]
+    location_id = org_with_location["location_id"]
+    _auth_as(monkeypatch, org_id, role="gerente", username="gerente_nosede",
+             location_id=None)
+
+    resp = _get(client, f"/api/locations/{location_id}/delivery-config", headers=_AUTH_HEADERS)
+    assert resp.status_code == 403, resp.text
+    assert "sede" in resp.json()["detail"].lower()
 
 
 def test_admin_role_is_allowed_not_only_owner(client, org_with_location, monkeypatch):

@@ -13,15 +13,22 @@ legacy org-level `organizations.features` defaults
 0083) had the same gap: writable through `db_update_location`, but with
 nowhere in the UI to type it.
 
-Owner/admin only — this is a business-config surface, not an operational
-staff screen (unlike app/routes/staff_delivery.py's Domicilios queue, which
-is cashier/courier/admin). A `gerente` is deliberately NOT included: the
-existing `/api/team/branches` owner-only gate (app/routes/team_routes.py)
-already treats branch-level config as an owner action; this chunk's
-instructions specifically say "owner/admin-only", so the gate here is
-{owner, admin} — narrower than app/services/staff_sections.ADMIN_ROLES
-(which also grants gerente every operational STAFF-APP section — a
-different, unrelated authorization surface).
+Admin roles only (app/services/staff_sections.ADMIN_ROLES = owner, admin,
+gerente) — this is a business-config surface, not an operational staff
+screen (unlike app/routes/staff_delivery.py's Domicilios queue, which is
+cashier/courier/admin).
+
+`owner` and `admin` are the SAME authorization level everywhere in the
+product (PM decision 2026-09-20), so this file no longer keeps its own
+narrower {owner, admin} set — it reuses ADMIN_ROLES, the one constant that
+already defines "admin" for the staff app.
+
+`gerente` was added by the same decision, but scoped: whoever runs the sede
+is who decides whether it takes domicilios today, so a gerente may read and
+write the config of THEIR OWN sede and no other. Owners and admins keep
+access to every sede in the org. A gerente with no location_id on their
+account is refused rather than defaulted to some sede — guessing which one
+is exactly the org/location ambiguity rls-multitenant.md forbids.
 """
 from __future__ import annotations
 
@@ -35,6 +42,7 @@ from app.routes.deps import get_current_user
 from app.services import database as db
 from app.services import delivery as delivery_svc
 from app.services.logging import get_logger
+from app.services.staff_sections import ADMIN_ROLES
 from app.services.money import to_decimal
 from app.services.tenant_context import tenant_scope
 
@@ -66,10 +74,43 @@ class LocationDeliveryConfigPatch(BaseModel):
     phone: str = Field("", max_length=30)
 
 
-def _require_owner_or_admin(user: dict) -> None:
-    roles = {r.strip().lower() for r in (user.get("role") or "").split(",") if r.strip()}
-    if not (roles & {"owner", "admin"}):
-        raise HTTPException(status_code=403, detail="Acceso restringido a dueños o administradores")
+def _user_roles(user: dict) -> set[str]:
+    return {r.strip().lower() for r in (user.get("role") or "").split(",") if r.strip()}
+
+
+def _require_admin_role(user: dict) -> set[str]:
+    """Reject anyone who is not owner/admin/gerente. Returns the role set so
+    the caller can apply the gerente sede restriction without re-parsing."""
+    roles = _user_roles(user)
+    if not (roles & ADMIN_ROLES):
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso restringido a dueños, administradores o gerentes",
+        )
+    return roles
+
+
+def _require_config_access(user: dict, location_id: int) -> None:
+    """Authorize reading/writing ONE sede's delivery config.
+
+    owner/admin  → any sede in their org.
+    gerente only → their own sede, and only if their account has one.
+    """
+    roles = _require_admin_role(user)
+    if roles & {"owner", "admin"}:
+        return
+
+    own = user.get("location_id")
+    if own is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Tu usuario de gerente no tiene una sede asignada",
+        )
+    if int(own) != int(location_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo puedes configurar los domicilios de tu propia sede",
+        )
 
 
 def _resolve_org_id(user: dict) -> int:
@@ -169,7 +210,7 @@ def _validate_patch(body: LocationDeliveryConfigPatch) -> dict:
 @router.get("/{location_id}/delivery-config")
 async def get_location_delivery_config(location_id: int, request: Request):
     user = await get_current_user(request)
-    _require_owner_or_admin(user)
+    _require_config_access(user, location_id)
     org_id = _resolve_org_id(user)
 
     location = await _owned_location_or_404(org_id, location_id)
@@ -181,7 +222,7 @@ async def set_location_delivery_config(
     location_id: int, body: LocationDeliveryConfigPatch, request: Request,
 ):
     user = await get_current_user(request)
-    _require_owner_or_admin(user)
+    _require_config_access(user, location_id)
     org_id = _resolve_org_id(user)
 
     location = await _owned_location_or_404(org_id, location_id)
