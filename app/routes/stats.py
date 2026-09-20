@@ -9,6 +9,8 @@ from app.routes.deps import (
     get_current_restaurant,
     get_current_user,
     get_current_restaurant_scoped,
+    may_span_locations,
+    resolve_sede_filter,
 )
 from app.repositories import reviews_repo as rr, conversations_repo
 from app.repositories import stats_repo
@@ -57,22 +59,19 @@ async def _get_effective_bot_number(restaurant: dict) -> str:
     return restaurant.get("whatsapp_number", "")
 
 def _resolve_branch_id(request: Request, user: dict, restaurant: dict) -> int | str | None:
-    """Resolve the effective branch_id for stats filtering.
+    """Resolve the effective sede for stats filtering.
 
-    Wave-2: the legacy `parent_restaurant_id` column was dropped in migration 0038.
-    Non-admin users are now scoped to their own branch_id (their staff/user row).
-    Admins honour the X-Branch-ID header as before.
+    "all" and "matriz" are admin-only sentinels the sidebar sends; everything
+    else is a location_id, or None for "no sede filter".
+
+    Fixed 2026-09-20 (PM: an employee of one sede must not see another): the
+    non-admin branch returned `user["branch_id"]`, which for a staff row is
+    the ORG id, not a sede — the exact org/location confusion
+    rls-multitenant.md forbids. Depending on the query it matched nothing or
+    matched the whole org. Non-admins now get their real `location_id` from
+    resolve_sede_filter, and are refused when they have none.
     """
-    branch_header = request.headers.get("X-Branch-ID")
-    is_admin = any(r in user.get("role", "") for r in ["owner", "admin"])
-
-    if is_admin:
-        if branch_header == "all": return "all"
-        elif branch_header == "matriz": return None
-        elif branch_header and branch_header.isdigit(): return int(branch_header)
-        return None
-
-    return user.get("branch_id")
+    return resolve_sede_filter(request, user, allow_all_sentinel=True)
 
 @router.get("/api/dashboard/sync")
 async def dashboard_sync(request: Request, period: str = Query("today")):
@@ -232,11 +231,9 @@ async def get_conversations(request: Request):
     # Wave-2 normalization in db_get_restaurant_by_id), but conversations
     # carry branch_id == location_id post-migration 0057 — filtering
     # branch_id = org_id matched zero rows. Same bug family as floor_plan.
-    branch_header = request.headers.get("X-Branch-ID")
-    branch_id: int | None = None
-    if branch_header and branch_header.isdigit():
-        if any(r in user.get("role", "") for r in ["owner", "admin"]):
-            branch_id = int(branch_header)
+    # Non-admins used to fall through to branch_id = None here, i.e. every
+    # conversation of the org regardless of which sede they work at.
+    branch_id = resolve_sede_filter(request, user)
 
     with tenant_scope(restaurant["id"]):
         conversations = await db.db_get_all_conversations(bot_number=bot_number, branch_id=branch_id)
@@ -652,11 +649,14 @@ async def get_inventory_critical(
     """
     restaurant = await get_current_restaurant(request)
     org_id = restaurant["id"]
+    user = await get_current_user(request)
+    sede = resolve_sede_filter(request, user)
 
     with tenant_scope(org_id):
         return await stats_repo.db_inventory_critical(
             org_id=org_id,
             ok_limit=ok_limit,
+            location_id=sede if isinstance(sede, int) else None,
         )
 
 
@@ -804,19 +804,28 @@ async def get_tips_pool(
     """
     restaurant = await get_current_restaurant(request)
     org_id = restaurant["id"]
-    location_id = restaurant.get("location_id") or restaurant["id"]
-    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    # `restaurant` is already the caller's own sede for anyone who cannot
+    # span locations (app/routes/deps.py), so no org_id fallback here — an
+    # org id in a location_id slot is the ambiguity rls-multitenant.md bans.
+    location_id = restaurant.get("location_id")
+    caller = await get_current_user(request)
+    if may_span_locations(caller):
+        bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    else:
+        # ?branch_id= used to be honoured for anyone: a waiter could read
+        # another sede's tip pool by changing one number in the URL.
+        bid = resolve_sede_filter(request, caller)
+        location_id = location_id or bid
 
-    # Detect if caller is a staff member (JWT claim "staff:<uuid>")
+    # Detect if caller is a staff member (JWT claim "staff:<uuid>").
+    # `caller` is already resolved above — the function-local
+    # `from app.routes.deps import get_current_user` that used to sit here
+    # shadowed the module-level name for the WHOLE function body, so the
+    # sede resolution above raised UnboundLocalError.
     caller_staff_id: str | None = None
-    try:
-        from app.routes.deps import get_current_user  # noqa: PLC0415
-        caller = await get_current_user(request)
-        username = caller.get("username") or caller.get("sub") or ""
-        if username.startswith("staff:"):
-            caller_staff_id = username[len("staff:"):]
-    except Exception:
-        pass  # admin callers without staff token — my_pool stays None
+    username = caller.get("username") or caller.get("sub") or ""
+    if username.startswith("staff:"):
+        caller_staff_id = username[len("staff:"):]
 
     with tenant_scope(org_id):
         result = await stats_repo.db_tips_pool(

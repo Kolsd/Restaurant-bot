@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.services.auth import hash_password
 from app.services import database as db
 from app.repositories import restaurant_repo
-from app.routes.deps import get_current_user
+from app.routes.deps import get_current_user, may_span_locations, resolve_sede_filter
 from app.services.tenant_context import tenant_scope
 from app.services.logging import get_logger
 
@@ -209,9 +209,16 @@ async def list_team_users(request: Request, branch_id: int = None):
         raise HTTPException(status_code=403, detail="Tu usuario no tiene una organización asignada")
     my_org_id = int(my_org_id)
 
-    branch_header = request.headers.get("X-Branch-ID")
-    if not branch_id and branch_header and branch_header.isdigit():
-        branch_id = int(branch_header)
+    # Sede scoping (PM 2026-09-20). Only owner/admin may list another sede's
+    # team or the org-wide roster; anyone else sees their own sede. Until now
+    # ANY authenticated account — a waiter, a cook — could list every employee
+    # of every sede just by omitting the filter.
+    if may_span_locations(user):
+        branch_header = request.headers.get("X-Branch-ID")
+        if not branch_id and branch_header and branch_header.isdigit():
+            branch_id = int(branch_header)
+    else:
+        branch_id = resolve_sede_filter(request, user)
 
     if branch_id:
         branch_row = await db.db_get_restaurant_by_location_id(branch_id)

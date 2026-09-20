@@ -14,7 +14,10 @@ from app.services import billing
 from app.services import realtime
 from app.services import state_store
 from app.services.agent import trigger_nps
-from app.routes.deps import require_auth, get_current_user, get_current_restaurant, get_current_restaurant_scoped
+from app.routes.deps import (
+    require_auth, get_current_user, get_current_restaurant,
+    get_current_restaurant_scoped, may_span_locations, resolve_sede_filter,
+)
 from app.services.tenant_context import tenant_scope, bypass_tenant_scope
 from app.services.tenant_db import tenant_connection
 from app.services import loyalty as loyalty_svc
@@ -286,8 +289,11 @@ async def get_floor_plan(request: Request, restaurant=Depends(get_current_restau
     nothing for any owner whose branch dropdown was on Casa Matriz —
     floor plan went empty for everyone.
     """
-    branch_id_str = request.headers.get("x-branch-id")
-    branch_id = int(branch_id_str) if branch_id_str and branch_id_str.isdigit() else None
+    # The header alone used to decide this, with no role check: a waiter of
+    # sede A could name sede B, and one who named nothing got the floor plan
+    # of every sede in the org.
+    user = await get_current_user(request)
+    branch_id = resolve_sede_filter(request, user)
     return await db.db_get_floor_plan(branch_id=branch_id)
 
 
@@ -536,24 +542,22 @@ async def get_waiter_alerts(request: Request):
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant.get("whatsapp_number", "")
 
-    # X-Branch-ID carries a location_id (CLAUDE.md "Contexto Multi-Sucursal" —
-    # NEVER mix it with restaurant["id"], which is the org_id). Only apply a
-    # location filter when the header is present and actually belongs to this
-    # caller's org — otherwise keep today's behaviour (all sedes sharing this
-    # bot_number). This closes the bug where a multi-location restaurant
-    # sharing one WhatsApp number leaked location-2 alerts onto location-1's
-    # waiter screen.
-    location_id = None
-    branch_header = request.headers.get("X-Branch-ID", "").strip()
-    if branch_header and branch_header.isdigit():
-        target_location_id = int(branch_header)
+    # A waiter sees THEIR OWN sede's alerts and nobody else's — the filter is
+    # their staff row, not a header they control (memory: mesero-location-gap).
+    # Owner/admin keep the org-wide view this screen has always had, and may
+    # narrow it to one sede from the sidebar. The header value is verified to
+    # belong to this org before it is used; resolve_sede_filter only decides
+    # WHO may name a sede, not that the sede is theirs.
+    user = await get_current_user(request)
+    location_id = resolve_sede_filter(request, user)
+    if location_id is not None and may_span_locations(user):
         try:
             with tenant_scope(restaurant["id"]):
-                loc = await db.db_get_location_by_id(target_location_id)
+                loc = await db.db_get_location_by_id(location_id)
         except Exception:
             loc = None
-        if loc and loc.get("org_id") == restaurant.get("id"):
-            location_id = target_location_id
+        if not loc or loc.get("org_id") != restaurant.get("id"):
+            location_id = None
 
     try:
         with tenant_scope(restaurant["id"]):
@@ -838,21 +842,24 @@ async def update_delivery_order_status(request: Request, order_id: str):
 
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None, station: str = None, table_id: str = None):
-    """Returns table orders filtered by branch and status.
+    """Returns table orders filtered by sede and status.
 
-    Resolution rules (post-2026-04-29 — fixes empty 'Pedidos activos' /
-    Comanda Sin productos / proof loop bug family):
-      - Caller is owner/admin: org_id = restaurant['id'] (org_id post-
-        Wave-2). location_id (= legacy branch_id column) only when the
-        user explicitly picked a sede via X-Branch-ID = digit.
-      - Caller is staff (mesero/caja/cocina): org_id from get_current_restaurant
-        too; location_id = user.branch_id when staff is pinned to a sede.
-      - X-Branch-ID = 'all' / 'matriz' / missing: cross-sede view of the org
-        (org_id filter only).
+    Resolution rules:
+      - owner/admin: every sede of the org, or ONE when they pick it from the
+        sidebar (X-Branch-ID / X-Location-ID = digit).
+      - everyone else (mesero, caja, cocina, bar, gerente): their OWN sede,
+        from their staff row. Never a header.
+
+    That second rule is the fix (PM 2026-09-20). The docstring already
+    claimed "location_id = user.branch_id when staff is pinned to a sede",
+    but the code never read it: `location_id` was set ONLY from the header
+    and ONLY for admins, so every non-admin fell through to `None` and the
+    kitchen of one sede got the comandas of every sede in the org.
     """
     user = await get_current_user(request)
-    role = user.get("role", "")
-    is_admin = any(r in role for r in ("owner", "admin", "gerente"))
+    # Substring matching on the joined role string used to decide this
+    # ("admin" also matches inside other words); roles_of() splits properly.
+    is_admin = may_span_locations(user)
 
     # Resolve org_id (canonical tenant key post-Wave-2). For owner/admin/gerente
     # we rely on the restaurant lookup; for staff (mesero/caja/...) the
@@ -863,13 +870,15 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
     except HTTPException:
         org_id = user.get("restaurant_id") or user.get("branch_id")
 
-    # Specific sede: only when X-Branch-ID is a digit and caller is admin/owner.
-    # The digit value is the location_id (sede) coming from the sidebar dropdown
-    # populated by /api/team/branches.
-    location_id: int | None = None
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and is_admin:
-        location_id = int(branch_header)
+    # Without an org_id the repo's `is_admin + no filters` branch returns
+    # EVERY tenant's table orders (it runs under bypass_tenant_scope below).
+    # Refuse instead of leaking across tenants.
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No se pudo resolver tu organización")
+
+    # Specific sede: the sidebar dropdown's location_id for an admin, the
+    # caller's own staff row for everyone else.
+    location_id = resolve_sede_filter(request, user)
 
     with bypass_tenant_scope("get_table_orders: may span branches or be admin view"):
         rows = await tr.db_get_table_orders_for_branch(
@@ -2001,14 +2010,11 @@ async def list_checkout_proposals(request: Request):
     For the 'Por Confirmar' tab in cashier.html.
     """
     restaurant = await get_current_restaurant(request)
-    branch_header = request.headers.get("X-Branch-ID", "")
-
-    branch_ids = None
-    if branch_header and branch_header != "all":
-        try:
-            branch_ids = [int(branch_header)]
-        except ValueError:
-            pass
+    # Cashier-facing: a cajero sees the proposals of their own sede. Only
+    # owner/admin may look at another one, or at all of them at once.
+    user = await get_current_user(request)
+    location_id = resolve_sede_filter(request, user)
+    branch_ids = [location_id] if location_id is not None else None
 
     with tenant_scope(restaurant["id"]):
         proposals = await db.db_list_checkout_proposals(restaurant["id"], branch_ids)

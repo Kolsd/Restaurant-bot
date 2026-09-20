@@ -123,6 +123,96 @@ async def get_current_user(request: Request) -> dict:
 
     raise HTTPException(status_code=401, detail="User not found")
 
+# ── Sede (location) scoping ──────────────────────────────────────────────────
+#
+# PM decision 2026-09-20: an employee of one sede must never see another
+# sede's data. Two role tiers decide what a caller may ask for:
+#
+#   owner / admin  — manage the whole business: may span every sede of their
+#                    org, and may pick ONE with a header.
+#   everyone else  — including `gerente`, who runs a single sede: pinned to
+#                    their own `location_id`, whatever any header says.
+#
+# `staff_sections.ADMIN_ROLES` is the product-wide "admin" set and includes
+# gerente (it grants every STAFF-APP section), so it is deliberately NOT the
+# set used here — spanning sedes is a narrower privilege than seeing every
+# section of your own.
+
+SEDE_SPANNING_ROLES: frozenset[str] = frozenset({"owner", "admin"})
+
+
+def roles_of(user: dict) -> set[str]:
+    """The caller's normalized role set. `role` is a comma-joined string on
+    both the `users` row and the staff dict built in get_current_user."""
+    from app.services.staff_sections import normalize_role  # noqa: PLC0415
+
+    return {
+        normalize_role(r)
+        for r in (user.get("role") or "").split(",")
+        if r.strip()
+    }
+
+
+def may_span_locations(user: dict) -> bool:
+    """True when the caller may see/choose any sede of their org."""
+    return bool(roles_of(user) & SEDE_SPANNING_ROLES)
+
+
+def resolve_sede_filter(
+    request: Request,
+    user: dict,
+    *,
+    admin_without_header: str = "all",
+    allow_all_sentinel: bool = False,
+) -> int | str | None:
+    """The location_id a staff-facing listing must filter by, or None for
+    "every sede of the org".
+
+    This is the ONE place that decides it. Before it existed, a dozen routes
+    each re-read `X-Branch-ID` (or `X-Location-ID`) with their own rules, and
+    most of them applied NO role check at all: a cook could name another sede
+    in a header, and a cook who named none saw every sede in the org.
+
+    owner/admin: the header wins when it names a sede; with no header they get
+    `admin_without_header` — "all" (None) for screens that have always been
+    usable org-wide, or "own" for screens where a cross-sede view is
+    meaningless and their own sede is the honest default.
+
+    Everyone else: their own `location_id`, always. Raises 403 when they have
+    none, because the alternative is showing them the whole org.
+
+    Both header names are accepted — `X-Location-ID` is the Wave-1 name the
+    newer surfaces use, `X-Branch-ID` the older one `mesioHeaders()` still
+    sends — so callers do not have to care which one the frontend attached.
+
+    `allow_all_sentinel` is for the stats/NPS/loyalty family, whose repos
+    distinguish "every sede of the org rolled up" (the string "all") from
+    "no sede filter" (None). Only an admin can ever get the sentinel.
+    """
+    if may_span_locations(user):
+        if allow_all_sentinel:
+            raw_all = (request.headers.get("X-Branch-ID") or "").strip()
+            if raw_all == "all":
+                return "all"
+            if raw_all == "matriz":
+                return None
+        for name in ("X-Location-ID", "X-Branch-ID"):
+            raw = (request.headers.get(name) or "").strip()
+            if raw.isdigit():
+                return int(raw)
+        if admin_without_header == "own":
+            own = user.get("location_id")
+            return int(own) if own else None
+        return None
+
+    own = user.get("location_id")
+    if not own:
+        raise HTTPException(
+            status_code=403, detail="Tu usuario no tiene una sede asignada",
+        )
+    return int(own)
+
+
 async def get_current_restaurant(request: Request) -> dict:
     """Returns the restaurant for the authenticated user or raises 403.
 
@@ -139,6 +229,19 @@ async def get_current_restaurant(request: Request) -> dict:
     directly on the staff dict in get_current_user above). A user whose
     org_id could not be resolved (genuine legacy ambiguity) is DENIED —
     never guessed via name-match or branch_id fallback.
+
+    Sede scoping (PM 2026-09-20: "los empleados de una sede no deben ver otra
+    sede"): `X-Branch-ID` is honoured ONLY for owner/admin, who legitimately
+    manage every sede of the org. It used to be honoured for ANY authenticated
+    caller — a mesero, a cocinero or a cajero of sede A could put sede B's id
+    in a header and this function would hand back sede B's restaurant row,
+    which every downstream route then uses as its tenant + sede context. A
+    `gerente` runs ONE sede (see staff_sections.ADMIN_ROLES and
+    app/routes/location_delivery.py), so they are pinned to their own like any
+    other employee. A mismatching header from such a caller is ignored rather
+    than refused: the sede lives in the browser's localStorage and can go
+    stale, and 403-ing every call of a waiter whose tablet remembers the wrong
+    sede would take the floor down. It is logged so it stays visible.
     """
     user = await get_current_user(request)
 
@@ -161,12 +264,24 @@ async def get_current_restaurant(request: Request) -> dict:
     if default_rest is None:
         raise HTTPException(status_code=403, detail="Restaurant not found")
 
-    # 🛡️ MAGIA MULTI-SUCURSAL: Si el owner envía la cabecera, suplanta la sede.
-    # X-Branch-ID SIEMPRE carga un location_id. The selected sede must belong
-    # to the SAME org as the authenticated user — verified via org_id.
+    # 🛡️ MAGIA MULTI-SUCURSAL: only an owner/admin may switch sede from the
+    # sidebar. X-Branch-ID ALWAYS carries a location_id, and the selected sede
+    # must belong to the SAME org as the authenticated user — verified via
+    # org_id. See the docstring for why a non-admin's header is dropped
+    # instead of refused.
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit():
         target_id = int(branch_header)
+        if not may_span_locations(user):
+            if location_id and int(location_id) != target_id:
+                _log.warning(
+                    "auth.sede_override_ignored",
+                    username=user.get("username"),
+                    own_location_id=int(location_id),
+                    requested_location_id=target_id,
+                )
+            return default_rest
+
         target_rest = await db.db_get_restaurant_by_location_id(target_id)
         if (
             target_rest

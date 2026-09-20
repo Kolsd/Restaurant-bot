@@ -141,12 +141,46 @@ with bypass_tenant_scope("webhook_enqueue_cross_tenant"):
 - ~~6 pending X-Branch-ID conflation sites in `staff.py`~~ — **CLOSED in Step 10**. All 6 sites were migrated to the fix template: consistent org_id for org-level queries, location_id propagated to `db_calculate_payroll`'s optional `branch_id` param for per-location tip scoping.
 - Phase 2 (integrity/concurrency) and Phase 3 (AI decoupling + middleware) — ✅ shipped 2026-04-17. The original plan was removed from the repo once the last item closed.
 
-## Multi-Branch Context
+## Sede (location) scoping — MANDATORY for every staff-facing listing
 
-- The `X-Branch-ID` header dictates which data to read. If it's `"all"`, return Matriz + branches.
-- `get_current_restaurant` in `deps.py` resolves the restaurant from the admin JWT token.
-- For operational staff: `restaurant_id` comes from the staff member's own DB record.
+PM decision 2026-09-20: **an employee of one sede must never see another
+sede's data.** Two tiers, and exactly one place decides which you are in:
+
+| Role | May see |
+|---|---|
+| `owner`, `admin` (`deps.SEDE_SPANNING_ROLES`) | every sede of their org, or ONE picked with `X-Branch-ID` / `X-Location-ID` |
+| everything else, **including `gerente`** | their own `staff.location_id` / `users.location_id`, whatever the header says |
+
+Use `app/routes/deps.py::resolve_sede_filter(request, user)`. It returns the
+`location_id` to filter by, `None` for "every sede" (admins only), or raises
+403 when a non-admin has no sede — never fall back to org-wide.
+`may_span_locations(user)` is the role test on its own. `allow_all_sentinel=True`
+adds the `"all"` / `"matriz"` strings the stats/NPS/loyalty repos expect.
+
+Do NOT write a new header read. Before this existed, a dozen routes each
+re-read `X-Branch-ID` with their own rules and most applied no role check at
+all, so a waiter could name another sede — or name none and be served the
+whole org, which is what the staff app did by default. `X-Branch-ID` is
+honoured inside `get_current_restaurant` for admins only, so anything that
+derives its sede from the returned restaurant row is already scoped.
+
+`gerente` is an admin role in `staff_sections.ADMIN_ROLES` (which sections
+of the staff app they see) but NOT in `SEDE_SPANNING_ROLES` (which sedes
+they may read). The two sets are deliberately different — don't merge them.
+
+Covered so far: `/api/table-orders`, `/api/waiter-alerts`,
+`/api/tables/floor-plan`, `/api/checkout-proposals`, `/api/staff` (roster),
+`/api/team/users`, `/api/dashboard/*`, `/api/stats/*`, `/api/nps/*`,
+`/api/loyalty/*`, `/api/reservations/*`, `/api/pos/*` (via
+`get_current_restaurant`), plus delivery, which already had it.
+**Still org-only: `app/routes/inventory.py`** — the table has `location_id`
+but per-sede stock needs a product decision on the WRITE side (which sede
+owns a new item), so it was left rather than half-done. Marketing,
+discounts and reviews are untouched too.
+
+### Legacy notes
 - `db_calculate_tips_by_attendance` and `db_calculate_payroll` respect `branch_id` via `ANY($n::int[])`.
+- For operational staff: `restaurant_id` comes from the staff member's own DB record.
 
 ## Branch Hierarchy
 

@@ -13,10 +13,26 @@ import app.services.agent as agent_module
 
 @pytest.fixture
 def mock_auth(monkeypatch):
+    """An owner of org 1, with no sede picked — the org-wide view.
+
+    `org_id` is not decoration: /api/table-orders refuses a caller whose org
+    cannot be resolved, because the repo's "admin with no filter at all"
+    branch runs under bypass_tenant_scope and would return EVERY tenant's
+    table orders. This fixture used to leave org_id unset and the endpoint
+    answered 200 with exactly that cross-tenant result.
+    """
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(
         "app.routes.deps.db.db_get_user",
-        AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": None, "role": "owner"}),
+        AsyncMock(return_value={
+            "username": "admin", "restaurant_name": "Test",
+            "branch_id": None, "org_id": 1, "location_id": None, "role": "owner",
+        }),
+    )
+    monkeypatch.setattr(
+        "app.routes.deps.db.db_get_restaurant_by_org_id",
+        AsyncMock(return_value={"id": 1, "org_id": 1, "location_id": None,
+                                "name": "Test", "whatsapp_number": "573000000000"}),
     )
 
 

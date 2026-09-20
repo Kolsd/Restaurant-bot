@@ -29,7 +29,10 @@ from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 from app.services.money import to_decimal
 
-from app.routes.deps import get_current_restaurant, get_current_restaurant_scoped, require_module
+from app.routes.deps import (
+    get_current_restaurant, get_current_restaurant_scoped, require_module,
+    get_current_user, resolve_sede_filter,
+)
 from app.services import database as db
 from app.services import state_store
 from app.repositories import sessions_repo, staff_repo
@@ -129,19 +132,22 @@ class TipCutRequest(BaseModel):
 async def list_staff(
     request: Request,
     restaurant: dict = Depends(get_current_restaurant_scoped),
+    user: dict = Depends(get_current_user),
 ):
-    """Returns the staff of the authenticated user's organization.
+    """Returns the staff the caller may see.
 
-    Wave-2: db_get_staff filters by org_id. Staff is organization-level —
-    all branches of an org share the same team in the admin dashboard. The
-    X-Branch-ID header doesn't apply here: passing it as branch_id pre-Step-10
-    turned it into location_id and the query returned zero rows in
-    multi-branch setups (a bug masked by the Matriz invariant). If the
-    product eventually wants "view staff by branch", add a dedicated repo
-    method that filters staff.location_id instead of overriding org_id.
+    owner/admin: the whole organization, or one sede when they pick it from
+    the sidebar. Everyone else: their own sede (PM 2026-09-20) — a gerente
+    or a cajero of one sede has no business reading another sede's roster,
+    with its phone numbers and document numbers.
+
+    The old note here said the header "doesn't apply" because passing it as
+    a branch_id used to be read as an org_id and returned zero rows. The id
+    kinds are separate now (`staff.location_id`), so it does apply.
     """
     org_id = restaurant["id"]
-    staff = await db.db_get_staff(org_id)
+    sede = resolve_sede_filter(request, user)
+    staff = await db.db_get_staff(org_id, location_id=sede if isinstance(sede, int) else None)
 
     # multi_sede tells the Team admin UI whether "Sin sede" is even a
     # meaningful thing to flag — a single-sede org auto-assigns every staff

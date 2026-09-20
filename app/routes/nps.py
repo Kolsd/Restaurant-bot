@@ -3,7 +3,9 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from app.services import database as db
 from app.repositories import conversations_repo
-from app.routes.deps import require_auth, get_current_restaurant, get_current_user
+from app.routes.deps import (
+    require_auth, get_current_restaurant, get_current_user, resolve_sede_filter,
+)
 from app.services.tenant_context import tenant_scope
 
 _NPS_INTERNAL_KEY = os.getenv("NPS_INTERNAL_KEY", "")
@@ -17,19 +19,13 @@ class NPSResponse(BaseModel):
     comment: str = ""
 
 def _resolve_branch_id(request: Request, user: dict, restaurant: dict):
-    """Wave-2: parent_restaurant_id dropped in 0038.  Non-admin users are
-    scoped to their own branch_id.  The previous fallback evaluated to None
-    for all orgs (parent_restaurant_id is always None post-0038), inadvertently
-    giving non-admins org-wide NPS visibility."""
-    branch_header = request.headers.get("X-Branch-ID")
-    is_admin = any(r in user.get("role", "") for r in ["owner", "admin"])
+    """Which sede's NPS the caller may read.
 
-    if is_admin:
-        if branch_header == "all": return "all"
-        elif branch_header == "matriz": return None
-        elif branch_header and branch_header.isdigit(): return int(branch_header)
-        return None
-    return user.get("branch_id")
+    Fixed 2026-09-20: the non-admin branch returned `user["branch_id"]`,
+    which on a staff row is the ORG id rather than a sede — so it either
+    matched nothing or handed a waiter the whole org's ratings. The shared
+    resolver in app/routes/deps.py returns their real `location_id`."""
+    return resolve_sede_filter(request, user, allow_all_sentinel=True)
     
 @router.post("/api/nps/response")
 async def save_nps_response(request: Request, body: NPSResponse):

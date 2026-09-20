@@ -11,7 +11,10 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from anthropic import Anthropic
 
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_user, get_current_restaurant
+from app.routes.deps import (
+    require_auth, get_current_user, get_current_restaurant,
+    may_span_locations, resolve_sede_filter,
+)
 from app.repositories import restaurant_repo, tables_repo as tr
 from app.repositories import weekly_reports_repo
 from app.repositories.staff_repo import db_has_staff
@@ -683,7 +686,10 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
     # verified to belong to the caller's own org before use — it previously
     # had no ownership check at all, so any owner/admin could pass another
     # tenant's location id and read that tenant's dashboard data.
-    if role in ("owner", "admin"):
+    # `role` is a comma-joined string, so `role in ("owner", "admin")` only
+    # matched an account with exactly ONE role — an "owner,admin" user fell
+    # into the staff branch. may_span_locations() splits it properly.
+    if may_span_locations(user):
         if branch_header == "all":
             branch_id = "all"
         elif branch_header and branch_header.isdigit():
@@ -697,10 +703,12 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
             # filter (resolved below) provides tenant scoping.
             branch_id = "all"
     else:
-        # gerente / staff: use "all" so that bot_number does the tenant scoping.
-        # user["org_id"] is the tenant key for staff users — passing it as a
-        # location_id filter would return 0 rows post-Wave-2.
-        branch_id = "all"
+        # gerente / staff: their OWN sede. This used to be "all" — every
+        # employee of a multi-sede org read the whole business's dashboard
+        # numbers, which is exactly what PM 2026-09-20 closed. The old
+        # comment blamed `user["org_id"]` being the wrong id kind; the fix is
+        # to use `location_id`, the id kind that actually means "sede".
+        branch_id = resolve_sede_filter(request, user)
 
     bot_number = None
     if branch_id and branch_id != "all":

@@ -7,7 +7,9 @@ REST endpoints for the Loyalty module.
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from app.services import database as db
-from app.routes.deps import get_current_restaurant, require_module, get_current_user
+from app.routes.deps import (
+    get_current_restaurant, require_module, get_current_user, resolve_sede_filter,
+)
 
 router = APIRouter(prefix="/api/loyalty", tags=["loyalty"])
 
@@ -15,19 +17,13 @@ _MODULE = "loyalty"
 _module_dep = Depends(require_module(_MODULE))
 
 def _resolve_branch_id(request: Request, user: dict, restaurant: dict) -> int | str | None:
-    branch_header = request.headers.get("X-Branch-ID")
-    is_admin = any(r in user.get("role", "") for r in ["owner", "admin"])
+    """Which sede's loyalty data the caller may read.
 
-    if is_admin:
-        if branch_header == "all": return "all"
-        elif branch_header == "matriz": return None
-        elif branch_header and branch_header.isdigit(): return int(branch_header)
-        return None
-
-    # Non-admin (gerente): user.branch_id is a location_id (set when the branch
-    # user account was created). parent_restaurant_id is always None post-Wave-2
-    # (0038 dropped it from the VIEW) — the fallback was dead code; removed.
-    return user.get("branch_id")
+    Fixed 2026-09-20: the non-admin branch returned `user["branch_id"]` with
+    a comment claiming it was a location_id. It is not — get_current_user
+    maps `branch_id` to the ORG id for every staff login, so a gerente was
+    filtering loyalty rows by an org id in a location column."""
+    return resolve_sede_filter(request, user, allow_all_sentinel=True)
     
 class RedeemBody(BaseModel):
     phone:    str = Field(..., min_length=7, max_length=15)

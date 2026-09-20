@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v13.0 (head `0089_orders_paid_by_staff`; 1999 passed / 6 skipped with DB, run as `postgres`)
+# Mesio Restaurant Bot — v13.0 (head `0089_orders_paid_by_staff`; 2008 passed / 6 skipped with DB, run as `postgres`)
 
 Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_use). Product: the diner's own web channel (QR → `/chat/{table_id}`); WhatsApp is being retired.
 
@@ -53,6 +53,7 @@ Local Windows environment: `.venv` Py 3.12, Postgres 16 (`postgres`/`mesio_local
 - **SQL** only in `app/repositories/`, `$n` parameters, never f-string with values.
 - **RLS**: `async with tenant_connection()` + `tenant_scope(org_id)`; cross-tenant only via `bypass_tenant_scope("reason≥8")`. Never `get_pool()` directly in new repos, never catch `TenantNotSetError`. New tenant table → RLS ENABLE+FORCE in the migration.
 - **Org vs location**: `org_id` and `location_id` are distinct integers; never guess or fall back between them. `db_get_restaurant_by_location_id` / `_by_org_id` per intent. Tenant tests seed ids that collide on purpose.
+- **Sede scoping**: every staff-facing listing filters by sede via `deps.resolve_sede_filter`. Only `owner`/`admin` may span sedes or pick one with `X-Branch-ID`; everyone else — `gerente` included — is pinned to their own `location_id`, and no sede means 403, never org-wide. Never add a new header read. Detail: `rls-multitenant.md`.
 - **Money**: `Decimal` + `services/money.py`; `float` only at the JSON edge (`# JSON boundary`). Never Decimal in `state_store`.
 - **4 workers**: mutable state via `state_store` (Redis). Inbox worker claim-then-ack, never a long transaction.
 - **Logging**: `get_logger(__name__)`, typed catch, no `except Exception: pass`, no `print`, `mask_phone()` in logs.

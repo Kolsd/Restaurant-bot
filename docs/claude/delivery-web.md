@@ -231,11 +231,11 @@ Only delivery/pickup was retired in chunk 9. Still live and untouched:
   decided unilaterally.
 
 ### Known open items found during verification (not yet fixed)
-- The kitchen KDS delivery feed (`tables_repo.db_get_delivery_orders_for_cashier`,
-  `/api/kitchen/delivery-orders`) is scoped by org only, not by sede: in a
-  multi-sede org every kitchen sees every sede's delivery tickets. Same gap
-  class as the waiter alerts (memory: mesero-location-gap). Staff JWTs carry
-  `location_id` since chunk 4, so the data to filter by now exists.
+- ~~The kitchen KDS delivery feed is scoped by org only~~ — closed in chunk 8
+  (`_kitchen_delivery_location_filter`), and the same rule was swept across
+  every other staff-facing listing on 2026-09-20. The canonical resolver is
+  `app/routes/deps.py::resolve_sede_filter`; see the "Sede scoping" section
+  of `docs/claude/rls-multitenant.md` before adding any new listing.
 - ~~Multi-sede orgs have no UI to assign a sede to staff~~ — done in chunk 8
   (team invite/edit sede selector, "Sin sede" badge); ~~kitchen feed not
   sede-scoped~~ — done in chunk 8.

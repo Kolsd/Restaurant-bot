@@ -8,7 +8,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 from typing import Optional
 
-from app.routes.deps import require_auth, get_current_restaurant_scoped, require_module
+from app.routes.deps import (
+    require_auth, get_current_restaurant_scoped, require_module,
+    get_current_user, may_span_locations, resolve_sede_filter,
+)
 from app.services import database as db
 from app.services.logging import get_logger
 from app.repositories import reservations_repo
@@ -71,6 +74,22 @@ router = APIRouter(
 )
 
 # ── CREATE RESERVATION ───────────────────────────────────────────────────────
+
+
+async def _sede_param(request: Request) -> str | int | None:
+    """The sede filter for this caller, as the reservation repos expect it.
+
+    Kept string-compatible because these three endpoints pass the value
+    straight through to repo helpers that already accept `branch_id` as a
+    str or int. An admin's explicit `?branch_id=` still wins; a non-admin's
+    is ignored in favour of their own sede.
+    """
+    user = await get_current_user(request)
+    if may_span_locations(user):
+        explicit = request.query_params.get("branch_id")
+        if explicit:
+            return explicit
+    return resolve_sede_filter(request, user, allow_all_sentinel=True)
 
 
 @router.post("", status_code=201)
@@ -140,7 +159,10 @@ async def check_availability(
     date = request.query_params.get("date")
     time = request.query_params.get("time")
     guests_raw = request.query_params.get("guests")
-    branch_id = request.query_params.get("branch_id") or request.headers.get("X-Branch-ID")
+    # Sede: an admin may name one (query param or header); everyone else gets
+    # their own, never the whole org. Before this, any staff account could
+    # read — or book into — another sede's reservations just by asking.
+    branch_id = await _sede_param(request)
 
     if not date or not time or not guests_raw:
         raise HTTPException(
@@ -178,7 +200,10 @@ async def reservation_stats(
     """Return aggregated reservation statistics for a given period."""
     period_start = request.query_params.get("period_start")
     period_end = request.query_params.get("period_end")
-    branch_id = request.query_params.get("branch_id") or request.headers.get("X-Branch-ID")
+    # Sede: an admin may name one (query param or header); everyone else gets
+    # their own, never the whole org. Before this, any staff account could
+    # read — or book into — another sede's reservations just by asking.
+    branch_id = await _sede_param(request)
 
     if not period_start or not period_end:
         raise HTTPException(
@@ -218,7 +243,10 @@ async def list_reservations(
     date_from = request.query_params.get("date_from")
     date_to = request.query_params.get("date_to")
     status = request.query_params.get("status")
-    branch_id = request.query_params.get("branch_id") or request.headers.get("X-Branch-ID")
+    # Sede: an admin may name one (query param or header); everyone else gets
+    # their own, never the whole org. Before this, any staff account could
+    # read — or book into — another sede's reservations just by asking.
+    branch_id = await _sede_param(request)
 
     bot_number = restaurant.get("whatsapp_number") or restaurant.get("bot_number")
 

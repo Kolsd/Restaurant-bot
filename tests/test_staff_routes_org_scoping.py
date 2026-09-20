@@ -97,15 +97,25 @@ def override_scoped_dep(matriz_dict, monkeypatch):
 
 # ── GET /api/staff (list_staff) ──────────────────────────────────────────────
 
-def test_list_staff_passes_org_id_to_repo_ignoring_branch_header(client):
-    """X-Branch-ID is intentionally ignored — staff is org-level."""
+def test_list_staff_passes_org_id_and_the_picked_sede(client):
+    """X-Branch-ID narrows an owner's roster to that sede — it must never
+    replace the ORG id (that confusion is what rls-multitenant.md bans)."""
     db_get_staff_mock = AsyncMock(return_value=[])
     with patch("app.routes.staff.db.db_get_staff", db_get_staff_mock):
         resp = client.get("/api/staff", headers={"X-Branch-ID": str(LOCATION),
                                                   "Authorization": "Bearer test"})
 
     assert resp.status_code == 200, resp.text
-    db_get_staff_mock.assert_awaited_once_with(ORG_OWN)
+    db_get_staff_mock.assert_awaited_once_with(ORG_OWN, location_id=LOCATION)
+
+
+def test_list_staff_without_a_header_is_org_wide_for_an_owner(client):
+    db_get_staff_mock = AsyncMock(return_value=[])
+    with patch("app.routes.staff.db.db_get_staff", db_get_staff_mock):
+        resp = client.get("/api/staff", headers={"Authorization": "Bearer test"})
+
+    assert resp.status_code == 200, resp.text
+    db_get_staff_mock.assert_awaited_once_with(ORG_OWN, location_id=None)
 
 
 # ── POST /api/staff (create_staff) ───────────────────────────────────────────

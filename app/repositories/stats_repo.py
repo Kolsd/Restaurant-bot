@@ -362,6 +362,7 @@ async def db_top_dishes(
 async def db_inventory_critical(
     org_id: int,
     ok_limit: int = 3,
+    location_id: int | None = None,
 ) -> dict:
     """
     Returns low-stock ingredients sorted by severity, plus a few OK items.
@@ -373,6 +374,14 @@ async def db_inventory_critical(
 
     Each alert includes `affects_dishes`: list of dish names that use this
     ingredient via dish_recipes.
+
+    `location_id` restricts the stock to ONE sede — a kitchen must see what
+    is in its own fridge, not what another sede has (PM 2026-09-20). Rows
+    with a NULL location_id are included either way: they predate per-sede
+    inventory and belong to the org as a whole, so dropping them would make
+    a single-sede restaurant's stock page go empty. None = every sede, which
+    only an owner/admin ever gets. `dish_recipes` stays org-level — it has no
+    location_id column; a recipe is the same dish everywhere.
     """
     async with _tenant_connection() as conn:
         inv_rows = await conn.fetch(
@@ -380,8 +389,9 @@ async def db_inventory_critical(
                       i.current_stock, i.min_stock
                FROM inventory i
                WHERE i.org_id = $1
+                 AND ($2::bigint IS NULL OR i.location_id = $2 OR i.location_id IS NULL)
                ORDER BY i.name""",
-            org_id,
+            org_id, location_id,
         )
 
         # ── reverse ingredient→dish mapping ────────────────────────────────
