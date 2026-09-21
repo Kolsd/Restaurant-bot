@@ -208,13 +208,14 @@ async def _fetch_inventory(item_id: int) -> dict:
         await conn.close()
 
 
-async def _seed_menu_availability(org_id: int, dish_name: str, available: bool) -> None:
+async def _seed_menu_availability(org_id: int, dish_name: str, available: bool,
+                                  location_id: int | None = None) -> None:
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         await conn.execute(
-            """INSERT INTO menu_availability (dish_name, org_id, available)
-               VALUES ($1, $2, $3)""",
-            dish_name, org_id, available,
+            """INSERT INTO menu_availability (dish_name, org_id, location_id, available)
+               VALUES ($1, $2, $3, $4)""",
+            dish_name, org_id, location_id, available,
         )
     finally:
         await conn.close()
@@ -329,7 +330,9 @@ def test_checkout_refused_when_dish_marked_sold_out(client):
     info = _run(_seed_checkout_org())
     try:
         token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"]))
-        _run(_seed_menu_availability(info["org_id"], "Bandeja Paisa", False))
+        # Sold out at THIS sede (per-sede since migration 0091).
+        _run(_seed_menu_availability(info["org_id"], "Bandeja Paisa", False,
+                                     location_id=info["location_id"]))
         _run(_seed_cart(token, info["bot_number"], info["org_id"], [
             {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 40000.0, "line_id": "a1"},
         ]))

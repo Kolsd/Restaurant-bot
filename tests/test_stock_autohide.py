@@ -64,11 +64,13 @@ async def test_sync_ingredient_no_op_when_stock_ok():
     conn = AsyncMock()
     recheck_calls = []
 
-    async def fake_recheck(c, ing_id, restaurant_id):
+    async def fake_recheck(c, ing_id, restaurant_id, location_id=None):
         recheck_calls.append((ing_id, restaurant_id))
 
     with patch.object(inv, "_recheck_dishes_for_ingredient_conn", fake_recheck):
-        await inv._sync_ingredient_dishes_conn(conn, ingredient_id=5, new_stock=3.0, min_stock=1.0, restaurant_id=1)
+        await inv._sync_ingredient_dishes_conn(
+            conn, ingredient_id=5, new_stock=3.0, min_stock=1.0, restaurant_id=1,
+            location_id=77)
 
     assert recheck_calls == [(5, 1)]
     conn.fetch.assert_not_called()
@@ -91,12 +93,13 @@ async def test_sync_ingredient_marks_dishes_unavailable_on_depletion():
 
     sync_calls = []
 
-    async def fake_sync_conn(c, dish_names, available, restaurant_id):
+    async def fake_sync_conn(c, dish_names, available, restaurant_id, location_id=None):
         sync_calls.append((sorted(dish_names), available, restaurant_id))
 
     with patch.object(inv, "_sync_dish_availability_conn", fake_sync_conn):
         await inv._sync_ingredient_dishes_conn(
-            conn, ingredient_id=7, new_stock=0.0, min_stock=0.5, restaurant_id=1
+            conn, ingredient_id=7, new_stock=0.0, min_stock=0.5, restaurant_id=1,
+            location_id=77,
         )
 
     assert len(sync_calls) == 1
@@ -115,12 +118,13 @@ async def test_sync_ingredient_no_dishes_in_recipe_is_noop():
 
     sync_calls = []
 
-    async def fake_sync_conn(c, dish_names, available, restaurant_id):
+    async def fake_sync_conn(c, dish_names, available, restaurant_id, location_id=None):
         sync_calls.append(dish_names)
 
     with patch.object(inv, "_sync_dish_availability_conn", fake_sync_conn):
         await inv._sync_ingredient_dishes_conn(
-            conn, ingredient_id=99, new_stock=0.0, min_stock=1.0, restaurant_id=1
+            conn, ingredient_id=99, new_stock=0.0, min_stock=1.0, restaurant_id=1,
+            location_id=77,
         )
 
     assert sync_calls == []
@@ -143,11 +147,12 @@ async def test_recheck_marks_dish_available_when_all_ingredients_ok():
 
     sync_calls = []
 
-    async def fake_sync(c, names, avail, rid):
+    async def fake_sync(c, names, avail, rid, location_id=None):
         sync_calls.append((names, avail))
 
     with patch.object(inv, "_sync_dish_availability_conn", fake_sync):
-        await inv._recheck_dishes_for_ingredient_conn(conn, ingredient_id=5, restaurant_id=1)
+        await inv._recheck_dishes_for_ingredient_conn(
+            conn, ingredient_id=5, restaurant_id=1, location_id=77)
 
     assert len(sync_calls) == 1
     assert sync_calls[0][0] == ["Pizza"]
@@ -169,11 +174,12 @@ async def test_recheck_keeps_dish_unavailable_if_another_ingredient_depleted():
 
     sync_calls = []
 
-    async def fake_sync(c, names, avail, rid):
+    async def fake_sync(c, names, avail, rid, location_id=None):
         sync_calls.append((names, avail))
 
     with patch.object(inv, "_sync_dish_availability_conn", fake_sync):
-        await inv._recheck_dishes_for_ingredient_conn(conn, ingredient_id=3, restaurant_id=1)
+        await inv._recheck_dishes_for_ingredient_conn(
+            conn, ingredient_id=3, restaurant_id=1, location_id=77)
 
     assert sync_calls[0][1] is False  # still unavailable
 
@@ -213,7 +219,8 @@ async def test_deduct_recipe_path_triggers_ingredient_sync():
 
     sync_calls = []
 
-    async def fake_sync_ingredient(conn, ingredient_id, new_stock, min_stock, restaurant_id):
+    async def fake_sync_ingredient(conn, ingredient_id, new_stock, min_stock, restaurant_id,
+                                   location_id=None):
         sync_calls.append({"ingredient_id": ingredient_id, "new_stock": new_stock, "min_stock": min_stock})
 
     with (
@@ -252,11 +259,12 @@ async def test_multi_ingredient_any_depleted_marks_unavailable():
 
     sync_calls = []
 
-    async def fake_sync(c, names, avail, rid):
+    async def fake_sync(c, names, avail, rid, location_id=None):
         sync_calls.append(avail)
 
     with patch.object(inv, "_sync_dish_availability_conn", fake_sync):
-        await inv._recheck_dishes_for_ingredient_conn(conn, ingredient_id=1, restaurant_id=1)
+        await inv._recheck_dishes_for_ingredient_conn(
+            conn, ingredient_id=1, restaurant_id=1, location_id=77)
 
     assert sync_calls[0] is False
 
@@ -273,11 +281,12 @@ async def test_multi_ingredient_all_restocked_marks_available():
 
     sync_calls = []
 
-    async def fake_sync(c, names, avail, rid):
+    async def fake_sync(c, names, avail, rid, location_id=None):
         sync_calls.append(avail)
 
     with patch.object(inv, "_sync_dish_availability_conn", fake_sync):
-        await inv._recheck_dishes_for_ingredient_conn(conn, ingredient_id=1, restaurant_id=1)
+        await inv._recheck_dishes_for_ingredient_conn(
+            conn, ingredient_id=1, restaurant_id=1, location_id=77)
 
     assert sync_calls[0] is True
 
@@ -298,13 +307,14 @@ async def test_upsert_recipe_with_depleted_ingredient_marks_unavailable():
     mock_conn.execute = AsyncMock()
     # fetchval calls: set_config #1 (tenant), depleted count, set_config #2 (db_get_dish_recipe)
     mock_conn.fetchval = AsyncMock(side_effect=[None, 1, None])
-    # fetch for db_get_dish_recipe (called at end)
-    mock_conn.fetch = AsyncMock(return_value=[])
+    # fetch #1: the org's sedes (db_upsert_dish_recipe re-evaluates the dish
+    # per sede since 0091); fetch #2: db_get_dish_recipe at the end.
+    mock_conn.fetch = AsyncMock(side_effect=[[_row({"id": 77})], []])
     mock_conn.transaction = _tx_cm()
 
     sync_calls = []
 
-    async def fake_sync_conn(conn, dish_names, available, restaurant_id):
+    async def fake_sync_conn(conn, dish_names, available, restaurant_id, location_id=None):
         sync_calls.append((dish_names, available))
 
     import app.repositories.inventory_repo as inv
@@ -333,12 +343,13 @@ async def test_upsert_recipe_all_stock_ok_marks_available():
     mock_conn.execute = AsyncMock()
     # fetchval calls: set_config #1 (tenant), depleted count=0, set_config #2 (db_get_dish_recipe)
     mock_conn.fetchval = AsyncMock(side_effect=[None, 0, None])
-    mock_conn.fetch = AsyncMock(return_value=[])
+    # fetch #1: the org's sedes; fetch #2: db_get_dish_recipe at the end.
+    mock_conn.fetch = AsyncMock(side_effect=[[_row({"id": 77})], []])
     mock_conn.transaction = _tx_cm()
 
     sync_calls = []
 
-    async def fake_sync_conn(conn, dish_names, available, restaurant_id):
+    async def fake_sync_conn(conn, dish_names, available, restaurant_id, location_id=None):
         sync_calls.append((dish_names, available))
 
     with (
@@ -370,13 +381,15 @@ async def test_upsert_recipe_empty_lines_marks_dish_available():
 
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock()
-    mock_conn.fetch = AsyncMock(return_value=[])
+    # fetch #1: the org's sedes — "no recipe, so available" is written once
+    # per sede (0091), not once for the whole org.
+    mock_conn.fetch = AsyncMock(side_effect=[[_row({"id": 77})], []])
     mock_conn.fetchval = AsyncMock(return_value=None)
     mock_conn.transaction = _tx_cm()
 
     sync_calls = []
 
-    async def fake_sync_conn(conn, dish_names, available, restaurant_id):
+    async def fake_sync_conn(conn, dish_names, available, restaurant_id, location_id=None):
         sync_calls.append((dish_names, available))
 
     with (
@@ -432,7 +445,8 @@ async def test_deduct_inventory_in_tx_calls_ingredient_sync():
 
     sync_calls = []
 
-    async def fake_sync_ingredient(conn, ingredient_id, new_stock, min_stock, restaurant_id):
+    async def fake_sync_ingredient(conn, ingredient_id, new_stock, min_stock, restaurant_id,
+                                   location_id=None):
         sync_calls.append({"ingredient_id": ingredient_id, "new_stock": new_stock})
 
     with patch.object(inv, "_sync_ingredient_dishes_conn", fake_sync_ingredient):

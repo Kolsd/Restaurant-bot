@@ -275,20 +275,18 @@ async def test_for_update_called_on_read_in_update_item():
     """
     conn = AsyncMock()
     existing_row = MagicMock()
-    existing_row.__iter__ = lambda s: iter({
-        "id": 1, "org_id": 5, "restaurant_id": 5, "name": "Papa", "unit": "kg",
+    # location_id: stock rows belong to ONE sede since migration 0090, and
+    # db_update_inventory_item syncs the dish's availability for that sede.
+    _EXISTING = {
+        "id": 1, "org_id": 5, "restaurant_id": 5, "location_id": 9,
+        "name": "Papa", "unit": "kg",
         "current_stock": 10.0, "min_stock": 1.0,
         "linked_dishes": json.dumps(["Papas Fritas"]),
         "cost_per_unit": 500.0,
-    }.items())
-    existing_row.keys = lambda: ["id", "org_id", "restaurant_id", "name", "unit",
-                                  "current_stock", "min_stock", "linked_dishes", "cost_per_unit"]
-    existing_row.__getitem__ = lambda s, k: {
-        "id": 1, "org_id": 5, "restaurant_id": 5, "name": "Papa", "unit": "kg",
-        "current_stock": 10.0, "min_stock": 1.0,
-        "linked_dishes": json.dumps(["Papas Fritas"]),
-        "cost_per_unit": 500.0,
-    }[k]
+    }
+    existing_row.__iter__ = lambda s: iter(_EXISTING.items())
+    existing_row.keys = lambda: list(_EXISTING.keys())
+    existing_row.__getitem__ = lambda s, k: _EXISTING[k]
 
     updated_row = MagicMock()
     updated_row.__iter__ = lambda s: iter({

@@ -99,11 +99,13 @@ async def _make_org(conn) -> dict:
         "VALUES ($1, $2, $3, $4, $5, $6, TRUE)",
         table_id, 9, f"Mesa {suffix[:4]}", location_id, location_id, org_id,
     )
+    # Sold out is per sede (migration 0091) — seed it on this table's sede.
     await conn.execute(
-        "INSERT INTO menu_availability (dish_name, org_id, available, updated_at) "
-        "VALUES ($1, $2, FALSE, NOW()) "
-        "ON CONFLICT (dish_name, org_id) DO UPDATE SET available=FALSE, updated_at=NOW()",
-        UNAVAILABLE_DISH, org_id,
+        "INSERT INTO menu_availability (dish_name, org_id, location_id, available, updated_at) "
+        "VALUES ($1, $2, $3, FALSE, NOW()) "
+        "ON CONFLICT (org_id, location_id, dish_name) "
+        "DO UPDATE SET available=FALSE, updated_at=NOW()",
+        UNAVAILABLE_DISH, org_id, location_id,
     )
     return {
         "org_id": org_id,

@@ -206,10 +206,33 @@ un selector de sedes."
 - Transfers: the SOURCE must be a sede the caller may act on (so a gerente
   sends out of their own sede but cannot pull from another); the DESTINATION
   can be any sede of the org.
-- **Known gap:** `menu_availability` is keyed `(dish_name, org_id)`, so
-  "sold out" is still org-wide. A transfer deliberately does not touch it —
-  flipping it would disable a dish everywhere because one sede's stock moved.
-  Per-sede dish availability is its own wave.
+- ~~`menu_availability` is keyed `(dish_name, org_id)`~~ — closed by
+  migration 0091, see below. A transfer still deliberately does not touch
+  availability: moving stock between sedes does not change what the org has.
+
+### "Agotado" is per sede (PM 2026-09-20, migration 0091)
+
+`menu_availability`'s primary key is `(org_id, location_id, dish_name)` and
+`location_id` is NOT NULL. Before 0091 it was `(org_id, dish_name)`, so
+marking a dish sold out at one sede took it off every sede's menu — including
+automatically, whenever one sede's inventory hit its minimum.
+
+- `db_get_menu_availability(org_id, location_id)` — `location_id` is
+  REQUIRED. There is no org-wide fallback; that fallback is the bug.
+- `db_set_dish_availability(..., location_id=...)` raises without a sede.
+- `db_get_menu_availability_any_sede(org_id)` is the ONE exception: the public
+  `/r/{slug}` brand pages have no sede yet, so a dish stays listed while at
+  least one sede has it.
+- The sync helpers (`_sync_dish_availability*`, `_sync_ingredient_dishes_conn`,
+  `_recheck_dishes_for_ingredient_conn`) all take the sede and log-and-skip
+  without one, rather than re-creating an org-wide row.
+- `db_upsert_dish_recipe` is org-level but re-evaluates the dish once PER SEDE
+  (`_resync_dish_for_every_sede_conn`), each against that sede's own stock.
+
+Every caller must have a sede: diner sessions carry `location_id`, the
+WhatsApp/table lookups get it from `db_get_restaurant_by_phone` (which returns
+`location_id` alongside the org in `id`), and the owner's sold-out toggle
+(`/api/menu/availability`) refuses with 400 until a sede is picked.
 
 ### Legacy notes
 - `db_calculate_tips_by_attendance` and `db_calculate_payroll` respect `branch_id` via `ANY($n::int[])`.

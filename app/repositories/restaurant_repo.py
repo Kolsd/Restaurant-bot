@@ -741,9 +741,12 @@ async def db_get_public_menu_data(normalized_bot_number: str) -> dict | None:
         )
         if not rest:
             return None
+        # `rest` is one sede (the view's id IS locations.id), so the sold-out
+        # state that applies is that sede's — not every sede's merged.
         inv_rows = await conn.fetch(
-            "SELECT dish_name, available FROM menu_availability WHERE org_id = $1",
-            rest["org_id"],
+            "SELECT dish_name, available FROM menu_availability "
+            "WHERE org_id = $1 AND location_id = $2",
+            rest["org_id"], rest["id"],
         )
     availability = {r["dish_name"]: r["available"] for r in inv_rows}
 
@@ -1473,27 +1476,66 @@ async def db_get_top_dishes(whatsapp_number: str, top_n: int = 5):
 
 # ── Menu availability ─────────────────────────────────────────────────────────
 
-async def db_get_menu_availability(restaurant_id: int):
-    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+async def db_get_menu_availability(restaurant_id: int, location_id: int):
+    """Sold-out state of ONE sede.
+
+    Each sede is its own restaurant (PM 2026-09-20), so "se acabo el
+    salmon" at Sede Norte says nothing about Sede Centro. `location_id` is
+    required, not optional with an org-wide fallback: the fallback is
+    exactly the behaviour migration 0091 removed, and a caller that cannot
+    name a sede has no business answering "is this dish available".
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     async with _tenant_connection() as conn:
-        rows = await conn.fetch("SELECT dish_name, available FROM menu_availability WHERE org_id = $1", restaurant_id)
+        rows = await conn.fetch(
+            "SELECT dish_name, available FROM menu_availability "
+            "WHERE org_id = $1 AND location_id = $2",
+            restaurant_id, location_id,
+        )
         return {r['dish_name']: r['available'] for r in rows}
 
 
-async def db_set_dish_availability(restaurant_id: int, dish_name: str, available: bool):
-    """# Requires active tenant_scope() or bypass_tenant_scope().
+async def db_get_menu_availability_any_sede(restaurant_id: int):
+    """A dish counts as available if ANY sede of the org still has it.
 
-    Wave-2: `restaurant_id` param name kept for the legacy interface,
-    value is the org_id tenant key. The ON CONFLICT target below relies on
-    the (org_id, dish_name) primary key from migration 0085 — before it the
-    only key was dish_name alone, and this upsert raised on every call.
+    For the PUBLIC brand surfaces (the /r/{slug} SEO sitemap and menu page),
+    which belong to the business rather than to one sede. Taking a dish off
+    the brand's sitemap because ONE sede ran out would be wrong, and the
+    page has no sede to ask about — the visitor has not chosen one yet.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with _tenant_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT dish_name, bool_or(available) AS available "
+            "FROM menu_availability WHERE org_id = $1 GROUP BY dish_name",
+            restaurant_id,
+        )
+        return {r['dish_name']: r['available'] for r in rows}
+
+
+async def db_set_dish_availability(restaurant_id: int, dish_name: str, available: bool,
+                                   location_id: int = None):
+    """Mark a dish sold out (or back) AT ONE SEDE.
+
+    `restaurant_id` is the org_id tenant key (the param name is the legacy
+    interface). `location_id` is the sede and is required — it is keyword
+    with a None default only so the older positional call sites keep
+    compiling; passing None raises instead of writing a row that no
+    per-sede read would ever return.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    if location_id is None:
+        raise ValueError("db_set_dish_availability requires a location_id (sede)")
+    async with _tenant_connection() as conn:
         await conn.execute("""
-            INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
-            VALUES ($1, $2, $3, NOW())
-            ON CONFLICT (dish_name, org_id) DO UPDATE SET available=EXCLUDED.available, updated_at=NOW()
-        """, dish_name, restaurant_id, available)
+            INSERT INTO menu_availability (dish_name, org_id, location_id, available, updated_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (org_id, location_id, dish_name)
+            DO UPDATE SET available=EXCLUDED.available, updated_at=NOW()
+        """, dish_name, restaurant_id, location_id, available)
 
 
 # ── NPS analytics ─────────────────────────────────────────────────────────────

@@ -38,28 +38,44 @@ def _serialize(d: dict) -> dict:
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
-async def _sync_dish_availability_conn(conn, dish_names: list, available: bool, restaurant_id: int):
-    """Enables or disables dishes using an existing connection (inside a transaction)."""
+async def _sync_dish_availability_conn(conn, dish_names: list, available: bool, restaurant_id: int,
+                                       location_id: int = None):
+    """Enables or disables dishes AT ONE SEDE, on an existing connection.
+
+    Stock is per sede (0090) and so is sold-out state (0091): a sede running
+    out of tomatoes must not take the dish off the other sedes' menus. A
+    caller with no sede to name is a bug, not a case to default away —
+    `location_id=None` skips the write and says so in the log rather than
+    re-creating the org-wide row 0091 removed.
+    """
+    if location_id is None:
+        log.warning(
+            "menu_availability.sync_without_sede",
+            restaurant_id=restaurant_id, dishes=dish_names,
+        )
+        return
     for name in dish_names:
         await conn.execute(
-            """INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
-               VALUES ($1, $2, $3, NOW())
-               ON CONFLICT (dish_name, org_id)
+            """INSERT INTO menu_availability (dish_name, org_id, location_id, available, updated_at)
+               VALUES ($1, $2, $3, $4, NOW())
+               ON CONFLICT (org_id, location_id, dish_name)
                DO UPDATE SET available = EXCLUDED.available, updated_at = NOW()""",
-            name, restaurant_id, available
+            name, restaurant_id, location_id, available
         )
 
 
-async def _sync_dish_availability(dish_names: list, available: bool, restaurant_id: int):
-    """Enables or disables dishes in menu_availability based on stock."""
+async def _sync_dish_availability(dish_names: list, available: bool, restaurant_id: int,
+                                  location_id: int = None):
+    """Enables or disables dishes in menu_availability based on stock, per sede."""
     if not dish_names:
         return
     async with _tenant_connection() as conn:
-        await _sync_dish_availability_conn(conn, dish_names, available, restaurant_id)
+        await _sync_dish_availability_conn(conn, dish_names, available, restaurant_id, location_id)
 
 
 async def _sync_ingredient_dishes_conn(
-    conn, ingredient_id: int, new_stock: float, min_stock: float, restaurant_id: int
+    conn, ingredient_id: int, new_stock: float, min_stock: float, restaurant_id: int,
+    location_id: int = None,
 ) -> None:
     """
     When an ingredient drops to <= min_stock, finds ALL dishes that use it
@@ -76,7 +92,7 @@ async def _sync_ingredient_dishes_conn(
     if new_stock > min_stock:
         # Stock replenished — re-evaluate affected dishes to mark them available
         # Only if ALL their other ingredients also have stock > min_stock.
-        await _recheck_dishes_for_ingredient_conn(conn, ingredient_id, restaurant_id)
+        await _recheck_dishes_for_ingredient_conn(conn, ingredient_id, restaurant_id, location_id)
         return
 
     # Stock depleted or at minimum — mark dishes as unavailable
@@ -94,19 +110,67 @@ async def _sync_ingredient_dishes_conn(
             new_stock=new_stock,
             restaurant_id=restaurant_id,
         )
-        await _sync_dish_availability_conn(conn, dish_names, False, restaurant_id)
+        await _sync_dish_availability_conn(conn, dish_names, False, restaurant_id, location_id)
+
+
+async def _resync_dish_for_every_sede_conn(
+    conn, restaurant_id: int, dish_name: str, force_available: bool = None
+) -> None:
+    """Re-evaluate one dish's availability at EVERY sede of the org.
+
+    Recipes are org-level (a dish is made the same way everywhere) but the
+    stock they consume is not, so editing a recipe has to be answered once
+    per sede against that sede's own fridge. `force_available` short-circuits
+    the stock check for the "recipe deleted, no constraint left" case.
+    """
+    sedes = await conn.fetch(
+        "SELECT id FROM locations WHERE org_id = $1", restaurant_id,
+    )
+    for sede in sedes:
+        if force_available is not None:
+            available = force_available
+        else:
+            depleted = await conn.fetchval(
+                """SELECT COUNT(DISTINCT r.ingredient_id)
+                     FROM dish_recipes r
+                     JOIN inventory src ON src.id = r.ingredient_id
+                     JOIN inventory tgt
+                       ON tgt.org_id = src.org_id
+                      AND lower(tgt.name) = lower(src.name)
+                      AND (tgt.location_id = $3 OR tgt.location_id IS NULL)
+                    WHERE r.dish_name = $1 AND r.org_id = $2
+                      AND tgt.current_stock <= tgt.min_stock""",
+                dish_name, restaurant_id, sede["id"],
+            )
+            available = (depleted == 0)
+        await _sync_dish_availability_conn(
+            conn, [dish_name], available, restaurant_id, sede["id"],
+        )
 
 
 async def _recheck_dishes_for_ingredient_conn(
-    conn, ingredient_id: int, restaurant_id: int
+    conn, ingredient_id: int, restaurant_id: int, location_id: int = None
 ) -> None:
     """
-    After restocking, re-evaluates each dish that uses this ingredient.
-    A dish becomes available again only if ALL its ingredients have
-    current_stock > min_stock.
+    After restocking, re-evaluates each dish that uses this ingredient AT ONE
+    SEDE. A dish becomes available again only if ALL its ingredients have
+    current_stock > min_stock in THAT sede's own inventory.
+
+    The recipe is org-level and names one ingredient row; the row that
+    matters is the one in this sede, matched by name (the rule in this
+    module's header note). Checking `inventory i ON i.id = r.ingredient_id`
+    like before answered "does SOME sede have stock", which is how a sede
+    with an empty fridge could keep selling the dish.
     """
     from app.services.logging import get_logger
     log = get_logger(__name__)
+
+    if location_id is None:
+        log.warning(
+            "menu_availability.recheck_without_sede",
+            restaurant_id=restaurant_id, ingredient_id=ingredient_id,
+        )
+        return
 
     recipe_rows = await conn.fetch(
         "SELECT dish_name FROM dish_recipes WHERE ingredient_id = $1 AND org_id = $2",
@@ -114,18 +178,24 @@ async def _recheck_dishes_for_ingredient_conn(
     )
     for row in recipe_rows:
         dish_name = row["dish_name"]
-        # Count total ingredients vs ingredients with OK stock
+        # DISTINCT on ingredient_id: a sede holding two rows with the same
+        # product name must not count as two satisfied ingredients.
         total = await conn.fetchval(
-            "SELECT COUNT(*) FROM dish_recipes WHERE dish_name = $1 AND org_id = $2",
+            "SELECT COUNT(DISTINCT ingredient_id) FROM dish_recipes "
+            "WHERE dish_name = $1 AND org_id = $2",
             dish_name, restaurant_id,
         )
         ok = await conn.fetchval(
-            """SELECT COUNT(*)
-               FROM dish_recipes r
-               JOIN inventory i ON i.id = r.ingredient_id
-               WHERE r.dish_name = $1 AND r.org_id = $2
-                 AND i.current_stock > i.min_stock""",
-            dish_name, restaurant_id,
+            """SELECT COUNT(DISTINCT r.ingredient_id)
+                 FROM dish_recipes r
+                 JOIN inventory src ON src.id = r.ingredient_id
+                 JOIN inventory tgt
+                   ON tgt.org_id = src.org_id
+                  AND lower(tgt.name) = lower(src.name)
+                  AND (tgt.location_id = $3 OR tgt.location_id IS NULL)
+                WHERE r.dish_name = $1 AND r.org_id = $2
+                  AND tgt.current_stock > tgt.min_stock""",
+            dish_name, restaurant_id, location_id,
         )
         available = (ok == total)
         log.info(
@@ -135,8 +205,11 @@ async def _recheck_dishes_for_ingredient_conn(
             ok_ingredients=ok,
             total_ingredients=total,
             restaurant_id=restaurant_id,
+            location_id=location_id,
         )
-        await _sync_dish_availability_conn(conn, [dish_name], available, restaurant_id)
+        await _sync_dish_availability_conn(
+            conn, [dish_name], available, restaurant_id, location_id,
+        )
 
 
 # ── DDL init (legacy stubs — schema is fully managed by Alembic) ─────────────
@@ -204,7 +277,7 @@ async def db_create_inventory_item(restaurant_id: int, name: str, unit: str,
         item = _serialize(dict(row))
         # Si el stock es 0, desactivar platos vinculados
         if current_stock <= 0:
-            await _sync_dish_availability(linked_dishes, False, restaurant_id)
+            await _sync_dish_availability(linked_dishes, False, restaurant_id, location_id)
         return item
 
 
@@ -251,7 +324,11 @@ async def db_update_inventory_item(item_id: int, fields: dict) -> dict | None:
 
         restaurant_id = existing["org_id"]
 
-        await _sync_dish_availability(dishes, new_stock > 0, restaurant_id)
+        # The item's OWN sede — editing sede A's stock must not re-open or
+        # close the dish at sede B.
+        await _sync_dish_availability(
+            dishes, new_stock > 0, restaurant_id, existing["location_id"],
+        )
         return item
 
 
@@ -286,7 +363,9 @@ async def db_adjust_inventory_stock(item_id: int, quantity_delta: float,
         dishes = item.get("linked_dishes", [])
         if isinstance(dishes, str):
             dishes = json.loads(dishes)
-        await _sync_dish_availability(dishes, float(item["current_stock"]) > 0, restaurant_id)
+        await _sync_dish_availability(
+            dishes, float(item["current_stock"]) > 0, restaurant_id, item.get("location_id"),
+        )
         return item
 
 
@@ -569,14 +648,18 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list,
                         )
                         min_stock_val = float(inv["min_stock"] or 0)
                         # Sync dish_recipes-based availability (Fase 5c)
-                        await _sync_ingredient_dishes_conn(conn, ing_id, new_stock, min_stock_val, restaurant_id)
+                        await _sync_ingredient_dishes_conn(
+                            conn, ing_id, new_stock, min_stock_val, restaurant_id, location_id,
+                        )
                         # Also sync legacy linked_dishes on the same ingredient
                         if new_stock <= min_stock_val:
                             dishes = inv["linked_dishes"]
                             if isinstance(dishes, str):
                                 dishes = json.loads(dishes)
                             if dishes:
-                                await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
+                                await _sync_dish_availability_conn(
+                                    conn, dishes, False, restaurant_id, location_id,
+                                )
 
                 else:
                     # ── 2. Fallback legacy: linked_dishes ────────────────
@@ -627,7 +710,9 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list,
                         if isinstance(dishes, str):
                             dishes = json.loads(dishes)
                         if new_stock <= float(row["min_stock"] or 0) and dishes:
-                            await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
+                            await _sync_dish_availability_conn(
+                                conn, dishes, False, restaurant_id, location_id,
+                            )
 
 
 # ── Recipes ─────────────────────────────────────────────────────
@@ -661,27 +746,20 @@ async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list)
                 )
 
             # Re-evaluate availability after recipe change (Phase 5c)
+            # The recipe is org-level; its CONSEQUENCE is not. Answer
+            # "is this dish available" once per sede, against that sede's
+            # own stock, instead of writing one org-wide verdict.
             if not lines:
-                # No recipe → no stock constraint → mark available
-                await _sync_dish_availability_conn(conn, [dish_name], True, restaurant_id)
+                # No recipe → no stock constraint → available everywhere
+                await _resync_dish_for_every_sede_conn(
+                    conn, restaurant_id, dish_name, force_available=True,
+                )
                 log.info("inventory.recipe_deleted_dish_available", dish=dish_name, restaurant_id=restaurant_id)
             else:
-                # Check if any new ingredient is already depleted
-                depleted = await conn.fetchval(
-                    """SELECT COUNT(*)
-                       FROM dish_recipes r
-                       JOIN inventory i ON i.id = r.ingredient_id
-                       WHERE r.dish_name = $1 AND r.org_id = $2
-                         AND i.current_stock <= i.min_stock""",
-                    dish_name, restaurant_id,
-                )
-                available = (depleted == 0)
-                await _sync_dish_availability_conn(conn, [dish_name], available, restaurant_id)
+                await _resync_dish_for_every_sede_conn(conn, restaurant_id, dish_name)
                 log.info(
                     "inventory.recipe_upserted_availability_synced",
                     dish=dish_name,
-                    available=available,
-                    depleted_ingredients=depleted,
                     restaurant_id=restaurant_id,
                 )
 

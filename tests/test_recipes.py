@@ -203,7 +203,8 @@ async def test_deduct_uses_recipe_when_it_exists():
     ))
 
     # Phase 5c: stub out the new auto-hide helper so it doesn't consume conn.fetch
-    async def _noop_sync(conn, ingredient_id, new_stock, min_stock, restaurant_id):
+    async def _noop_sync(conn, ingredient_id, new_stock, min_stock, restaurant_id,
+                         location_id=None):
         pass
 
     with (
@@ -316,13 +317,14 @@ async def test_deduct_deactivates_dish_when_stock_runs_out():
 
     sync_calls = []
 
-    async def fake_sync_conn(conn, dish_names, available, restaurant_id):
+    async def fake_sync_conn(conn, dish_names, available, restaurant_id, location_id=None):
         sync_calls.append((dish_names, available))
 
     # Phase 5c: stub out _sync_ingredient_dishes_conn so it doesn't consume
     # additional conn.fetch calls; the linked_dishes path is what this test
     # exercises via _sync_dish_availability_conn.
-    async def _noop_ingredient_sync(conn, ingredient_id, new_stock, min_stock, restaurant_id):
+    async def _noop_ingredient_sync(conn, ingredient_id, new_stock, min_stock, restaurant_id,
+                                    location_id=None):
         pass
 
     with (

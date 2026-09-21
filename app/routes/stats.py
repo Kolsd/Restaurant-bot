@@ -297,17 +297,21 @@ async def get_menu_availability(request: Request):
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
 
-    # Wave-2: menu_availability rows are keyed by (dish_name, org_id) — the
-    # same menu state applies to every branch of an org. Always scope by
-    # org_id (restaurant["id"] is normalized to org_id post-Wave-2). The
-    # X-Branch-ID header used to be honored here pre-Wave-2 as if menu
-    # availability were per-branch; since it is not, the override is a
-    # no-op for the org_id resolution and we leave it out.
+    # Sold out is PER SEDE (migration 0091). Each sede is its own restaurant:
+    # running out of salmon at Sede Norte says nothing about Sede Centro.
+    # Until 0091 the key was (org_id, dish_name) and this endpoint returned —
+    # and wrote — one state for the whole business.
     org_id = restaurant["id"]
+    sede = resolve_sede_filter(request, user, admin_without_header="own")
+    if not isinstance(sede, int):
+        raise HTTPException(
+            status_code=400,
+            detail="Elegí una sede para ver qué platos están agotados",
+        )
 
     with tenant_scope(org_id):
-        availability = await db.db_get_menu_availability(org_id)
-    return {"availability": availability}
+        availability = await db.db_get_menu_availability(org_id, sede)
+    return {"availability": availability, "location_id": sede}
 
 @router.post("/api/menu/availability")
 async def set_dish_availability(request: Request):
@@ -315,22 +319,33 @@ async def set_dish_availability(request: Request):
     body = await request.json()
     if not body.get("dish_name"): raise HTTPException(status_code=400, detail="dish_name requerido")
 
-    await get_current_user(request)
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
 
-    # Wave-2: same as GET — menu_availability is keyed by (dish_name, org_id).
-    # The X-Branch-ID override would have written a row scoped to a
-    # location_id, which violates the unique constraint shape and would
-    # never be read back by GET (which scopes by org_id). Always use org_id.
+    # Same rule as GET: the sede whose menu is being changed. An owner
+    # looking at every sede at once has to pick one first — "agotado" has
+    # to mean somewhere in particular.
     org_id = restaurant["id"]
+    sede = resolve_sede_filter(request, user, admin_without_header="own")
+    if not isinstance(sede, int):
+        raise HTTPException(
+            status_code=400,
+            detail="Elegí la sede en la que se agotó este plato",
+        )
 
     with tenant_scope(org_id):
         await db.db_set_dish_availability(
             restaurant_id=org_id,
             dish_name=body["dish_name"],
-            available=body.get("available", True)
+            available=body.get("available", True),
+            location_id=sede,
         )
-    return {"success": True, "dish_name": body["dish_name"], "available": body.get("available", True)}
+    return {
+        "success": True,
+        "dish_name": body["dish_name"],
+        "available": body.get("available", True),
+        "location_id": sede,
+    }
 
 @router.post("/api/menu/sync-branches")
 async def sync_menu_to_branches(request: Request):

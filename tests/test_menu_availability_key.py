@@ -1,4 +1,4 @@
-"""menu_availability must be keyed per tenant: (org_id, dish_name).
+"""menu_availability must be keyed per SEDE: (org_id, location_id, dish_name).
 
 Its primary key was `dish_name` ALONE, while every writer upserts with
 `ON CONFLICT (dish_name, org_id)`. Postgres rejects an ON CONFLICT target
@@ -8,6 +8,11 @@ falling to its minimum marks the dish sold out) rolled back the whole order.
 Even with the upsert fixed, a single-column key means two restaurants cannot
 both have a dish called "Bandeja Paisa": the second insert collides with a
 row RLS hides from it.
+
+Migration 0091 added the sede to the key. Each sede is its own restaurant
+(PM 2026-09-20), so running out of a dish at Sede Norte must not take it off
+Sede Centro's menu — which is exactly what the org-wide key did, including
+automatically whenever one sede's inventory hit its minimum.
 
 These run against the real database — the previous coverage
 (tests/test_stock_autohide.py) mocks the connection, which is why none of
@@ -125,25 +130,69 @@ async def _seed_org(conn, name: str) -> int:
     )
 
 
+async def _seed_sede(conn, org_id: int, name: str = "Sede") -> int:
+    return await conn.fetchval(
+        "INSERT INTO locations (org_id, name) VALUES ($1, $2) RETURNING id",
+        org_id, name,
+    )
+
+
 async def test_marking_a_dish_sold_out_persists(db_conn):
     from app.repositories.restaurant_repo import (
         db_get_menu_availability, db_set_dish_availability,
     )
 
     org = await _seed_org(db_conn, "Availability Org")
+    sede = await _seed_sede(db_conn, org)
     with tenant_scope(org):
         await _pin(db_conn, org)
-        await db_set_dish_availability(org, "Ajiaco", False)
-        assert (await db_get_menu_availability(org))["Ajiaco"] is False
+        await db_set_dish_availability(org, "Ajiaco", False, location_id=sede)
+        assert (await db_get_menu_availability(org, sede))["Ajiaco"] is False
 
         # Upsert, not a second row: flipping it back updates in place.
-        await db_set_dish_availability(org, "Ajiaco", True)
-        assert (await db_get_menu_availability(org))["Ajiaco"] is True
+        await db_set_dish_availability(org, "Ajiaco", True, location_id=sede)
+        assert (await db_get_menu_availability(org, sede))["Ajiaco"] is True
         count = await db_conn.fetchval(
             "SELECT count(*) FROM menu_availability WHERE org_id = $1 AND dish_name = $2",
             org, "Ajiaco",
         )
     assert count == 1
+
+
+async def test_sold_out_at_one_sede_does_not_touch_the_other(db_conn):
+    """The whole point of migration 0091. Each sede is its own restaurant:
+    Sede Norte running out of ajiaco says nothing about Sede Centro."""
+    from app.repositories.restaurant_repo import (
+        db_get_menu_availability, db_set_dish_availability,
+    )
+
+    org = await _seed_org(db_conn, "Two Sede Org")
+    norte = await _seed_sede(db_conn, org, "Sede Norte")
+    centro = await _seed_sede(db_conn, org, "Sede Centro")
+
+    with tenant_scope(org):
+        await _pin(db_conn, org)
+        await db_set_dish_availability(org, "Ajiaco", True, location_id=centro)
+        await db_set_dish_availability(org, "Ajiaco", False, location_id=norte)
+
+        assert (await db_get_menu_availability(org, norte))["Ajiaco"] is False
+        assert (await db_get_menu_availability(org, centro))["Ajiaco"] is True
+
+
+async def test_a_sede_never_sees_another_sedes_sold_out_rows(db_conn):
+    """A read is scoped to one sede, not merged across the org."""
+    from app.repositories.restaurant_repo import (
+        db_get_menu_availability, db_set_dish_availability,
+    )
+
+    org = await _seed_org(db_conn, "Scoped Read Org")
+    a = await _seed_sede(db_conn, org, "A")
+    b = await _seed_sede(db_conn, org, "B")
+
+    with tenant_scope(org):
+        await _pin(db_conn, org)
+        await db_set_dish_availability(org, "Solo en A", False, location_id=a)
+        assert "Solo en A" not in (await db_get_menu_availability(org, b))
 
 
 async def test_two_restaurants_can_share_a_dish_name(db_conn):
@@ -155,17 +204,19 @@ async def test_two_restaurants_can_share_a_dish_name(db_conn):
 
     org_a = await _seed_org(db_conn, "Availability A")
     org_b = await _seed_org(db_conn, "Availability B")
+    sede_a = await _seed_sede(db_conn, org_a)
+    sede_b = await _seed_sede(db_conn, org_b)
 
     with tenant_scope(org_a):
         await _pin(db_conn, org_a)
-        await db_set_dish_availability(org_a, "Bandeja Paisa", True)
+        await db_set_dish_availability(org_a, "Bandeja Paisa", True, location_id=sede_a)
     with tenant_scope(org_b):
         await _pin(db_conn, org_b)
-        await db_set_dish_availability(org_b, "Bandeja Paisa", False)
-        assert (await db_get_menu_availability(org_b))["Bandeja Paisa"] is False
+        await db_set_dish_availability(org_b, "Bandeja Paisa", False, location_id=sede_b)
+        assert (await db_get_menu_availability(org_b, sede_b))["Bandeja Paisa"] is False
     with tenant_scope(org_a):
         await _pin(db_conn, org_a)
-        assert (await db_get_menu_availability(org_a))["Bandeja Paisa"] is True
+        assert (await db_get_menu_availability(org_a, sede_a))["Bandeja Paisa"] is True
 
 
 async def test_selling_the_last_unit_marks_sold_out_without_killing_the_order(db_conn):
@@ -177,19 +228,23 @@ async def test_selling_the_last_unit_marks_sold_out_without_killing_the_order(db
     from app.repositories.restaurant_repo import db_get_menu_availability
 
     org = await _seed_org(db_conn, "Last Unit Org")
+    sede = await _seed_sede(db_conn, org)
     with tenant_scope(org):
         await _pin(db_conn, org)
         inv_id = await db_conn.fetchval(
-            """INSERT INTO inventory (name, current_stock, min_stock, linked_dishes, org_id)
-               VALUES ($1, 1, 0, $2::jsonb, $3) RETURNING id""",
-            "Masa de arepa", ["Arepa"], org,
+            """INSERT INTO inventory (name, current_stock, min_stock, linked_dishes,
+                                      org_id, location_id)
+               VALUES ($1, 1, 0, $2::jsonb, $3, $4) RETURNING id""",
+            "Masa de arepa", ["Arepa"], org, sede,
         )
 
         async with db_conn.transaction():  # savepoint, like the order tx
-            await deduct_inventory_in_tx(db_conn, org, [{"name": "Arepa", "quantity": 1}])
+            await deduct_inventory_in_tx(
+                db_conn, org, [{"name": "Arepa", "quantity": 1}], location_id=sede,
+            )
 
         stock = await db_conn.fetchval("SELECT current_stock FROM inventory WHERE id = $1", inv_id)
-        availability = await db_get_menu_availability(org)
+        availability = await db_get_menu_availability(org, sede)
 
     assert stock == 0
     assert availability.get("Arepa") is False, "the dish must be marked sold out"

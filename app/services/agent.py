@@ -2543,7 +2543,11 @@ async def _build_enriched_user_message(
         )
         cart_text = ""
 
-    availability = await db.db_get_menu_availability(restaurant_obj.get("id"))
+    # `id` is the org_id and `location_id` the resolved sede (see
+    # db_get_restaurant_by_phone). Sold out is per sede since 0091.
+    availability = await db.db_get_menu_availability(
+        restaurant_obj.get("id"), restaurant_obj.get("location_id"),
+    ) if restaurant_obj.get("location_id") else {}
     menu         = await db.db_get_menu(bot_number) or {}
     compact_menu = _build_compact_menu(
         menu, availability,

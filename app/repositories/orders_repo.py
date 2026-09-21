@@ -161,14 +161,18 @@ async def deduct_inventory_in_tx(
                 min_stock = to_decimal(inv["min_stock"] or 0)
                 # Sync dish_recipes-based availability (Fase 5c)
                 from app.repositories.inventory_repo import _sync_ingredient_dishes_conn
-                await _sync_ingredient_dishes_conn(conn, ing_id, float(new_stock), float(min_stock), restaurant_id)
+                await _sync_ingredient_dishes_conn(
+                    conn, ing_id, float(new_stock), float(min_stock), restaurant_id, location_id,
+                )
                 # Also sync legacy linked_dishes on the same ingredient
                 if new_stock <= min_stock:
                     dishes = inv["linked_dishes"]
                     if isinstance(dishes, str):
                         dishes = json.loads(dishes)
                     if dishes:
-                        await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
+                        await _sync_dish_availability_conn(
+                            conn, dishes, False, restaurant_id, location_id,
+                        )
 
         else:
             # ── 2. Legacy linked_dishes path ─────────────────────────────────
@@ -230,7 +234,9 @@ async def deduct_inventory_in_tx(
                     dishes = json.loads(dishes)
                 min_stock = to_decimal(row["min_stock"] or 0)
                 if new_stock <= min_stock and dishes:
-                    await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
+                    await _sync_dish_availability_conn(
+                        conn, dishes, False, restaurant_id, location_id,
+                    )
 
 
 # Backward-compatible private alias — tests/test_stock_autohide.py calls the
@@ -239,16 +245,25 @@ _deduct_inventory_in_tx = deduct_inventory_in_tx
 
 
 async def _sync_dish_availability_conn(
-    conn, dish_names: list[str], available: bool, restaurant_id: int
+    conn, dish_names: list[str], available: bool, restaurant_id: int,
+    location_id: int = None,
 ) -> None:
-    """Mirror of database._sync_dish_availability_conn — used inside the transaction."""
+    """Mirror of inventory_repo._sync_dish_availability_conn — used inside the
+    transaction. Sold-out state is per sede (migration 0091), so a caller with
+    no sede writes nothing rather than re-creating an org-wide row."""
+    if location_id is None:
+        log.warning(
+            "menu_availability.sync_without_sede",
+            restaurant_id=restaurant_id, dishes=dish_names,
+        )
+        return
     for name in dish_names:
         await conn.execute(
-            """INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
-               VALUES ($1, $2, $3, NOW())
-               ON CONFLICT (dish_name, org_id)
+            """INSERT INTO menu_availability (dish_name, org_id, location_id, available, updated_at)
+               VALUES ($1, $2, $3, $4, NOW())
+               ON CONFLICT (org_id, location_id, dish_name)
                DO UPDATE SET available = EXCLUDED.available, updated_at = NOW()""",
-            name, restaurant_id, available,
+            name, restaurant_id, location_id, available,
         )
 
 

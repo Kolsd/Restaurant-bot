@@ -824,7 +824,9 @@ async def restaurant_sitemap(restaurant_id: int):
     availability: dict = {}
     try:
         with bypass_tenant_scope("restaurant_sitemap: public sitemap menu availability lookup"):
-            availability = await db.db_get_menu_availability(restaurant_id) or {}
+            # Brand-level page, no sede chosen yet: a dish stays listed while
+            # at least one sede has it (db_get_menu_availability is per sede).
+            availability = await db.db_get_menu_availability_any_sede(restaurant_id) or {}
     except Exception:
         log.exception("sitemap.availability_load_failed", restaurant_id=restaurant_id)
         # availability is optional — fail open (sitemap still renders all dishes)

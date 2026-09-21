@@ -245,6 +245,7 @@ async def add_to_cart(phone: str, dish_name: str, quantity: int, bot_number: str
 
 async def resolve_dish_for_cart(
     bot_number: str, org_id: int, sku: str | None = None, name: str | None = None,
+    location_id: int | None = None,
 ) -> dict | None:
     """Server-side dish resolution for DIRECT (non-LLM) cart taps from the
     diner chat UI. NEVER trusts price/category from the client — both are
@@ -281,11 +282,23 @@ async def resolve_dish_for_cart(
         log.info("resolve_dish_for_cart.inactive", dish=dish.get("name"), bot_number=bot_number)
         return None
 
-    try:
-        availability = await db.db_get_menu_availability(org_id)
-    except Exception:
-        log.exception("resolve_dish_for_cart.availability_check_failed", bot_number=bot_number)
-        availability = {}
+    # Sold out is per sede (migration 0091): the diner is at ONE of them, and
+    # what another sede ran out of is irrelevant here. Without a sede there is
+    # no honest answer, so the check is skipped rather than guessed — the
+    # caller (the diner chat) always has one.
+    availability = {}
+    if location_id is not None:
+        try:
+            availability = await db.db_get_menu_availability(org_id, location_id)
+        except Exception:
+            log.exception(
+                "resolve_dish_for_cart.availability_check_failed",
+                bot_number=bot_number, location_id=location_id,
+            )
+            availability = {}
+    else:
+        log.warning("resolve_dish_for_cart.no_sede", bot_number=bot_number, org_id=org_id)
+
     if availability.get(dish.get("name"), True) is False:
         log.info("resolve_dish_for_cart.unavailable", dish=dish.get("name"), bot_number=bot_number)
         return None

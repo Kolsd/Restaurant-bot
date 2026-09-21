@@ -720,7 +720,9 @@ async def diner_chat(request: Request, body: DinerChatRequest):
             if isinstance(dishes, list) and dishes:
                 feats = _features_dict((await db.db_get_restaurant_by_org_id(org_id) or {}).get("features"))
                 currency = feats.get("currency", "COP")
-                availability = await db.db_get_menu_availability(org_id)
+                # The diner is sitting at ONE sede — what that sede ran out
+                # of is what greys out, not what some other sede ran out of.
+                availability = await db.db_get_menu_availability(org_id, location_id)
                 dish_block = _dish_cards_for_category(dishes, availability, currency)
                 return {
                     "message": f"Esto es lo que tenemos en {category}:",
@@ -761,12 +763,14 @@ async def diner_menu(token: str = Query(..., min_length=1, max_length=200)):
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
     bot_number = session["bot_number"]
+    location_id = session.get("location_id")
 
     with tenant_scope(org_id):
         await diner_sessions_repo.touch_last_seen(token, org_id)
         restaurant = await db.db_get_restaurant_by_org_id(org_id)
         menu = await db.db_get_menu(bot_number) or {}
-        availability = await db.db_get_menu_availability(org_id)
+        # Sold out is per sede (migration 0091): this session belongs to one.
+        availability = await db.db_get_menu_availability(org_id, location_id)
 
     feats = _features_dict((restaurant or {}).get("features"))
     currency = feats.get("currency", "COP")
@@ -856,7 +860,10 @@ async def diner_cart_add(request: Request, body: DinerCartAddRequest):
     with tenant_scope(org_id):
         await diner_sessions_repo.touch_last_seen(token, org_id)
 
-        dish = await orders.resolve_dish_for_cart(bot_number, org_id, sku=sku, name=name)
+        dish = await orders.resolve_dish_for_cart(
+            bot_number, org_id, sku=sku, name=name,
+            location_id=session.get("location_id"),
+        )
         if dish is None:
             raise HTTPException(
                 status_code=404,

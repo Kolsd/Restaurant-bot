@@ -460,7 +460,7 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
         # endpoint without re-checking at all, so a stale cart line could
         # still go through. This closes that hole with a real server refusal
         # naming the dish, not just a page that greys it out.
-        availability = await db.db_get_menu_availability(org_id)
+        availability = await db.db_get_menu_availability(org_id, location_id)
         for item in cart_items:
             dish_name = (item.get("name") or "").strip()
             if dish_name and availability.get(dish_name, True) is False:

@@ -464,9 +464,14 @@ async def public_menu_context(table_id: str):
 
     menu = await db.db_get_menu(wa_number) or {}
     restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
-    if restaurant.get("id"):
+    # db_get_restaurant_by_phone overrides `id` with the org_id and carries
+    # the resolved sede as `location_id`. Sold out is per sede (0091), and
+    # this table belongs to exactly one.
+    if restaurant.get("id") and restaurant.get("location_id"):
         with tenant_scope(restaurant["id"]):
-            availability = await db.db_get_menu_availability(restaurant["id"])
+            availability = await db.db_get_menu_availability(
+                restaurant["id"], restaurant["location_id"],
+            )
     else:
         availability = {}
     features = restaurant.get("features") or {}

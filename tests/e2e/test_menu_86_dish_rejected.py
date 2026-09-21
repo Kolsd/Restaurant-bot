@@ -140,9 +140,9 @@ async def test_86d_dish_rejected_by_bot(
             # Keyed per tenant since migration 0085: (org_id, dish_name).
             await conn.execute(
                 """
-                INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
-                VALUES ($1, $2, FALSE, NOW())
-                ON CONFLICT (dish_name, org_id) DO UPDATE SET
+                INSERT INTO menu_availability (dish_name, org_id, location_id, available, updated_at)
+                SELECT $1, $2, l.id, FALSE, NOW() FROM locations l WHERE l.org_id = $2
+                ON CONFLICT (org_id, location_id, dish_name) DO UPDATE SET
                     available = FALSE,
                     updated_at = NOW()
                 """,
