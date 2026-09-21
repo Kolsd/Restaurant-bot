@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from app.services import database as db
+from app.services import sede_menu
 from app.repositories import inventory_repo
 from app.repositories.orders_repo import InsufficientStockError
 from app.routes.deps import (
@@ -265,10 +266,14 @@ async def get_inventory_alerts(
 
 @router.get("/api/inventory/menu-items")
 async def get_menu_items_for_linking(
+    request: Request,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Returns all menu dishes for the linking selector"""
-    menu = await db.db_get_menu(restaurant["whatsapp_number"]) or {}
+    """The dishes a stock item can be linked to: the caller's sede carta,
+    which includes the dishes only that sede sells (migration 0093). With
+    no sede (owner viewing every sede) it is the org's base carta."""
+    sede = await _sede_for_read(request)
+    menu = await sede_menu.get_sede_menu(restaurant["id"], sede)
     dishes = []
     for category, items in menu.items():
         for item in items:

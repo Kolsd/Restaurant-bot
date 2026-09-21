@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.services import database as db
 from app.services import billing
 from app.services import realtime
+from app.services import sede_menu
 from app.services import state_store
 from app.services.agent import trigger_nps
 from app.routes.deps import (
@@ -462,18 +463,20 @@ async def public_menu_context(table_id: str):
     wa_msg = f"Hola! Estoy en {table['name']} [t:{table['id']}]"
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
 
-    menu = await db.db_get_menu(wa_number) or {}
     restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
-    # db_get_restaurant_by_phone overrides `id` with the org_id and carries
-    # the resolved sede as `location_id`. Sold out is per sede (0091), and
-    # this table belongs to exactly one.
-    if restaurant.get("id") and restaurant.get("location_id"):
-        with tenant_scope(restaurant["id"]):
-            availability = await db.db_get_menu_availability(
-                restaurant["id"], restaurant["location_id"],
+    # The carta and the sold-out list are the TABLE's sede (0091, 0093) —
+    # not the sede the bot number resolves to by default, which for a chain
+    # sharing one number is whichever sede has the lowest id.
+    org_id = table.get("org_id") or restaurant.get("id")
+    sede = table.get("branch_id")
+    if org_id:
+        with tenant_scope(int(org_id)):
+            menu = await sede_menu.get_sede_menu(int(org_id), int(sede) if sede else None)
+            availability = (
+                await db.db_get_menu_availability(int(org_id), int(sede)) if sede else {}
             )
     else:
-        availability = {}
+        menu, availability = {}, {}
     features = restaurant.get("features") or {}
     if isinstance(features, str):
         import json as _json
@@ -1174,29 +1177,19 @@ async def get_pos_menu(request: Request):
     """
     user = await get_current_user(request)
 
-    wa_number = ""
-    if user:
-        # P0 fix (2026-09): resolve the staff's specific sede via the
-        # explicit location_id when assigned, else fall back to the org's
-        # deterministic default location — never the ambiguous branch_id.
-        location_id = user.get("location_id")
-        if location_id:
-            r = await db.db_get_restaurant_by_location_id(location_id)
-            if r:
-                wa_number = r.get("whatsapp_number", "") or ""
-        if not wa_number and user.get("org_id"):
-            r = await db.db_get_restaurant_by_org_id(int(user["org_id"]))
-            if r:
-                wa_number = r.get("whatsapp_number", "") or ""
-
-    if not wa_number:
-        # Cannot resolve the staff's sede → return empty menu rather than a
-        # cross-tenant one. The frontend handles {} gracefully (shows
-        # "menu not configured" state) instead of mixing data from another tenant.
+    if not user or not user.get("org_id"):
+        # Cannot resolve the caller's org → an empty menu rather than a
+        # cross-tenant one. The frontend shows "menu not configured".
         return {"menu": {}}
 
-    menu = await db.db_get_menu(wa_number) or {}
-    return {"menu": menu}
+    # The POS sells at ONE sede, at that sede's prices (migration 0093).
+    # owner/admin may pick the sede they are working; everyone else is
+    # pinned to their own.
+    org_id = int(user["org_id"])
+    sede = resolve_sede_filter(request, user, admin_without_header="own")
+    with tenant_scope(org_id):
+        menu = await sede_menu.get_sede_menu(org_id, sede if isinstance(sede, int) else None)
+    return {"menu": menu, "location_id": sede}
 
 @router.get("/api/pos/tables-status")
 async def get_tables_status(request: Request):

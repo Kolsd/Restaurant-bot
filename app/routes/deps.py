@@ -47,7 +47,28 @@ async def require_auth(request: Request) -> str:
     return username
 
 async def get_current_user(request: Request) -> dict:
-    """Returns the authenticated user dict or raises 401."""
+    """Returns the authenticated user dict or raises 401.
+
+    Resolved once per request and kept on `request.state`. A route behind
+    `get_current_restaurant_scoped` runs pinned to its tenant, and resolving
+    a staff login a second time from inside it (e.g. to decide the sede)
+    opened a `bypass_tenant_scope` there — TenantContextConflict, a 500 on
+    every inventory call made by a PIN-login employee.
+    """
+    state = getattr(request, "state", None)
+    cached = getattr(state, "mesio_user", None)
+    if isinstance(cached, dict):
+        return cached
+    user = await _resolve_current_user(request)
+    if state is not None:
+        try:
+            state.mesio_user = user
+        except AttributeError:
+            pass  # a stub request without a writable state: resolve every time
+    return user
+
+
+async def _resolve_current_user(request: Request) -> dict:
     username = await require_auth(request)
 
     if username.startswith("staff:"):

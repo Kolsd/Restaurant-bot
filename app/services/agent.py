@@ -12,6 +12,7 @@ from app.services import orders, database as db
 from app.services.logging import get_logger
 from app.services import state_store
 from app.services import blocks
+from app.services import sede_context
 from app.services.money import to_decimal, money_mul, money_sum, ZERO
 from app.services.tenant_context import bypass_tenant_scope_if_unset as _bypass_tenant, tenant_scope
 from app.services.tenant_db import tenant_connection as _tenant_conn
@@ -2467,9 +2468,15 @@ async def _load_restaurant_context(
     table_context: dict | None,
     user_phone: str,
     meta_phone_id: str,
+    location_id: int | None = None,
 ) -> dict | None:
     """
     Resolve restaurant data, features, and payment-method text.
+
+    `location_id` is the sede the caller already knows (the web chat's
+    session: /pedir and table QR). Without it a table-less turn fell back to
+    the org's default sede, whose carta and sold-out list are not this
+    diner's.
 
     Returns a dict with keys:
         restaurant_obj, restaurant_name, feats, google_maps_url,
@@ -2493,8 +2500,14 @@ async def _load_restaurant_context(
     # preferred the ORG match, so a location id colliding with an unrelated
     # org's id could serve THAT org's name/menu/features to this diner and
     # then fail RLS on writes scoped to the real org (rule 11 + 14).
-    if table_context and table_context.get("branch_id"):
-        r = await db.db_get_restaurant_by_location_id(table_context["branch_id"])
+    sede_id = (table_context or {}).get("branch_id") or location_id
+    if sede_id:
+        r = await db.db_get_restaurant_by_location_id(sede_id)
+        if r and r.get("org_id") != restaurant_obj.get("org_id"):
+            log.warning(
+                "agent.sede_of_another_org", bot_number=bot_number, location_id=sede_id,
+            )
+            r = None
         if r:
             restaurant_obj = r
             restaurant_name = r.get("name", restaurant_name)
@@ -2548,7 +2561,9 @@ async def _build_enriched_user_message(
     availability = await db.db_get_menu_availability(
         restaurant_obj.get("id"), restaurant_obj.get("location_id"),
     ) if restaurant_obj.get("location_id") else {}
-    menu         = await db.db_get_menu(bot_number) or {}
+    menu         = await orders._turn_menu(
+        bot_number, restaurant_obj.get("id"), restaurant_obj.get("location_id"),
+    )
     compact_menu = _build_compact_menu(
         menu, availability,
         bot_visual_menu=feats.get("bot_visual_menu", False) is True,
@@ -3111,9 +3126,11 @@ async def chat(
     never leak into another. See blocks.begin_turn/end_turn docstrings.
     """
     _blocks_token = blocks.begin_turn()
+    _sede_token = sede_context.begin_turn()
     try:
         return await _chat_impl(user_phone, user_message, bot_number, meta_phone_id, location_id)
     finally:
+        sede_context.end_turn(_sede_token)
         blocks.end_turn(_blocks_token)
 
 
@@ -3206,7 +3223,9 @@ async def _chat_impl(
         return await _whatsapp_no_table_reply(bot_number)
 
     # 6. Load restaurant context (name, features, payment methods, branch override)
-    ctx = await _load_restaurant_context(bot_number, table_context, user_phone, meta_phone_id)
+    ctx = await _load_restaurant_context(
+        bot_number, table_context, user_phone, meta_phone_id, location_id=location_id,
+    )
     if ctx is None:
         return {"message": "Este número aún no está configurado. Si eres el dueño del restaurante, contacta a soporte en mesio.co"}
 
@@ -3214,6 +3233,10 @@ async def _chat_impl(
     restaurant_name      = ctx["restaurant_name"]
     feats                = ctx["feats"]
     payment_methods_text = ctx["payment_methods_text"]
+
+    # Every carta read from here on (find_dish, add_to_cart, the tool
+    # guards) prices dishes for THIS sede — migration 0093.
+    sede_context.set_sede(restaurant_obj.get("location_id"))
 
     # 6b. Subscription cap enforcement — 1 inbound message = 1 conversation slot.
     # Must run AFTER restaurant_obj is resolved (we need org_id = restaurant_obj["id"]).

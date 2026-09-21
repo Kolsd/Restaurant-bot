@@ -31,6 +31,11 @@ import uuid
 import asyncpg
 import pytest
 
+# The sede carta the seeded carts order from: checkout refuses a line whose
+# dish is not on it (migration 0093).
+_TEST_CARTA = json.dumps({"Platos": [{"name": "Bandeja Paisa", "price": 20000}], "Bebidas": [{"name": "Jugo", "price": 5000}]})
+
+
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
     not TEST_DB_URL, reason="TEST_DATABASE_URL not set — integration tests skipped",
@@ -118,8 +123,8 @@ async def _seed_org(name: str, features: dict | None = None) -> int:
     try:
         suffix = uuid.uuid4().hex[:8]
         return await conn.fetchval(
-            "INSERT INTO organizations (name, slug, features) VALUES ($1, $2, $3::jsonb) RETURNING id",
-            name, f"{name.lower().replace(' ', '-')}-{suffix}", json.dumps(features or {}),
+            "INSERT INTO organizations (name, slug, features, menu) VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id",
+            name, f"{name.lower().replace(' ', '-')}-{suffix}", json.dumps(features or {}), _TEST_CARTA,
         )
     finally:
         await conn.close()

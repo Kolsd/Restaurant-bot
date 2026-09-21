@@ -11,6 +11,8 @@ from app.services import database as db
 from app.services import state_store
 from app.services.logging import get_logger
 from app.services.money import to_decimal, money_mul, money_sum, ZERO
+from app.services import sede_context, sede_menu
+from app.services.tenant_context import peek_tenant
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
@@ -137,16 +139,39 @@ async def _cart_lock(phone: str, bot_number: str, ttl_seconds: int = 30):
     finally:
         await state_store.cart_lock_release(phone, bot_number, token=token)
 
+async def _turn_menu(bot_number: str, org_id: int | None = None, location_id: int | None = None) -> dict:
+    """The carta of the sede this turn serves (migration 0093 — each sede
+    has its own prices, hidden dishes and dishes of its own).
+
+    Explicit ids win; otherwise the bot turn's ambient sede. With no sede at
+    all the org's base carta is the only honest answer, and it is logged: an
+    order priced from it may not be what the sede charges.
+    """
+    org = org_id or peek_tenant()
+    sede = location_id or sede_context.current_sede_id()
+    if org and sede:
+        return await sede_menu.get_sede_menu(int(org), int(sede))
+    log.warning("menu.read_without_sede", bot_number=bot_number, org_id=org)
+    return await db.db_get_menu(bot_number) or {}
+
+
 async def find_dish(dish_name: str, bot_number: str) -> dict | None:
     if not dish_name or not dish_name.strip():
         log.info("find_dish.empty_query", bot_number=bot_number)
         return None
 
-    menu = await db.db_get_menu(bot_number)
+    menu = await _turn_menu(bot_number)
     if not menu:
         log.info("find_dish.no_menu", bot_number=bot_number)
         return None
+    return await _find_in_menu(dish_name, menu, bot_number)
 
+
+async def _find_in_menu(dish_name: str, menu: dict, bot_number: str) -> dict | None:
+    """find_dish's matching (rule 12) against a carta the caller already
+    holds, so a caller with an explicit sede does not re-read it."""
+    if not dish_name or not dish_name.strip():
+        return None
     name_lower = dish_name.lower().strip()
 
     # Pass 1: exact match (case-insensitive)
@@ -255,7 +280,7 @@ async def resolve_dish_for_cart(
     depth: the dish-card UI already hides these, but a stale client or a
     direct API call must not be able to bypass it.
     """
-    menu = await db.db_get_menu(bot_number)
+    menu = await _turn_menu(bot_number, org_id, location_id)
     if not menu:
         return None
 
@@ -273,7 +298,7 @@ async def resolve_dish_for_cart(
                 break
 
     if dish is None and name and name.strip():
-        dish = await find_dish(name, bot_number)
+        dish = await _find_in_menu(name, menu, bot_number)
 
     if dish is None:
         return None

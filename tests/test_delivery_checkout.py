@@ -35,6 +35,11 @@ import pytest
 
 from app.services.tenant_context import tenant_scope
 
+# The sede carta the seeded carts order from: checkout refuses a line whose
+# dish is not on it (migration 0093).
+_TEST_CARTA = json.dumps({"Platos": [{"name": "Bandeja Paisa", "price": 20000}], "Bebidas": [{"name": "Jugo", "price": 5000}]})
+
+
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
     not TEST_DB_URL, reason="TEST_DATABASE_URL not set — integration tests skipped",
@@ -444,8 +449,8 @@ async def _http_seed_checkout_org(
         suffix = uuid.uuid4().hex[:10]
         bot_number = f"573{suffix[:9]}"
         org_id = await conn.fetchval(
-            "INSERT INTO organizations (name, slug, features) VALUES ($1, $2, $3::jsonb) RETURNING id",
-            f"Checkout Org {suffix}", f"checkout-org-{suffix}", json.dumps({"currency": "COP"}),
+            "INSERT INTO organizations (name, slug, features, menu) VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id",
+            f"Checkout Org {suffix}", f"checkout-org-{suffix}", json.dumps({"currency": "COP"}), _TEST_CARTA,
         )
         location_id = await conn.fetchval(
             """
@@ -778,12 +783,12 @@ def test_checkout_tenant_isolation_with_colliding_ids(client):
         conn = await asyncpg.connect(TEST_DB_URL)
         try:
             org_a = await conn.fetchval(
-                "INSERT INTO organizations (name, slug, features) VALUES ($1, $2, $3::jsonb) RETURNING id",
-                f"Checkout Collision A {suffix}", f"checkout-collision-a-{suffix}", json.dumps({"currency": "COP"}),
+                "INSERT INTO organizations (name, slug, features, menu) VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id",
+                f"Checkout Collision A {suffix}", f"checkout-collision-a-{suffix}", json.dumps({"currency": "COP"}), _TEST_CARTA,
             )
             org_b = await conn.fetchval(
-                "INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id",
-                f"Checkout Collision B {suffix}", f"checkout-collision-b-{suffix}",
+                "INSERT INTO organizations (name, slug, menu) VALUES ($1, $2, $3::jsonb) RETURNING id",
+                f"Checkout Collision B {suffix}", f"checkout-collision-b-{suffix}", _TEST_CARTA,
             )
             bot_number = f"573{suffix}0"
             loc_l = await conn.fetchval(

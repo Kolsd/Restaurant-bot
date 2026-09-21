@@ -10,7 +10,7 @@
     document.querySelectorAll('[data-tab]').forEach(function (b) {
       b.classList.toggle('active', b.dataset.tab === tab);
     });
-    ['disp', 'inv', 'esc'].forEach(function (t) {
+    ['disp', 'inv', 'esc', 'sede'].forEach(function (t) {
       const el = document.getElementById('tab-' + t);
       if (el) el.style.display = t === tab ? '' : 'none';
     });
@@ -19,36 +19,6 @@
   document.querySelectorAll('[data-tab]').forEach(function (btn) {
     btn.addEventListener('click', function () { switchTab(btn.dataset.tab); });
   });
-
-  // ── Sync branches ─────────────────────────────────────────────────
-  var syncBtn = document.getElementById('btn-sync-branches');
-  if (syncBtn) {
-    syncBtn.addEventListener('click', async function () {
-      var ok = await mesioConfirm(
-        'Sincronizar menú a todas las sucursales. Los cambios locales de cada sucursal se sobreescribirán.',
-        { confirmText: 'Sincronizar', danger: false }
-      );
-      if (!ok) return;
-      syncBtn.disabled = true;
-      try {
-        var res = await fetch('/api/menu/sync-branches', {
-          method: 'POST',
-          headers: mesioHeaders()
-        });
-        if (!res.ok) {
-          var err = await res.json().catch(function () { return {}; });
-          throw new Error(err.detail || 'HTTP ' + res.status);
-        }
-        var data = await res.json();
-        var n = data.branches_updated != null ? data.branches_updated : 'todas las';
-        mesioToast('Menú sincronizado a ' + n + ' sucursales', 'success');
-      } catch (e) {
-        mesioToast('Error al sincronizar: ' + e.message, 'error');
-      } finally {
-        syncBtn.disabled = false;
-      }
-    });
-  }
 
   // ── Availability sub-filters ────────────────────────────────────
   // State: 'all' | 'available' | 'unavailable'
@@ -171,7 +141,7 @@
           '</div>' +
           '<label class="toggle" style="margin-left:auto;">' +
           '<input type="checkbox"' + (available ? ' checked' : '') + '>' +
-          '<span></span></label>' +
+          '<span class="toggle-slider"></span></label>' +
           '</div>';
       }).join('');
 
@@ -1015,6 +985,9 @@
             cat:             cat,
             price:           d.price           != null ? d.price : 0,
             desc:            d.description     || '',
+            // sku must round-trip or a save from here wipes it (the diner
+            // chat's tap-to-cart resolves dishes by it).
+            sku:             d.sku             || null,
             image_url:       d.image_url       || null,
             image_public_id: d.image_public_id || null,
             tags:            d.tags            || [],
@@ -1042,6 +1015,10 @@
 
   var cartaBtn = document.getElementById('btn-edit-carta');
   if (cartaBtn) cartaBtn.addEventListener('click', openCartaEditor);
+  // The general carta is the owner's/admin's (PM 2026-09-21). A gerente
+  // changes their own sede's in the "Carta de esta sede" tab.
+  var _role = (localStorage.getItem('rb_role') || '').toLowerCase();
+  if (cartaBtn && !/owner|admin/.test(_role)) cartaBtn.style.display = 'none';
 
   // ── Recipe costing sheets (recipes) ─────────────────────────────────────────
   var _allInventoryForRecipes = []; // populated by loadInventory for the recipe modal select

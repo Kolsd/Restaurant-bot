@@ -14,6 +14,7 @@ from app.routes.deps import (
 )
 from app.repositories import reviews_repo as rr, conversations_repo
 from app.repositories import stats_repo
+from app.services.sede_menu import parse_price
 from app.services.tenant_context import tenant_scope
 from app.services.logging import get_logger
 
@@ -266,31 +267,6 @@ async def dashboard_chart(request: Request, period: str = Query("week")):
         orders_data.append(data["orders"])
     return {"labels": labels, "revenue": revenue_data, "orders": orders_data}
 
-@router.get("/api/dashboard/menu")
-async def dashboard_menu(request: Request):
-    user = await get_current_user(request)
-    restaurant = await get_current_restaurant(request)
-    bot_number = restaurant.get("whatsapp_number", "")
-    
-    branch_header = request.headers.get("X-Branch-ID")
-    
-    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
-        branch_id = int(branch_header)
-        # P0 fix (2026-09): X-Branch-ID is a location_id — must be verified
-        # to belong to the caller's own org before trusting its whatsapp
-        # number (previously unchecked: any owner could pass another
-        # tenant's location id and have their bot_number filter switched
-        # to it, leaking that tenant's menu).
-        branch_rest = await db.db_get_restaurant_by_location_id(branch_id)
-        if (
-            branch_rest
-            and branch_rest.get("whatsapp_number")
-            and branch_rest.get("org_id") == restaurant.get("org_id", restaurant.get("id"))
-        ):
-            bot_number = branch_rest["whatsapp_number"]
-            
-    return {"menu": await db.db_get_menu(bot_number) or {}}
-
 @router.get("/api/menu/availability")
 async def get_menu_availability(request: Request):
     await require_auth(request)
@@ -379,8 +355,10 @@ async def update_menu_structure(request: Request):
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     
-    if "owner" not in user.get("role", ""):
-        raise HTTPException(status_code=403, detail="Solo el dueño puede editar el menú.")
+    # owner == admin (PM 2026-09-20). A gerente changes their own sede's
+    # carta through /api/menu/sede/*, never the base every sede inherits.
+    if not may_span_locations(user):
+        raise HTTPException(status_code=403, detail="Solo el dueño o un admin pueden editar la carta general.")
 
     # Wave-2: parent_restaurant_id no longer exists. X-Branch-ID guard is sufficient.
     branch_header = request.headers.get("X-Branch-ID")
@@ -394,9 +372,13 @@ async def update_menu_structure(request: Request):
 
     # 🛡️ Strict backend validation: ensure prices are numeric
     for cat, items in new_menu.items():
+        if not isinstance(items, list):
+            raise HTTPException(status_code=400, detail=f"La categoría '{cat}' no tiene una lista de platos.")
         for item in items:
+            if not isinstance(item, dict):
+                raise HTTPException(status_code=400, detail=f"Hay un plato inválido en '{cat}'.")
             try:
-                item["price"] = float(item.get("price", 0))
+                item["price"] = parse_price(item.get("price", 0))
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"El precio del plato '{item.get('name')}' debe ser un número (sin signos $ ni letras).")
 

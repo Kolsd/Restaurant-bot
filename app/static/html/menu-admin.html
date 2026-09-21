@@ -42,6 +42,7 @@
             <button class="seg-btn active" data-tab="disp">🍽️ Disponibilidad</button>
             <button class="seg-btn" data-tab="inv">📦 Inventario</button>
             <button class="seg-btn" data-tab="esc">🧪 Escandallos</button>
+            <button class="seg-btn" data-tab="sede">🏪 Carta de esta sede</button>
           </div>
         </div>
       </div>
@@ -57,7 +58,6 @@
           </div>
           <span id="menu-counter" style="margin-left: auto; font-size: 12px; color: var(--text-3);">— / — disponibles</span>
           <button class="btn" id="btn-edit-carta"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>Editar carta</button>
-          <button class="btn primary" id="btn-sync-branches">🔄 Sincronizar sucursales</button>
         </div>
 
         <!-- Visual onboarding widget — shows photo coverage and which dishes still need images. -->
@@ -116,6 +116,20 @@
         <!-- Recipe costing sheets — rendered dynamically from /api/inventory/recipes -->
         <div id="recipes-container" class="g-2">
           <div style="padding:18px;color:var(--text-3);font-size:13px;">Cargando escandallos&hellip;</div>
+        </div>
+      </div>
+
+      <!-- THIS SEDE'S CARTA — its prices, hidden dishes and own dishes on top of
+           the org's carta (migration 0093). Rendered by menu-sede.js. -->
+      <div id="tab-sede" style="display:none;">
+        <div class="row" style="margin-bottom: 14px;">
+          <div>
+            <div style="font-size: 15px; font-weight: 600;">Carta de esta sede</div>
+            <div style="font-size: 12px; color: var(--text-3); margin-top: 2px;">Cambia precios, oculta platos o agrega platos propios solo para esta sede. La carta general no cambia.</div>
+          </div>
+        </div>
+        <div id="sede-carta-body">
+          <div style="padding:18px;color:var(--text-3);font-size:13px;">Cargando carta de la sede&hellip;</div>
         </div>
       </div>
 
@@ -263,5 +277,6 @@
 <!-- are defined when menu-admin.js wires the button.                         -->
 <script src="/static/js/dashboard-features.js"></script>
 <script src="/static/js/pages/menu-admin.js"></script>
+<script src="/static/js/pages/menu-sede.js"></script>
 </body>
 </html>

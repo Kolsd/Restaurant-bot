@@ -41,6 +41,11 @@ from datetime import datetime, timezone as dt_timezone
 import asyncpg
 import pytest
 
+# The sede carta the seeded carts order from: checkout refuses a line whose
+# dish is not on it (migration 0093).
+_TEST_CARTA = json.dumps({"Platos": [{"name": "Bandeja Paisa", "price": 20000}], "Bebidas": [{"name": "Jugo", "price": 5000}]})
+
+
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
     not TEST_DB_URL, reason="TEST_DATABASE_URL not set — integration tests skipped",
@@ -252,8 +257,8 @@ async def _seed_checkout_org(
         suffix = uuid.uuid4().hex[:10]
         bot_number = f"573{suffix[:9]}"
         org_id = await conn.fetchval(
-            "INSERT INTO organizations (name, slug, features) VALUES ($1, $2, $3::jsonb) RETURNING id",
-            f"Cashier Checkout Org {suffix}", f"cashier-checkout-{suffix}", json.dumps({"currency": "COP"}),
+            "INSERT INTO organizations (name, slug, features, menu) VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id",
+            f"Cashier Checkout Org {suffix}", f"cashier-checkout-{suffix}", json.dumps({"currency": "COP"}), _TEST_CARTA,
         )
         location_id = await conn.fetchval(
             """
@@ -344,6 +349,39 @@ def test_checkout_refused_when_dish_marked_sold_out(client):
         assert "Bandeja Paisa" in detail["message"]
 
         assert _run(_count_orders(info["org_id"])) == 0, "a sold-out refusal must never create an order row"
+    finally:
+        _run(_teardown_org(info["org_id"]))
+
+
+async def _hide_at_sede(org_id: int, location_id: int, dish_name: str) -> None:
+    conn = await asyncpg.connect(TEST_DB_URL)
+    try:
+        await conn.execute(
+            """INSERT INTO location_menu_overrides (org_id, location_id, dish_name, hidden)
+               VALUES ($1, $2, $3, TRUE)""",
+            org_id, location_id, dish_name,
+        )
+    finally:
+        await conn.close()
+
+
+def test_checkout_refused_when_the_sede_hid_the_dish_after_it_was_added(client):
+    """The sede took the dish off its carta (migration 0093) between the
+    add-to-cart and the checkout: the stale line must not become an order."""
+    info = _run(_seed_checkout_org())
+    try:
+        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"]))
+        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+            {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 40000.0, "line_id": "a1"},
+        ]))
+        _run(_hide_at_sede(info["org_id"], info["location_id"], "bandeja paisa"))
+
+        resp = _post(client, "/api/diner/delivery/checkout", json=_default_checkout_body(token))
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "dish_not_on_carta"
+        assert "Bandeja Paisa" in detail["message"]
+        assert _run(_count_orders(info["org_id"])) == 0
     finally:
         _run(_teardown_org(info["org_id"]))
 

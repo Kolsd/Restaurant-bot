@@ -250,6 +250,39 @@ WhatsApp/table lookups get it from `db_get_restaurant_by_phone` (which returns
 `location_id` alongside the org in `id`), and the owner's sold-out toggle
 (`/api/menu/availability`) refuses with 400 until a sede is picked.
 
+### The carta is the org's, with per-sede changes (PM 2026-09-21, migration 0093)
+
+`organizations.menu` stays the ONE base carta. On top of it each sede may:
+- charge its own price — `location_menu_overrides.price` (NULL = base price).
+  It survives later base-price changes until someone removes it;
+- hide a dish — `location_menu_overrides.hidden`;
+- sell dishes of its own — `location_menu_dishes` (full dish JSONB + category).
+  A name the base already has is refused; if the base later gains one, the
+  sede's own dish wins.
+
+Matched by dish NAME, case-insensitive (unique on `lower(dish_name)`), like
+`menu_availability`. Both tables: RLS `org_isolation` + FORCE, FK to
+`locations` ON DELETE CASCADE.
+
+- **Reading a sede's carta = `services/sede_menu.get_sede_menu(org_id, location_id)`.**
+  Never `db_get_menu(bot_number)` for anything that shows or prices a dish at a
+  sede: it returns the base and, for a chain sharing one number, can't tell
+  sedes apart. `location_id=None` returns the base (brand pages only).
+- **The bot** reads the carta deep in its call chain. `agent.chat` opens a
+  `sede_context` turn and names the sede once the restaurant resolves
+  (`set_sede`); `orders._turn_menu` / `find_dish` read it. A read with no sede
+  falls back to the base and logs `menu.read_without_sede`.
+  `_load_restaurant_context` now honours the web session's `location_id`.
+  Before, a table-less (/pedir) turn used the org's default sede.
+- **Who edits:** `PUT /api/menu/update` (base) → owner/admin only.
+  `/api/menu/sede*` (`routes/sede_menu_routes.py`) → owner/admin for the sede
+  they pick, gerente pinned to their own (via `resolve_sede_filter`). UI: the
+  "Carta de esta sede" tab in `/menu-admin` (`pages/menu-sede.js`).
+- Delivery checkout re-checks each cart line against the sede's carta
+  (`dish_not_on_carta`), like the sold-out re-check.
+- `/pedir/{slug}` stays ONE link per org (PM 2026-09-21); the sede picked by
+  GPS decides the carta through the diner session's `location_id`.
+
 ### Legacy notes
 - `db_calculate_tips_by_attendance` and `db_calculate_payroll` respect `branch_id` via `ANY($n::int[])`.
 - For operational staff: `restaurant_id` comes from the staff member's own DB record.

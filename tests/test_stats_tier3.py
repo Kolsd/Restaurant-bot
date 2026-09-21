@@ -281,7 +281,7 @@ def test_public_menu_context_includes_table_context_key(monkeypatch):
     async def _fake_restaurant(wa):
         return {"id": 1, "name": "Test", "features": {}, "whatsapp_number": "+57300"}
 
-    async def _fake_availability(rid):
+    async def _fake_availability(rid, location_id):
         return {}
 
     async def _fake_active_session(tid, oid):
@@ -289,7 +289,10 @@ def test_public_menu_context_includes_table_context_key(monkeypatch):
 
     monkeypatch.setattr("app.routes.tables.db.db_get_table_by_id", _fake_table)
     monkeypatch.setattr("app.routes.tables.get_table_wa_number", _fake_wa)
-    monkeypatch.setattr("app.routes.tables.db.db_get_menu", _fake_menu)
+    async def _fake_sede_menu(org_id, location_id):
+        return {}
+
+    monkeypatch.setattr("app.routes.tables.sede_menu.get_sede_menu", _fake_sede_menu)
     monkeypatch.setattr("app.routes.tables.db.db_get_restaurant_by_bot_number", _fake_restaurant)
     monkeypatch.setattr("app.routes.tables.db.db_get_menu_availability", _fake_availability)
     monkeypatch.setattr("app.routes.tables._get_active_session_for_table", _fake_active_session)
@@ -318,7 +321,7 @@ def test_public_menu_context_table_context_populated(monkeypatch):
     async def _fake_restaurant(wa):
         return {"id": 1, "name": "Test", "features": {}, "whatsapp_number": "+57300"}
 
-    async def _fake_availability(rid):
+    async def _fake_availability(rid, location_id):
         return {}
 
     async def _fake_active_session(tid, oid):
@@ -329,7 +332,10 @@ def test_public_menu_context_table_context_populated(monkeypatch):
 
     monkeypatch.setattr("app.routes.tables.db.db_get_table_by_id", _fake_table)
     monkeypatch.setattr("app.routes.tables.get_table_wa_number", _fake_wa)
-    monkeypatch.setattr("app.routes.tables.db.db_get_menu", _fake_menu)
+    async def _fake_sede_menu(org_id, location_id):
+        return {}
+
+    monkeypatch.setattr("app.routes.tables.sede_menu.get_sede_menu", _fake_sede_menu)
     monkeypatch.setattr("app.routes.tables.db.db_get_restaurant_by_bot_number", _fake_restaurant)
     monkeypatch.setattr("app.routes.tables.db.db_get_menu_availability", _fake_availability)
     monkeypatch.setattr("app.routes.tables._get_active_session_for_table", _fake_active_session)

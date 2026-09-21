@@ -65,6 +65,7 @@ from app.services import database as db
 from app.services import delivery as delivery_service
 from app.services import orders
 from app.services import realtime
+from app.services import sede_menu
 from app.services import state_store
 from app.services.naming import restaurant_display_name
 from app.services import turnstile
@@ -347,14 +348,17 @@ def _cart_error_to_http(error: str) -> HTTPException:
     return HTTPException(status_code=422, detail=error or "No pudimos actualizar tu pedido")
 
 
-async def _opening_turn(bot_number: str, restaurant_name: str, table_name: str | None = None) -> dict:
+async def _opening_turn(
+    org_id: int, location_id: int | None, restaurant_name: str, table_name: str | None = None,
+) -> dict:
     """Deterministic opening turn (greeting + category chips) — shared by a
     fresh scan on a free table (create_diner_session), a participant who
     just supplied the right join code (diner_join), and a delivery/pickup
     session (no table_name — docs/claude/delivery-web.md chunk 2). No LLM
     round-trip for a fixed template. Caller must already be inside
-    tenant_scope(org_id)."""
-    menu = await db.db_get_menu(bot_number) or {}
+    tenant_scope(org_id). The chips are the categories of THIS sede's carta
+    (migration 0093), which may hold categories of its own."""
+    menu = await sede_menu.get_sede_menu(org_id, location_id)
     categories = [c for c, dishes in menu.items() if isinstance(dishes, list) and dishes]
     reply_blocks = []
     if categories:
@@ -443,7 +447,7 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
             order_mode=body.order_mode,
         )
 
-        turn = await _opening_turn(bot_number, restaurant_name)
+        turn = await _opening_turn(org_id, location_id, restaurant_name)
 
     log.info(
         "diner_session.opened",
@@ -590,7 +594,7 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         await tables_repo.db_set_session_join_code(new_session["id"], join_code)
         await tables_repo.db_mark_session_verified(new_session["id"])
 
-        turn = await _opening_turn(bot_number, restaurant_name, table_name)
+        turn = await _opening_turn(org_id, location_id, restaurant_name, table_name)
 
     log.info(
         "diner_session.opened",
@@ -659,7 +663,7 @@ async def diner_join(request: Request, body: DinerJoinRequest):
             restaurant = await db.db_get_restaurant_by_org_id(org_id)
             restaurant_name = (restaurant or {}).get("name") or "nuestro restaurante"
             currency = _features_dict((restaurant or {}).get("features")).get("currency", "COP")
-            turn = await _opening_turn(bot_number, restaurant_name, table_name)
+            turn = await _opening_turn(org_id, location_id, restaurant_name, table_name)
             return {**turn, "restaurant_name": restaurant_name, "currency": currency, "table_name": table_name}
 
         new_session = await tables_repo.db_link_participant_session(
@@ -696,7 +700,7 @@ async def diner_join(request: Request, body: DinerJoinRequest):
         restaurant = await db.db_get_restaurant_by_org_id(org_id)
         restaurant_name = (restaurant or {}).get("name") or "nuestro restaurante"
         currency = _features_dict((restaurant or {}).get("features")).get("currency", "COP")
-        turn = await _opening_turn(bot_number, restaurant_name, table_name)
+        turn = await _opening_turn(org_id, location_id, restaurant_name, table_name)
 
     log.info("diner_join.success", org_id=org_id, table_id=table_id, session_id=new_session.get("id"))
 
@@ -733,7 +737,7 @@ async def diner_chat(request: Request, body: DinerChatRequest):
         stripped = user_message
         if stripped.lower().startswith("cat:"):
             category = stripped[4:].strip()
-            menu = await db.db_get_menu(bot_number) or {}
+            menu = await sede_menu.get_sede_menu(org_id, location_id)
             dishes = menu.get(category)
             if isinstance(dishes, list) and dishes:
                 feats = _features_dict((await db.db_get_restaurant_by_org_id(org_id) or {}).get("features"))
@@ -786,7 +790,9 @@ async def diner_menu(token: str = Query(..., min_length=1, max_length=200)):
     with tenant_scope(org_id):
         await diner_sessions_repo.touch_last_seen(token, org_id)
         restaurant = await db.db_get_restaurant_by_org_id(org_id)
-        menu = await db.db_get_menu(bot_number) or {}
+        # This sede's carta: its prices, without what it hides, plus its own
+        # dishes (migration 0093).
+        menu = await sede_menu.get_sede_menu(org_id, location_id)
         # Sold out is per sede (migration 0091): this session belongs to one.
         availability = await db.db_get_menu_availability(org_id, location_id)
 

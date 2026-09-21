@@ -38,6 +38,7 @@ from app.routes.orders_routes import router as orders_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.auth_routes import router as auth_router
 from app.routes.settings_routes import router as settings_router
+from app.routes.sede_menu_routes import router as sede_menu_router
 from app.routes.team_routes import router as team_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
@@ -334,6 +335,7 @@ app.include_router(auth_router)
 app.include_router(settings_router)
 app.include_router(team_router)
 app.include_router(stats_router)
+app.include_router(sede_menu_router)
 app.include_router(chat_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)

@@ -24,6 +24,7 @@
 10. WhatsApp is being retired. Web push is out of scope until delivery is built.
 11. The superadmin edits only business (organization) data; each location's data is edited by the restaurant.
 12. Sales hook = 8 free days on top of the basic plan using `comp_until` (NOT a `plan_code='free'`). NOT implemented; still need to confirm whether it's Pulso or Restaurante.
+13. Each sede is its own restaurant (2026-09-20). The carta is the org's plus per-sede overrides: own price, hidden dish, own dishes. The gerente edits their own sede's; a sede price survives base-price changes. `/pedir/{slug}` stays one link per org and the sede picked by GPS decides the carta (2026-09-21, migration 0093; `rls-multitenant.md`).
 
 ### Next session — in this order
 1. **Validate the bot with the real LLM — blocking.** Everything verified ran WITHOUT `ANTHROPIC_API_KEY`. The PM loads the key; run the full `pytest tests/e2e` (44 tests with LLM) and `python run_ai_sim.py` (~$2-5). Check: the `add_to_cart` tool creates lines with `line_id`, the cart enters context with sanitized notes, NPS and checkout written via web chat.

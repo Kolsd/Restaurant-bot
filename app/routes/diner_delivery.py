@@ -56,6 +56,7 @@ from app.services import database as db
 from app.services import delivery
 from app.services import orders
 from app.services import realtime
+from app.services import sede_menu
 from app.services import state_store
 from app.services.naming import restaurant_display_name
 from app.services import turnstile
@@ -468,6 +469,23 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
                 raise _refusal(
                     "dish_sold_out",
                     f"'{dish_name}' está agotado en este momento. Quítalo de tu carrito para continuar.",
+                )
+
+        # A dish this sede stopped selling (hidden, or one of its own dishes
+        # removed) after it went into the cart — same hole as above, for the
+        # per-sede carta of migration 0093.
+        sede_carta = await sede_menu.get_sede_menu(org_id, location_id)
+        on_carta = {
+            sede_menu.dish_key(d.get("name"))
+            for dishes in sede_carta.values() if isinstance(dishes, list)
+            for d in dishes if isinstance(d, dict) and d.get("active", True) is not False
+        }
+        for item in cart_items:
+            dish_name = (item.get("name") or "").strip()
+            if dish_name and sede_menu.dish_key(dish_name) not in on_carta:
+                raise _refusal(
+                    "dish_not_on_carta",
+                    f"'{dish_name}' ya no está en la carta de esta sede. Quítalo de tu carrito para continuar.",
                 )
 
         subtotal = quantize_money(money_sum(to_decimal(i.get("subtotal")) for i in cart_items), currency)
