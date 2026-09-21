@@ -96,7 +96,12 @@ async def login(username: str, password: str) -> dict:
                 # `staff WHERE org_id=$1`) — always an org_id, safe.
                 restaurant = await db.db_get_restaurant_by_org_id(branch_id)
                 if restaurant:
-                    restaurant_name = restaurant.get("name", "")
+                    # display_name (migration 0092) names the sede when the
+                    # org runs several, so the dashboard header and every
+                    # report say which restaurant they are about.
+                    restaurant_name = (
+                        restaurant.get("display_name") or restaurant.get("name", "")
+                    )
                     whatsapp_number = restaurant.get("whatsapp_number", "")
                     raw = restaurant.get("features") or {}
                     features = _json.loads(raw) if isinstance(raw, str) else dict(raw)

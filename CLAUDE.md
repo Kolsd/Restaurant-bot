@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v13.0 (head `0091_menu_availability_sede`; 2026 passed / 6 skipped with DB, run as `postgres`)
+# Mesio Restaurant Bot — v13.0 (head `0092_restaurants_display_name`; 2035 passed / 6 skipped with DB, run as `postgres`)
 
 Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_use). Product: the diner's own web channel (QR → `/chat/{table_id}`); WhatsApp is being retired.
 
@@ -55,6 +55,7 @@ Local Windows environment: `.venv` Py 3.12, Postgres 16 (`postgres`/`mesio_local
 - **Org vs location**: `org_id` and `location_id` are distinct integers; never guess or fall back between them. `db_get_restaurant_by_location_id` / `_by_org_id` per intent. Tenant tests seed ids that collide on purpose.
 - **Sede scoping**: every staff-facing listing filters by sede via `deps.resolve_sede_filter`. Only `owner`/`admin` may span sedes or pick one with `X-Branch-ID`; everyone else — `gerente` included — is pinned to their own `location_id`, and no sede means 403, never org-wide. Never add a new header read. Detail: `rls-multitenant.md`.
 - **Inventory is per sede**: stock rows carry `location_id`, creating one requires naming a sede, and "the same product at another sede" is matched by `lower(name)` within the org — used by both transfers and order deduction. Pass `location_id` to `deduct_inventory_in_tx`. Detail: `rls-multitenant.md`.
+- **Sede name**: `restaurants.display_name` ("Marca · Sede" only when the org has several) is what a restaurant calls itself to a human; `name` stays the org's. Python mirror: `services/naming.py`.
 - **"Agotado" is per sede**: `menu_availability` is keyed `(org_id, location_id, dish_name)`. `db_get_menu_availability` REQUIRES a `location_id` and `db_set_dish_availability` raises without one — no org-wide fallback. Only the public `/r/{slug}` brand pages use `db_get_menu_availability_any_sede`.
 - **Money**: `Decimal` + `services/money.py`; `float` only at the JSON edge (`# JSON boundary`). Never Decimal in `state_store`.
 - **4 workers**: mutable state via `state_store` (Redis). Inbox worker claim-then-ack, never a long transaction.

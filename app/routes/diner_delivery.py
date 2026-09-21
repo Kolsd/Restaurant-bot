@@ -57,6 +57,7 @@ from app.services import delivery
 from app.services import orders
 from app.services import realtime
 from app.services import state_store
+from app.services.naming import restaurant_display_name
 from app.services import turnstile
 from app.services.logging import get_logger, mask_email
 from app.services.money import money_sum, quantize_money, to_decimal
@@ -589,7 +590,15 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
         # Fire-and-forget — see _send_order_confirmation_email's docstring.
         # Never awaited: a slow/broken email provider must not delay or
         # fail this response.
-        _fire_and_forget(_send_order_confirmation_email(body.customer_email, org.get("name") or "", public_code))
+        # Name the sede in the email too — the customer has to know which
+        # kitchen is cooking, not just the brand (0092 / naming.py).
+        _sedes = await db.db_get_org_locations(org_id)
+        _email_name = restaurant_display_name(
+            org.get("name"),
+            (location or {}).get("name"),
+            len(_sedes or []),
+        )
+        _fire_and_forget(_send_order_confirmation_email(body.customer_email, _email_name, public_code))
 
     response = {
         "order_id": created["id"],
@@ -667,7 +676,8 @@ def _public_order_items_view(items: list) -> list[dict]:
     return out
 
 
-def _public_order_view(order: dict, org: dict, location: dict, currency: str, nps_already_submitted: bool) -> dict:
+def _public_order_view(order: dict, org: dict, location: dict, currency: str,
+                       nps_already_submitted: bool, sede_count: int = 1) -> dict:
     """Everything (and ONLY what) /pedido/{code} needs to render.
 
     Deliberately EXCLUDES: customer_phone, customer_email (chunk-6
@@ -684,7 +694,11 @@ def _public_order_view(order: dict, org: dict, location: dict, currency: str, np
     status = order.get("status")
     return {
         "public_code": order.get("public_code"),
-        "org_name": org.get("name") or "",
+        # The sede is what the customer actually ordered from; the brand
+        # alone would leave a two-sede city ambiguous (0092 / naming.py).
+        "org_name": restaurant_display_name(
+            org.get("name"), location.get("name"), sede_count,
+        ),
         "location_name": location.get("name") or "",
         "location_phone": location.get("phone") or None,
         "order_type": order_type,
@@ -753,6 +767,8 @@ async def diner_order_public_status(public_code: str, request: Request):
         org = await db.db_get_org_by_id(org_id)
         location = await db.db_get_location_by_id(location_id) if location_id else None
         already_submitted = order.get("nps_answered_at") is not None
+        # Only name the sede when there is more than one to tell apart.
+        sedes = await db.db_get_org_locations(org_id)
 
     if not org or not location or int(location.get("org_id") or -1) != org_id:
         # Same defensive shape as diner_delivery_checkout above — org_id and
@@ -761,7 +777,9 @@ async def diner_order_public_status(public_code: str, request: Request):
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
 
     currency = _features_dict(org.get("features")).get("currency", "COP")
-    return _public_order_view(order, org, location, currency, already_submitted)
+    return _public_order_view(
+        order, org, location, currency, already_submitted, sede_count=len(sedes or []),
+    )
 
 
 class DinerOrderCancelRequest(BaseModel):

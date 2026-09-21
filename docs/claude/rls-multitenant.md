@@ -210,6 +210,22 @@ un selector de sedes."
   migration 0091, see below. A transfer still deliberately does not touch
   availability: moving stock between sedes does not change what the org has.
 
+### The sede's own name (PM 2026-09-20, migration 0092)
+
+`restaurants.display_name` is "Marca · Sede" for an org with more than one
+location and the plain brand for an org with one. Use it wherever a
+restaurant names itself to a human — chat greeting, `/pedido/{code}`,
+customer emails, dashboard header. `name` is UNCHANGED (still the org's) and
+still what tenant resolution and older templates read; do not flip it.
+
+`app/services/naming.py::restaurant_display_name` is the in-Python mirror
+for the paths that merge an org row with a location row instead of reading
+the view (`diner.py::_resolve_diner_restaurant`). `tests/test_sede_display_name.py`
+asserts the two do not drift.
+
+Guards in both: a single sede, a blank sede name, or a sede named after the
+org all fall back to the plain brand.
+
 ### "Agotado" is per sede (PM 2026-09-20, migration 0091)
 
 `menu_availability`'s primary key is `(org_id, location_id, dish_name)` and

@@ -66,6 +66,7 @@ from app.services import delivery as delivery_service
 from app.services import orders
 from app.services import realtime
 from app.services import state_store
+from app.services.naming import restaurant_display_name
 from app.services import turnstile
 from app.services.agent import chat as agent_chat, _generate_join_code, _JOIN_CODE_RE
 from app.services.logging import get_logger
@@ -296,6 +297,17 @@ async def _resolve_diner_restaurant(org_id: int, location_id: int | None) -> dic
         (location.get("whatsapp_number") if location else None) or org_restaurant.get("whatsapp_number")
     )
     merged["location_id"] = location_id
+
+    # What the diner is told they are ordering from. The `restaurants` view
+    # computes this as `display_name` (migration 0092), but this helper
+    # merges an org row with a location row by hand rather than reading the
+    # view, so the same rule is applied here — see app/services/naming.py.
+    sedes = await db.db_get_org_locations(org_id)
+    merged["display_name"] = restaurant_display_name(
+        org_restaurant.get("name"),
+        location.get("name") if location else None,
+        len(sedes or []),
+    )
     return merged
 
 
@@ -411,7 +423,10 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
         if not restaurant or not restaurant.get("whatsapp_number"):
             raise HTTPException(status_code=404, detail="Restaurante no configurado para esta sede")
         bot_number = str(restaurant["whatsapp_number"]).split("_b")[0]
-        restaurant_name = restaurant.get("name") or "nuestro restaurante"
+        # display_name says WHICH sede when the org has several (0092).
+        restaurant_name = (
+            restaurant.get("display_name") or restaurant.get("name") or "nuestro restaurante"
+        )
         feats = _features_dict(restaurant.get("features"))
         currency = feats.get("currency", "COP")
         sede_name = location.get("name") or restaurant_name
@@ -522,7 +537,10 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         # Strip the "_b<timestamp>" branch suffix (see get_table_wa_number
         # in tables.py) so the bot_number matches what the inbox worker uses.
         bot_number = str(restaurant["whatsapp_number"]).split("_b")[0]
-        restaurant_name = restaurant.get("name") or "nuestro restaurante"
+        # display_name says WHICH sede when the org has several (0092).
+        restaurant_name = (
+            restaurant.get("display_name") or restaurant.get("name") or "nuestro restaurante"
+        )
         feats = _features_dict(restaurant.get("features"))
         currency = feats.get("currency", "COP")
         location_id_int = int(location_id) if location_id else None
