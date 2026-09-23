@@ -2595,3 +2595,40 @@ async def db_create_organization(
         elif val is None:
             d[field] = {} if field == "features" else []
     return d
+
+
+async def db_delete_new_organization(org_id: int) -> bool:
+    """Compensating delete for a provision that failed halfway through.
+
+    `services/provisioning.create_tenant` creates the organization before it
+    can know whether the owner's login name is free. When that last step
+    fails, the org and its sede are already committed, and leaving them
+    behind means every duplicate signup attempt adds a dead tenant to the
+    superadmin list and to the MRR roll-up.
+
+    This is NOT a general-purpose org delete. It refuses whenever the org
+    has anything attached that a real customer would have produced — a
+    user, an order or a table — so it can only ever remove the empty shell
+    it was written for. Returns True when the org was removed.
+
+    # Cross-tenant by nature (the caller has no scope yet).
+    """
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
+
+    pool = await _get_pool()
+    with bypass_tenant_scope_if_unset("provisioning_compensating_delete"):
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                in_use = await conn.fetchval(
+                    """SELECT EXISTS(SELECT 1 FROM users            WHERE org_id = $1)
+                            OR EXISTS(SELECT 1 FROM orders           WHERE org_id = $1)
+                            OR EXISTS(SELECT 1 FROM restaurant_tables WHERE org_id = $1)""",
+                    org_id,
+                )
+                if in_use:
+                    log.warning("restaurant_repo.compensating_delete_refused", org_id=org_id)
+                    return False
+                await conn.execute("DELETE FROM locations WHERE org_id = $1", org_id)
+                await conn.execute("DELETE FROM organizations WHERE id = $1", org_id)
+    log.info("restaurant_repo.compensating_delete_done", org_id=org_id)
+    return True

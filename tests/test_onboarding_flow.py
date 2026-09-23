@@ -142,13 +142,18 @@ class TestConvertWithOnboarding:
         call_kwargs = restaurant_repo.db_create_organization.await_args.kwargs
         assert call_kwargs.get("subscription_plan") == "restaurante"
 
-    def test_convert_starts_the_eight_day_free_trial(self, super_client, monkeypatch):
-        """Closed product decision (docs/claude/status.md #12): the sales hook
-        is 8 free days on top of the PAID plan via organizations.comp_until.
-        Nothing implemented it — db_set_comp_until had no caller at all, so
-        every converted customer started billable on day one."""
+    def test_convert_starts_the_advertised_free_trial(self, super_client, monkeypatch):
+        """Closed product decision (docs/claude/status.md #12, revised
+        2026-09-23): the sales hook is N free days on top of the PAID plan
+        via organizations.comp_until. Nothing implemented it — db_set_comp_until
+        had no caller at all, so every converted customer started billable on
+        day one. N is read from provisioning rather than written here: the
+        number the landing page promises and the number the product grants
+        were 14 and 8 for a while, and a test that hardcodes one of them is
+        how that goes unnoticed."""
         from datetime import datetime, timedelta, timezone
         from app.repositories import plan_limits_repo
+        from app.services.provisioning import DEFAULT_TRIAL_DAYS
         _patch_convert_deps(monkeypatch)
 
         resp = super_client.post(
@@ -160,14 +165,14 @@ class TestConvertWithOnboarding:
         args = plan_limits_repo.db_set_comp_until.await_args.args
         assert args[0] == 10, "the trial must be set on the org just created"
         comp_until = args[1]
-        expected = datetime.now(tz=timezone.utc) + timedelta(days=8)
+        expected = datetime.now(tz=timezone.utc) + timedelta(days=DEFAULT_TRIAL_DAYS)
         assert abs((comp_until - expected).total_seconds()) < 60, comp_until
 
         # And the founder is told, so they can quote the end date to the customer.
         assert resp.json()["comp_until"] is not None
 
     def test_convert_trial_days_zero_starts_no_trial(self, super_client, monkeypatch):
-        """A customer who is already paying should not silently get 8 free days."""
+        """A customer who is already paying should not silently get free days."""
         from app.repositories import plan_limits_repo
         _patch_convert_deps(monkeypatch)
 

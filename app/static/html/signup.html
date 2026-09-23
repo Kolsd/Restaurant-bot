@@ -194,6 +194,19 @@
           </div>
         </div>
 
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sg-password">Contraseña</label>
+            <input type="password" id="sg-password" name="password" placeholder="Mínimo 8 caracteres" autocomplete="new-password" required minlength="8" maxlength="200">
+            <div class="field-error" id="err-password"></div>
+          </div>
+          <div class="form-group">
+            <label for="sg-password2">Repite la contraseña</label>
+            <input type="password" id="sg-password2" name="password2" placeholder="Mínimo 8 caracteres" autocomplete="new-password" required minlength="8" maxlength="200">
+            <div class="field-error" id="err-password2"></div>
+          </div>
+        </div>
+
         <div class="form-group">
           <label for="sg-plan">Plan de interés</label>
           <select id="sg-plan" name="plan" required>
@@ -207,7 +220,7 @@
           <div class="field-hint">Todos los precios + IVA. Puedes cambiar de plan en cualquier momento.</div>
         </div>
 
-        <button type="submit" class="signup-submit" id="signup-btn">Solicitar acceso gratis</button>
+        <button type="submit" class="signup-submit" id="signup-btn">Crear mi cuenta gratis</button>
         <p class="signup-legal">
           Al registrarte aceptas los <a href="/terms">Términos de servicio</a> y la
           <a href="/privacy">Política de privacidad</a> de Mesio.
@@ -217,9 +230,10 @@
 
     <div class="signup-success" id="signup-success">
       <div class="check-icon">✅</div>
-      <h2>¡Listo! Te contactamos pronto</h2>
-      <p>Recibimos tu solicitud. Un asesor de Mesio te escribirá por WhatsApp en menos de 24 horas para activar tu prueba gratuita.</p>
-      <a href="/" class="btn btn-primary btn-sm">Volver al inicio</a>
+      <h2>¡Tu cuenta está lista!</h2>
+      <p id="success-detail">Ya puedes entrar y empezar a configurar tu carta.</p>
+      <p>Tu usuario es <strong id="success-username"></strong> y tu contraseña, la que acabas de elegir.</p>
+      <a href="/login" class="btn btn-primary btn-sm">Entrar a Mesio</a>
     </div>
 
   </div>
@@ -253,7 +267,7 @@ function _showFieldError(fieldId, msg) {
   el.style.display = msg ? 'block' : 'none';
 }
 function _clearErrors() {
-  ['nombre','restaurante','email','telefono','ciudad','plan'].forEach(function(f) {
+  ['nombre','restaurante','email','telefono','ciudad','plan','password','password2'].forEach(function(f) {
     _showFieldError(f, '');
   });
 }
@@ -270,6 +284,15 @@ function _validate(payload) {
   }
   if (!payload.ciudad.trim()) { _showFieldError('ciudad', 'Campo requerido'); ok = false; }
   if (!payload.plan) { _showFieldError('plan', 'Selecciona un plan'); ok = false; }
+  if (payload.password.length < 8) {
+    _showFieldError('password', 'Mínimo 8 caracteres'); ok = false;
+  }
+  // Checked here and not only on the server: a typo in the password is the
+  // one mistake this form cannot let through, because recovering from it
+  // needs an email that the restaurant may not receive.
+  if (payload.password !== payload.password2) {
+    _showFieldError('password2', 'Las contraseñas no coinciden'); ok = false;
+  }
   return ok;
 }
 
@@ -284,37 +307,58 @@ form.addEventListener('submit', async function(e) {
     restaurante: document.getElementById('sg-restaurante').value.trim(),
     ciudad:      document.getElementById('sg-ciudad').value.trim(),
     plan:        document.getElementById('sg-plan').value,
+    // Not trimmed: spaces the owner typed are part of their password, and
+    // trimming here would hash something different from what they type at
+    // the login screen.
+    password:    document.getElementById('sg-password').value,
+    password2:   document.getElementById('sg-password2').value,
   };
 
   if (!_validate(payload)) return;
 
   btn.disabled = true;
-  btn.textContent = 'Enviando...';
+  btn.textContent = 'Creando tu cuenta...';
 
   try {
+    const body = {
+      nombre: payload.nombre, email: payload.email, telefono: payload.telefono,
+      restaurante: payload.restaurante, ciudad: payload.ciudad,
+      plan: payload.plan, password: payload.password,
+    };
     const r = await fetch('/api/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
     const data = await r.json().catch(function() { return {}; });
     if (r.status === 429) {
       btn.disabled = false;
-      btn.textContent = 'Solicitar acceso gratis';
+      btn.textContent = 'Crear mi cuenta gratis';
       alert('Demasiados intentos. Por favor espera 15 minutos e intenta de nuevo.');
+      return;
+    }
+    if (r.status === 409) {
+      btn.disabled = false;
+      btn.textContent = 'Crear mi cuenta gratis';
+      _showFieldError('email', 'Ya existe una cuenta con este correo. Entra desde /login.');
       return;
     }
     if (!r.ok) {
       btn.disabled = false;
-      btn.textContent = 'Solicitar acceso gratis';
+      btn.textContent = 'Crear mi cuenta gratis';
       alert(data.detail || 'Error al registrar. Por favor intenta de nuevo.');
       return;
+    }
+    document.getElementById('success-username').textContent = data.username || payload.email;
+    if (data.trial_days) {
+      document.getElementById('success-detail').textContent =
+        'Tienes ' + data.trial_days + ' días gratis. Ya puedes entrar y empezar a configurar tu carta.';
     }
     formSection.style.display = 'none';
     successEl.style.display   = 'block';
   } catch (err) {
     btn.disabled = false;
-    btn.textContent = 'Solicitar acceso gratis';
+    btn.textContent = 'Crear mi cuenta gratis';
     alert('Error de conexión. Por favor verifica tu internet e intenta de nuevo.');
   }
 });

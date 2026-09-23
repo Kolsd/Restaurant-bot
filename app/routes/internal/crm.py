@@ -11,6 +11,14 @@ from app.services import database as db
 from app.repositories.internal import crm_repo
 from app.services.logging import get_logger, mask_phone
 from app.routes.deps import verify_superadmin
+from app.services.provisioning import (
+    DEFAULT_TRIAL_DAYS,
+    ProvisioningError,
+    TenantAlreadyExists,
+    create_tenant,
+    generate_temp_password,
+    username_from,
+)
 
 log = get_logger(__name__)
 
@@ -205,28 +213,22 @@ class ConvertProspectBody(BaseModel):
     subscription_plan: str = "restaurante"  # legacy alias kept for compat
     features:        Optional[dict] = None
     skip_welcome_message: bool = False      # founder option to skip the welcome send on convert
-    trial_days:      int = 8                # Closed product decision (docs/claude/status.md #12):
-                                             # the sales hook is 8 free days ON TOP of the paid
-                                             # plan via organizations.comp_until — NOT a
-                                             # plan_code='free', which would have to be
-                                             # downgraded later. 0 disables the trial for a
-                                             # customer who is already paying.
+    trial_days:      int = DEFAULT_TRIAL_DAYS  # Closed product decision (docs/claude/status.md
+                                             # #12, revised 2026-09-23): free days ON TOP of
+                                             # the paid plan via organizations.comp_until —
+                                             # NOT a plan_code='free', which would have to be
+                                             # downgraded later. The number is whatever the
+                                             # landing page promises, so it lives in
+                                             # services/provisioning and is not repeated here.
+                                             # 0 disables the trial for a customer who is
+                                             # already paying.
 
 
 # ── Temp password generator ───────────────────────────────────────────────────
-import random
-import string as _string
-
-_SAFE_CHARS = (
-    _string.ascii_uppercase.replace("O", "").replace("I", "")
-    + _string.ascii_lowercase.replace("l", "").replace("o", "")
-    + _string.digits.replace("0", "").replace("1", "")
-)
-
-
-def _generate_temp_password(length: int = 8) -> str:
-    """Generate an 8-char alphanumeric password excluding confusable chars (0/O/l/1/I)."""
-    return "".join(random.SystemRandom().choice(_SAFE_CHARS) for _ in range(length))
+# One implementation, in services/provisioning, because both the CRM convert
+# and the self-serve signup hand out credentials. Re-exported under the old
+# private name so existing callers and tests keep working.
+_generate_temp_password = generate_temp_password
 
 
 async def _send_welcome_whatsapp(phone: str, username: str, temp_password: str) -> bool:
@@ -292,20 +294,19 @@ async def convert_prospect_to_restaurant(
 
     What this does:
       1. Reads the prospect row by id.
-      2. Validates we have the minimum to create an org (name + whatsapp).
-      3. Calls restaurant_repo.db_create_organization.
-      4. Auto-creates the primary location named 'Principal'.
-      5. Creates the first owner/admin user with a generated temp password.
-      6. Optionally sends a welcome email with login credentials (to
-         body.owner_email or prospect.email — WhatsApp is being retired,
-         see _send_welcome_whatsapp docstring).
-      7. Marks the prospect stage='cerrado' and tags it with `org:<id>`.
-      8. Adds a system note to the prospect timeline.
+      2. Validates we have the minimum to create an org (a name).
+      3. Delegates org + sede + trial + owner + welcome email to
+         services/provisioning.create_tenant — the same code path the
+         public self-serve signup runs, so the two cannot drift apart.
+      4. Marks the prospect stage='cerrado' and tags it with `org:<id>`.
+      5. Adds a system note to the prospect timeline.
 
     Idempotency:
-      Calling convert twice on the same prospect WILL fail at the org-create
-      step (UNIQUE constraint on whatsapp_number → 409). The caller should
-      check the prospect's tags for an existing `org:<id>` tag before retrying.
+      The prospect's tags are checked for an existing `org:<id>` first. A
+      second convert of an untagged prospect no longer collides on the
+      whatsapp_number index (the phone is optional since 2026-09-23), so it
+      would create a SECOND organization — the tag check is the guard, not
+      the database.
 
     Returns:
       {
@@ -322,10 +323,6 @@ async def convert_prospect_to_restaurant(
     Security note: temp_password is returned to the founder so they can relay
     credentials if WhatsApp delivery fails. It is NOT logged to structlog or Sentry.
     """
-    import asyncpg  # noqa: PLC0415
-    from app.repositories import restaurant_repo  # noqa: PLC0415
-    from app.services.password_hash import hash_password as _hash_pw  # noqa: PLC0415
-
     prospect = await crm_repo.db_get_prospect_by_id(pid)
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospecto no encontrado")
@@ -341,147 +338,62 @@ async def convert_prospect_to_restaurant(
         )
 
     name = (body.name or prospect.get("restaurant_name") or "").strip()
+    # The phone is OPTIONAL as of 2026-09-23. Requiring it made the UNIQUE
+    # index on organizations.whatsapp_number a business rule nobody chose:
+    # one owner could not have two restaurants, and a product whose channel
+    # is the web was refusing to create accounts over a WhatsApp column.
     wa   = (body.whatsapp_number or prospect.get("phone") or "").strip()
-    if not name or not wa:
+    if not name:
         raise HTTPException(
             status_code=400,
-            detail="Faltan datos: el prospecto debe tener restaurant_name y phone (o pasarlos en el body).",
+            detail="Faltan datos: el prospecto debe tener restaurant_name (o pasarlo en el body).",
         )
 
     plan = body.plan_code or body.subscription_plan or "restaurante"
 
-    # 1. Create the organization
-    try:
-        org = await restaurant_repo.db_create_organization(
-            name=name,
-            whatsapp_number=wa,
-            features=body.features or {},
-            subscription_plan=plan,
-        )
-    except asyncpg.UniqueViolationError as exc:
-        log.warning("crm.convert.unique_violation", prospect_id=pid, detail=str(exc))
-        raise HTTPException(
-            status_code=409,
-            detail="Ya existe una organización con ese teléfono. Verificá si ya fue convertido.",
-        )
-    except Exception as exc:
-        log.exception("crm.convert.org_create_failed", prospect_id=pid)
-        raise HTTPException(status_code=500, detail=f"Error creando la org: {str(exc)[:120]}")
-
-    # 2. Create the primary location
-    try:
-        primary_loc = await restaurant_repo.db_create_location(
-            org_id=org["id"],
-            name="Principal",
-            code="principal",
-            active=True,
-        )
-    except Exception:
-        log.exception("crm.convert.location_create_failed", prospect_id=pid, org_id=org["id"])
-        raise HTTPException(
-            status_code=500,
-            detail=f"Org #{org['id']} creada, pero falló creación de sede Principal.",
-        )
-
-    # 2b. Start the free trial. The decision has existed since 2026-09-12 and
-    #     nothing implemented it: db_set_comp_until was in the repo with no
-    #     caller and no route, so every converted customer started billable on
-    #     day one and the "8 días gratis" the landing page offers was not a
-    #     thing the product could actually do.
-    trial_until = None
-    if body.trial_days and body.trial_days > 0:
-        from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: PLC0415
-        from app.repositories import plan_limits_repo  # noqa: PLC0415
-        from app.services.tenant_context import bypass_tenant_scope as _bypass_scope  # noqa: PLC0415
-
-        trial_until = _dt.now(tz=_tz.utc) + _td(days=body.trial_days)
-        try:
-            with _bypass_scope("crm_convert_start_trial"):
-                await plan_limits_repo.db_set_comp_until(org["id"], trial_until)
-        except Exception:
-            # Non-fatal: the org exists and can operate; the founder can set
-            # the trial from the org screen. Never lose the conversion over it.
-            log.exception("crm.convert.trial_failed", prospect_id=pid, org_id=org["id"])
-            trial_until = None
-
-    # 3. Create the first admin/owner user
-    # Username = prospect email if available, else sanitized org name, else "owner"
+    # Steps 1-4 (org → sede → trial → owner → welcome email) are the same
+    # sequence the public self-serve signup runs, and they live in
+    # services/provisioning so that the two cannot drift apart. What stays
+    # here is the part that is genuinely CRM: reading the prospect, and the
+    # bookkeeping below.
     prospect_email = (prospect.get("email") or "").strip().lower()
-    if prospect_email and "@" in prospect_email:
-        base_username = prospect_email.split("@")[0]
-    else:
-        # Sanitize name → slug-like username (alphanumeric + dots)
-        import re as _re  # noqa: PLC0415
-        base_username = _re.sub(r"[^a-z0-9.]", "", name.lower().replace(" ", "."))[:20] or "owner"
-
-    temp_password = _generate_temp_password()
-    # Hash the password — NEVER log temp_password
-    pw_hash = _hash_pw(temp_password)
-
-    user_created = False
-    final_username = base_username
+    dest_email = (body.owner_email or prospect_email or "").strip().lower()
 
     try:
-        # Try the base username first; if it conflicts, append org_id suffix
-        created = await restaurant_repo.db_create_user(
-            username=base_username,
-            password_hash=pw_hash,
+        tenant = await create_tenant(
             restaurant_name=name,
-            role="owner",
-            branch_id=org["id"],
-            # P0 fix (2026-09): set the explicit org_id column too — this
-            # writer stores an ORG id in branch_id (owner of the whole org,
-            # not a specific sede), which is exactly the ambiguity that
-            # made auth resolution have to guess. location_id stays NULL:
-            # a fresh owner isn't scoped to one sede.
-            org_id=org["id"],
+            # Local part of the email, or a slug of the restaurant name —
+            # the historical behaviour of this endpoint, kept because the
+            # founder reads the username out to the customer.
+            username=username_from(prospect_email, name),
+            # Generated and returned once, for the founder to relay.
+            password=None,
+            owner_email=dest_email,
+            whatsapp_number=wa or None,
+            plan_code=plan,
+            trial_days=body.trial_days,
+            features=body.features or {},
+            send_welcome_email=not body.skip_welcome_message,
+            # A sales-assisted conversion must end with a working account
+            # even when the username is taken; the founder relays whatever
+            # it ended up being.
+            allow_username_suffix=True,
         )
-        if not created:
-            # Username collision — append org id to make unique
-            final_username = f"{base_username}.{org['id']}"
-            created = await restaurant_repo.db_create_user(
-                username=final_username,
-                password_hash=pw_hash,
-                restaurant_name=name,
-                role="owner",
-                branch_id=org["id"],
-            )
-        user_created = bool(created)
-    except Exception:
-        log.exception("crm.convert.user_create_failed", prospect_id=pid, org_id=org["id"])
-        # Non-fatal: org + location already created; surface error but don't block response
+    except TenantAlreadyExists as exc:
+        log.warning("crm.convert.already_exists", prospect_id=pid, stage=exc.stage)
+        raise HTTPException(status_code=409, detail=exc.message) from exc
+    except ProvisioningError as exc:
+        log.warning("crm.convert.provisioning_failed", prospect_id=pid, stage=exc.stage)
+        status = 400 if exc.stage == "validate" else 500
+        raise HTTPException(status_code=status, detail=exc.message) from exc
 
-    # 4. Send welcome email (best-effort, skippable). WhatsApp is being
-    #    retired — _send_welcome_whatsapp above is kept in place, unused, per
-    #    the "don't delete features outright" rule for the wave that fully
-    #    retires WhatsApp. body.owner_email lets the founder supply an
-    #    address at convert time even when the CRM row never captured one.
-    welcome_sent = False
-    dest_email = (body.owner_email or prospect_email or "").strip().lower()
-    if user_created and not body.skip_welcome_message:
-        if dest_email and "@" in dest_email:
-            from app.services.email import send_email  # noqa: PLC0415
-            from app.services.email_templates import render_welcome_email  # noqa: PLC0415
-
-            app_domain = os.getenv("APP_DOMAIN", "").strip()
-            login_url = f"https://{app_domain}/login" if app_domain else "https://mesio.app/login"
-            subject, html, text = render_welcome_email(
-                restaurant_name=name,
-                username=final_username,
-                temp_password=temp_password,
-                login_url=login_url,
-            )
-            try:
-                welcome_sent = await send_email(to=dest_email, subject=subject, html=html, text=text)
-            except Exception:
-                log.exception(
-                    "crm.convert.welcome_email_exception", prospect_id=pid, org_id=org["id"]
-                )
-                welcome_sent = False
-        else:
-            log.info(
-                "crm.convert.welcome_email_no_address", prospect_id=pid, org_id=org["id"]
-            )
+    org            = tenant.org
+    primary_loc    = tenant.location
+    final_username = tenant.username
+    temp_password  = tenant.temp_password
+    user_created   = tenant.user_created
+    welcome_sent   = tenant.welcome_email_sent
+    trial_until    = tenant.comp_until
 
     # 5. Update the prospect — stage + tag + audit note (best-effort)
     try:
