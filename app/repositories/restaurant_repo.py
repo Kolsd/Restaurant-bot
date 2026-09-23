@@ -1663,13 +1663,37 @@ async def _ensure_usage_table() -> None:
     pass
 
 
-async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
-    """Adds `tokens` to the restaurant's daily counter (atomic upsert).
+async def db_increment_token_usage(
+    restaurant_id: int,
+    tokens: int,
+    *,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+) -> None:
+    """Adds one LLM response's token counters to the daily row (atomic upsert).
+
+    `tokens` is the LEGACY counter (uncached input + output) and keeps
+    feeding `db_check_usage_limits`; the four keyword counters are the real
+    per-kind split that `cost_metrics_repo` prices (migration 0094). They
+    are keyword-only and default to 0 so a caller that has not been updated
+    degrades to the old behaviour instead of silently recording zeros in
+    the columns it does know about.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    if tokens <= 0:
+    counters = (tokens, input_tokens, output_tokens,
+                cache_read_tokens, cache_write_tokens)
+    if all(c <= 0 for c in counters):
         return
+    # A single negative counter must not subtract from the day's total.
+    tokens             = max(tokens, 0)
+    input_tokens       = max(input_tokens, 0)
+    output_tokens      = max(output_tokens, 0)
+    cache_read_tokens  = max(cache_read_tokens, 0)
+    cache_write_tokens = max(cache_write_tokens, 0)
+
     await _ensure_usage_table()
     async with _tenant_connection() as conn:
         # Insert both restaurant_id and org_id (same value during Wave 1).
@@ -1678,12 +1702,19 @@ async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
         # constraint (also restored by 0037b) keeps backward-compat for any
         # concurrent code path that reads by restaurant_id.
         await conn.execute(
-            """INSERT INTO subscription_usage (org_id, usage_date, total_tokens)
-               VALUES ($1, CURRENT_DATE, $2)
+            """INSERT INTO subscription_usage
+                   (org_id, usage_date, total_tokens, input_tokens,
+                    output_tokens, cache_read_tokens, cache_write_tokens)
+               VALUES ($1, CURRENT_DATE, $2, $3, $4, $5, $6)
                ON CONFLICT (org_id, usage_date) DO UPDATE
-               SET total_tokens = subscription_usage.total_tokens + $2,
-                   updated_at   = NOW()""",
-            restaurant_id, tokens,
+               SET total_tokens       = subscription_usage.total_tokens       + $2,
+                   input_tokens       = subscription_usage.input_tokens       + $3,
+                   output_tokens      = subscription_usage.output_tokens      + $4,
+                   cache_read_tokens  = subscription_usage.cache_read_tokens  + $5,
+                   cache_write_tokens = subscription_usage.cache_write_tokens + $6,
+                   updated_at         = NOW()""",
+            restaurant_id, tokens, input_tokens, output_tokens,
+            cache_read_tokens, cache_write_tokens,
         )
 
 

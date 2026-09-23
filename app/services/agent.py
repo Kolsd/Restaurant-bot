@@ -1134,14 +1134,33 @@ async def call_claude(
                 continue
             raise
 
-    # Registrar tokens reales consumidos
+    # Registrar tokens reales consumidos.
+    # Anthropic reports FOUR counters and `input_tokens` is only the uncached
+    # part: the tokens served from the prompt cache (the system prompt, the
+    # tool list and the carta — most of every turn, see the cache_control
+    # breakpoints above) live in cache_read_input_tokens and were previously
+    # recorded nowhere, which made every margin figure too cheap. Each is
+    # billed at a different rate, so they are stored apart (migration 0094)
+    # and priced apart (cost_estimator.estimate_cost_usd_breakdown).
     if restaurant_id is not None:
-        total_tokens = (
-            getattr(response.usage, "input_tokens", 0) +
-            getattr(response.usage, "output_tokens", 0)
-        )
-        if total_tokens > 0:
-            await db.db_increment_token_usage(restaurant_id, total_tokens)
+        usage = getattr(response, "usage", None)
+        input_tokens       = getattr(usage, "input_tokens", 0) or 0
+        output_tokens      = getattr(usage, "output_tokens", 0) or 0
+        cache_read_tokens  = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_write_tokens = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        # Legacy counter — unchanged on purpose: it feeds the per-day cap in
+        # db_check_usage_limits, and folding cache reads in would tighten
+        # that cap several-fold for anyone who has one configured.
+        total_tokens = input_tokens + output_tokens
+        if any((total_tokens, cache_read_tokens, cache_write_tokens)):
+            await db.db_increment_token_usage(
+                restaurant_id,
+                total_tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+            )
 
     # Guard: truncated responses may contain partial tool calls
     stop_reason = getattr(response, "stop_reason", None)
