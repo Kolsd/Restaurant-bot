@@ -13,6 +13,19 @@ let menuAvailability = {};
 let MENU_ITEMS = [];
 let editorMenuState = []; // 🛡️ FIX: Declared up front to avoid TDZ errors
 
+// `let` at the top level of a classic script does NOT create a property on
+// window, so `window.MENU_ITEMS = [...]` from another file writes a
+// DIFFERENT variable and openMenuEditor keeps reading this empty one. That
+// is exactly what happened to the full carta editor: menu-admin.js filled
+// window.MENU_ITEMS and the editor opened saying "Tu carta está vacía".
+// This setter is the only supported way in from another file.
+window.setMenuItems = function (items) {
+  MENU_ITEMS = Array.isArray(items) ? items : [];
+  // Kept in sync for any reader that still looks at the window property.
+  window.MENU_ITEMS = MENU_ITEMS;
+  return MENU_ITEMS.length;
+};
+
 async function loadMenu() {
   const h = window._dashHeaders;
   try {

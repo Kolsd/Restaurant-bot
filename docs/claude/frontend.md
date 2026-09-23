@@ -14,6 +14,21 @@
 
 Sprint A-W redesign detail in [docs/history/sprints.md](docs/history/sprints.md). For "what got deferred" see "Calendar pending items" above.
 
+## `window.X = ...` does NOT reach a top-level `let X` in another script (2026-09-23)
+
+These are classic scripts, not modules: a top-level `let` / `const` lives in
+script scope and is **not** a property of `window`. `menu-admin.js` was doing
+`window.MENU_ITEMS = [...]` and then calling `openMenuEditor()`, which reads
+the `let MENU_ITEMS` declared in `dashboard-features.js` — a different
+binding that stayed empty. The full carta editor therefore opened saying "Tu
+carta está vacía" for every restaurant, on top of a carta that was in the
+database. It fails silently: no error anywhere, just empty data.
+
+Rule: to hand data to another script file, call a function it exports on
+`window` (`window.setMenuItems(items)`), never assign a `window.<NAME>` that
+shadows its `let`. If you must read one, check `MENU_ITEMS === window.MENU_ITEMS`
+before trusting it.
+
 ## Visual Catalog v2 — Image Endpoints (`/api/menu/image/...`)
 
 Let the admin editor upload and delete dish images directly on Cloudinary from the browser. The backend only signs — the bytes never pass through our server.

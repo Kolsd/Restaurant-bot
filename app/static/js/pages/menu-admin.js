@@ -975,12 +975,16 @@
       var rMenu = await fetch('/api/dashboard/menu', { headers: window._dashHeaders });
       if (!rMenu.ok) throw new Error('HTTP ' + rMenu.status);
       var menu = (await rMenu.json()).menu || {};
-      window.MENU_ITEMS = [];
+      // Collected here, handed over with setMenuItems below: assigning
+      // window.MENU_ITEMS does NOT reach the variable openMenuEditor reads
+      // (a top-level `let` in a classic script is not a window property),
+      // which is why this editor used to open empty.
+      var items = [];
       Object.entries(menu).forEach(function (entry) {
         var cat = entry[0], dishes = entry[1];
         if (!Array.isArray(dishes)) return;
         dishes.forEach(function (d) {
-          window.MENU_ITEMS.push({
+          items.push({
             name:            d.name            || '',
             cat:             cat,
             price:           d.price           != null ? d.price : 0,
@@ -1006,10 +1010,11 @@
       return;
     }
 
-    if (typeof openMenuEditor !== 'function') {
+    if (typeof openMenuEditor !== 'function' || typeof window.setMenuItems !== 'function') {
       mesioToast('Editor no disponible (dashboard-features.js no cargó)', 'error');
       return;
     }
+    window.setMenuItems(items);
     openMenuEditor();
   }
 
@@ -1019,6 +1024,177 @@
   // changes their own sede's in the "Carta de esta sede" tab.
   var _role = (localStorage.getItem('rb_role') || '').toLowerCase();
   if (cartaBtn && !/owner|admin/.test(_role)) cartaBtn.style.display = 'none';
+
+  // ── Import a carta from a photo or pasted text ──────────────────────────────
+  // This produces a DRAFT and nothing else. The parsed dishes are loaded into
+  // MENU_ITEMS and handed to the SAME editor as "Editar carta", so they are
+  // only written when the owner saves there. A misread price is then a line to
+  // fix in an unsaved draft, never a price change on a live carta — which is
+  // the whole reason the reader is allowed to be wrong.
+
+  var _importModal   = document.getElementById('importCartaModal');
+  var _importFile    = document.getElementById('importCartaFile');
+  var _importText    = document.getElementById('importCartaText');
+  var _importStatus  = document.getElementById('importCartaStatus');
+  var _importGo      = document.getElementById('importCartaGo');
+  var _importDraft   = null;   // parsed menu, waiting for the owner to open it
+
+  function _importSetStatus(msg, kind) {
+    if (!_importStatus) return;
+    _importStatus.textContent = msg || '';
+    _importStatus.style.color = kind === 'error' ? 'var(--danger)'
+      : kind === 'ok' ? 'var(--brand)' : 'var(--text-3)';
+  }
+
+  function _openImportModal() {
+    if (!_importModal) return;
+    _importDraft = null;
+    if (_importFile) _importFile.value = '';
+    if (_importText) _importText.value = '';
+    if (_importGo) { _importGo.textContent = 'Leer carta'; _importGo.disabled = false; }
+    _importSetStatus('');
+    _importModal.style.display = 'flex';
+  }
+
+  function _closeImportModal() {
+    if (_importModal) _importModal.style.display = 'none';
+  }
+
+  function _readFileAsBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        // "data:image/png;base64,AAAA" → "AAAA"
+        var result = String(reader.result || '');
+        var comma  = result.indexOf(',');
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = function () { reject(new Error('No se pudo leer el archivo')); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function _draftIntoEditor(menu) {
+    var items = [];
+    Object.keys(menu).forEach(function (cat) {
+      var dishes = menu[cat];
+      if (!Array.isArray(dishes)) return;
+      dishes.forEach(function (d) {
+        items.push({
+          name:  d.name  || '',
+          cat:   cat,
+          price: d.price != null ? d.price : 0,
+          desc:  d.description || '',
+          // A draft has no sku, no photo and no ordering yet — those are
+          // assigned when the owner saves, exactly as for a dish typed by
+          // hand. Inventing them here would claim a history the dish lacks.
+          sku: null, image_url: null, image_public_id: null,
+          tags: [], badges: [], allergens: [],
+          featured: false, active: true, sort_order: 999,
+          calories: null, prep_time_min: null,
+        });
+      });
+    });
+    window._dashHeaders = mesioHeaders();
+    if (typeof openMenuEditor !== 'function' || typeof window.setMenuItems !== 'function') {
+      mesioToast('Editor no disponible (dashboard-features.js no cargó)', 'error');
+      return false;
+    }
+    window.setMenuItems(items);
+    openMenuEditor();
+    return true;
+  }
+
+  function _describeDraft(data) {
+    // Everything the reader was unsure about, said before the owner walks
+    // into the editor. Silent warnings are the same as no warnings.
+    var needReview = [];
+    Object.keys(data.menu || {}).forEach(function (cat) {
+      (data.menu[cat] || []).forEach(function (d) {
+        if (d.import_warnings && d.import_warnings.length) needReview.push(d.name);
+      });
+    });
+    var lines = ['Leí ' + data.dish_count + ' plato(s).'];
+    (data.warnings || []).forEach(function (w) { lines.push(w); });
+    if (needReview.length) {
+      var shown = needReview.slice(0, 8).join(', ');
+      lines.push(
+        needReview.length + ' necesitan que revises el precio: ' + shown +
+        (needReview.length > 8 ? '…' : '')
+      );
+    }
+    lines.push('Nada se ha guardado todavía.');
+    return lines.join(' ');
+  }
+
+  async function _runImport() {
+    if (!_importGo) return;
+
+    // Second press: the draft is ready and the owner wants to see it.
+    if (_importDraft) {
+      if (_draftIntoEditor(_importDraft.menu)) _closeImportModal();
+      return;
+    }
+
+    var file = _importFile && _importFile.files && _importFile.files[0];
+    var text = _importText ? _importText.value.trim() : '';
+    if (!file && !text) {
+      _importSetStatus('Sube una foto o pega el texto de la carta.', 'error');
+      return;
+    }
+    if (file && text) {
+      _importSetStatus('Usa una foto o el texto, no ambos.', 'error');
+      return;
+    }
+
+    _importGo.disabled = true;
+    _importSetStatus('Leyendo la carta… puede tardar unos segundos.');
+
+    try {
+      var body;
+      if (file) {
+        body = { image_b64: await _readFileAsBase64(file), image_type: file.type };
+      } else {
+        body = { text: text };
+      }
+      var res = await fetch('/api/menu/import', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
+        body: JSON.stringify(body),
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok) {
+        // The reader failing is normal and survivable: the editor is
+        // untouched and the owner can still type the carta by hand.
+        _importSetStatus(data.detail || 'No pude leer la carta. Puedes escribirla a mano.', 'error');
+        _importGo.disabled = false;
+        return;
+      }
+      _importDraft = data;
+      _importSetStatus(_describeDraft(data), 'ok');
+      _importGo.textContent = 'Abrir en el editor';
+      _importGo.disabled = false;
+    } catch (e) {
+      _importSetStatus('Error de conexión: ' + e.message, 'error');
+      _importGo.disabled = false;
+    }
+  }
+
+  var importBtn = document.getElementById('btn-import-carta');
+  if (importBtn) importBtn.addEventListener('click', _openImportModal);
+  // Same permission as the base carta: a gerente edits their own sede's.
+  if (importBtn && !/owner|admin/.test(_role)) importBtn.style.display = 'none';
+
+  var importClose  = document.getElementById('importCartaClose');
+  var importCancel = document.getElementById('importCartaCancel');
+  if (importClose)  importClose.addEventListener('click', _closeImportModal);
+  if (importCancel) importCancel.addEventListener('click', _closeImportModal);
+  if (_importGo)    _importGo.addEventListener('click', _runImport);
+  if (_importModal) {
+    _importModal.addEventListener('click', function (e) {
+      if (e.target === _importModal) _closeImportModal();
+    });
+  }
 
   // ── Recipe costing sheets (recipes) ─────────────────────────────────────────
   var _allInventoryForRecipes = []; // populated by loadInventory for the recipe modal select

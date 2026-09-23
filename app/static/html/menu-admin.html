@@ -57,7 +57,41 @@
             <button class="seg-btn">No disponibles</button>
           </div>
           <span id="menu-counter" style="margin-left: auto; font-size: 12px; color: var(--text-3);">— / — disponibles</span>
+          <button class="btn ghost" id="btn-import-carta"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 11V3M5 6l3-3 3 3M3 12v1h10v-1"/></svg>Importar carta</button>
           <button class="btn" id="btn-edit-carta"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>Editar carta</button>
+        </div>
+
+        <!-- Import a carta from a photo or pasted text. It produces a DRAFT:
+             the result opens in the same editor as "Editar carta" and is only
+             saved when the owner saves there. Nothing here writes a menu. -->
+        <div class="modal-overlay" id="importCartaModal" style="display:none;">
+          <div class="modal" style="max-width:560px;">
+            <div class="modal-head">
+              <h3 class="modal-title">Importar carta</h3>
+              <button class="modal-close" id="importCartaClose" type="button">&times;</button>
+            </div>
+            <div class="modal-body">
+              <p style="font-size:13px;color:var(--text-2);margin:0 0 14px;">
+                Sube una foto de tu carta o pega el texto. Mesio la lee y te deja los platos
+                listos en el editor para que los revises. <strong>No se guarda nada</strong>
+                hasta que tú le des guardar.
+              </p>
+              <div class="form-group">
+                <label for="importCartaFile">Foto de la carta</label>
+                <input type="file" id="importCartaFile" accept="image/jpeg,image/png,image/webp">
+              </div>
+              <div style="text-align:center;font-size:12px;color:var(--text-3);margin:10px 0;">o</div>
+              <div class="form-group">
+                <label for="importCartaText">Pega el texto de la carta</label>
+                <textarea id="importCartaText" rows="8" placeholder="Ajiaco santafereño — 28.000&#10;Bandeja paisa — 32.000"></textarea>
+              </div>
+              <div id="importCartaStatus" style="font-size:13px;margin-top:10px;"></div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn ghost" id="importCartaCancel" type="button">Cancelar</button>
+              <button class="btn primary" id="importCartaGo" type="button">Leer carta</button>
+            </div>
+          </div>
         </div>
 
         <!-- Visual onboarding widget — shows photo coverage and which dishes still need images. -->

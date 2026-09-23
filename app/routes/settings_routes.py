@@ -942,8 +942,28 @@ async def get_dashboard_conversations(request: Request):
 
 @router.get("/api/dashboard/menu")
 async def get_dashboard_menu(request: Request):
-    _, bot_number, _, _ = await get_dashboard_filters(request, "today")
-    menu = await db.db_get_menu(bot_number) or {}
+    """The organization's BASE carta — what the full carta editor loads.
+
+    Resolved by org_id, not by bot_number. It used to call
+    `db_get_menu(bot_number)`, which meant a restaurant was identified by
+    its WhatsApp number: any org without one — every org created through
+    self-serve signup, where the phone is deliberately not claimed — got an
+    empty carta here, and the editor opened blank with a menu sitting in
+    the database. It also contradicted the standing rule that nothing reads
+    a carta through `db_get_menu(bot_number)` any more.
+
+    Base and not sede-merged, on purpose: whatever this returns is what the
+    editor saves back through `PUT /api/menu/update`, which writes the base
+    every sede inherits. Returning a sede's overridden prices here would
+    quietly promote them into the base on the next save. A sede's own carta
+    is edited through `/api/menu/sede/*`.
+    """
+    from app.repositories import sede_menu_repo  # noqa: PLC0415
+
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+    with tenant_scope(org_id):
+        menu = await sede_menu_repo.db_get_org_menu(org_id) or {}
     return {"menu": menu}
 
 
