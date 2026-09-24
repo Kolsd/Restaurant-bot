@@ -189,6 +189,14 @@ async def security_headers_middleware(request: Request, call_next):
     # Modern browsers ignore this header; explicitly disable to avoid edge-case bugs.
     response.headers["X-XSS-Protection"] = "0"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # HTML pages are returned by route handlers that read the file and set no
+    # Cache-Control at all, which leaves the browser free to invent one from
+    # Last-Modified (commonly ~10% of the file's age). An old page can then go
+    # on loading old script tags after a deploy. `setdefault` so a handler
+    # that deliberately set its own — and the static mount below, which runs
+    # before this middleware — keeps it.
+    if response.headers.get("content-type", "").startswith("text/html"):
+        response.headers.setdefault("Cache-Control", "no-cache")
     # WebAuthn (publickey-credentials-*) required for biometric staff clock-in.
     # geolocation=(self) — NOT (): the delivery/pickup ordering page
     # (docs/claude/delivery-web.md chunk 5, /pedir/{slug}) calls
@@ -282,13 +290,27 @@ class _CachedStaticFiles(StaticFiles):
     """StaticFiles with Cache-Control headers tuned per file type.
 
     Strategy:
-      - Images (.png/.jpg/.svg/.webp/.ico/.gif): 7 days. Rarely change.
-      - JS/CSS: 1 day. Browser revalidates with If-Modified-Since (304 if same).
+      - Images (.png/.jpg/.svg/.webp/.ico/.gif): 7 days. Rarely change, and
+        a stale logo is not a broken app.
+      - JS/CSS: `no-cache` — cacheable, but revalidated on every use.
       - sw.js: no-cache + must-revalidate. Stale service workers are a footgun.
       - Everything else: 1 hour conservative.
 
-    StaticFiles already emits Last-Modified, so 304 conditional GETs work for
-    free. This adds explicit max-age so browsers don't heuristically guess.
+    **Why JS/CSS are not cached for a day.** They used to carry
+    `max-age=86400, must-revalidate`, which reads like "revalidate" but does
+    not: `must-revalidate` only governs what happens once a response is
+    STALE, so for 24 hours the browser served its copy without ever asking.
+    A deploy therefore reached a tablet whenever its day happened to end —
+    observed in this very app on 2026-09-23, where a fixed script kept
+    running in its broken version until the cache was forced. `no-cache`
+    keeps the file in the cache and makes the browser revalidate before
+    using it: unchanged files come back as a 304 with no body, so the cost
+    is one conditional request per asset, and a deploy is live immediately.
+
+    The right end state is content-hashed URLs (`app.a1b2c3.js`, cached for
+    a year), which needs the script tags to be generated rather than
+    hand-written in 30 HTML files. Until then, correctness beats the
+    handful of 304s.
     """
 
     _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico", ".gif")
@@ -303,7 +325,7 @@ class _CachedStaticFiles(StaticFiles):
             elif lower.endswith(self._IMAGE_EXTS):
                 response.headers["Cache-Control"] = "public, max-age=604800"
             elif lower.endswith(self._ASSET_EXTS):
-                response.headers["Cache-Control"] = "public, max-age=86400, must-revalidate"
+                response.headers["Cache-Control"] = "public, no-cache"
             else:
                 response.headers["Cache-Control"] = "public, max-age=3600"
         return response

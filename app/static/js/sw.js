@@ -8,9 +8,27 @@
  *   HTML pages      → Network-first, fallback to cache (stale shell beats blank screen)
  *
  * Cache busting: increment CACHE_VERSION on every deploy that changes static assets.
+ *
+ * ⚠ DORMANT as of 2026-09-24 — this worker never runs in production.
+ * The only call to navigator.serviceWorker.register() lives in
+ * offline-sync.js, and NO html page loads offline-sync.js (checked across
+ * app/static/html: zero references, and zero occurrences of
+ * "serviceWorker"). So nothing installs this worker, nothing reads
+ * CACHE_NAME, and bumping CACHE_VERSION has no effect on any browser.
+ *
+ * The rule to bump it in the same commit as a static change is kept on
+ * purpose: it costs one line and it is what makes this file safe to switch
+ * on later. But it is NOT what makes a deploy reach a browser today —
+ * that is the Cache-Control on /static (app/main.py, _CachedStaticFiles).
+ * If a tablet is running old code, look there first, not here.
+ *
+ * Turning this on is a product decision, not a cleanup: an offline shell
+ * cache changes what staff see when the wifi drops, and a cache-first
+ * strategy over /static/* would reintroduce exactly the staleness the
+ * Cache-Control fix just removed unless the version bump is disciplined.
  */
 
-const CACHE_VERSION  = 'v62';
+const CACHE_VERSION  = 'v63';
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
