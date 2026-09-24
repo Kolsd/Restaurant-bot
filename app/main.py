@@ -40,6 +40,7 @@ from app.routes.auth_routes import router as auth_router
 from app.routes.settings_routes import router as settings_router
 from app.routes.sede_menu_routes import router as sede_menu_router
 from app.routes.menu_import_routes import router as menu_import_router
+from app.routes.onboarding_routes import router as onboarding_router
 from app.routes.team_routes import router as team_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
@@ -360,6 +361,7 @@ app.include_router(team_router)
 app.include_router(stats_router)
 app.include_router(sede_menu_router)
 app.include_router(menu_import_router)
+app.include_router(onboarding_router)
 app.include_router(chat_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)

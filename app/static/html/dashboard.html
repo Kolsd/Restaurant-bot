@@ -58,6 +58,18 @@
         </div>
       </div>
 
+      <!-- Setup checklist — what this restaurant still has to do before it can
+           sell through Mesio. Filled by pages/onboarding-card.js from
+           /api/onboarding; stays hidden once every required step is done. -->
+      <div class="card" id="onboarding-card" style="display:none;margin-bottom:16px;padding:18px 20px;">
+        <div class="row" style="align-items:baseline;gap:10px;margin-bottom:4px;">
+          <div style="font-size:15px;font-weight:700;">Pon tu restaurante a vender</div>
+          <div id="onboarding-progress" style="font-size:12px;color:var(--text-3);"></div>
+          <div id="onboarding-trial" style="margin-left:auto;font-size:12px;font-weight:600;color:var(--brand);"></div>
+        </div>
+        <div id="onboarding-steps" style="display:flex;flex-direction:column;gap:10px;margin-top:12px;"></div>
+      </div>
+
       <!-- AI insight banner (hidden until data loads; hidden if feature disabled) -->
       <div class="ai-card" id="ai-insight-banner" style="display:none;">
         <div class="ai-card-head">
@@ -242,5 +254,6 @@
 <script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/pages/sidebar.js"></script>
 <script src="/static/js/pages/dashboard.js"></script>
+<script src="/static/js/pages/onboarding-card.js"></script>
 </body>
 </html>

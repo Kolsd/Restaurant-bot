@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v13.0 (head `0095_prospects_full_schema`; 2121 passed / 6 skipped with DB, run as `postgres`)
+# Mesio Restaurant Bot — v13.0 (head `0095_prospects_full_schema`; 2146 passed / 6 skipped with DB, run as `postgres`)
 
 Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_use). Product: the diner's own web channel (QR → `/chat/{table_id}`); WhatsApp is being retired.
 

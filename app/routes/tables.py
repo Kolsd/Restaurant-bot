@@ -165,19 +165,22 @@ async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict
 
 # ── TABLES ────────────────────────────────────────────────────────────
 
-@router.get("/api/tables")
-async def get_tables(request: Request):
-    """Returns the current branch's tables for rendering on the dashboard."""
-    await require_auth(request)
+async def _tables_scope(request: Request) -> tuple[int, int | None]:
+    """(org_id, branch_id) for a table listing, verified against the user.
+
+    P0 fix (2026-09): previously used user["branch_id"] (mixed id kind —
+    for staff it is actually the ORG id, not a location id) directly as
+    the location_id filter, under bypass_tenant_scope (no RLS net). If
+    that number happened to collide with an unrelated org's real location
+    id, this leaked that org's tables. Now scoped by the explicit org_id
+    under REAL tenant_scope (RLS-protected), and X-Branch-ID is verified
+    to belong to that org before being used as a location filter.
+
+    Shared by the table list and the QR sheet so the codes a restaurant
+    prints can never cover a sede its listing does not show.
+    """
     user = await get_current_user(request)
 
-    # P0 fix (2026-09): previously used user["branch_id"] (mixed id kind —
-    # for staff it is actually the ORG id, not a location id) directly as
-    # the location_id filter, under bypass_tenant_scope (no RLS net). If
-    # that number happened to collide with an unrelated org's real location
-    # id, this leaked that org's tables. Now scoped by the explicit org_id
-    # under REAL tenant_scope (RLS-protected), and X-Branch-ID is verified
-    # to belong to that org before being used as a location filter.
     org_id = user.get("org_id")
     if not org_id:
         raise HTTPException(status_code=403, detail="No se pudo determinar la organización del usuario")
@@ -199,6 +202,14 @@ async def get_tables(request: Request):
         # assignment today, so they see every table of their own org.
         branch_id = user.get("location_id")
 
+    return org_id, branch_id
+
+
+@router.get("/api/tables")
+async def get_tables(request: Request):
+    """Returns the current branch's tables for rendering on the dashboard."""
+    await require_auth(request)
+    org_id, branch_id = await _tables_scope(request)
     with tenant_scope(org_id):
         tables = await db.db_get_tables(branch_id=branch_id)
     return {"tables": tables}
@@ -513,6 +524,22 @@ async def public_menu_context(table_id: str):
         "table_context": table_context,
     }
 
+def table_qr_url(request: Request, table_id: str) -> str:
+    """Where a table's printed QR sends the diner.
+
+    `/chat/{table_id}` — the diner's own web channel, which is the product:
+    scanning opens the chat, the bot shows the carta as cards, and the order
+    reaches the kitchen (closed product decision, docs/claude/status.md).
+
+    Until 2026-09-24 every QR pointed at `/menu/{table_id}` instead, the
+    catalog page whose printed sheet told the diner to "pedir por WhatsApp"
+    — the channel being retired. A restaurant that printed its codes was
+    handing customers the wrong flow on physical paper, which is the most
+    expensive place to be wrong.
+    """
+    return f"{_public_base_url(request)}/chat/{table_id}"
+
+
 def build_qr_html(menu_url: str, table_name: str, width: int = 300) -> str:
     return f"<!DOCTYPE html><html><head><meta charset='UTF-8'><script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script></head><body style='margin:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;'><div id='qr'></div><script>window.onload=function(){{new QRCode(document.getElementById('qr'),{{text:decodeURIComponent('{urllib.parse.quote(menu_url)}'),width:{width},height:{width},colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});}};</script></body></html>"
 
@@ -523,24 +550,125 @@ def _public_base_url(request: Request) -> str:
         return f"https://{_APP_DOMAIN}"
     return str(request.base_url).rstrip('/')
 
+_QR_SHEET_CSS = """
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Arial,Helvetica,sans-serif;background:#f4f4f2;color:#0D1412;}
+.bar{position:sticky;top:0;background:#fff;border-bottom:1px solid #e3e3e0;
+     padding:14px 20px;display:flex;align-items:center;gap:14px;}
+.bar h1{font-size:16px;font-weight:700;}
+.bar .sub{font-size:13px;color:#666;}
+.bar button{margin-left:auto;background:#1D9E75;color:#fff;border:0;border-radius:8px;
+     padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;padding:20px;}
+.card{background:#fff;border:2px solid #0D1412;border-radius:16px;padding:20px;
+      text-align:center;break-inside:avoid;page-break-inside:avoid;}
+.logo{font-size:22px;font-weight:900;}
+.logo span{color:#1D9E75;}
+.tname{font-size:19px;font-weight:700;margin:10px 0 2px;}
+.instr{font-size:12px;color:#666;margin-bottom:12px;line-height:1.45;}
+.qrbox{width:180px;height:180px;margin:0 auto 12px;}
+.qrbox canvas,.qrbox img{width:180px !important;height:180px !important;}
+.steps{text-align:left;background:#f8f8f5;border-radius:10px;padding:10px 14px;}
+.step{font-size:11.5px;color:#444;padding:2px 0;display:flex;gap:7px;}
+.sn{color:#1D9E75;font-weight:700;}
+.empty{padding:60px 20px;text-align:center;color:#666;font-size:14px;}
+@media print{
+  body{background:#fff;}
+  .bar{display:none;}
+  .grid{padding:0;gap:0;grid-template-columns:repeat(2,1fr);}
+  .card{border-radius:0;margin:0;}
+}
+"""
+
+
+@router.get("/api/tables/qr-sheet", response_class=HTMLResponse)
+async def get_all_tables_qr_sheet(request: Request):
+    """Every table's QR on one printable page.
+
+    A restaurant opening for the first time has to put a code on each
+    table, and the only way to get them was one page per table — open the
+    sheet, print, go back, next table. For twenty tables that is twenty
+    round trips, on the very first day, which is exactly where onboarding
+    is abandoned.
+
+    Scoped through the same `_tables_scope` as the table listing, so a
+    sheet can never contain a sede the user is not entitled to see.
+    """
+    await require_auth(request)
+    org_id, branch_id = await _tables_scope(request)
+    with tenant_scope(org_id):
+        tables = await db.db_get_tables(branch_id=branch_id)
+
+    cards = []
+    for t in tables:
+        table_id = str(t.get("id") or t.get("table_id") or "").strip()
+        if not table_id:
+            continue
+        safe_name = _html.escape(str(t.get("name") or table_id))
+        encoded = urllib.parse.quote(table_qr_url(request, table_id))
+        cards.append(
+            "<div class='card'>"
+            "<div class='logo'>Mesio<span>.</span></div>"
+            f"<div class='tname'>{safe_name}</div>"
+            "<div class='instr'>Escanea el QR con la cámara<br>para ver la carta y pedir</div>"
+            f"<div class='qrbox' data-qr='{encoded}'></div>"
+            "<div class='steps'>"
+            "<div class='step'><span class='sn'>1.</span><span>Abre la cámara de tu celular</span></div>"
+            "<div class='step'><span class='sn'>2.</span><span>Apunta al código QR</span></div>"
+            "<div class='step'><span class='sn'>3.</span><span>Elige tus platos de la carta</span></div>"
+            "<div class='step'><span class='sn'>4.</span><span>Envía el pedido a la cocina</span></div>"
+            "</div></div>"
+        )
+
+    body = (
+        "<div class='grid'>" + "".join(cards) + "</div>"
+        if cards else
+        "<div class='empty'>Todavía no tienes mesas creadas.<br>"
+        "Crea tus mesas y vuelve aquí para imprimir sus códigos.</div>"
+    )
+    count = len(cards)
+    plural = "" if count == 1 else "s"
+
+    # The QR images are drawn in the browser from data-qr, never built into
+    # the HTML string: the URL is the only place a table name or id could
+    # reach the page unescaped, and keeping it in an attribute the script
+    # reads keeps that one value out of the markup it generates.
+    return HTMLResponse(
+        "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Códigos QR de tus mesas — Mesio</title>"
+        f"<style>{_QR_SHEET_CSS}</style>"
+        "<script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script>"
+        "</head><body>"
+        "<div class='bar'><div><h1>Códigos QR de tus mesas</h1>"
+        f"<div class='sub'>{count} mesa{plural} · imprime y pega uno en cada mesa</div></div>"
+        "<button onclick='window.print()'>Imprimir</button></div>"
+        f"{body}"
+        "<script>window.onload=function(){"
+        "document.querySelectorAll('.qrbox').forEach(function(el){"
+        "new QRCode(el,{text:decodeURIComponent(el.dataset.qr),width:180,height:180,"
+        "colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});"
+        "});};</script>"
+        "</body></html>"
+    )
+
+
 @router.get("/api/tables/{table_id}/qr", response_class=HTMLResponse)
 async def get_table_qr(request: Request, table_id: str):
     with bypass_tenant_scope("qr_public_lookup: pre-resolve table tenant for QR"):
         table = await db.db_get_table_by_id(table_id)
     if not table: raise HTTPException(status_code=404, detail="Mesa no encontrada")
-    menu_url = f"{_public_base_url(request)}/menu/{table_id}"
-    return build_qr_html(menu_url, table["name"], width=300)
+    return build_qr_html(table_qr_url(request, table_id), table["name"], width=300)
 
 @router.get("/api/tables/{table_id}/qr-sheet")
 async def get_qr_sheet(request: Request, table_id: str):
     with bypass_tenant_scope("qr_sheet_public_lookup: pre-resolve table tenant for QR sheet"):
         table = await db.db_get_table_by_id(table_id)
     if not table: raise HTTPException(status_code=404, detail="Mesa no encontrada")
-    menu_url = f"{_public_base_url(request)}/menu/{table_id}"
-    encoded = urllib.parse.quote(menu_url)
+    encoded = urllib.parse.quote(table_qr_url(request, table_id))
     safe_name = _html.escape(table['name'])
     return HTMLResponse(
-        f"<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><style>*{{box-sizing:border-box;margin:0;padding:0;}}body{{font-family:Arial,sans-serif;background:#fff;}}.page{{width:10cm;margin:1cm auto;text-align:center;padding:1.5cm;border:2px solid #0D1412;border-radius:16px;}}.logo{{font-size:28px;font-weight:900;color:#0D1412;margin-bottom:4px;}}.logo span{{color:#1D9E75;}}.tname{{font-size:20px;font-weight:700;color:#0D1412;margin:12px 0 4px;}}.instr{{font-size:13px;color:#666;margin-bottom:16px;line-height:1.5;}}.qrbox{{width:200px;height:200px;margin:0 auto 16px;}}.qrbox canvas,.qrbox img{{width:200px !important;height:200px !important;border-radius:8px;}}.wa-badge{{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}.steps{{text-align:left;background:#f8f8f5;border-radius:10px;padding:12px 16px;margin-top:8px;}}.step{{font-size:12px;color:#444;padding:3px 0;display:flex;gap:8px;}}.sn{{color:#1D9E75;font-weight:700;}}@media print{{body{{margin:0;}}}}</style><script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script></head><body><div class='page'><div class='logo'>Mesio<span>.</span></div><div class='tname'>{safe_name}</div><div class='instr'>Escanea el QR para ver el menú<br>y pedir por WhatsApp</div><div class='qrbox' id='qrc'></div><div class='wa-badge'>Ver Menú y Pedir</div><div class='steps'><div class='step'><span class='sn'>1.</span><span>Abre la cámara de tu celular</span></div><div class='step'><span class='sn'>2.</span><span>Apunta al código QR</span></div><div class='step'><span class='sn'>3.</span><span>Revisa el menú interactivo</span></div><div class='step'><span class='sn'>4.</span><span>Toca pedir por WhatsApp</span></div></div></div><script>window.onload=function(){{new QRCode(document.getElementById('qrc'),{{text:decodeURIComponent('{encoded}'),width:200,height:200,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});setTimeout(function(){{window.print();}},800);}};</script></body></html>"
+        f"<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><style>*{{box-sizing:border-box;margin:0;padding:0;}}body{{font-family:Arial,sans-serif;background:#fff;}}.page{{width:10cm;margin:1cm auto;text-align:center;padding:1.5cm;border:2px solid #0D1412;border-radius:16px;}}.logo{{font-size:28px;font-weight:900;color:#0D1412;margin-bottom:4px;}}.logo span{{color:#1D9E75;}}.tname{{font-size:20px;font-weight:700;color:#0D1412;margin:12px 0 4px;}}.instr{{font-size:13px;color:#666;margin-bottom:16px;line-height:1.5;}}.qrbox{{width:200px;height:200px;margin:0 auto 16px;}}.qrbox canvas,.qrbox img{{width:200px !important;height:200px !important;border-radius:8px;}}.wa-badge{{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}.steps{{text-align:left;background:#f8f8f5;border-radius:10px;padding:12px 16px;margin-top:8px;}}.step{{font-size:12px;color:#444;padding:3px 0;display:flex;gap:8px;}}.sn{{color:#1D9E75;font-weight:700;}}@media print{{body{{margin:0;}}}}</style><script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script></head><body><div class='page'><div class='logo'>Mesio<span>.</span></div><div class='tname'>{safe_name}</div><div class='instr'>Escanea el QR con la cámara<br>para ver la carta y pedir</div><div class='qrbox' id='qrc'></div><div class='wa-badge'>Ver la carta y pedir</div><div class='steps'><div class='step'><span class='sn'>1.</span><span>Abre la cámara de tu celular</span></div><div class='step'><span class='sn'>2.</span><span>Apunta al código QR</span></div><div class='step'><span class='sn'>3.</span><span>Elige tus platos de la carta</span></div><div class='step'><span class='sn'>4.</span><span>Envía el pedido a la cocina</span></div></div></div><script>window.onload=function(){{new QRCode(document.getElementById('qrc'),{{text:decodeURIComponent('{encoded}'),width:200,height:200,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});setTimeout(function(){{window.print();}},800);}};</script></body></html>"
     )
 
 # ── ALERTAS MESERO ──────────────────────────────────────────────────
