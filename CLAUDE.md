@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v13.0 (head `0095_prospects_full_schema`; 2146 passed / 6 skipped with DB, run as `postgres`)
+# Mesio Restaurant Bot — v13.0 (head `0096_restaurants_web_key`; 2148 passed / 6 skipped with DB, run as `postgres`)
 
 Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_use). Product: the diner's own web channel (QR → `/chat/{table_id}`); WhatsApp is being retired.
 
@@ -36,7 +36,8 @@ Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_
 3. ~~Web delivery wave Phase A~~ (2026-09-19, chunks 1-9: data model, `/pedir/{slug}`, checkout, `/pedido/{code}`, cashier + courier UI, per-sede config, WhatsApp delivery/pickup switched off — spec `docs/claude/delivery-web.md`). Phase B (Mapbox map, live chat) later.
 4. ~~Onboarding blockers~~ (2026-09-20): orgs are born with a slug (`/pedir/{slug}` was unreachable for every customer created since 0034; 0088 backfills); the staff roster is no longer behind the `staff_tips` module; `gerente` configures their own sede's delivery; `POST /api/staff/delivery/orders/{id}/mark-paid` records cash/card/transfer (before it, NO web order could ever be `paid=TRUE`, so delivery sales were missing from `total_sales`); CRM convert starts the `comp_until` trial.
 4b. ~~Self-serve GTM~~ (2026-09-23/24, GTM decisions in `status.md` #14): real LLM cost per kind (0094), self-serve signup with owner-chosen password + 14-day trial (0095 fixed the CRM `prospects` stub), carta import from photo/text as a DRAFT into the existing editor (editor was opening empty — fixed), owner checklist `/api/onboarding`, QR → `/chat/{id}` + all-tables print sheet. Open: `RESEND_API_KEY` in prod (welcome email is now optional, not blocking); the import needs Anthropic credit to be tried for real; flat price per sede + `plan_code`/`subscription_plan` unification; country-neutral schema.
-5. Sweep `json.dumps()` passed to `$n::jsonb`.
+4c. **Cleanup (2026-09-25, branch `chore/limpieza`, tag `pre-limpieza`)** — scope in memory `cleanup-scope-2026-09-25`. Step 1 done: self-serve orgs (no WhatsApp) could not open a table or `/pedir` → 0096 web key. Next: browser walk-through of a fresh self-serve restaurant, then module deletions, then new landing + real demo. `tests/e2e/test_happy_path_full_flow.py` (WhatsApp harness) already failed before step 1.
+5. Sweep `json.dumps()` passed to jsonb params — CONFIRMED P1: the pool codec double-encodes them (all `table_checks.items`, `conversations.history`, `carts` in the test DB are JSON strings); ~29 test pools lack the codec, which hid it. Fix writers + test pools + a data-repair migration.
 6. Turn off remaining WhatsApp (migrate e2e harness first).
 7. Fix the Wompi webhook before reactivating it (its e2e test fails: invalid signature → 200, expects 401).
 Closed product decisions: see `status.md` — do not re-discuss.

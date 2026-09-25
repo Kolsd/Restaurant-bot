@@ -129,13 +129,15 @@ async def _fetch_churn_risk() -> list[dict]:
             rows = await conn.fetch(
                 """
                 WITH bot_orgs AS (
-                    SELECT
+                    -- DISTINCT: every sede of an org shares its number, and one row
+                    -- per sede multiplied that org's conversation count.
+                    SELECT DISTINCT
                         l.org_id,
                         o.name AS org_name,
-                        COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
+                        COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) AS bot_number
                     FROM locations l
                     JOIN organizations o ON o.id = l.org_id
-                    WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                    WHERE COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) IS NOT NULL
                 ),
                 daily AS (
                     SELECT

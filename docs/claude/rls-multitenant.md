@@ -292,6 +292,8 @@ Matched by dish NAME, case-insensitive (unique on `lower(dish_name)`), like
 - Matriz (head office): `parent_restaurant_id IS NULL`.
 - Branch: `parent_restaurant_id` points to the Matriz.
 - WhatsApp: branches use a `_b[TIMESTAMP]` suffix on `whatsapp_number` to avoid collisions.
+- **Orgs with no WhatsApp (every self-serve signup) — 0096.** `restaurants.whatsapp_number` (the bot runtime's `bot_number`) falls back to `web<org_id>`: one key per org, shared by its sedes like a WhatsApp org's number; the sede is told apart by `location_id`. Before 0096 the table QR and `/pedir` 404'd for these orgs. Python mirror: `services/channel_key.py` — use `dialable()` before building a wa.me link or calling Meta. Diner tests must also cover an org with NO number (`tests/test_self_serve_no_whatsapp.py`); every older seed sets one.
+- **jsonb writes:** the app pool's codec (`database.init_connection`) serializes jsonb parameters, so never pass `json.dumps(x)` — that stores a JSON string. Test pools must use `init=init_connection`; ~29 older test files still don't (sweep pending).
 
 ## Wave 2 (Org/Location) — Post-deploy summary
 

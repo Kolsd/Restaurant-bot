@@ -64,10 +64,10 @@ async def analytics_overview(_: None = Depends(verify_superadmin)):
                     WITH bot_orgs AS (
                         SELECT
                             l.org_id,
-                            COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
+                            COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) AS bot_number
                         FROM locations l
                         JOIN organizations o ON o.id = l.org_id
-                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) IS NOT NULL
                     )
                     SELECT COUNT(DISTINCT bo.org_id)
                     FROM conversations c
@@ -87,10 +87,10 @@ async def analytics_overview(_: None = Depends(verify_superadmin)):
                     WITH bot_orgs AS (
                         SELECT
                             l.org_id,
-                            COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
+                            COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) AS bot_number
                         FROM locations l
                         JOIN organizations o ON o.id = l.org_id
-                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) IS NOT NULL
                     )
                     SELECT COUNT(DISTINCT bo.org_id)
                     FROM conversations c
@@ -481,10 +481,10 @@ async def analytics_activation(_: None = Depends(verify_superadmin)):
                         -- (locations.whatsapp_number can be NULL; menu lives on organizations).
                         SELECT
                             l.org_id,
-                            COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
+                            COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) AS bot_number
                         FROM locations l
                         JOIN organizations o ON o.id = l.org_id
-                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) IS NOT NULL
                     ),
                     org_menu AS (
                         -- Stage 2: org has at least one dish in any category
@@ -664,10 +664,10 @@ async def analytics_churn_risk(_: None = Depends(verify_superadmin)):
                         SELECT
                             l.org_id,
                             o.name AS org_name,
-                            COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
+                            COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) AS bot_number
                         FROM locations l
                         JOIN organizations o ON o.id = l.org_id
-                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) IS NOT NULL
                     ),
                     daily AS (
                         SELECT

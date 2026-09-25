@@ -204,7 +204,9 @@ async def db_save_table_order(order: dict):
                 updated_at=NOW()
             RETURNING id, table_id, org_id, branch_id, (xmax = 0) AS inserted
         """, order['id'], order['table_id'], order['table_name'], order['phone'],
-            json.dumps(order['items']),
+            # The pool's jsonb codec serializes; json.dumps here stored a
+            # JSON *string* instead of an array (found 2026-09-25).
+            order['items'],
             order.get('status', 'recibido'),
             order.get('notes', ''),
             order.get('total', 0),
@@ -275,7 +277,7 @@ async def db_merge_table_order_items(base_order_id: str, new_items: list, additi
         published_row = await conn.fetchrow(
             "UPDATE table_orders SET items=$2, total=$3, updated_at=NOW() WHERE id=$1 "
             "RETURNING id, table_id, org_id, branch_id",
-            base_order_id, json.dumps(merged), new_total
+            base_order_id, merged, new_total  # codec serializes (see insert above)
         )
 
     if published_row is not None:

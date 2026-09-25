@@ -241,7 +241,9 @@ async def raw_pool():
     if not TEST_DB_URL:
         pytest.skip("TEST_DATABASE_URL not set — integration tests skipped")
     import asyncpg
-    pool = await asyncpg.create_pool(TEST_DB_URL, min_size=1, max_size=3)
+    from app.services.database import init_connection
+    # Same jsonb codec as production, or double-encoded writes look correct.
+    pool = await asyncpg.create_pool(TEST_DB_URL, min_size=1, max_size=3, init=init_connection)
     try:
         yield pool
     finally:

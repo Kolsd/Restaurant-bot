@@ -166,11 +166,11 @@ async def health_metrics(_: None = Depends(verify_superadmin)):
                         ),
                         bot_orgs AS (
                             SELECT
-                                COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number,
+                                COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) AS bot_number,
                                 o.name AS org_name
                             FROM locations l
                             JOIN organizations o ON o.id = l.org_id
-                            WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                            WHERE COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) IS NOT NULL
                         )
                         SELECT p.bot_number,
                                COALESCE(bo.org_name, p.bot_number) AS org_name,

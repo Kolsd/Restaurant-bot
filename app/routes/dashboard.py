@@ -22,6 +22,7 @@ from pydantic import BaseModel, field_validator
 from app.services import database as db
 from app.repositories import delivery_repo, restaurant_repo
 from app.services import state_store
+from app.services.channel_key import dialable
 from app.services.logging import get_logger
 from app.services.tenant_context import bypass_tenant_scope
 
@@ -759,7 +760,8 @@ async def seo_dish_page(slug: str, dish_slug: str):
 
     # WhatsApp pre-filled link
     wa_text  = urllib.parse.quote(f"Hola, quiero pedir {dish_name}")
-    wa_link  = f"https://wa.me/{urllib.parse.quote(bot_number.replace('+', ''))}?text={wa_text}" if bot_number else "#"
+    wa_digits = dialable(bot_number).replace('+', '')
+    wa_link  = f"https://wa.me/{urllib.parse.quote(wa_digits)}?text={wa_text}" if wa_digits else "#"
 
     # Dish image HTML — XSS-safe: all values escaped
     if image_url:

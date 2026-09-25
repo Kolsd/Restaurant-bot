@@ -264,14 +264,16 @@ async def _check_churn_risk() -> None:
                 WITH bot_orgs AS (
                     -- Resolve bot_number → org via locations override OR org fallback
                     -- (locations.whatsapp_number can be NULL; restaurants VIEW uses
-                    -- COALESCE(l.whatsapp_number, o.whatsapp_number)).
-                    SELECT
+                    -- COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id), 0096).
+                    -- DISTINCT: every sede of an org shares its number, and one row
+                    -- per sede multiplied that org's conversation count.
+                    SELECT DISTINCT
                         l.org_id,
                         o.name AS org_name,
-                        COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
+                        COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) AS bot_number
                     FROM locations l
                     JOIN organizations o ON o.id = l.org_id
-                    WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                    WHERE COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) IS NOT NULL
                 ),
                 daily AS (
                     SELECT

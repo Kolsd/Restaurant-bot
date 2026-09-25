@@ -19,6 +19,7 @@ from app.routes.deps import (
     require_auth, get_current_user, get_current_restaurant,
     get_current_restaurant_scoped, may_span_locations, resolve_sede_filter,
 )
+from app.services.channel_key import dialable
 from app.services.tenant_context import tenant_scope, bypass_tenant_scope
 from app.services.tenant_db import tenant_connection
 from app.services import loyalty as loyalty_svc
@@ -472,7 +473,11 @@ async def public_menu_context(table_id: str):
     # marker is invisible in WhatsApp's preview because it sits at end-of-line
     # and most clients trim it visually.
     wa_msg = f"Hola! Estoy en {table['name']} [t:{table['id']}]"
-    wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
+    # A web-only org (0096) has a key, not a phone: no wa.me link for it.
+    wa_url = (
+        f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
+        if dialable(wa_number) else ""
+    )
 
     restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
     # The carta and the sold-out list are the TABLE's sede (0091, 0093) —

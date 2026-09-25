@@ -146,6 +146,18 @@ _pool = None
 
 SESSION_TTL_HOURS = 72  # V-06: tokens expire in 72 hours
 
+async def init_connection(conn) -> None:
+    """Per-connection setup for the app pool: jsonb in and out as Python objects.
+
+    Public so test pools can use the very same codec. A test pool without it
+    made `json.dumps(x)` passed to a jsonb parameter look right, while in
+    production the codec serialized it a second time and stored a JSON string.
+    """
+    await conn.set_type_codec(
+        'jsonb', encoder=json.dumps, decoder=json.loads, schema='pg_catalog'
+    )
+
+
 def _normalize_phone(number: str) -> str:
     if not number: return ""
     return number.replace(" ", "").replace("+", "")
@@ -235,9 +247,7 @@ async def get_pool():
             min_size=2,
             max_size=20,
             command_timeout=30,
-            init=lambda conn: conn.set_type_codec(
-                'jsonb', encoder=json.dumps, decoder=json.loads, schema='pg_catalog'
-            )
+            init=init_connection,
         )
         await _circuit_record_success()
         return _pool

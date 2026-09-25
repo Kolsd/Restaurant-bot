@@ -117,7 +117,9 @@ async def _set_scope(conn, org_id):
 
 @pytest.fixture
 async def raw_pool():
-    pool = await asyncpg.create_pool(TEST_DB_URL, min_size=1, max_size=3)
+    from app.services.database import init_connection
+    # Same jsonb codec as production, or double-encoded writes look correct.
+    pool = await asyncpg.create_pool(TEST_DB_URL, min_size=1, max_size=3, init=init_connection)
     try:
         yield pool
     finally:

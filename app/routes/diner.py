@@ -290,7 +290,7 @@ async def _resolve_diner_restaurant(org_id: int, location_id: int | None) -> dic
     # Mirror the `restaurants` VIEW's own precedence exactly (see migration
     # 0037's `CREATE VIEW restaurants`): org name wins over location name
     # (COALESCE(o.name, l.name)), but location's own WhatsApp number wins
-    # over the org's (COALESCE(l.whatsapp_number, o.whatsapp_number)) — the
+    # over the org's (COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id)) — the
     # two fields intentionally fall back in OPPOSITE directions.
     merged = dict(org_restaurant)
     merged["name"] = org_restaurant.get("name") or (location.get("name") if location else None)
