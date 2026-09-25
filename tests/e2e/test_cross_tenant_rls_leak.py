@@ -38,7 +38,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
     seed_restaurant,
     truncate_e2e_data,
@@ -50,10 +50,10 @@ from app.services.tenant_context import bypass_tenant_scope
 log = get_logger(__name__)
 
 
-# ── App fixture (no wa_capture needed — no bot turns) ─────────────────────────
+# ── App fixture (no bot_replies needed — no bot turns) ─────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app_rls(wa_capture):
+async def e2e_app_rls(bot_replies):
     """FastAPI app via ASGI transport without bot turns."""
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
@@ -133,7 +133,7 @@ async def _seed_delivery_order(pool: asyncpg.Pool, org_id: int, bot_number: str)
 async def test_admin_cannot_see_other_tenant_orders(
     test_pool: asyncpg.Pool,
     e2e_app_rls: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Proves Fase 1 RLS blindaje works end-to-end for delivery orders.

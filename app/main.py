@@ -33,7 +33,6 @@ structlog.configure(
 
 from pathlib import Path
 from starlette.responses import RedirectResponse
-from app.routes.chat import router as chat_router
 from app.routes.orders_routes import router as orders_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.auth_routes import router as auth_router
@@ -59,10 +58,8 @@ from app.routes.reservations import router as reservations_router
 from app.routes.discounts import router as discounts_router
 from app.routes.reviews import router as reviews_router
 from app.routes.health import router as health_router
-from app.routes.marketing import router as marketing_router
 from app.routes.subscription import router as subscription_router
 from app.routes.billing_subscription import router as billing_subscription_router
-from app.routes.demo import router as demo_router
 from app.routes.signup_routes import router as signup_router
 # ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
 from app.routes.internal.crm import router as internal_crm_router
@@ -97,41 +94,17 @@ async def lifespan(app):
 
     await db.db_cleanup_expired_sessions()
 
-    _disable_worker = os.getenv("DISABLE_EMBEDDED_WORKER", "").strip().lower() in ("1", "true", "yes")
-    _inbox_stop_event: asyncio.Event | None = None
-    _inbox_task: asyncio.Task | None = None
-
-    if not _disable_worker:
-        # Start the webhook inbox worker (one per uvicorn worker process).
-        # FOR UPDATE SKIP LOCKED in the worker query makes concurrent workers safe.
-        from app.services.inbox_worker import run_worker
-        _inbox_stop_event = asyncio.Event()
-        _inbox_task = asyncio.create_task(run_worker(_inbox_stop_event))
-        _log.info("inbox_worker_task_created")
-    else:
-        _log.info("inbox_worker_disabled", reason="DISABLE_EMBEDDED_WORKER is set")
-
-    # Warn loudly if ANTHROPIC_API_KEY is missing — the bot will fail silently
-    # on every incoming WhatsApp message without it.
+    # Warn loudly if ANTHROPIC_API_KEY is missing — free text typed in the
+    # diner chat gets no answer without it.
     if not os.getenv("ANTHROPIC_API_KEY"):
         _log.error(
             "startup.missing_critical_key",
             key="ANTHROPIC_API_KEY",
-            hint="Bot will not respond to any WhatsApp message until this is set",
+            hint="The diner chat cannot answer free text until this is set",
         )
 
     _redis_configured = bool(os.getenv("REDIS_URL"))
     _log.info("redis_url_configured", configured=_redis_configured)
-
-    # CRM env vars warning
-    crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID", "").strip()
-    if not crm_phone_id:
-        _log.warning(
-            "startup.crm_phone_id_unset",
-            message="CRM_PHONE_NUMBER_ID not set — inbound WA messages on the CRM support number will not be auto-captured into prospects.",
-        )
-    else:
-        _log.info("startup.crm_phone_id_configured", phone_id_prefix=crm_phone_id[:8])
 
     # Turnstile (delivery/pickup diner entry, docs/claude/delivery-web.md) —
     # logged ONCE here, never per request (app/services/turnstile.py).
@@ -143,18 +116,6 @@ async def lifespan(app):
     yield
 
     # ── SHUTDOWN ──────────────────────────────────────────────────────
-    if _inbox_stop_event is not None:
-        _inbox_stop_event.set()
-
-    if _inbox_task is not None:
-        try:
-            await asyncio.wait_for(_inbox_task, timeout=10.0)
-            _log.info("inbox_worker_shutdown_clean")
-        except asyncio.TimeoutError:
-            _log.warning("inbox_worker_shutdown_timeout", timeout_seconds=10)
-        except Exception:
-            _log.exception("inbox_worker_shutdown_error")
-
     from app.services.realtime import shutdown as realtime_shutdown
     await realtime_shutdown()
 
@@ -249,7 +210,6 @@ async def security_headers_middleware(request: Request, call_next):
             "font-src 'self' data: "
             "https://fonts.gstatic.com; "
             "connect-src 'self' "
-            "https://graph.facebook.com "
             "https://checkout.wompi.co "
             "https://nominatim.openstreetmap.org "
             "https://res.cloudinary.com "
@@ -362,7 +322,6 @@ app.include_router(stats_router)
 app.include_router(sede_menu_router)
 app.include_router(menu_import_router)
 app.include_router(onboarding_router)
-app.include_router(chat_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)
 app.include_router(diner_router)
@@ -376,7 +335,6 @@ app.include_router(reservations_router)
 app.include_router(health_router)
 app.include_router(subscription_router)
 app.include_router(billing_subscription_router)
-app.include_router(demo_router)
 app.include_router(signup_router)
 
 # Feature-gated (disabled by default for MVP bot scope)
@@ -387,7 +345,6 @@ _maybe_include("staff_comms", staff_comms_router)
 _maybe_include("loyalty", loyalty_router)
 _maybe_include("discounts", discounts_router)
 _maybe_include("reviews", reviews_router)
-_maybe_include("marketing", marketing_router)
 # ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
 app.include_router(internal_crm_router)
 app.include_router(internal_admin_router)

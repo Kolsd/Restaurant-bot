@@ -149,6 +149,13 @@ class TestMenuPage:
         assert "og:url" in resp.text
         assert "/r/el-sabor/menu" in resp.text
 
+    def test_menu_page_sends_humans_to_the_ordering_page(self, client):
+        """It redirected to the WhatsApp-era /menu/{bot_number} catalog, and to
+        ITSELF — an endless refresh — for an org with no number."""
+        resp = client.get("/r/el-sabor/menu")
+        assert 'content="0; url=/pedir/el-sabor"' in resp.text
+        assert "url=/r/el-sabor/menu" not in resp.text
+
     def test_menu_page_has_restaurant_name(self, client):
         resp = client.get("/r/el-sabor/menu")
         assert "El Sabor" in resp.text
@@ -183,9 +190,10 @@ class TestDishPage:
         # Price should appear somewhere (formatted)
         assert "28" in resp.text  # at minimum the raw number
 
-    def test_dish_page_whatsapp_cta(self, client):
+    def test_dish_page_order_cta_points_to_pedir(self, client):
         resp = client.get("/r/el-sabor/menu/bandeja-paisa")
-        assert "wa.me" in resp.text or "WhatsApp" in resp.text
+        assert 'href="/pedir/el-sabor"' in resp.text
+        assert "wa.me" not in resp.text
 
     def test_dish_page_no_image_no_crash(self, client):
         """Dish without image_url should render without error (uses placeholder)."""

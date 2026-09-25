@@ -20,7 +20,6 @@ from app.services.logging import get_logger
 
 _log = get_logger(__name__)
 
-META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
 router = APIRouter()
 
@@ -401,51 +400,6 @@ async def get_conversation(phone: str, request: Request):
     with tenant_scope(restaurant["id"]):
         details = await db.db_get_conversation_details(phone, restaurant["whatsapp_number"])
     return {"phone": phone, "history": details.get("history", []), "bot_paused": details.get("bot_paused", False)}
-
-@router.post("/api/conversations/{phone}/pause")
-async def pause_bot_for_conversation(phone: str, request: Request):
-    restaurant = await get_current_restaurant(request)
-    body = await request.json()
-    with tenant_scope(restaurant["id"]):
-        await db.db_toggle_bot(phone, restaurant["whatsapp_number"], body.get("paused", True))
-    return {"success": True, "paused": body.get("paused", True)}
-
-@router.post("/api/conversations/{phone}/reply")
-async def manual_reply(phone: str, request: Request):
-    import httpx as _httpx
-    restaurant  = await get_current_restaurant(request)
-    message     = (await request.json()).get("message", "").strip()
-    if not message: raise HTTPException(status_code=400, detail="Mensaje vacio")
-
-    with tenant_scope(restaurant["id"]):
-        # Use the conversation's real bot_number (may differ in multi-branch setups)
-        details    = await db.db_get_conversation_details(phone, restaurant["whatsapp_number"])
-        actual_bot = details.get("bot_number") or restaurant["whatsapp_number"]
-        history    = details.get("history", [])
-        history.append({"role": "assistant", "content": f"[Humano] {message}"})
-        await db.db_save_history(phone, actual_bot, history)
-
-    # wa_phone_id y wa_access_token viven en la tabla restaurants, no en env vars
-    meta_token = restaurant.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN", "")
-    phone_id   = restaurant.get("wa_phone_id")    or os.getenv("META_PHONE_NUMBER_ID", "")
-    if meta_token and phone_id:
-        try:
-            async with _httpx.AsyncClient(timeout=8) as client:
-                res = await client.post(
-                    f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
-                    headers={"Authorization": f"Bearer {meta_token}"},
-                    json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": message}},
-                )
-                if res.status_code != 200:
-                    raise HTTPException(status_code=502, detail=f"Meta error {res.status_code}: {res.text[:200]}")
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Error enviando a WhatsApp: {e}")
-    else:
-        raise HTTPException(status_code=503, detail="wa_phone_id o wa_access_token no configurados para este restaurante")
-    return {"success": True}
-
 
 # ── ADVANCED ANALYTICS ───────────────────────────────────────────────────────
 

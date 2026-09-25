@@ -28,7 +28,7 @@
  * Cache-Control fix just removed unless the version bump is disciplined.
  */
 
-const CACHE_VERSION  = 'v64';
+const CACHE_VERSION  = 'v65';
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
@@ -89,8 +89,8 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Catalog/menu pages: never cache — always serve fresh HTML so JS updates take effect.
-  if (url.pathname.startsWith('/menu/') || url.pathname === '/menu' || url.pathname === '/catalog') {
+  // Diner chat pages: never cache — always serve fresh HTML so JS updates take effect.
+  if (url.pathname.startsWith('/chat/')) {
     event.respondWith(fetch(request));
     return;
   }

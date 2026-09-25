@@ -243,53 +243,6 @@ async def db_get_base_order_status(base_order_id: str) -> str | None:
         return row["status"] if row else None
 
 
-async def db_merge_table_order_items(base_order_id: str, new_items: list, additional_total: float) -> bool:
-    """Merges new items into the base order when it's still in 'recibido' status.
-    Combines quantities for duplicate item names. Returns False if order is no longer recibido.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    published_row = None
-    async with tenant_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT items, total FROM table_orders WHERE id=$1 AND status='recibido'",
-            base_order_id
-        )
-        if row is None:
-            return False
-
-        existing = row["items"]
-        if isinstance(existing, str):
-            try: existing = json.loads(existing)
-            except: existing = []
-        existing = existing or []
-
-        items_map = {i["name"]: dict(i) for i in existing}
-        for ni in new_items:
-            name = ni["name"]
-            if name in items_map:
-                items_map[name]["quantity"] = items_map[name].get("quantity", 1) + ni.get("quantity", 1)
-            else:
-                items_map[name] = dict(ni)
-
-        merged = list(items_map.values())
-        new_total = to_decimal(row["total"]) + to_decimal(additional_total)
-        published_row = await conn.fetchrow(
-            "UPDATE table_orders SET items=$2, total=$3, updated_at=NOW() WHERE id=$1 "
-            "RETURNING id, table_id, org_id, branch_id",
-            base_order_id, merged, new_total  # codec serializes (see insert above)
-        )
-
-    if published_row is not None:
-        from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
-        await realtime.publish(
-            published_row["org_id"], "table_order.updated",
-            location_id=published_row["branch_id"], table_id=published_row["table_id"],
-            entity_id=published_row["id"],
-        )
-    return True
-
-
 async def db_get_table_orders(status: str = None):
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
@@ -921,12 +874,6 @@ async def db_touch_session(phone: str, bot_number: str):
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
         await conn.execute("UPDATE table_sessions SET last_activity=NOW() WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number)
-
-
-async def db_touch_session_with_phone_id(phone: str, bot_number: str, meta_phone_id: str):
-    """# Requires active tenant_scope() or bypass_tenant_scope()."""
-    async with tenant_connection() as conn:
-        await conn.execute("UPDATE table_sessions SET last_activity=NOW(), meta_phone_id=$3 WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number, meta_phone_id)
 
 
 async def db_session_mark_order(phone: str, bot_number: str):
@@ -2162,31 +2109,6 @@ async def db_update_delivery_order_status(order_id: str, new_status: str) -> Non
         await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
 
 
-async def db_get_delivery_order_contact(order_id: str) -> dict | None:
-    """Return phone, address, total for a delivery order (for WA notification).
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with tenant_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT phone, address, total FROM orders WHERE id=$1", order_id
-        )
-    return dict(row) if row else None
-
-
-async def db_get_meta_phone_id_for_session(phone: str) -> str | None:
-    """Return the most recent meta_phone_id from a table session for a phone.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with tenant_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT meta_phone_id FROM table_sessions WHERE phone=$1 ORDER BY started_at DESC LIMIT 1",
-            phone,
-        )
-    return row["meta_phone_id"] if row else None
-
-
 async def db_get_delivery_order_full(order_id: str) -> dict | None:
     """Return full order row for billing/DIAN processing.
 
@@ -2212,21 +2134,6 @@ async def db_force_delete_conversation_data(phone: str, username: str) -> None:
             "closed_by = 'manual_delete', closed_by_username = $2 "
             "WHERE phone = $1 AND closed_at IS NULL",
             phone, username,
-        )
-
-
-async def db_insert_session_waiter_alert(
-    table_id: str, table_name: str, message: str
-) -> None:
-    """Insert a waiter alert triggered from a dashboard session alert.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with tenant_connection() as conn:
-        await conn.execute(
-            "INSERT INTO waiter_alerts (table_id, table_name, message, status, org_id) "
-            "VALUES ($1, $2, $3, 'active', NULLIF(current_setting('app.org_id', true), '')::bigint)",
-            table_id, table_name, message,
         )
 
 

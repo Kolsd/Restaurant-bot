@@ -107,9 +107,6 @@ def drain_blocks() -> list:
 
 # ── Pure builders (no side effects, no I/O) ───────────────────────────────
 
-def build_text_block(text: str) -> dict:
-    return {"type": "text", "text": text or ""}
-
 
 def build_dish_cards_block(dishes: list, currency: str = "COP") -> dict:
     """`dishes` are raw menu dish dicts of whatever shape a restaurant's menu
@@ -197,15 +194,6 @@ def build_cart_summary_block(cart: dict, currency: str = "COP", allow_empty: boo
         "subtotal": float(quantize_money(running_total, currency)),  # JSON boundary
         "currency": currency,
     }
-
-
-def build_payment_options_block(payment_methods: list) -> dict:
-    options = [
-        {"label": str(m), "value": str(m)}
-        for m in (payment_methods or [])
-        if m
-    ]
-    return {"type": "payment_options", "options": options}
 
 
 def build_waiter_ack_block(reason: str, text: str) -> dict:

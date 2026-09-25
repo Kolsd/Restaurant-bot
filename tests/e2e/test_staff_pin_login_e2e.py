@@ -31,7 +31,7 @@ STAFF_PIN = "4321"
 
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
 
@@ -49,7 +49,7 @@ async def e2e_app(wa_capture):
 async def test_staff_pin_login_returns_token(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture,
+    bot_replies,
 ):
     """
     Seed staff with a known PIN -> POST /api/staff/pin-login -> assert token returned.
@@ -134,7 +134,7 @@ async def test_staff_pin_login_returns_token(
 async def test_staff_pin_login_wrong_pin_returns_401(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture,
+    bot_replies,
 ):
     """Wrong PIN must return 401 with a constant-time response (no enumeration)."""
     pool = test_pool

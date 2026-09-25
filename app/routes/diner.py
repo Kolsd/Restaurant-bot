@@ -26,28 +26,22 @@ Security posture (CLAUDE.md "Diner traffic is UNAUTHENTICATED PUBLIC input"):
     the Anthropic API (see _build_enriched_user_message in agent.py). This
     module never talks to the LLM directly.
   - Tenant resolution: table_id → org_id happens BEFORE the tenant is known,
-    so that lookup runs under bypass_tenant_scope() (mirrors
-    app/routes/tables.py::public_menu_context and
-    app/routes/dashboard.py::post_qr_claim). Everything after resolution runs
-    inside tenant_scope(org_id), mirroring
-    app/services/inbox_worker.py::_handle_meta_whatsapp (Rule 14).
+    so that lookup runs under bypass_tenant_scope(). Everything after
+    resolution runs inside tenant_scope(org_id) (Rule 14).
   - Diner identities are opaque "web:<uuid4>" tokens — never a phone number.
-    They flow into agent.chat()/carts/NPS/waiter_alerts exactly like a real
-    WhatsApp number would (phone is an opaque identity string platform-wide).
+    They flow into agent.chat()/carts/NPS/waiter_alerts as the `phone` key
+    (an opaque identity string platform-wide).
     Phone/name are OPTIONAL and captured later, at payment time, via
     diner_sessions_repo.set_contact_info() — not implemented by this wave
     (payment/order-placement is a LATER wave per PM scope).
 
-Table-context trick (no agent.py core changes needed):
-  agent.detect_table_context() already has a well-tested path (Path 1) that
-  opens a table_sessions row when the RAW message contains a `[t:<table_id>]`
-  marker — this is exactly what a real QR-scan-without-phone-claim produces
-  today. We reuse that path verbatim: the FIRST diner_chat message of a
-  session carries the marker; once a table_sessions row exists,
-  detect_table_context's Path 2 (active-session-by-phone lookup) picks it up
-  automatically on every later turn, so the marker is only sent once (mirrors
-  the real single-scan flow). This avoids touching agent.py's tool-execution
-  internals, which CLAUDE.md gates hard ("Reglas del Bot — NO ROMPER").
+Table context: agent.detect_table_context() reads the diner's active
+  table_sessions row. When a dine-in diner writes and that row does not exist
+  (first message, or the previous sitting was closed), diner_chat opens it
+  from the table bound to the diner session — never from anything the diner
+  typed. Until 2026-09-25 this went through a `[t:<table_id>]` marker
+  appended to the message, which also let a diner TYPE another table's
+  marker and open a session there.
 """
 
 from __future__ import annotations
@@ -751,19 +745,32 @@ async def diner_chat(request: Request, body: DinerChatRequest):
                     "blocks": [dish_block],
                 }
 
-        # Establish table context on the first message of a (re)opened
-        # session — see module docstring "Table-context trick". Once a
-        # table_sessions row exists, later turns pick it up automatically.
-        raw_message = user_message
+        # Open the table session if this dine-in diner has none yet (first
+        # message, or the previous sitting was closed) — from the table bound
+        # to THIS diner session, never from message text. Rule #5 (cooldown):
+        # not while another customer holds the table.
         table_id = session.get("table_id")
         if session.get("order_mode") == "dine_in" and table_id:
             active = await db.db_get_active_session(token, bot_number)
             if not active:
-                raw_message = f"{user_message} [t:{table_id}]"
+                holder = await db.db_get_active_session_on_table_by_other_phone(table_id, token)
+                table = await db.db_get_table_by_id(table_id)
+                if holder or not table:
+                    return {
+                        "message": (
+                            "Esta mesa ya está en uso por otro cliente. Si crees "
+                            "que es un error, pídele al mesero que te ayude."
+                        ),
+                        "blocks": [],
+                    }
+                await db.db_create_table_session(
+                    token, bot_number, table["id"], table["name"],
+                    org_id=table.get("org_id"), location_id=table.get("location_id"),
+                )
 
         result = await agent_chat(
             user_phone=token,
-            user_message=raw_message,
+            user_message=user_message,
             bot_number=bot_number,
             location_id=location_id,
         )

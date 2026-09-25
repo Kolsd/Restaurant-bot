@@ -36,11 +36,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
-    drain_inbox,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -71,7 +70,7 @@ PAYMENT_METHODS = ["Nequi", "Efectivo"]
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
 
@@ -91,7 +90,7 @@ async def e2e_app(wa_capture):
 async def test_salon_bill_fires_waiter_alert_immediately(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Rule #17: waiter_alert with alert_type='bill' MUST exist in the DB
@@ -152,7 +151,7 @@ async def test_salon_bill_fires_waiter_alert_immediately(
     qr_message = f"Hola, acabo de llegar a la mesa [table_id:{table_id}]"
     log.info("e2e.bill_alert_turn_1", text=qr_message)
     t1 = time.monotonic()
-    processed_1 = await simulate_whatsapp_inbound(
+    processed_1 = await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=qr_message,
@@ -160,7 +159,7 @@ async def test_salon_bill_fires_waiter_alert_immediately(
     )
     log.info("e2e.bill_alert_turn_1_done", processed=processed_1, elapsed=round(time.monotonic() - t1, 1))
     assert processed_1 >= 1, "Turn 1 (QR scan) was not processed"
-    assert len(wa_capture.texts_to(CUSTOMER_PHONE_RAW)) >= 1, "Bot sent no reply after QR scan"
+    assert len(bot_replies.texts_to(CUSTOMER_PHONE_RAW)) >= 1, "Bot sent no reply after QR scan"
 
     # ── Assert: active table_session created ──────────────────────────────────
     session_row = None
@@ -185,7 +184,7 @@ async def test_salon_bill_fires_waiter_alert_immediately(
     order_text = "Quiero pedir 2 empanaditas de carne"
     log.info("e2e.bill_alert_turn_2", text=order_text)
     t2 = time.monotonic()
-    processed_2 = await simulate_whatsapp_inbound(
+    processed_2 = await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=order_text,
@@ -193,17 +192,17 @@ async def test_salon_bill_fires_waiter_alert_immediately(
     )
     log.info("e2e.bill_alert_turn_2_done", processed=processed_2, elapsed=round(time.monotonic() - t2, 1))
     assert processed_2 >= 1, "Turn 2 (order) was not processed"
-    assert len(wa_capture.texts_to(CUSTOMER_PHONE_RAW)) >= 2, "Bot sent no reply after order"
+    assert len(bot_replies.texts_to(CUSTOMER_PHONE_RAW)) >= 2, "Bot sent no reply after order"
 
     # ── Turn 2b (conditional): confirm order if bot prompts ───────────────────
     # The bot may ask "¿Confirmas tu pedido?" before actually placing it.
-    last_reply_t2 = wa_capture.texts_to(CUSTOMER_PHONE_RAW)[-1].lower()
+    last_reply_t2 = bot_replies.texts_to(CUSTOMER_PHONE_RAW)[-1].lower()
     needs_order_confirm = any(kw in last_reply_t2 for kw in ("confirm", "pedido", "proceder", "correctamente"))
     if needs_order_confirm:
         confirm_order_text = "sí confirmo"
         log.info("e2e.bill_alert_turn_2b", text=confirm_order_text)
         t2b = time.monotonic()
-        processed_2b = await simulate_whatsapp_inbound(
+        processed_2b = await send_diner_message(
             client, pool,
             phone=CUSTOMER_PHONE_RAW,
             text=confirm_order_text,
@@ -253,7 +252,7 @@ async def test_salon_bill_fires_waiter_alert_immediately(
     bill_text = bill_texts[0]
     log.info("e2e.bill_alert_turn_3", text=bill_text)
     t3 = time.monotonic()
-    processed_3 = await simulate_whatsapp_inbound(
+    processed_3 = await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=bill_text,
@@ -304,7 +303,7 @@ async def test_salon_bill_fires_waiter_alert_immediately(
     )
 
     # ── Assert: bot replied acknowledging the bill request ────────────────────
-    all_replies = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    all_replies = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     # There must be at least 3 messages: turn1 reply + turn2 reply + turn3 reply
     assert len(all_replies) >= 3, (
         f"Expected >= 3 WA messages (QR reply + order reply + bill reply), "

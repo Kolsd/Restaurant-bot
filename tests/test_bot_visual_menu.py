@@ -1,13 +1,11 @@
 """
 tests/test_bot_visual_menu.py
 
-Test suite for Catalog v2 — Fase 4: WhatsApp bot visual menu (send_dish_card).
+Test suite for the bot's visual menu (send_dish_card → a dish card in the web chat).
 
 Covers:
   - _validate_tool_call gate: flag off / flag on + image / flag on + no image / dish not found
-  - execute_action: image sent successfully
-  - execute_action: send_image raises → fallback text via meta_api.send_text
-  - Rate limiting: 4th request in window → fallback text (no image sent)
+  - execute_action: pushes a dish_cards block and keeps the LLM reply
 
 Patterns follow existing suite conventions (no pytest.mark.asyncio — uses
 asyncio.get_event_loop().run_until_complete or plain sync where possible).
@@ -148,138 +146,71 @@ class TestValidateToolCallSendDishCard:
 
 # ── Section B — execute_action handler ───────────────────────────────────────
 
-class TestExecuteActionSendDishCard:
-    """execute_action handler for send_dish_card action."""
+def _run_turn(coro):
+    """Run one agent turn with its block bucket open; return (result, blocks)."""
+    from app.services import blocks
 
-    def _make_parsed(self, caption=""):
+    async def _go():
+        token = blocks.begin_turn()
+        try:
+            result = await coro
+            return result, blocks.drain_blocks()
+        finally:
+            blocks.end_turn(token)
+
+    return _run(_go())
+
+
+class TestExecuteActionSendDishCard:
+    """send_dish_card shows the dish's card — photo, price — in the web chat.
+    (It sent the photo over WhatsApp until 2026-09-25.)"""
+
+    def _make_parsed(self, reply="Aquí tienes:"):
         return {
             "action": "send_dish_card",
-            "reply": "Aquí tienes:",
+            "reply": reply,
             "dish_name": "Bandeja Paisa",
-            "caption": caption,
+            "caption": "",
             "_resolved_dish": _DISH_WITH_IMAGE,
         }
 
-    def _restaurant_obj(self):
+    def _restaurant_obj(self, currency="COP"):
         return {
             "id": 1,
             "name": "Test Rest",
-            "wa_access_token": "token_abc",
-            "wa_phone_id": "pid_001",
-            "features": {"bot_visual_menu": True},
+            "features": {"bot_visual_menu": True, "currency": currency},
         }
 
-    def test_image_sent_successfully_returns_reply(self, monkeypatch):
-        """When send_image succeeds, execute_action returns the LLM reply."""
-        monkeypatch.setattr(
-            state_store, "rate_limit_check", AsyncMock(return_value=True)
-        )
-
-        send_image_mock = AsyncMock(return_value=True)
-
-        with patch("app.services.meta_api.send_image", send_image_mock):
-            result = _run(
-                execute_action(
-                    self._make_parsed(),
-                    _PHONE, _BOT, None, {},
-                    restaurant_obj=self._restaurant_obj(),
-                )
-            )
-
+    def test_pushes_the_dish_card_and_keeps_the_reply(self):
+        result, pushed = _run_turn(execute_action(
+            self._make_parsed(), _PHONE, _BOT, None, {},
+            restaurant_obj=self._restaurant_obj(),
+        ))
         assert result == "Aquí tienes:"
-        send_image_mock.assert_awaited_once()
+        cards = [b for b in pushed if b.get("type") == "dish_cards"]
+        assert len(cards) == 1
+        (dish,) = cards[0]["dishes"]
+        assert dish["name"] == "Bandeja Paisa"
+        assert dish["image_url"] == _DISH_WITH_IMAGE["image_url"]
+        assert dish["price"] == 28000
 
-    def test_send_image_raises_uses_fallback_text(self, monkeypatch):
-        """When send_image raises an exception, fallback text is returned (Regla 8)."""
-        monkeypatch.setattr(
-            state_store, "rate_limit_check", AsyncMock(return_value=True)
-        )
+    def test_without_llm_text_still_says_something(self):
+        result, pushed = _run_turn(execute_action(
+            self._make_parsed(reply=""), _PHONE, _BOT, None, {},
+            restaurant_obj=self._restaurant_obj(),
+        ))
+        assert result == "Aquí tienes Bandeja Paisa."
+        assert any(b.get("type") == "dish_cards" for b in pushed)
 
-        send_image_mock = AsyncMock(side_effect=Exception("network error"))
+    def test_no_resolved_dish_pushes_nothing(self):
+        parsed = self._make_parsed()
+        parsed["_resolved_dish"] = {}
+        result, pushed = _run_turn(execute_action(
+            parsed, _PHONE, _BOT, None, {}, restaurant_obj=self._restaurant_obj(),
+        ))
+        assert result == "Aquí tienes:"
+        assert not [b for b in pushed if b.get("type") == "dish_cards"]
 
-        with patch("app.services.meta_api.send_image", send_image_mock):
-            result = _run(
-                execute_action(
-                    self._make_parsed(),
-                    _PHONE, _BOT, None, {},
-                    restaurant_obj=self._restaurant_obj(),
-                )
-            )
-
-        # Should fall back to text — not empty, not raising
-        assert result  # non-empty string
-        assert "Bandeja Paisa" in result or result == "Aquí tienes:"
-
-    def test_send_image_returns_false_uses_fallback_text(self, monkeypatch):
-        """When send_image returns False, fallback text is returned (Regla 8)."""
-        monkeypatch.setattr(
-            state_store, "rate_limit_check", AsyncMock(return_value=True)
-        )
-
-        send_image_mock = AsyncMock(return_value=False)
-
-        with patch("app.services.meta_api.send_image", send_image_mock):
-            result = _run(
-                execute_action(
-                    self._make_parsed(),
-                    _PHONE, _BOT, None, {},
-                    restaurant_obj=self._restaurant_obj(),
-                )
-            )
-
-        # Must not be empty — fallback text contains dish info
-        assert result
-        assert "Bandeja Paisa" in result or result == "Aquí tienes:"
-
-    def test_rate_limited_returns_fallback_no_image_call(self, monkeypatch):
-        """4th request in 60s window → rate_limit_check returns False → no image sent."""
-        monkeypatch.setattr(
-            state_store, "rate_limit_check", AsyncMock(return_value=False)
-        )
-
-        send_image_mock = AsyncMock(return_value=True)
-
-        with patch("app.services.meta_api.send_image", send_image_mock):
-            result = _run(
-                execute_action(
-                    self._make_parsed(),
-                    _PHONE, _BOT, None, {},
-                    restaurant_obj=self._restaurant_obj(),
-                )
-            )
-
-        send_image_mock.assert_not_awaited()
-        assert result  # Fallback text returned, not empty
-
-    def test_no_access_token_uses_fallback(self, monkeypatch):
-        """When no access_token is available, fallback text is returned without calling send_image."""
-        monkeypatch.setattr(
-            state_store, "rate_limit_check", AsyncMock(return_value=True)
-        )
-        monkeypatch.delenv("META_ACCESS_TOKEN", raising=False)
-
-        rest = {
-            "id": 1, "name": "Test Rest",
-            "wa_access_token": None, "wa_phone_id": None,
-            "features": {"bot_visual_menu": True},
-        }
-
-        send_image_mock = AsyncMock(return_value=True)
-
-        with patch("app.services.meta_api.send_image", send_image_mock):
-            result = _run(
-                execute_action(
-                    self._make_parsed(),
-                    _PHONE, _BOT, None, {},
-                    restaurant_obj=rest,
-                )
-            )
-
-        send_image_mock.assert_not_awaited()
-        assert result
-
-
-# ── Section C — _build_compact_menu photo markers ─────────────────────────────
 
 class TestBuildCompactMenuPhotoMarkers:
     """_build_compact_menu marks dishes with [📷] only when bot_visual_menu=True and image_url set."""
@@ -334,21 +265,9 @@ class TestSendDishCardExternalFlow:
         assert ALL_TOOLS["send_dish_card"]["name"] == "send_dish_card"
         assert "dish_name" in ALL_TOOLS["send_dish_card"]["input_schema"]["properties"]
 
-    def test_external_flow_can_use_send_dish_card(self, monkeypatch):
-        """execute_action invoked with table_context=None returns the LLM
-        reply just like the salon path — handler is flow-agnostic."""
-        monkeypatch.setattr(
-            state_store, "rate_limit_check", AsyncMock(return_value=True)
-        )
-
-        external_rest = {
-            "id": 1, "name": "Test Rest",
-            "wa_access_token": "token_abc",
-            "wa_phone_id": "pid_001",
-            # No table context — implies external (delivery/pickup) flow.
-            "features": {"bot_visual_menu": True},
-        }
-
+    def test_without_a_table_the_card_is_shown_too(self):
+        """table_context=None (the web ordering chat) — the handler is
+        flow-agnostic and pushes the same card."""
         parsed = {
             "action": "send_dish_card",
             "reply": "Te muestro la bandeja:",
@@ -356,17 +275,9 @@ class TestSendDishCardExternalFlow:
             "caption": "",
             "_resolved_dish": _DISH_WITH_IMAGE,
         }
-
-        send_image_mock = AsyncMock(return_value=True)
-
-        with patch("app.services.meta_api.send_image", send_image_mock):
-            result = _run(
-                execute_action(
-                    parsed,
-                    _PHONE, _BOT, None, {},
-                    restaurant_obj=external_rest,
-                )
-            )
-
+        result, pushed = _run_turn(execute_action(
+            parsed, _PHONE, _BOT, None, {},
+            restaurant_obj={"id": 1, "name": "Test Rest", "features": {"bot_visual_menu": True}},
+        ))
         assert result == "Te muestro la bandeja:"
-        send_image_mock.assert_awaited_once()
+        assert any(b.get("type") == "dish_cards" for b in pushed)

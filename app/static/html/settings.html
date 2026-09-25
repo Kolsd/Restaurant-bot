@@ -47,7 +47,6 @@
           <a class="set-nav-item" href="#dian">📄 DIAN / Facturación</a>
           <a class="set-nav-item" href="#notif">🔔 Notificaciones</a>
           <div class="set-nav-sub">Plataforma</div>
-          <a class="set-nav-item" href="#integ">🔗 Integraciones</a>
           <a class="set-nav-item" href="#kiosko">📱 Kiosko de personal</a>
           <a class="set-nav-item" href="#seguridad">🛡️ Seguridad</a>
           <a class="set-nav-item danger" href="#peligro">⚠️ Zona peligrosa</a>
@@ -64,7 +63,7 @@
             <div class="field-group">
               <div>
                 <label class="fg-label" for="inputName">Nombre comercial</label>
-                <div class="fg-hint">Aparece en recibos y WhatsApp.</div>
+                <div class="fg-hint">Aparece en recibos y en el chat de tus clientes.</div>
               </div>
               <div>
                 <input id="inputName" class="input" type="text" placeholder="Nombre del restaurante" />
@@ -123,7 +122,7 @@
           <!-- Hours -->
           <section id="horarios" class="card set-sec">
             <h2>Horarios de atención</h2>
-            <div class="s-sub">Define cuándo el restaurante acepta pedidos por WhatsApp, QR y delivery.</div>
+            <div class="s-sub">Define cuándo el restaurante acepta pedidos por QR y delivery.</div>
 
             <div class="hours-header">
               <div>Día</div><div>Apertura</div><div>Cierre</div><div>Abierto</div>
@@ -177,7 +176,7 @@
           <!-- Payments -->
           <section id="pagos" class="card set-sec">
             <h2>Métodos de pago</h2>
-            <div class="s-sub">Los métodos activos aparecen en Caja, WhatsApp y QR de mesa. Para los métodos digitales, escribí las instrucciones que el bot enviará al cliente para que pueda pagar (cuenta Nequi, número Bancolombia, etc.).</div>
+            <div class="s-sub">Los métodos activos aparecen en Caja y en el chat de la mesa. Para los métodos digitales, escribí las instrucciones que el bot enviará al cliente para que pueda pagar (cuenta Nequi, número Bancolombia, etc.).</div>
 
             <div class="integ-row">
               <div class="integ-logo" style="background:#E1F5EE;">💵</div>
@@ -263,7 +262,7 @@
               <div class="integ-logo" style="background:#EDE9FE;">💸</div>
               <div class="integ-info">
                 <div class="integ-name">Bold</div>
-                <div class="integ-desc">Link de pago por WhatsApp</div>
+                <div class="integ-desc">Link de pago</div>
               </div>
               <button class="switch" id="pay-sw-bold" data-toggleable aria-label="Bold activado"></button>
             </div>
@@ -339,7 +338,7 @@
               <div><div class="fg-label">NPS negativo (&lt; 7)</div></div>
               <div class="tog">
                 <button class="switch on" id="notif-sw-nps_negative" data-toggleable aria-label="NPS negativo"></button>
-                <span class="text-mute">admin vía WhatsApp</span>
+                <span class="text-mute">admin</span>
               </div>
             </div>
 
@@ -350,24 +349,6 @@
                 <span class="text-mute">equipo completo</span>
               </div>
             </div>
-          </section>
-
-          <!-- Bot features -->
-          <section id="bot-features" class="card set-sec">
-            <h2>Funciones del bot</h2>
-            <div class="s-sub">Activa o desactiva capacidades del asistente de WhatsApp.</div>
-
-            <div class="field-group">
-              <div>
-                <div class="fg-label">Notas de voz (audio)</div>
-                <div class="fg-hint">Transcribe audios de WhatsApp con IA. Desactivado por defecto — activa solo cuando esté listo para tu operación.</div>
-              </div>
-              <div class="tog">
-                <button class="switch" id="bot-sw-voice-notes" data-toggleable aria-label="Notas de voz activadas"></button>
-                <span class="text-mute">transcripción IA</span>
-              </div>
-            </div>
-
           </section>
 
           <!-- Commerce features -->
@@ -384,22 +365,6 @@
                 <button class="switch" id="commerce-sw-dian" data-toggleable aria-label="Facturación electrónica DIAN activada"></button>
                 <span class="text-mute">factura electrónica</span>
               </div>
-            </div>
-
-          </section>
-
-          <!-- Integrations -->
-          <section id="integ" class="card set-sec">
-            <h2>Integraciones</h2>
-            <div class="s-sub">Conecta Mesio con tus otras herramientas.</div>
-
-            <div class="integ-row">
-              <div class="integ-logo" style="background:#25D366;color:#fff;font-size:16px;">💬</div>
-              <div class="integ-info">
-                <div class="integ-name">WhatsApp Business API</div>
-                <div class="integ-desc">Meta · Gestiona pedidos, reservas y soporte</div>
-              </div>
-              <span class="badge success">Activa</span>
             </div>
 
           </section>
@@ -487,7 +452,7 @@
             <div class="field-group">
               <div>
                 <div class="fg-label">Pausar restaurante</div>
-                <div class="fg-hint">Oculta el menú público y suspende pedidos WhatsApp.</div>
+                <div class="fg-hint">Oculta el menú público y suspende los pedidos en línea.</div>
               </div>
               <div>
                 <button class="btn" id="btnPause">Pausar</button>

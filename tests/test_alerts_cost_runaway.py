@@ -287,11 +287,8 @@ class TestCostRunawayRegisteredInCheckAlerts:
 
         # Stub out all other checks so they don't need real infrastructure
         for check_name in (
-            "_check_dead_letters",
             "_check_pool_exhaustion",
-            "_check_inbox_latency",
-            "_check_queue_depth",
-            "_check_error_rate",
+            "_check_churn_risk",
         ):
             monkeypatch.setattr(alerts_mod, check_name, AsyncMock())
 

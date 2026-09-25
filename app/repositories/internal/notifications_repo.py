@@ -34,35 +34,6 @@ async def _get_pool():
 
 # ── Source functions ──────────────────────────────────────────────────────────
 
-async def _fetch_dead_letters() -> list[dict]:
-    """Dead letters in webhook_inbox (messages that permanently failed)."""
-    try:
-        pool = await _get_pool()
-        async with pool.acquire() as conn:
-            count = await conn.fetchval(
-                "SELECT COUNT(*) FROM webhook_inbox WHERE last_error LIKE 'DEAD_LETTER:%'"
-            )
-        count = int(count or 0)
-        if count == 0:
-            return []
-        return [
-            {
-                "id": f"deadletter:{count}",
-                "type": "deadletter",
-                "severity": "high",
-                "title": f"{count} dead letter{'s' if count != 1 else ''} en inbox",
-                "detail": "Mensajes que fallaron 5 intentos. Investiga ASAP.",
-                "url": "/internal/monitoring",
-                "created_at": _now_iso(),
-                "count": count,
-                "tenant_id": None,
-            }
-        ]
-    except Exception:
-        log.exception("notifications_repo.dead_letters_error")
-        return []
-
-
 async def _fetch_cost_runaway() -> list[dict]:
     """Tenants who exceeded 2x their plan daily token budget today."""
     try:
@@ -346,7 +317,6 @@ async def db_get_notifications() -> list[dict]:
     import asyncio  # noqa: PLC0415
 
     results_per_source = await asyncio.gather(
-        _fetch_dead_letters(),
         _fetch_cost_runaway(),
         _fetch_churn_risk(),
         _fetch_new_prospects(),

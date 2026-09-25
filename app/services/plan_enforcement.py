@@ -52,20 +52,8 @@ REDIRECT_MESSAGE = (
     "Espera un momentico por favor, ya te respondemos."
 )
 
-# Admin WA alert when cap is exhausted (sent to restaurant admin phone)
-_ADMIN_CAP_ALERT = (
-    "⚠️ Tu plan Mesio agotó las conversaciones del mes. "
-    "Activa auto-recarga en /billing o sube de plan para reanudar el bot."
-)
-
-# Admin WA notification when auto-recharge fires
-_ADMIN_RECHARGE_MSG_TMPL = (
-    "Mesio auto-recargó 100 conversaciones por $50.000 COP. "
-    "Llevas {packs_used} de {max_packs} packs este mes. "
-    "Configura el límite en /billing."
-)
-
-# Threshold percentages that trigger a one-time warning notification
+# Usage percentages logged once per period. The owner used to get these by
+# WhatsApp (retired 2026-09-25); Mesio sees caps in /internal notifications.
 _WARN_THRESHOLDS = (50, 80, 90)
 
 
@@ -73,14 +61,11 @@ async def check_and_consume_conv_slot(
     org_id: int,
     *,
     bot_number: str = "",
-    access_token: str = "",
-    admin_phone: str = "",
-    phone_id: str = "",
 ) -> CapDecision:
     """Check cap and consume one conversation slot.
 
-    Must be called INSIDE tenant_scope(org_id) — the inbox_worker already ensures
-    this before dispatching to _process_message → agent.chat().
+    Must be called INSIDE tenant_scope(org_id) — agent.chat() runs inside the
+    scope its caller (the diner chat route) set.
 
     Bot-rule constraint: errors in cap infrastructure NEVER silence the bot.
     An exception from db_check_caps or db_increment_conv_usage causes a PROCEED
@@ -88,10 +73,7 @@ async def check_and_consume_conv_slot(
 
     Args:
         org_id:       Organization ID (tenant key, equals restaurant_obj["id"] post-Wave-2).
-        bot_number:   Bot WhatsApp number — used to send WA notifications (best-effort).
-        access_token: Meta access token — used to send WA notifications.
-        admin_phone:  Restaurant admin phone to notify on exhaustion/recharge.
-        phone_id:     Meta phone_id for notification delivery.
+        bot_number:   The org's bot key — only for log context.
 
     Returns:
         CapDecision.PROCEED           — allow message to continue to LLM
@@ -133,7 +115,7 @@ async def check_and_consume_conv_slot(
             return CapDecision.PROCEED
 
         # Fire threshold warnings (best-effort side-effect)
-        _fire_threshold_warn_nowait(org_id, new_used, caps, bot_number, access_token, admin_phone, phone_id)
+        _fire_threshold_warn_nowait(org_id, new_used, caps)
 
         return CapDecision.PROCEED
 
@@ -184,9 +166,8 @@ async def check_and_consume_conv_slot(
                     fired_automatically=True,
                 )
             except Exception:
-                log.exception("plan_enforcement.create_pack_failed", org_id=org_id)
+                log.exception("plan_enforcement.create_pack_failed", org_id=org_id, bot_number=bot_number)
                 # If pack creation fails, we cannot safely proceed (no cap room)
-                _send_cap_exhausted_alert_nowait(org_id, bot_number, access_token, admin_phone, phone_id)
                 return CapDecision.REDIRECT_TO_HUMAN
 
             try:
@@ -206,12 +187,6 @@ async def check_and_consume_conv_slot(
                 max_packs=max_packs,
             )
 
-            # Notify admin about auto-recharge (best-effort)
-            _send_recharge_notification_nowait(
-                org_id, bot_number, access_token, admin_phone, phone_id,
-                packs_used=packs_used + 1, max_packs=max_packs,
-            )
-
             return CapDecision.PROCEED
 
     # ── All options exhausted ─────────────────────────────────────────────────
@@ -222,42 +197,26 @@ async def check_and_consume_conv_slot(
         conv_cap=conv.get("cap"),
         pack_credits=conv.get("pack_credits"),
         auto_recharge_enabled=auto_recharge_enabled,
+        bot_number=bot_number,
     )
-    _send_cap_exhausted_alert_nowait(org_id, bot_number, access_token, admin_phone, phone_id)
     return CapDecision.REDIRECT_TO_HUMAN
 
 
 # ── Threshold notification helpers ────────────────────────────────────────────
 
-def _fire_threshold_warn_nowait(
-    org_id: int,
-    new_used: int,
-    caps: dict,
-    bot_number: str,
-    access_token: str,
-    admin_phone: str,
-    phone_id: str,
-) -> None:
+def _fire_threshold_warn_nowait(org_id: int, new_used: int, caps: dict) -> None:
     """Schedule threshold warning as a fire-and-forget asyncio task (best-effort)."""
     import asyncio
     try:
         asyncio.ensure_future(
-            _fire_threshold_warn(org_id, new_used, caps, bot_number, access_token, admin_phone, phone_id)
+            _fire_threshold_warn(org_id, new_used, caps)
         )
     except Exception:
         pass  # best-effort; never block the bot
 
 
-async def _fire_threshold_warn(
-    org_id: int,
-    new_used: int,
-    caps: dict,
-    bot_number: str,
-    access_token: str,
-    admin_phone: str,
-    phone_id: str,
-) -> None:
-    """Send a one-time admin WA notification when usage crosses 50/80/90%."""
+async def _fire_threshold_warn(org_id: int, new_used: int, caps: dict) -> None:
+    """Log once per period when usage crosses 50/80/90%."""
     try:
         conv = caps.get("conv", {})
         cap = conv.get("cap", 0)
@@ -277,9 +236,7 @@ async def _fire_threshold_warn(
         if crossed_pct is None:
             return
 
-        # Dedup via Redis: only notify the first time per (org, period, threshold)
-        period_start = caps.get("conv", {}).get("used")  # fallback — not period start
-        # Use a stable key: org + crossed_pct (period resets clear naturally since usage resets)
+        # Dedup via Redis: only the first time per (org, period, threshold)
         dedup_acquired = await _acquire_threshold_warn_slot(org_id, crossed_pct)
         if not dedup_acquired:
             log.debug(
@@ -288,16 +245,10 @@ async def _fire_threshold_warn(
             )
             return
 
-        if not admin_phone or not access_token or not bot_number:
-            return
-
-        msg = (
-            f"⚠️ Tu bot Mesio ha usado el {crossed_pct}% de las conversaciones del plan este mes "
-            f"({new_used}/{cap}). "
-            + ("Recuerda activar auto-recarga o subir de plan en /billing." if crossed_pct >= 80
-               else "Revisa tu consumo en /billing.")
+        log.warning(
+            "plan_enforcement.usage_threshold_crossed",
+            org_id=org_id, pct=crossed_pct, used=new_used, cap=cap,
         )
-        await _send_wa_best_effort(bot_number, access_token, admin_phone, msg, phone_id)
 
     except Exception:
         log.warning("plan_enforcement.threshold_warn_failed", org_id=org_id, exc_info=True)
@@ -335,64 +286,3 @@ def _fb_acquire_threshold_warn(org_id: int, pct: int) -> bool:
         return False
     _fb_threshold_warns[key] = True
     return True
-
-
-# ── WA notification helpers ───────────────────────────────────────────────────
-
-def _send_cap_exhausted_alert_nowait(
-    org_id: int,
-    bot_number: str,
-    access_token: str,
-    admin_phone: str,
-    phone_id: str,
-) -> None:
-    import asyncio
-    if not admin_phone or not access_token or not bot_number:
-        return
-    try:
-        asyncio.ensure_future(
-            _send_wa_best_effort(bot_number, access_token, admin_phone, _ADMIN_CAP_ALERT, phone_id)
-        )
-    except Exception:
-        pass
-
-
-def _send_recharge_notification_nowait(
-    org_id: int,
-    bot_number: str,
-    access_token: str,
-    admin_phone: str,
-    phone_id: str,
-    *,
-    packs_used: int,
-    max_packs: int,
-) -> None:
-    import asyncio
-    if not admin_phone or not access_token or not bot_number:
-        return
-    msg = _ADMIN_RECHARGE_MSG_TMPL.format(packs_used=packs_used, max_packs=max_packs)
-    try:
-        asyncio.ensure_future(
-            _send_wa_best_effort(bot_number, access_token, admin_phone, msg, phone_id)
-        )
-    except Exception:
-        pass
-
-
-async def _send_wa_best_effort(
-    bot_number: str,
-    access_token: str,
-    phone: str,
-    text: str,
-    phone_id: str,
-) -> None:
-    """Send a WA text message, logging failures but never raising."""
-    try:
-        from app.services.meta_api import send_text as _meta_send_text  # noqa: PLC0415
-        await _meta_send_text(bot_number, access_token, phone, text, phone_id=phone_id)
-    except Exception:
-        log.warning(
-            "plan_enforcement.wa_notify_failed",
-            bot_number=bot_number,
-            phone=phone[:4] + "****" if len(phone) > 4 else "****",
-        )

@@ -122,20 +122,6 @@ def estimate_cost_usd_breakdown(
     return total.quantize(Decimal("0.000001"), rounding=ROUND_HALF_EVEN)
 
 
-def estimate_cost_cop_breakdown(
-    input_tokens: int = 0,
-    output_tokens: int = 0,
-    cache_read_tokens: int = 0,
-    cache_write_tokens: int = 0,
-) -> Decimal:
-    """`estimate_cost_usd_breakdown` converted to COP, rounded to the peso."""
-    return usd_to_cop(
-        estimate_cost_usd_breakdown(
-            input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
-        )
-    )
-
-
 def estimate_cost_usd(tokens: int) -> Decimal:
     """LEGACY. Price an undifferentiated token count at one blended rate.
 

@@ -177,7 +177,6 @@ def test_bot_table_flow_resolves_own_restaurant_despite_collision(collision):
             bot_number=collision["bot_number"],
             table_context=table_context,
             user_phone="+573000000001",
-            meta_phone_id=None,
         )
 
     ctx = _run(_call())

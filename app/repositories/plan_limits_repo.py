@@ -181,27 +181,6 @@ async def db_increment_conv_usage(org_id: int, count: int = 1) -> int:
     return result
 
 
-async def db_increment_audio_usage(org_id: int, minutes: Decimal) -> Decimal:
-    """Atomically increment audio usage (in minutes) for the current period.
-
-    Returns the new current_period_audio_min_used value.
-    # Requires active tenant_scope(org_id).
-    """
-    async with tenant_connection() as conn:
-        new_val = await conn.fetchval(
-            """
-            UPDATE organizations
-               SET current_period_audio_min_used = current_period_audio_min_used + $2
-             WHERE id = $1
-            RETURNING current_period_audio_min_used
-            """,
-            org_id, minutes,
-        )
-    result = to_decimal(new_val)
-    log.debug("plan_limits.audio_incremented", org_id=org_id, minutes=str(minutes), new_total=str(result))
-    return result
-
-
 async def db_check_caps(org_id: int) -> dict:
     """Return per-dimension cap status for an org.
 

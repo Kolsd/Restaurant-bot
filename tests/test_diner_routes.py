@@ -492,15 +492,6 @@ def test_waiter_call_is_rate_limited(client, seed_org):
 
 # ── Safety net 1: web:<uuid4> identity survives phone-mangling paths ────────
 
-def test_qr_claims_canonical_phone_passes_web_identity_unchanged():
-    from app.repositories.qr_claims_repo import _canonical_phone
-
-    token = f"web:{uuid.uuid4()}"
-    assert _canonical_phone(token) == token
-    # A real phone is still canonicalized normally (regression guard — the
-    # web: passthrough must not swallow legitimate WhatsApp numbers).
-    assert _canonical_phone("3144914554") == "573144914554"
-
 
 def test_loyalty_balance_rejects_web_diner_identity(client):
     """The loyalty endpoint must 422 a 'web:<uuid4>' identity outright instead

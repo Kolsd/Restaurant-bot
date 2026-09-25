@@ -1,6 +1,5 @@
 import os
 import json
-import httpx
 import csv
 import io
 from datetime import datetime
@@ -25,8 +24,6 @@ log = get_logger(__name__)
 router = APIRouter(prefix="/api/internal/crm", tags=["internal-crm"])
 
 # ── CONFIG ────────────────────────────────────────────────────────────
-META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
-CRM_TEMPLATE_LANGUAGE = os.getenv("CRM_TEMPLATE_LANGUAGE", "en")
 
 # NOTE: _require_auth (X-Admin-Key + raw ADMIN_KEY fallback) has been replaced
 # by verify_superadmin (Depends) everywhere. All CRM callers must obtain a
@@ -70,22 +67,6 @@ class NoteCreate(BaseModel):
     content:   str
     note_type: str = "note"   # note | call | email | whatsapp | meeting
 
-class TemplateCreate(BaseModel):
-    name:     str
-    wa_name:  str
-    language: str = "es_CO"
-    category: str = "MARKETING"
-    body:     str
-    params:   List[str] = []
-
-class SendTemplatePayload(BaseModel):
-    prospect_ids:  List[int]
-    template_id:   int
-    params_map:    dict = {}   # {prospect_id: [param1, param2, ...]}
-
-class SendMessagePayload(BaseModel):
-    prospect_id: int
-    message:     str
 
 
 # ── DB HELPERS ────────────────────────────────────────────────────────
@@ -94,9 +75,6 @@ def _ser(row: dict) -> dict:
     return crm_repo._serialize(row)
 
 
-async def _ensure_crm_tables():
-    # Schema managed by Alembic. This is seed-only for default templates.
-    await crm_repo.db_seed_crm_templates()
 
 # ── PROSPECTS CRUD ────────────────────────────────────────────────────
 @router.get("/prospects")
@@ -108,7 +86,6 @@ async def get_prospects(
     limit: int = 500,
     _: None = Depends(verify_superadmin),
 ):
-    await _ensure_crm_tables()
     limit = max(1, min(limit, 500))  # hard cap
     prospects = await crm_repo.db_get_prospects(
         archived=archived, stage=stage, priority=priority, search=search, limit=limit
@@ -117,7 +94,6 @@ async def get_prospects(
 
 @router.post("/prospects")
 async def create_prospect(body: ProspectCreate, _: None = Depends(verify_superadmin)):
-    await _ensure_crm_tables()
     prospect = await crm_repo.db_create_prospect(
         restaurant_name=body.restaurant_name, owner_name=body.owner_name,
         phone=body.phone, city=body.city, neighborhood=body.neighborhood,
@@ -203,10 +179,8 @@ async def get_loss_reasons(_: None = Depends(verify_superadmin)):
 class ConvertProspectBody(BaseModel):
     """Optional overrides when converting. Defaults pull from the prospect row."""
     name:            Optional[str] = None   # defaults to prospect.restaurant_name
-    whatsapp_number: Optional[str] = None   # defaults to prospect.phone
     owner_email:     Optional[str] = None   # defaults to prospect.email — destination for
-                                             # the welcome email (WhatsApp is being retired;
-                                             # see _send_welcome_whatsapp docstring below).
+                                             # the welcome email.
                                              # Lets the founder supply an address at convert
                                              # time even when the CRM row never captured one.
     plan_code:       str = "restaurante"    # CEO decision: default to Restaurante plan
@@ -229,59 +203,6 @@ class ConvertProspectBody(BaseModel):
 # and the self-serve signup hand out credentials. Re-exported under the old
 # private name so existing callers and tests keep working.
 _generate_temp_password = generate_temp_password
-
-
-async def _send_welcome_whatsapp(phone: str, username: str, temp_password: str) -> bool:
-    """Send welcome WhatsApp to new admin user. Returns True on success, False on failure.
-
-    Best-effort: caller should NOT raise on False — log and continue.
-    Password is NOT passed to structlog.
-
-    UNUSED as of the email-channel migration — `convert_prospect_to_restaurant`
-    now sends the welcome message via `app.services.email.send_email` +
-    `render_welcome_email` instead (WhatsApp is being retired platform-wide).
-    Kept in place rather than deleted per the "don't delete features outright"
-    rule, for the wave that fully retires WhatsApp end to end.
-    """
-    token    = os.getenv("META_ACCESS_TOKEN", "")
-    phone_id = os.getenv("CRM_PHONE_NUMBER_ID") or os.getenv("META_PHONE_NUMBER_ID", "")
-
-    if not token or not phone_id:
-        log.warning("crm.convert.welcome_wa_no_credentials", phone_suffix=phone[-4:])
-        return False
-
-    clean_phone = phone.lstrip("+").replace(" ", "")
-    body_text = (
-        f"¡Bienvenido a Mesio! 🎉 Tu cuenta ya está creada. "
-        f"Inicia sesión en https://mesio.app/login con usuario: {username} "
-        f"y contraseña: {temp_password}. "
-        f"Cámbiala en tu primer login."
-    )
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
-                headers={"Authorization": f"Bearer {token}"},
-                json={
-                    "messaging_product": "whatsapp",
-                    "to": clean_phone,
-                    "type": "text",
-                    "text": {"body": body_text},
-                },
-            )
-            if resp.status_code == 200:
-                log.info("crm.convert.welcome_wa_sent", phone_suffix=clean_phone[-4:])
-                return True
-            log.warning(
-                "crm.convert.welcome_wa_failed",
-                phone_suffix=clean_phone[-4:],
-                status=resp.status_code,
-            )
-            return False
-    except Exception:
-        log.exception("crm.convert.welcome_wa_exception", phone_suffix=clean_phone[-4:])
-        return False
 
 
 @router.post("/prospects/{pid}/convert")
@@ -321,15 +242,14 @@ async def convert_prospect_to_restaurant(
       }
 
     Security note: temp_password is returned to the founder so they can relay
-    credentials if WhatsApp delivery fails. It is NOT logged to structlog or Sentry.
+    credentials if the welcome email fails. It is NOT logged to structlog or Sentry.
     """
     prospect = await crm_repo.db_get_prospect_by_id(pid)
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospecto no encontrado")
 
     # Idempotency hint — if already tagged as converted, refuse with a clear
-    # message so the caller can detect (instead of getting a generic 409 from
-    # the org create when the whatsapp_number collides).
+    # message so the caller can detect it.
     existing_tags = prospect.get("tags") or []
     if any(isinstance(t, str) and t.startswith("org:") for t in existing_tags):
         raise HTTPException(
@@ -338,11 +258,8 @@ async def convert_prospect_to_restaurant(
         )
 
     name = (body.name or prospect.get("restaurant_name") or "").strip()
-    # The phone is OPTIONAL as of 2026-09-23. Requiring it made the UNIQUE
-    # index on organizations.whatsapp_number a business rule nobody chose:
-    # one owner could not have two restaurants, and a product whose channel
-    # is the web was refusing to create accounts over a WhatsApp column.
-    wa   = (body.whatsapp_number or prospect.get("phone") or "").strip()
+    # The prospect's phone is a sales contact, never the restaurant's key:
+    # WhatsApp is retired (2026-09-25) and a web org is keyed by id (0096).
     if not name:
         raise HTTPException(
             status_code=400,
@@ -369,7 +286,6 @@ async def convert_prospect_to_restaurant(
             # Generated and returned once, for the founder to relay.
             password=None,
             owner_email=dest_email,
-            whatsapp_number=wa or None,
             plan_code=plan,
             trial_days=body.trial_days,
             features=body.features or {},
@@ -499,212 +415,10 @@ async def get_interactions(pid: int, _: None = Depends(verify_superadmin)):
     return {"interactions": interactions}
 
 
-# ── SEND WHATSAPP MESSAGE (manual 1:1) ───────────────────────────────
-@router.post("/send-message")
-async def send_manual_message(body: SendMessagePayload, _: None = Depends(verify_superadmin)):
-    prospect = await crm_repo.db_get_prospect_by_id(body.prospect_id)
-    if not prospect:
-        raise HTTPException(status_code=404, detail="Prospecto no encontrado")
-
-    prospect = dict(prospect)
-    phone    = prospect["phone"].lstrip("+").replace(" ", "")
-    token    = os.getenv("META_ACCESS_TOKEN", "")
-    phone_id = os.getenv("CRM_PHONE_NUMBER_ID") or os.getenv("META_PHONE_NUMBER_ID", "")  # CRM usa número de prospectos
-
-    wa_msg_id = ""
-    status    = "sent"
-    error_msg = ""
-
-    if token and phone_id:
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(
-                    f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={
-                        "messaging_product": "whatsapp",
-                        "to": phone,
-                        "type": "text",
-                        "text": {"body": body.message}
-                    }
-                )
-                data = resp.json()
-                if resp.status_code == 200:
-                    wa_msg_id = data.get("messages", [{}])[0].get("id", "")
-                else:
-                    status    = "error"
-                    error_msg = data.get("error", {}).get("message", str(resp.text[:200]))
-        except Exception as e:
-            status    = "error"
-            error_msg = str(e)[:200]
-    else:
-        status    = "no_credentials"
-        error_msg = "Configura CRM_PHONE_NUMBER_ID en Railway con el ID del número de prospectos"
-
-    # Log the interaction ONLY if it was sent successfully
-    if status == "sent":
-        await crm_repo.db_record_outbound_interaction(
-            body.prospect_id, content=body.message, wa_message_id=wa_msg_id
-        )
-
-    if status == "error":
-        raise HTTPException(status_code=422, detail=error_msg)
-
-    return {"success": True, "status": status, "wa_message_id": wa_msg_id}
-
-# ── SEND TEMPLATE (masivo) ────────────────────────────────────────────
-@router.post("/send-template")
-async def send_template(body: SendTemplatePayload, _: None = Depends(verify_superadmin)):
-    tpl = await crm_repo.db_get_crm_template_by_id(body.template_id)
-    if not tpl:
-        raise HTTPException(status_code=404, detail="Template no encontrado")
-
-    tpl      = dict(tpl)
-    token    = os.getenv("META_ACCESS_TOKEN", "")
-    phone_id = os.getenv("CRM_PHONE_NUMBER_ID") or os.getenv("META_PHONE_NUMBER_ID", "")
-
-    _PROSPECT_FIELDS = {
-        "restaurante": "restaurant_name", "restaurant": "restaurant_name",
-        "nombre":      "owner_name",      "name":       "owner_name",
-        "ciudad":      "city",            "city":       "city",
-    }
-
-    results = []
-    for pid in body.prospect_ids:
-        prospect = await crm_repo.db_get_prospect_by_id(pid)
-        if not prospect:
-            results.append({"prospect_id": pid, "status": "not_found"})
-            continue
-        phone    = prospect["phone"].lstrip("+").replace(" ", "")
-
-        # Build template components resolviendo parámetros desde el prospecto
-        components = []
-        tpl_param_names = [str(p).strip().lower() for p in (tpl.get("params") or [])]
-
-        if tpl_param_names:
-            parameters_list = []
-            for p_name in tpl_param_names:
-                field    = _PROSPECT_FIELDS.get(p_name)
-                resolved = str(prospect[field]) if field and prospect.get(field) else ""
-                if not resolved:
-                    continue  # omitir parámetro si no hay dato
-                clean_text = resolved.replace("{", "").replace("}", "")
-                param_obj  = {"type": "text", "text": clean_text}
-                if not p_name.isdigit():
-                    param_obj["parameter_name"] = p_name[:20]
-                parameters_list.append(param_obj)
-                
-            components.append({
-                "type": "body",
-                "parameters": parameters_list
-            })
-
-        wa_msg_id = ""
-        status    = "sent"
-        error_msg = ""
-
-        if token and phone_id:
-            try:
-                meta_payload = {
-                    "messaging_product": "whatsapp",
-                    "to": phone,
-                    "type": "template",
-                    "template": {
-                        "name": tpl["wa_name"],
-                        "language": {
-                            "policy": "deterministic",
-                            "code": tpl.get("language") or CRM_TEMPLATE_LANGUAGE
-                        },
-                        "components": components
-                    }
-                }
-                log.info("crm.template_sending", phone=mask_phone(phone), template=tpl["wa_name"])
-
-                async with httpx.AsyncClient(timeout=10) as client:
-                    resp = await client.post(
-                        f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
-                        headers={"Authorization": f"Bearer {token}"},
-                        json=meta_payload
-                    )
-                    data = resp.json()
-                    log.info("crm.template_response", phone=mask_phone(phone), status=resp.status_code)
-
-                    if resp.status_code == 200:
-                        wa_msg_id = data.get("messages", [{}])[0].get("id", "")
-                    else:
-                        status    = "error"
-                        error_msg = data.get("error", {}).get("message", str(resp.text[:200]))
-            except Exception as e:
-                status    = "error"
-                error_msg = str(e)[:200]
-                log.error("crm.template_send_failed", phone=mask_phone(phone), error=error_msg)
-        else:
-            status    = "no_credentials"
-            error_msg = "Credenciales Meta no configuradas"
-
-        # Build the preview by replacing parameters with the prospect's values
-        preview = tpl["body"]
-        for p_name in tpl_param_names:
-            field    = _PROSPECT_FIELDS.get(p_name)
-            resolved = str(prospect[field]) if field and prospect.get(field) else ""
-            if resolved:
-                preview = preview.replace("{{" + p_name + "}}", resolved)
-
-        # Log to the database ONLY if it was sent successfully
-        if status == "sent":
-            await crm_repo.db_record_outbound_interaction(
-                pid, content=preview, template_name=tpl["wa_name"], wa_message_id=wa_msg_id
-            )
-
-        results.append({
-            "prospect_id": pid,
-            "phone":       phone,
-            "status":      status,
-            "error":       error_msg,
-            "wa_msg_id":   wa_msg_id
-        })
-
-    sent_ok  = len([r for r in results if r["status"] == "sent"])
-    sent_err = len([r for r in results if r["status"] == "error"])
-    return {
-        "success":   True,
-        "total":     len(results),
-        "sent":      sent_ok,
-        "errors":    sent_err,
-        "results":   results
-    }
-
-
-# ── TEMPLATES CRUD ────────────────────────────────────────────────────
-@router.get("/templates")
-async def get_templates(_: None = Depends(verify_superadmin)):
-    await _ensure_crm_tables()
-    templates = await crm_repo.db_get_crm_templates()
-    return {"templates": templates}
-
-
-@router.post("/templates")
-async def create_template(body: TemplateCreate, _: None = Depends(verify_superadmin)):
-    try:
-        template = await crm_repo.db_create_crm_template(
-            name=body.name, wa_name=body.wa_name, language=body.language,
-            category=body.category, body=body.body, params=body.params,
-        )
-        return {"success": True, "template": template}
-    except Exception:
-        log.exception("crm.create_template.unexpected_error")
-        raise HTTPException(status_code=400, detail="No se pudo crear la plantilla")
-
-@router.delete("/templates/{tid}")
-async def delete_template(tid: int, _: None = Depends(verify_superadmin)):
-    await crm_repo.db_delete_crm_template(tid)
-    return {"success": True}
-
 # ── IMPORTACIÓN CSV ───────────────────────────────────────────────────
 @router.post("/upload-csv")
 async def upload_csv(file: UploadFile = File(...), _: None = Depends(verify_superadmin)):
     
-    await _ensure_crm_tables()
     content = await file.read()
 
     # utf-8-sig strips Excel BOM (\ufeff); fallback to latin-1 for Windows-1252
@@ -756,26 +470,4 @@ async def upload_csv(file: UploadFile = File(...), _: None = Depends(verify_supe
 # ── STATS / KANBAN COUNTS ─────────────────────────────────────────────
 @router.get("/stats")
 async def crm_stats(_: None = Depends(verify_superadmin)):
-    await _ensure_crm_tables()
     return await crm_repo.db_get_crm_stats()
-
-# ── PAGE ROUTE ────────────────────────────────────────────────────────
-from fastapi import Response as FResponse
-from pathlib import Path
-from fastapi.responses import HTMLResponse
-
-@router.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def crm_page():
-    p = Path(__file__).parent.parent / "static" / "crm.html"
-    if p.exists():
-        return HTMLResponse(p.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>crm.html no encontrado en static/</h1>", status_code=404)
-
-# ── INBOUND WEBHOOK HOOK — logs prospect replies ─────────
-async def register_inbound_from_prospect(phone: str, message: str, wa_message_id: str = ""):
-    """
-    Called from chat.py when a WhatsApp message arrives.
-    If the number doesn't exist, creates it. If it exists, logs the interaction.
-    Delegates all SQL to crm_repo.db_record_inbound_interaction.
-    """
-    await crm_repo.db_record_inbound_interaction(phone, message, wa_message_id)

@@ -1,6 +1,6 @@
-# Mesio Restaurant Bot — v13.0 (head `0096_restaurants_web_key`; 2148 passed / 6 skipped with DB, run as `postgres`)
+# Mesio Restaurant Bot — v13.0 (head `0096_restaurants_web_key`; 1954 passed / 6 skipped with DB, run as `postgres`)
 
-Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_use). Product: the diner's own web channel (QR → `/chat/{table_id}`); WhatsApp is being retired.
+Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_use). Product: the diner's own web channel (QR → `/chat/{table_id}`); WhatsApp was removed on 2026-09-25.
 
 ## Token usage — working rules (PM 2026-09-12)
 - This file loads on EVERY turn: keep it short. Detail lives in `docs/claude/*.md`, read ONLY when the task touches that topic.
@@ -15,7 +15,7 @@ Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_
 |---|---|
 | State, closed product decisions, next session | `status.md` |
 | Env vars, commands | `env.md` |
-| `agent*.py`, `orders.py`, `orders_repo.py`, `inbox_worker.py`, `state_store.py`, `chat.py` | `bot-rules.md` (MANDATORY) |
+| `agent*.py`, `orders.py`, `orders_repo.py`, `state_store.py`, `routes/diner.py` | `bot-rules.md` (MANDATORY) |
 | Repos, deps, tenant scope, alembic, org/location, branches | `rls-multitenant.md` |
 | Structure, DB, webhook/inbox, Redis, scheduler, Decimal, feature flags | `architecture.md` |
 | Delivery / pickup web wave, `/pedir`, `/pedido` | `delivery-web.md` (MANDATORY) |
@@ -36,9 +36,9 @@ Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_
 3. ~~Web delivery wave Phase A~~ (2026-09-19, chunks 1-9: data model, `/pedir/{slug}`, checkout, `/pedido/{code}`, cashier + courier UI, per-sede config, WhatsApp delivery/pickup switched off — spec `docs/claude/delivery-web.md`). Phase B (Mapbox map, live chat) later.
 4. ~~Onboarding blockers~~ (2026-09-20): orgs are born with a slug (`/pedir/{slug}` was unreachable for every customer created since 0034; 0088 backfills); the staff roster is no longer behind the `staff_tips` module; `gerente` configures their own sede's delivery; `POST /api/staff/delivery/orders/{id}/mark-paid` records cash/card/transfer (before it, NO web order could ever be `paid=TRUE`, so delivery sales were missing from `total_sales`); CRM convert starts the `comp_until` trial.
 4b. ~~Self-serve GTM~~ (2026-09-23/24, GTM decisions in `status.md` #14): real LLM cost per kind (0094), self-serve signup with owner-chosen password + 14-day trial (0095 fixed the CRM `prospects` stub), carta import from photo/text as a DRAFT into the existing editor (editor was opening empty — fixed), owner checklist `/api/onboarding`, QR → `/chat/{id}` + all-tables print sheet. Open: `RESEND_API_KEY` in prod (welcome email is now optional, not blocking); the import needs Anthropic credit to be tried for real; flat price per sede + `plan_code`/`subscription_plan` unification; country-neutral schema.
-4c. **Cleanup (2026-09-25, branch `chore/limpieza`, tag `pre-limpieza`)** — scope in memory `cleanup-scope-2026-09-25`. Step 1 done: self-serve orgs (no WhatsApp) could not open a table or `/pedir` → 0096 web key. Next: browser walk-through of a fresh self-serve restaurant, then module deletions, then new landing + real demo. `tests/e2e/test_happy_path_full_flow.py` (WhatsApp harness) already failed before step 1.
+4c. **Cleanup (2026-09-25, branch `chore/limpieza`, tag `pre-limpieza`)** — scope in memory `cleanup-scope-2026-09-25`. Step 1 done: self-serve orgs (no WhatsApp) could not open a table or `/pedir` → 0096 web key. Step 2 done: WhatsApp deleted (see item 6). Next, in order: 3) identity — replace `whatsapp_number`/`bot_number` with org/location ids; 4) browser walk-through of a fresh self-serve restaurant; 5) module deletions; 6) new landing + real demo; plus the conversation-cap P1 (cap → bot tells diners "te atiende un asesor humano" and auto-charges 50.000 COP packs, against the flat-price decision). The e2e flagship (`test_happy_path_full_flow`) passes again: its "pre-existing" failure was a MagicMock usage missing the 0094 cache-token fields.
 5. Sweep `json.dumps()` passed to jsonb params — CONFIRMED P1: the pool codec double-encodes them (all `table_checks.items`, `conversations.history`, `carts` in the test DB are JSON strings); ~29 test pools lack the codec, which hid it. Fix writers + test pools + a data-repair migration.
-6. Turn off remaining WhatsApp (migrate e2e harness first).
+6. ~~Turn off remaining WhatsApp~~ (2026-09-25, cleanup step 2: webhook, inbox worker, Meta API, audio, WA catalog/QR claims, CRM WA inbox, scheduler WA tasks; e2e harness + AI sim now drive `agent.chat()` like the web chat). Left for step 3 (identity): `whatsapp_number`/`bot_number` as the tenant key, superadmin WA fields, `wa_*` columns.
 7. Fix the Wompi webhook before reactivating it (its e2e test fails: invalid signature → 200, expects 401).
 Closed product decisions: see `status.md` — do not re-discuss.
 
@@ -61,7 +61,7 @@ Local Windows environment: `.venv` Py 3.12, Postgres 16 (`postgres`/`mesio_local
 - **"Agotado" is per sede**: `menu_availability` is keyed `(org_id, location_id, dish_name)`. `db_get_menu_availability` REQUIRES a `location_id` and `db_set_dish_availability` raises without one — no org-wide fallback. Only the public `/r/{slug}` brand pages use `db_get_menu_availability_any_sede`.
 - **The carta is per sede**: the org's `organizations.menu` plus each sede's overrides (price, hidden, own dishes; 0093). Anything that shows or prices a dish at a sede reads `services/sede_menu.get_sede_menu(org_id, location_id)`, never `db_get_menu(bot_number)`; the bot gets its sede from `sede_context`. Gerente edits their own sede; the base belongs to owner/admin. Detail: `rls-multitenant.md`.
 - **Money**: `Decimal` + `services/money.py`; `float` only at the JSON edge (`# JSON boundary`). Never Decimal in `state_store`.
-- **4 workers**: mutable state via `state_store` (Redis). Inbox worker claim-then-ack, never a long transaction.
+- **4 workers**: mutable state via `state_store` (Redis); never hold a DB connection or transaction across an LLM call.
 - **Logging**: `get_logger(__name__)`, typed catch, no `except Exception: pass`, no `print`, `mask_phone()` in logs.
 - **Frontend**: `textContent` for user data; `mesioHeaders()`/`_staffFetch`; a commit touching static → bump `CACHE_VERSION` in `sw.js` in the same commit.
 - **Alembic**: rev id ≤ 32 chars; `sa.text()` + `CAST(:p AS type)`; `IF NOT EXISTS`.

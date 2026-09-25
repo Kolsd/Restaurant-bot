@@ -22,7 +22,6 @@ from pydantic import BaseModel, field_validator
 from app.services import database as db
 from app.repositories import delivery_repo, restaurant_repo
 from app.services import state_store
-from app.services.channel_key import dialable
 from app.services.logging import get_logger
 from app.services.tenant_context import bypass_tenant_scope
 
@@ -84,16 +83,6 @@ async def reset_password_page():
 async def dashboard_page():
     return (STATIC / "html" / "dashboard.html").read_text(encoding="utf-8")
 
-@router.get("/demo", response_class=HTMLResponse)
-async def demo_money_shot_page():
-    """Money-shot split-screen demo: WhatsApp ↔ Dashboard reacting in real time. GTM critical."""
-    return (STATIC / "html" / "demo.html").read_text(encoding="utf-8")
-
-@router.get("/dashboard-demo", response_class=HTMLResponse)
-async def dashboard_demo_page():
-    """Redesigned full-dashboard demo: 11-section sidebar, AI insight, live ticker, trust block. GTM landing."""
-    return (STATIC / "html" / "dashboard-demo.html").read_text(encoding="utf-8")
-
 @router.get("/landing", response_class=HTMLResponse)
 async def landing_page():
     return (STATIC / "html" / "landing.html").read_text(encoding="utf-8")
@@ -147,10 +136,6 @@ async def crm_internal_alias():
     p = STATIC / "html" / "internal" / "crm.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
-@router.get("/catalog", response_class=HTMLResponse)
-async def catalog_page():
-    p = STATIC / "html" / "catalog.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Catálogo no disponible</h1>")
 
 @router.get("/chat/{table_id}", response_class=HTMLResponse)
 async def diner_chat_page(table_id: str):
@@ -309,143 +294,6 @@ async def public_restaurant_info(id: int):
 # up by exact phone match and opens the session on the correct table —
 # no race conditions, no visible markers in WhatsApp.
 
-class QrClaimRequest(BaseModel):
-    bot_number: str
-    table_id: str
-    phone: str
-    geo_lat: float | None = None
-    geo_lon: float | None = None
-
-    @field_validator("phone")
-    @classmethod
-    def _phone_digits_only(cls, v: str) -> str:
-        digits = "".join(ch for ch in (v or "") if ch.isdigit())
-        if len(digits) < 7 or len(digits) > 15:
-            raise ValueError("phone must be 7-15 digits")
-        return digits
-
-
-@router.post("/api/qr-claim")
-async def post_qr_claim(request: Request, body: QrClaimRequest):
-    """Register a pre-binding between a phone and a table QR scan.
-
-    Public endpoint (no auth — scanned by anonymous customers). Rate-limited
-    by IP to prevent abuse: 30 claims/min/IP.
-
-    Returns 201 + claim_id on success. Returns 404 if bot_number doesn't
-    resolve to any org. Returns 422 if phone format is invalid (Pydantic).
-    """
-    client_ip = request.client.host if request.client else "unknown"
-    allowed = await state_store.rate_limit_check(
-        f"qr_claim:{client_ip}", max_requests=30, window_seconds=60,
-    )
-    if not allowed:
-        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
-
-    normalized_bot = body.bot_number.replace("+", "").replace(" ", "").strip()
-
-    # Resolve org/location from bot_number BEFORE entering tenant_scope.
-    # The client menu page knows the bot_number from the URL it loaded.
-    with bypass_tenant_scope("post_qr_claim: pre-resolve org from bot_number"):
-        rest = await restaurant_repo.db_get_restaurant_by_bot_number(normalized_bot)
-    if not rest:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado para ese número")
-
-    org_id = int(rest["id"])
-    location_id = rest.get("location_id")
-
-    # Geo-fence check: 50m radius around the location's coords.
-    geo_verified: bool | None = None
-    if body.geo_lat is not None and body.geo_lon is not None:
-        loc_lat = rest.get("latitude")
-        loc_lon = rest.get("longitude")
-        if loc_lat is not None and loc_lon is not None:
-            try:
-                distance_km = restaurant_repo.haversine_km(
-                    float(body.geo_lat), float(body.geo_lon),
-                    float(loc_lat), float(loc_lon),
-                )
-                geo_verified = distance_km <= 0.05  # 50m
-                if not geo_verified:
-                    log.warning(
-                        "qr_claim.geo_far",
-                        org_id=org_id,
-                        table_id=body.table_id,
-                        distance_km=round(distance_km, 3),
-                    )
-            except (TypeError, ValueError):
-                geo_verified = None
-
-    from app.repositories import qr_claims_repo  # noqa: PLC0415
-    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
-
-    with tenant_scope(org_id):
-        claim_id = await qr_claims_repo.create_claim(
-            bot_number=normalized_bot,
-            table_id=body.table_id,
-            phone=body.phone,
-            org_id=org_id,
-            location_id=int(location_id) if location_id else None,
-            geo_verified=geo_verified,
-        )
-
-    return {
-        "ok": True,
-        "claim_id": claim_id,
-        "geo_verified": geo_verified,
-    }
-
-
-@router.get("/api/public/menu/{bot_number}")
-async def get_public_menu(request: Request, bot_number: str):
-    # ── Rate limit: 30 req/min per IP — prevents mass harvesting ─────────────
-    client_ip = request.client.host if request.client else "unknown"
-    allowed = await state_store.rate_limit_check(f"public_menu:{client_ip}", max_requests=30, window_seconds=60)
-    if not allowed:
-        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
-
-    normalized = bot_number.replace("+", "").replace(" ", "").strip()
-    data = await restaurant_repo.db_get_public_menu_data(normalized)
-    if not data:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
-    menu_data = data["menu"]
-    if (not menu_data or menu_data == '{}' or menu_data == "{}") and data["parent_menu"]:
-        menu_data = data["parent_menu"]
-    if isinstance(menu_data, str):
-        try:
-            menu_data = json.loads(menu_data)
-            if isinstance(menu_data, str):
-                menu_data = json.loads(menu_data)
-        except Exception:
-            menu_data = {}
-    elif not menu_data:
-        menu_data = {}
-
-    features = data["features"]
-    if (not features or features == '{}' or features == "{}") and data["parent_features"]:
-        features = data["parent_features"]
-    if isinstance(features, str):
-        try:
-            features = json.loads(features)
-            if isinstance(features, str):
-                features = json.loads(features)
-        except Exception:
-            features = {}
-    elif not features:
-        features = {}
-
-    return {
-        "restaurant_name": data["name"],
-        "menu": menu_data,
-        "availability": data["availability"],
-        "bot_number": bot_number,
-        "locale": features.get("locale", "es-CO"),
-        "currency": features.get("currency", "COP"),
-        "catalog_v2_enabled": bool(features.get("catalog_v2_enabled", True)),
-        "bot_visual_menu": bool(features.get("bot_visual_menu", False)),
-    }
-
 
 @router.get("/api/geocode")
 async def geocode_endpoint(request: Request, address: str):
@@ -512,70 +360,6 @@ async def geocode_reverse_endpoint(request: Request, lat: float, lon: float):
 # ── Catalog v2: analytics tracking (fire-and-forget, real DB insert — Fase 5b) ─
 
 _VALID_TRACK_EVENTS = frozenset({"view", "modal_open", "add_to_cart", "ordered"})
-
-
-class MenuTrackBody(BaseModel):
-    dish_name:  str
-    event_type: str
-    bot_number: str
-    phone:      str | None = None
-
-    @field_validator("dish_name")
-    @classmethod
-    def _dish_name_len(cls, v: str) -> str:
-        if not v or not v.strip():
-            raise ValueError("dish_name required")
-        return v.strip()[:255]
-
-    @field_validator("event_type")
-    @classmethod
-    def _valid_event(cls, v: str) -> str:
-        if v not in _VALID_TRACK_EVENTS:
-            raise ValueError(f"event_type must be one of {sorted(_VALID_TRACK_EVENTS)}")
-        return v
-
-    @field_validator("bot_number")
-    @classmethod
-    def _bot_number_len(cls, v: str) -> str:
-        if len(v) > 20:
-            raise ValueError("bot_number max 20 chars")
-        return v
-
-
-@router.post("/api/public/menu/track")
-async def menu_track(body: MenuTrackBody):
-    """
-    Fire-and-forget analytics tracking for catalog v2 events.
-    Rate-limited to 120 req/min per bot_number.
-    Always returns 200 (sendBeacon callers cannot handle 4xx/5xx).
-    """
-    from app.repositories import menu_analytics_repo
-
-    rate_key = f"catalog_track:{body.bot_number}"
-    allowed = await state_store.rate_limit_check(rate_key, max_requests=120, window_seconds=60)
-    if not allowed:
-        log.warning("catalog.track.rate_limited", bot_number=body.bot_number)
-        return {"ok": True}
-
-    # Resolve restaurant_id from bot_number — fire-and-forget on miss
-    restaurant = await restaurant_repo.db_get_restaurant_by_bot_number(body.bot_number)
-    if not restaurant:
-        log.info(
-            "catalog.track.unknown_bot",
-            bot_number=body.bot_number,
-            dish_name=body.dish_name,
-            event_type=body.event_type,
-        )
-        return {"ok": True}
-
-    await menu_analytics_repo.record_event(
-        restaurant_id=restaurant["id"],
-        dish_name=body.dish_name,
-        event_type=body.event_type,
-        phone=body.phone,
-        bot_number=body.bot_number,
-    )
-    return {"ok": True}
 
 
 # ── SEO / Growth routes (Catálogo v2 Fase 6) ─────────────────────────────────
@@ -656,7 +440,9 @@ async def seo_menu_page(slug: str):
     """
     Server-rendered menu page with Open Graph tags.
     OG crawlers (WhatsApp, Facebook) read the meta tags.
-    Humans are redirected immediately to the JS catalog (/menu/{bot_number}).
+    Humans are redirected to the org's ordering page, /pedir/{slug}. (It
+    sent them to the WhatsApp-era /menu/{bot_number} catalog, and to itself
+    — an endless refresh — when the org had no number.)
     """
     data = await restaurant_repo.db_get_restaurant_by_slug(slug)
     if not data:
@@ -684,9 +470,9 @@ async def seo_menu_page(slug: str):
         og_image = _OG_IMAGE_FALLBACK
 
     canonical   = f"https://{_APP_DOMAIN}/r/{_html.escape(slug)}/menu"
-    redirect_to = f"/menu/{urllib.parse.quote(bot_number)}" if bot_number else f"/r/{slug}/menu"
+    redirect_to = f"/pedir/{urllib.parse.quote(slug)}"
     esc_name    = _html.escape(name)
-    description = _html.escape(f"Menú de {name} — pide por WhatsApp")
+    description = _html.escape(f"Menú de {name} — pide en línea")
 
     html_body = f"""<!DOCTYPE html>
 <html lang="es">
@@ -715,7 +501,7 @@ async def seo_menu_page(slug: str):
 @router.get("/r/{slug}/menu/{dish_slug}", response_class=HTMLResponse)
 async def seo_dish_page(slug: str, dish_slug: str):
     """
-    Server-rendered dish page with per-dish Open Graph tags and WhatsApp CTA.
+    Server-rendered dish page with per-dish Open Graph tags and an order CTA.
     """
     data = await restaurant_repo.db_get_restaurant_by_slug(slug)
     if not data:
@@ -758,10 +544,8 @@ async def seo_dish_page(slug: str, dish_slug: str):
     og_desc      = _html.escape((description or "")[:200])
     price_display = _format_price(price, features)
 
-    # WhatsApp pre-filled link
-    wa_text  = urllib.parse.quote(f"Hola, quiero pedir {dish_name}")
-    wa_digits = dialable(bot_number).replace('+', '')
-    wa_link  = f"https://wa.me/{urllib.parse.quote(wa_digits)}?text={wa_text}" if wa_digits else "#"
+    # Ordering happens on the org's own web link (delivery / pickup).
+    order_url = f"/pedir/{urllib.parse.quote(slug)}"
 
     # Dish image HTML — XSS-safe: all values escaped
     if image_url:
@@ -787,7 +571,7 @@ async def seo_dish_page(slug: str, dish_slug: str):
     page = page.replace("{{DISH_IMAGE_HTML}}", dish_image_html)
     page = page.replace("{{PRICE_DISPLAY}}", _html.escape(price_display))
     page = page.replace("{{DESCRIPTION_HTML}}", description_html)
-    page = page.replace("{{WA_LINK}}", _html.escape(wa_link))
+    page = page.replace("{{ORDER_URL}}", _html.escape(order_url))
     page = page.replace("{{MENU_URL}}", menu_url)
 
     return HTMLResponse(content=page, status_code=200)

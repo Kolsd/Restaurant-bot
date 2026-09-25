@@ -34,10 +34,9 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
-    drain_inbox,
+    BotReplies,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -80,7 +79,7 @@ ORDER_QUANTITY = 5   # > STOCK_AVAILABLE — must trigger InsufficientStockError
 # ── App fixture (function-scoped so lifespan runs per test) ────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     """Real FastAPI app via ASGI transport, with lifespan managed."""
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
@@ -125,7 +124,7 @@ def _clear_state_store():
 async def test_insufficient_stock_raises_and_rolls_back(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Orders 5 units of a dish with stock=2.
@@ -203,7 +202,7 @@ async def test_insufficient_stock_raises_and_rolls_back(
     # We phrase the request unambiguously so the LLM doesn't round down.
     turn1_text = f"Hola, quiero pedir a domicilio {ORDER_QUANTITY} empanaditas de carne"
     log.info("e2e.stock_test.turn_1", phone=CUSTOMER_PHONE_A, text=turn1_text)
-    await simulate_whatsapp_inbound(
+    await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_A,
         text=turn1_text,
@@ -212,7 +211,7 @@ async def test_insufficient_stock_raises_and_rolls_back(
 
     # ── Turn 2: Address ────────────────────────────────────────────────────────
     log.info("e2e.stock_test.turn_2", phone=CUSTOMER_PHONE_A)
-    await simulate_whatsapp_inbound(
+    await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_A,
         text=CUSTOMER_ADDRESS,
@@ -221,7 +220,7 @@ async def test_insufficient_stock_raises_and_rolls_back(
 
     # ── Turn 3: Payment method (Efectivo — no proof needed) ───────────────────
     log.info("e2e.stock_test.turn_3", phone=CUSTOMER_PHONE_A)
-    await simulate_whatsapp_inbound(
+    await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_A,
         text="Efectivo",
@@ -230,14 +229,14 @@ async def test_insufficient_stock_raises_and_rolls_back(
 
     # ── Turn 4: Confirm ────────────────────────────────────────────────────────
     log.info("e2e.stock_test.turn_4", phone=CUSTOMER_PHONE_A)
-    await simulate_whatsapp_inbound(
+    await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_A,
         text="sí confirmo",
         bot_number=bot_number,
     )
 
-    all_replies = wa_capture.texts_to(CUSTOMER_PHONE_RAW_A)
+    all_replies = bot_replies.texts_to(CUSTOMER_PHONE_RAW_A)
     log.info(
         "e2e.stock_test.wa_replies",
         count=len(all_replies),
@@ -322,7 +321,7 @@ async def test_insufficient_stock_raises_and_rolls_back(
 async def test_cart_lock_contention_returns_neutral_message(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Pre-acquires the cart lock from the test, then sends a confirmation turn.
@@ -366,7 +365,7 @@ async def test_cart_lock_contention_returns_neutral_message(
     # Turn 1: intent + item
     turn1_text = "Hola, quiero pedir a domicilio empanaditas de carne"
     log.info("e2e.cartlock_test.turn_1", phone=CUSTOMER_PHONE_B, text=turn1_text)
-    await simulate_whatsapp_inbound(
+    await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_B,
         text=turn1_text,
@@ -375,7 +374,7 @@ async def test_cart_lock_contention_returns_neutral_message(
 
     # Turn 2: address
     log.info("e2e.cartlock_test.turn_2", phone=CUSTOMER_PHONE_B)
-    await simulate_whatsapp_inbound(
+    await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_B,
         text=CUSTOMER_ADDRESS,
@@ -384,7 +383,7 @@ async def test_cart_lock_contention_returns_neutral_message(
 
     # Turn 3: payment method — bot should now ask for confirmation
     log.info("e2e.cartlock_test.turn_3", phone=CUSTOMER_PHONE_B)
-    await simulate_whatsapp_inbound(
+    await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_B,
         text="Efectivo",
@@ -392,7 +391,7 @@ async def test_cart_lock_contention_returns_neutral_message(
     )
 
     # Snapshot WA replies after turn 3 (before the contention turn)
-    replies_before_contention = wa_capture.texts_to(CUSTOMER_PHONE_RAW_B)[:]
+    replies_before_contention = bot_replies.texts_to(CUSTOMER_PHONE_RAW_B)[:]
     log.info(
         "e2e.cartlock_test.replies_before_contention",
         count=len(replies_before_contention),
@@ -416,7 +415,7 @@ async def test_cart_lock_contention_returns_neutral_message(
     # The agent will attempt to acquire the same lock, fail, and return the neutral message.
     try:
         log.info("e2e.cartlock_test.turn_4_confirming", phone=CUSTOMER_PHONE_B)
-        await simulate_whatsapp_inbound(
+        await send_diner_message(
             client, pool,
             phone=CUSTOMER_PHONE_RAW_B,
             text="sí confirmo",
@@ -432,7 +431,7 @@ async def test_cart_lock_contention_returns_neutral_message(
             log.warning("e2e.cartlock_test.lock_release_failed", error=str(_rel_err))
 
     # All WA replies (turn 1 through 4)
-    all_replies = wa_capture.texts_to(CUSTOMER_PHONE_RAW_B)
+    all_replies = bot_replies.texts_to(CUSTOMER_PHONE_RAW_B)
     # Only messages that arrived AFTER pre-acquiring the lock (i.e. from turn 4)
     new_replies = all_replies[len(replies_before_contention):]
     log.info(

@@ -500,42 +500,6 @@ async def clear_cart(phone: str, bot_number: str):
         raise
 
 
-async def migrate_cart(phone: str, from_bot_number: str, to_bot_number: str) -> bool:
-    """Migrate cart from one bot_number to another under a distributed lock.
-
-    Locks both bot_numbers in deterministic sorted order to prevent deadlocks.
-    Returns False if either lock cannot be acquired; re-raises non-contention errors.
-    """
-    keys = sorted([from_bot_number, to_bot_number])
-    try:
-        async with _cart_lock(phone, keys[0]):
-            # Second lock acquired inside the first — if it fails, the first
-            # _cart_lock's finally block releases the first lock automatically.
-            try:
-                async with _cart_lock(phone, keys[1]):
-                    await db.db_migrate_cart(phone, from_bot_number, to_bot_number)
-            except RuntimeError as e:
-                if "cart_lock_contention" in str(e):
-                    log.warning(
-                        "cart_migration_lock_contention",
-                        phone=phone,
-                        failed_lock=keys[1],
-                        reason="second lock unavailable — first lock released by context manager",
-                    )
-                    return False
-                raise
-    except RuntimeError as e:
-        if "cart_lock_contention" in str(e):
-            log.warning(
-                "cart_migration_lock_contention",
-                phone=phone,
-                failed_lock=keys[0],
-                reason="first lock unavailable",
-            )
-            return False
-        raise
-    return True
-        
 async def get_cart_total(phone: str, bot_number: str) -> float:
     cart = await db.db_get_cart(phone, bot_number)
     return sum(item["subtotal"] for item in cart["items"])

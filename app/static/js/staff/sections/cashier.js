@@ -275,7 +275,7 @@
     <!-- Chats / comprobantes view -->
     <div data-view="chats" style="display:none;flex:1;overflow-y:auto;padding:16px;">
       <div style="font-size:14px;font-weight:600;color:#E8EAEE;margin-bottom:4px;">Comprobantes de Pago</div>
-      <div style="font-size:12px;color:#6B7280;margin-bottom:14px;">Mesas con propuestas de pago pendientes de validar desde WhatsApp.</div>
+      <div style="font-size:12px;color:#6B7280;margin-bottom:14px;">Mesas con propuestas de pago pendientes de validar.</div>
       <div id="chats-list" style="display:flex;flex-wrap:wrap;gap:12px;">
         <div style="color:#6B7280;font-size:13px;">Cargando…</div>
       </div>
@@ -339,10 +339,6 @@
 
     <!-- Action buttons -->
     <div class="cart-foot">
-      <button class="sec-btn" id="btn-pre-cuenta" title="Generar pre-cuenta">
-        Pre-cuenta
-        <span class="kbd" style="font-size:10px;color:#6B7280;">P</span>
-      </button>
       <button class="sec-btn" id="btn-send-kitchen" title="Enviar a cocina (Cmd+Enter)">
         Enviar cocina
         <span class="kbd" style="font-size:9px;color:#6B7280;">⌘↵</span>
@@ -1735,32 +1731,6 @@ async function _submitSplit(baseOrderId, checks, tableName) {
   }
 }
 
-// ── Pre-cuenta ─────────────────────────────────────────
-async function openPreBill() {
-  const table = _activeTables[_activeTableIdx];
-  if (!table) { mesioToast('Selecciona una mesa activa', 'warning'); return; }
-
-  const btn = document.getElementById('btn-pre-cuenta');
-  const orig = btn ? btn.textContent : '';
-  if (btn) { btn.textContent = 'Enviando…'; btn.disabled = true; }
-
-  try {
-    const res = await fetch('/api/pos/tables/' + encodeURIComponent(table.table_id || table.id) + '/pre-cuenta', {
-      method: 'POST',
-      headers: mesioHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      mesioToast(data.detail || 'Error al enviar pre-cuenta', 'error');
-      return;
-    }
-    mesioToast(`Pre-cuenta enviada por WhatsApp (${data.phone})`, 'success', 3500);
-  } catch (err) {
-    mesioToast('Error de red: ' + err.message, 'error');
-  } finally {
-    if (btn) { btn.textContent = orig; btn.disabled = false; }
-  }
-}
 
 // ── Chats tab (checkout proposals with proof) ─────────
 async function loadChatsTab() {
@@ -2027,7 +1997,6 @@ async function _boot() {
 
   document.getElementById('btn-send-kitchen')?.addEventListener('click', sendToKitchen);
   document.getElementById('btn-pay')?.addEventListener('click', openPayModal);
-  document.getElementById('btn-pre-cuenta')?.addEventListener('click', openPreBill);
 
   document.querySelectorAll('.seg-btn').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));

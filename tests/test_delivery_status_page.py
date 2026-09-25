@@ -12,9 +12,7 @@ Covers:
   C. POST /api/diner/order/{public_code}/cancel — token ownership, illegal
      transitions, realtime publish.
   D. POST /api/diner/order/{public_code}/nps — eligibility, dedup, storage
-     via the EXISTING nps_responses path, and the WhatsApp trap this chunk
-     was told to avoid (send_wa_interactive_nps must never fire for a
-     `web:` identity).
+     via the EXISTING nps_responses path.
   E. The order-confirmation email — sent iff an email was given, never
      fails checkout.
   F. Realtime — db_get_order_ids_for_phone() scoping (the DB half of the
@@ -452,13 +450,10 @@ def test_nps_refused_with_wrong_token(client):
         _run(_teardown_org(org_id))
 
 
-def test_nps_submit_never_sends_whatsapp(client):
-    """The trap this chunk was told to avoid (docs/claude/delivery-web.md
-    chunk 6): the WhatsApp-era NPS trigger (_farewell_and_nps ->
-    send_wa_interactive_nps) fires for ANY phone, which would call Meta with
-    an invalid number for a `web:` identity. Mocks ONLY the outbound
-    WhatsApp client functions (never a repository), calls the real endpoint
-    against the real DB, and asserts neither was ever invoked."""
+def test_nps_submit_stores_the_rating(client):
+    """A web order's NPS is submitted on its own page and stored for its sede.
+    (Until 2026-09-25 this also guarded against a WhatsApp survey push for a
+    `web:` identity; that channel is gone.)"""
     org_id = _run(_seed_org("Status Nps NoWhatsapp Org"))
     try:
         location_id = _run(_seed_location(org_id))
@@ -466,13 +461,8 @@ def test_nps_submit_never_sends_whatsapp(client):
         code = "NPE" + uuid.uuid4().hex[:3].upper()
         _run(_seed_order(org_id=org_id, location_id=location_id, status="entregado", public_code=code, phone=token))
 
-        with patch("app.routes.tables.send_wa_interactive_nps", new=AsyncMock()) as mock_interactive, \
-             patch("app.routes.tables.send_wa_msg", new=AsyncMock()) as mock_msg:
-            resp = _post(client, f"/api/diner/order/{code}/nps", json={"token": token, "score": 2, "comment": "Tardó mucho"})
-            assert resp.status_code == 200, resp.text
-
-        mock_interactive.assert_not_called()
-        mock_msg.assert_not_called()
+        resp = _post(client, f"/api/diner/order/{code}/nps", json={"token": token, "score": 2, "comment": "Tardó mucho"})
+        assert resp.status_code == 200, resp.text
 
         rows = _run(_fetch_nps_rows(org_id))
         assert len(rows) == 1 and rows[0]["score"] == 2

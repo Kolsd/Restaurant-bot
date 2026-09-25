@@ -44,11 +44,10 @@ from httpx import ASGITransport, AsyncClient
 from unittest.mock import patch
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
-    drain_inbox,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -121,7 +120,7 @@ def _wompi_headers(body_bytes: bytes, secret: str) -> dict:
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app_deposit(wa_capture):
+async def e2e_app_deposit(bot_replies):
     """
     Yields an httpx.AsyncClient wrapping the real FastAPI app.
 
@@ -159,7 +158,7 @@ async def e2e_app_deposit(wa_capture):
 async def test_reservation_deposit_wompi_lifecycle(
     test_pool: asyncpg.Pool,
     e2e_app_deposit: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Full reservation deposit (Wompi prepayment) lifecycle:
@@ -232,7 +231,7 @@ async def test_reservation_deposit_wompi_lifecycle(
     )
     log.info("e2e.deposit_turn_1", text=reservation_text)
     t1 = time.monotonic()
-    processed_1 = await simulate_whatsapp_inbound(
+    processed_1 = await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=reservation_text,
@@ -240,13 +239,13 @@ async def test_reservation_deposit_wompi_lifecycle(
     )
     log.info("e2e.deposit_turn_1_done", processed=processed_1, elapsed=round(time.monotonic() - t1, 1))
     assert processed_1 >= 1, "Turn 1 was not processed"
-    assert len(wa_capture.texts_to(CUSTOMER_PHONE_RAW)) >= 1, "Bot sent no reply after turn 1"
+    assert len(bot_replies.texts_to(CUSTOMER_PHONE_RAW)) >= 1, "Bot sent no reply after turn 1"
 
     # ── Turn 2 (conditional): confirm ─────────────────────────────────────────
     confirm_text = "Sí, confirmo la reserva"
     log.info("e2e.deposit_turn_2", text=confirm_text)
     t2 = time.monotonic()
-    processed_2 = await simulate_whatsapp_inbound(
+    processed_2 = await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=confirm_text,
@@ -418,5 +417,5 @@ async def test_reservation_deposit_wompi_lifecycle(
         f"  reservation_id={reservation_id}\n"
         f"  deposit: pending → paid (tx_id={tx_id})\n"
         f"  reservation: → confirmed, deposit_paid=True\n"
-        f"  WA messages: {len(wa_capture.texts_to(CUSTOMER_PHONE_RAW))}"
+        f"  WA messages: {len(bot_replies.texts_to(CUSTOMER_PHONE_RAW))}"
     )

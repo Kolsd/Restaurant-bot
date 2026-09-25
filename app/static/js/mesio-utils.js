@@ -582,7 +582,7 @@ function mesioDateTime(isoStr) { return mesioDate(isoStr, { format: 'short' }); 
   // URL patterns where the button should NOT appear
   var SKIP_PATHS = [
     '/staff',   // unified Staff App (cashier/waiter/kitchen/bar/courier/my shift)
-    '/landing', '/menu', '/login', '/signup', '/demo', '/dashboard-demo',
+    '/landing', '/menu', '/login', '/signup',
     '/r/',   // public QR menu routes
   ];
 

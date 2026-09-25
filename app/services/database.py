@@ -265,11 +265,6 @@ async def init_pool():
     await get_pool()
 
 
-async def init_db():
-    """Deprecated alias for init_pool(). DDL now lives in Alembic migrations."""
-    await init_pool()
-
-
 # === Reservations: moved to app.repositories.reservations_repo (Apparta integration) ===
 from app.repositories.reservations_repo import (
     db_add_reservation,
@@ -314,7 +309,6 @@ from app.repositories.conversations_repo import (
     db_get_all_conversations,
     db_delete_conversation,
     db_get_conversation_details,
-    db_toggle_bot,
     db_cleanup_old_conversations,
     db_increment_turns_without_progress,
     db_reset_turns_without_progress,
@@ -421,7 +415,6 @@ from app.repositories.tables_repo import (
     db_link_participant_session,
     db_create_table_session,
     db_touch_session,
-    db_touch_session_with_phone_id,
     db_session_mark_order,
     db_session_mark_delivered,
     db_mark_session_nps_pending,
@@ -451,8 +444,6 @@ from app.repositories.conversations_repo import (
 from app.repositories.conversations_repo import (
     db_save_nps_waiting,
     db_clear_nps_waiting,
-    db_get_nps_waiting_pending_reminder,
-    db_mark_nps_reminded,
     db_cleanup_expired_nps_waiting,
 )
 
@@ -559,7 +550,6 @@ from app.repositories.loyalty_repo import (
 
 
 # === Conversations (WAM deduplication): moved to app.repositories.conversations_repo (Fase 6) ===
-from app.repositories.conversations_repo import db_is_duplicate_wam
 
 
 # === Staff (advanced): moved to app.repositories.staff_repo (Fase 6) ===

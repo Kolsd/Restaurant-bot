@@ -732,7 +732,9 @@ function _renderDetailQr(tableId) {
     canvas.textContent = 'QR no disponible';
     return;
   }
-  var url = window.location.origin + '/menu/' + encodeURIComponent(tableId);
+  // The diner's web chat is the product (QR → /chat/{table_id}); /menu/ was
+  // the WhatsApp-era catalog, deleted 2026-09-25.
+  var url = window.location.origin + '/chat/' + encodeURIComponent(tableId);
   try {
     new QRCode(canvas, {
       text: url,
@@ -880,7 +882,7 @@ function renderQrGrid() {
     qrWrap.appendChild(qrDiv);
     card.appendChild(qrWrap);
 
-    var qrUrl = window.location.origin + '/menu/' + tbl.id;
+    var qrUrl = window.location.origin + '/chat/' + encodeURIComponent(tbl.id);
     // Generate QR client-side via qrcodejs
     if (typeof QRCode !== 'undefined') {
       new QRCode(qrDiv, {

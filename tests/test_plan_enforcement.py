@@ -150,7 +150,6 @@ async def test_exceeded_auto_recharge_fires():
         patch(f"{_REPO}.db_count_packs_this_period", new_callable=AsyncMock, return_value=1) as mock_count,
         patch(f"{_REPO}.db_get_org_subscription", new_callable=AsyncMock,
               return_value=_make_sub(auto_recharge_enabled=True, max_packs=5)) as mock_sub,
-        patch(f"{_REPO}._send_recharge_notification_nowait"),
     ):
         with tenant_scope(ORG_ID):
             result = await check_and_consume_conv_slot(ORG_ID)
@@ -175,7 +174,6 @@ async def test_exceeded_no_recharge_redirect():
         patch(f"{_REPO}.db_create_pack", new_callable=AsyncMock) as mock_create,
         patch(f"{_REPO}.db_get_org_subscription", new_callable=AsyncMock,
               return_value=_make_sub(auto_recharge_enabled=False, max_packs=0)),
-        patch(f"{_REPO}._send_cap_exhausted_alert_nowait"),
     ):
         with tenant_scope(ORG_ID):
             result = await check_and_consume_conv_slot(ORG_ID)
@@ -198,7 +196,6 @@ async def test_exceeded_max_packs_reached_redirect():
         patch(f"{_REPO}.db_count_packs_this_period", new_callable=AsyncMock, return_value=5),
         patch(f"{_REPO}.db_get_org_subscription", new_callable=AsyncMock,
               return_value=_make_sub(auto_recharge_enabled=True, max_packs=5)),
-        patch(f"{_REPO}._send_cap_exhausted_alert_nowait"),
     ):
         with tenant_scope(ORG_ID):
             result = await check_and_consume_conv_slot(ORG_ID)
@@ -253,7 +250,6 @@ async def test_create_pack_failure_redirect():
         patch(f"{_REPO}.db_count_packs_this_period", new_callable=AsyncMock, return_value=0),
         patch(f"{_REPO}.db_get_org_subscription", new_callable=AsyncMock,
               return_value=_make_sub(auto_recharge_enabled=True, max_packs=5)),
-        patch(f"{_REPO}._send_cap_exhausted_alert_nowait"),
     ):
         with tenant_scope(ORG_ID):
             result = await check_and_consume_conv_slot(ORG_ID)
@@ -300,33 +296,27 @@ async def test_threshold_no_double_fire():
 
 @pytest.mark.asyncio
 async def test_threshold_80_first_cross():
-    """_fire_threshold_warn sends the 80-pct message when prev<80<=new."""
+    """_fire_threshold_warn logs the 80-pct crossing once when prev<80<=new.
+
+    (It sent the owner a WhatsApp until 2026-09-25; Mesio now sees usage in
+    /internal notifications, and the crossing is logged here.)"""
     _fb_threshold_warns.clear()
-
-    sent_messages = []
-
-    async def _mock_send(bot_number, access_token, phone, text, phone_id):
-        sent_messages.append(text)
 
     caps = _make_caps("ok", 79, 100)
 
     with (
-        patch(f"{_REPO}._acquire_threshold_warn_slot", new_callable=AsyncMock, return_value=True),
-        patch(f"{_REPO}._send_wa_best_effort", side_effect=_mock_send),
+        patch(f"{_REPO}._acquire_threshold_warn_slot", new_callable=AsyncMock, return_value=True) as slot,
+        patch(f"{_REPO}.log") as log_mock,
     ):
         from app.services.plan_enforcement import _fire_threshold_warn
-        await _fire_threshold_warn(
-            org_id=ORG_ID,
-            new_used=80,
-            caps=caps,
-            bot_number="bot",
-            access_token="tok",
-            admin_phone="admin",
-            phone_id="pid",
-        )
+        await _fire_threshold_warn(org_id=ORG_ID, new_used=80, caps=caps)
 
-    assert len(sent_messages) == 1
-    assert "80%" in sent_messages[0]
+    slot.assert_awaited_once_with(ORG_ID, 80)
+    crossed = [c for c in log_mock.warning.call_args_list
+               if c.args and c.args[0] == "plan_enforcement.usage_threshold_crossed"]
+    assert len(crossed) == 1
+    assert crossed[0].kwargs["pct"] == 80
+    assert crossed[0].kwargs["used"] == 80
 
 
 # ── Test 13: REDIRECT_MESSAGE is the correct customer copy ───────────────────

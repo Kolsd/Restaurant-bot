@@ -1,11 +1,9 @@
 import asyncio
 import html as _html
 import os
-import httpx
 import urllib.parse
 import uuid
 from decimal import Decimal
-from pathlib import Path
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
@@ -19,7 +17,6 @@ from app.routes.deps import (
     require_auth, get_current_user, get_current_restaurant,
     get_current_restaurant_scoped, may_span_locations, resolve_sede_filter,
 )
-from app.services.channel_key import dialable
 from app.services.tenant_context import tenant_scope, bypass_tenant_scope
 from app.services.tenant_db import tenant_connection
 from app.services import loyalty as loyalty_svc
@@ -31,8 +28,6 @@ from app.repositories import tables_repo as tr
 log = get_logger(__name__)
 
 router = APIRouter()
-STATIC = Path(__file__).parent.parent / "static"
-META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 _APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
 # Role-based status transition map: which roles may set each status
@@ -50,68 +45,6 @@ _STATUS_ROLE_MAP: dict[str, set[str]] = {
 # WA notification rate-limiting moved to Redis via state_store (multi-worker safe).
 # Keys: notif_wa:{bot_number}:{phone}:{kind}  max 1 per 5 min per worker pool.
 
-async def _get_active_session_for_table(table_id: str, org_id: int) -> dict | None:
-    """Return the active table_session row for a table_id (tenant-scoped).
-
-    Requires caller to be inside tenant_scope(org_id) already.
-    Returns None if no active session exists.
-    """
-    async with tenant_connection() as conn:
-        row = await conn.fetchrow(
-            """SELECT assigned_staff_id
-               FROM table_sessions
-               WHERE table_id = $1 AND org_id = $2 AND status = 'active'
-               ORDER BY started_at DESC LIMIT 1""",
-            table_id, org_id,
-        )
-    return dict(row) if row else None
-
-
-async def _resolve_waiter(staff_id: str | None, org_id: int) -> dict | None:
-    """Resolve staff name from staff_id UUID (GLOBAL lookup, no tenant scope needed).
-
-    Returns {"name": "...", "first_name": "..."} or None if not found.
-    """
-    if not staff_id:
-        return None
-    try:
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT name FROM staff WHERE id = $1::uuid AND org_id = $2",
-                str(staff_id), org_id,
-            )
-        if not row:
-            return None
-        full_name: str = row["name"] or ""
-        first_name = full_name.split()[0] if full_name else full_name
-        return {"name": full_name, "first_name": first_name}
-    except Exception:
-        log.warning("tables.resolve_mesero_error", staff_id=staff_id)
-        return None
-
-
-async def get_table_wa_number(table: dict) -> str:
-    """Resolve the WhatsApp number to use for a wa.me link from a table dict.
-
-    Wave-2: tables belong to a SPECIFIC sede (branch_id = location_id), and
-    each sede has its own whatsapp_number on the org+location join. We must
-    NOT fall back to "any restaurant globally" — that's cross-tenant data
-    leakage (the link would point to another customer's WhatsApp).
-
-    If branch_id is missing or no restaurant resolves, return empty string —
-    the caller renders the page without a wa.me link rather than with a
-    wrong/cross-tenant one.
-    """
-    wa_number = ""
-    bid = table.get("branch_id")
-    if bid:
-        r = await db.db_get_restaurant_by_location_id(bid)
-        if r:
-            wa_number = r.get("whatsapp_number", "") or ""
-
-    # 🛡️ Strip the _b suffix so the wa.me link is valid
-    return wa_number.split("_b")[0] if wa_number else ""
 
 async def _get_restaurant_for_table(table_id: str | None, session_data: dict | None) -> dict:
     """Resuelve el restaurante/sucursal a partir de la mesa o la sesión activa."""
@@ -136,7 +69,7 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
     # on missing whatsapp_number so this degrades gracefully without leaking.
     return {}
 
-async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict | None, db_phone_id: str | None, username: str) -> None:
+async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict | None, username: str) -> None:
     rest = await _get_restaurant_for_table(table_id, session_data)
     # Use the clean bot_number so it matches Meta's webhook
     raw_bot_num = rest.get("whatsapp_number", "")
@@ -144,20 +77,11 @@ async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict
     final_bot_num = (session_data.get("bot_number") if session_data else None) or clean_bot_num
 
     rest_name = rest.get("name", "nuestro restaurante")
-    # Diner-web identities (Mesio-native chat, see app/routes/diner.py) are
-    # opaque "web:<uuid4>" tokens, never a real WhatsApp number. Sending
-    # Meta's interactive-message API a phone param of "web:xxxx" on every
-    # single table payment was a real bug (found 2026-09): the call always
-    # fails against Meta but still burns a request per diner per payment.
-    # The web diner still gets the SAME survey — rendered in their own chat
-    # via GET /api/diner/status + the nps_prompt block (blocks.py) once
-    # trigger_nps below sets the Redis state; only the WhatsApp push is skipped.
-    is_web_identity = phone.startswith("web:")
+    # The diner answers the survey in their own chat: GET /api/diner/status
+    # renders the nps_prompt block (blocks.py) once trigger_nps sets the state.
     # Trigger the NPS survey directly
     if final_bot_num:
         asyncio.create_task(trigger_nps(phone, final_bot_num, rest_name))
-        if not is_web_identity:
-            asyncio.create_task(send_wa_interactive_nps(phone, rest_name, db_phone_id))
         with bypass_tenant_scope("farewell_and_nps: mark session nps_pending by phone"):
             await db.db_mark_session_nps_pending(phone, final_bot_num)
 
@@ -418,116 +342,6 @@ async def update_table_properties(table_id: str, body: TablePropertiesBody, rest
         return JSONResponse({"detail": "Table not found"}, status_code=404)
     return result
 
-
-@router.get("/menu", response_class=HTMLResponse)
-async def menu_page_bot():
-    """Serves the catalog for delivery/pickup context (?bot=NUMBER)."""
-    p = STATIC / "html" / "menu.html"
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="menu.html no encontrado en static/")
-    return HTMLResponse(p.read_text(encoding="utf-8"))
-
-
-@router.get("/menu/{table_id}", response_class=HTMLResponse)
-async def menu_page(table_id: str):
-    # Resolve catalog_v2_enabled to pick legacy vs current template.
-    catalog_v2 = True  # default: serve new catalog
-    try:
-        with bypass_tenant_scope("menu_page: pre-resolve table tenant for template selection"):
-            table = await db.db_get_table_by_id(table_id)
-        if table:
-            wa_number = await get_table_wa_number(table)
-            restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
-            feat = restaurant.get("features") or {}
-            if isinstance(feat, str):
-                import json as _json
-                try:
-                    feat = _json.loads(feat)
-                except Exception:
-                    feat = {}
-            catalog_v2 = bool(feat.get("catalog_v2_enabled", True))
-    except Exception:
-        log.exception("menu_page.template_resolution_failed", table_id=table_id)
-        # on any error keep default (True) — non-critical path (template fallback)
-
-    html_file = "menu.html" if catalog_v2 else "menu-legacy.html"
-    p = STATIC / "html" / html_file
-    if not p.exists():
-        raise HTTPException(status_code=404, detail=f"{html_file} no encontrado en static/")
-    return HTMLResponse(p.read_text(encoding="utf-8"))
-
-@router.get("/api/public/menu-context/{table_id}")
-async def public_menu_context(table_id: str):
-    with bypass_tenant_scope("public_menu_context: pre-resolve table tenant for public menu"):
-        table = await db.db_get_table_by_id(table_id)
-    if not table:
-        raise HTTPException(status_code=404, detail="Mesa no encontrada")
-
-    wa_number = await get_table_wa_number(table)
-    if not wa_number:
-        raise HTTPException(status_code=404, detail="Restaurante no configurado para esta mesa")
-    # The [t:<id>] marker is REQUIRED by detect_table_context (agent.py:154) to
-    # establish a salon session. Without it the bot falls through to manual-text
-    # detection which is gated by features.allow_manual_table_number=False (the
-    # secure default) and rejects the customer with no visible explanation. The
-    # marker is invisible in WhatsApp's preview because it sits at end-of-line
-    # and most clients trim it visually.
-    wa_msg = f"Hola! Estoy en {table['name']} [t:{table['id']}]"
-    # A web-only org (0096) has a key, not a phone: no wa.me link for it.
-    wa_url = (
-        f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
-        if dialable(wa_number) else ""
-    )
-
-    restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
-    # The carta and the sold-out list are the TABLE's sede (0091, 0093) —
-    # not the sede the bot number resolves to by default, which for a chain
-    # sharing one number is whichever sede has the lowest id.
-    org_id = table.get("org_id") or restaurant.get("id")
-    sede = table.get("branch_id")
-    if org_id:
-        with tenant_scope(int(org_id)):
-            menu = await sede_menu.get_sede_menu(int(org_id), int(sede) if sede else None)
-            availability = (
-                await db.db_get_menu_availability(int(org_id), int(sede)) if sede else {}
-            )
-    else:
-        menu, availability = {}, {}
-    features = restaurant.get("features") or {}
-    if isinstance(features, str):
-        import json as _json
-        try: features = _json.loads(features)
-        except Exception: features = {}
-
-    # ── Table context: active session + assigned mesero ────────────────────
-    table_context = None
-    rid = restaurant.get("id")
-    if rid:
-        try:
-            with tenant_scope(rid):
-                session_row = await _get_active_session_for_table(table_id, rid)
-            if session_row:
-                mesero_info = await _resolve_waiter(session_row.get("assigned_staff_id"), rid)
-                table_context = {
-                    "table_name": table["name"],
-                    "assigned_mesero": mesero_info,
-                }
-        except Exception:
-            from app.services.logging import get_logger as _gl
-            _gl(__name__).warning("public_menu_context.table_context_error", table_id=table_id)
-
-    return {
-        "table_name": table["name"],
-        "wa_url": wa_url,
-        "menu": menu,
-        "availability": availability,
-        "locale": features.get("locale", "es-CO"),
-        "currency": features.get("currency", "COP"),
-        "catalog_v2_enabled": bool(features.get("catalog_v2_enabled", True)),
-        "bot_visual_menu": bool(features.get("bot_visual_menu", False)),
-        "bot_number": wa_number,
-        "table_context": table_context,
-    }
 
 def table_qr_url(request: Request, table_id: str) -> str:
     """Where a table's printed QR sends the diner.
@@ -898,44 +712,9 @@ async def update_delivery_order_status(request: Request, order_id: str):
     with tenant_scope(org_id):
         await tr.db_update_delivery_order_status(order_id, new_status)
 
-    if new_status in ("confirmado", "en_camino", "entregado", "listo"):
-        with tenant_scope(org_id):
-            row = await tr.db_get_delivery_order_contact(order_id)
-            # entregado also needs the full row to fetch bot_number for trigger_nps.
-            full = await tr.db_get_delivery_order_full(order_id) if new_status in ("listo", "entregado") else None
-        if row:
-            phone = row["phone"]
-            order_type = (full or {}).get("order_type", "domicilio")
-            if new_status == "confirmado":
-                msg = f"✅ ¡Tu pedido fue confirmado! Ya está en preparación y pronto estará listo. 🍽️"
-            elif new_status == "listo" and order_type == "recoger":
-                msg = "🛍️ ¡Tu pedido está listo para recoger! Puedes pasar a buscarlo cuando quieras. ¡Te esperamos!"
-            elif new_status == "en_camino":
-                msg = f"🛵 ¡Tu pedido ya va en camino a {row['address']}! Pronto estaremos contigo."
-            elif new_status == "entregado":
-                msg = f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
-            else:
-                msg = None
-            if msg:
-                try:
-                    with bypass_tenant_scope("update_delivery_order_status: meta phone ID lookup"):
-                        db_phone_id = await tr.db_get_meta_phone_id_for_session(phone)
-                except Exception:
-                    db_phone_id = None
-                await send_wa_msg(phone, msg, db_phone_id)
-
-            # Parity with /api/delivery/orders PATCH: trigger NPS on entregado.
-            # Without this, kitchen-path "entregado" skips NPS entirely.
-            if new_status == "entregado":
-                try:
-                    restaurant = await get_current_restaurant(request)
-                    rest_name = (restaurant or {}).get("name", "")
-                    bot_number_for_nps = (full or {}).get("bot_number")
-                    if bot_number_for_nps:
-                        await trigger_nps(phone, bot_number_for_nps, rest_name)
-                except Exception:
-                    log.exception("kitchen.nps_trigger_failed", phone=phone, order_id=order_id)
-
+    # The customer follows the order on /pedido/{code} (live over SSE); the
+    # WhatsApp status texts and the bot NPS that used to fire here are gone —
+    # a web order's NPS is asked on that page (diner_delivery.py).
     if new_status == "confirmado":
         with bypass_tenant_scope("update_delivery_order_status: full order for billing"):
             order_row = await tr.db_get_delivery_order_full(order_id)
@@ -1123,64 +902,6 @@ async def get_order_ticket(request: Request, order_id: str):
     }
 
 
-async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
-    token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
-    final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
-
-    if token and final_phone_id:
-        try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                resp = await client.post(
-                    f"https://graph.facebook.com/{META_API_VERSION}/{final_phone_id}/messages",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": text}}
-                )
-                log.info("tables.wa_notification_sent", phone=phone, status=resp.status_code)
-        except Exception as e:
-            log.error("tables.wa_notification_failed", phone=phone, error=str(e))
-    else:
-        log.warning("tables.wa_notification_skipped_no_credentials", phone=phone, has_token=bool(token), phone_id=final_phone_id)
-
-
-async def send_wa_interactive_nps(phone: str, nps_label: str, db_phone_id: str = None):
-    """Send the NPS rating question as an interactive WhatsApp message with a skip button."""
-    token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
-    final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
-
-    if not token or not final_phone_id:
-        log.warning("tables.nps_interactive_skipped_no_credentials", phone=phone)
-        return
-
-    nps_text = (
-        f"⭐ Antes de irte, ¿cómo calificarías tu experiencia en {nps_label} hoy?\n"
-        f"Responde con un número del 1 al 5\n"
-        f"(1 = Muy mala · 5 = Excelente)"
-    )
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": phone,
-        "type": "interactive",
-        "interactive": {
-            "type": "button",
-            "body": {"text": nps_text},
-            "action": {
-                "buttons": [
-                    {"type": "reply", "reply": {"id": "skip_nps", "title": "No calificar"}}
-                ]
-            }
-        }
-    }
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.post(
-                f"https://graph.facebook.com/{META_API_VERSION}/{final_phone_id}/messages",
-                headers={"Authorization": f"Bearer {token}"},
-                json=payload
-            )
-            log.info("tables.nps_interactive_sent", phone=phone, status=resp.status_code)
-    except Exception as e:
-        log.error("tables.nps_interactive_failed", phone=phone, error=str(e))
-
 @router.post("/api/table-orders/{order_id}/status")
 async def update_order_status(request: Request, order_id: str):
     username = await require_auth(request)
@@ -1207,7 +928,6 @@ async def update_order_status(request: Request, order_id: str):
     phone = order.get("phone")
     table_name = order.get("table_name", "tu mesa")
 
-    db_phone_id = None
     session_data = None
     if phone and phone != "manual":
         try:
@@ -1215,7 +935,6 @@ async def update_order_status(request: Request, order_id: str):
                 session = await tr.db_get_open_table_session_by_phone(phone)
             if session:
                 session_data = session
-                db_phone_id = session_data.get("meta_phone_id")
         except Exception:
             log.exception("tables.session_lookup_error", phone=phone)
 
@@ -1223,12 +942,6 @@ async def update_order_status(request: Request, order_id: str):
         base_id = order.get("base_order_id") or order_id
         with bypass_tenant_scope("update_order_status: mark factura generada by order ID"):
             await db.db_mark_invoice_generated(base_id)
-        if phone and phone != "manual":
-            await send_wa_msg(
-                phone,
-                f"🧾 Estamos preparando tu factura de {table_name}. En un momento te la llevamos.",
-                db_phone_id
-            )
         return {"success": True, "order_id": order_id, "status": "factura_generada"}
 
     if status in ("cerrar_mesa", "factura_entregada"):
@@ -1236,25 +949,16 @@ async def update_order_status(request: Request, order_id: str):
         with bypass_tenant_scope("update_order_status: close table bill by order ID"):
             await db.db_close_table_bill(base_id)
         if phone and phone != "manual":
-            await _farewell_and_nps(phone, order.get("table_id"), session_data, db_phone_id, username)
+            await _farewell_and_nps(phone, order.get("table_id"), session_data, username)
         return {"success": True, "order_id": order_id, "status": "factura_entregada"}
 
     # ── C. ESTADOS NORMALES (Prep, Listo, Entregado) ──
     else:
         with bypass_tenant_scope("update_order_status: normal status update by order ID"):
             await db.db_update_table_order_status(order_id, status)
-        # bot_number needed for per-tenant rate-limit key (Redis, cross-worker safe)
+        # The diner sees "listo"/"entregado" in their chat (SSE table_order_updated).
         _bot_number = (session_data.get("bot_number") if session_data else None) or order.get("bot_number", "")
-        if status == "entregado" and phone and phone != "manual":
-            _rl_key = f"notif_wa:{_bot_number}:{phone}:entregado"
-            if await state_store.rate_limit_check(_rl_key, max_requests=1, window_seconds=300):
-                msg = f"¡Tu pedido ha llegado a {table_name}! 🍽️\n\n¡Que lo disfrutes! Cuando estés listo, puedes pedir la cuenta aquí mismo."
-                await send_wa_msg(phone, msg, db_phone_id)
         if status == "listo" and phone and phone != "manual":
-            _rl_key = f"notif_wa:{_bot_number}:{phone}:listo"
-            if await state_store.rate_limit_check(_rl_key, max_requests=1, window_seconds=300):
-                msg = f"🍽️ ¡Tu pedido en {table_name} está listo!\n\nUn mesero te lo llevará en un momento. ¡Buen provecho! 😋"
-                await send_wa_msg(phone, msg, db_phone_id)
             # Notify the assigned mesero that food is ready at the pass.
             # Best-effort: failure to create the alert MUST NOT block the
             # customer notification or the status update. Same pattern as
@@ -1564,79 +1268,6 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
 
     dest = {"kitchen": "cocina", "bar": "bar", "all": "cocina y bar"}.get(body.station, "cocina")
     return {"success": True, "order_id": order_id, "message": f"Comanda enviada a {dest}"}
-
-
-# ── PRE-CUENTA ─────────────────────────────────────────────────────────────────
-
-@router.post("/api/pos/tables/{table_id}/pre-cuenta")
-async def pos_pre_bill(request: Request, table_id: str):
-    """Sends a WhatsApp pre-bill summary to the customer at the table.
-
-    Queries the active session to get the customer's phone, aggregates all open
-    table orders, and sends a formatted WA text message.
-    Returns {success, phone, items_count, total} or 404 if no active session.
-    """
-    restaurant = await get_current_restaurant(request)
-
-    # 1. Find active session for this table
-    with bypass_tenant_scope("pre_bill: active session lookup for table"):
-        sess = await db.db_get_active_session_by_table_id(table_id)
-
-    if not sess:
-        raise HTTPException(status_code=404, detail="No hay sesión activa en esta mesa")
-
-    customer_phone = sess["phone"]
-    meta_phone_id = sess.get("meta_phone_id")
-
-    # 2. Get all open orders for this table
-    with bypass_tenant_scope("pre_bill: order aggregation for table"):
-        base_order_id = await db.db_get_base_order_id(table_id)
-
-    if not base_order_id:
-        raise HTTPException(status_code=404, detail="No hay pedidos activos en esta mesa")
-
-    with bypass_tenant_scope("pre_bill: ticket aggregation"):
-        ticket = await db.db_get_order_ticket_data(base_order_id, None)
-
-    if not ticket:
-        raise HTTPException(status_code=404, detail="No se pudo obtener el ticket de la mesa")
-
-    items = ticket.get("items", [])
-    total = ticket.get("total", 0)
-    table_name = ticket.get("table_name", table_id)
-
-    # 3. Build the pre-cuenta message
-    if items:
-        lines = []
-        for item in items:
-            name = item.get("name", "")
-            qty  = item.get("qty", item.get("quantity", 1))
-            price = item.get("price", item.get("unit_price", 0))
-            subtotal = (qty or 1) * (price or 0)
-            lines.append(f"  • {qty}x {name} — ${int(subtotal):,}")
-        items_text = "\n".join(lines)
-    else:
-        items_text = "  (sin ítems)"
-
-    total_fmt = f"${int(total):,}"
-    wa_text = (
-        f"🧾 *Pre-cuenta — {table_name}*\n\n"
-        f"{items_text}\n\n"
-        f"*Total: {total_fmt}*\n\n"
-        f"¿Todo bien? Responde *Sí* para pedir la cuenta formalmente o dinos si hay algo más."
-    )
-
-    db_phone_id = meta_phone_id or restaurant.get("phone_number_id") or None
-    await send_wa_msg(customer_phone, wa_text, db_phone_id=db_phone_id)
-
-    log.info("tables.pre_bill_sent", table_id=table_id, phone=customer_phone, items=len(items), total=total)
-    return {
-        "success":     True,
-        "phone":       customer_phone,
-        "items_count": len(items),
-        "total":       float(total),
-        "message":     f"Pre-cuenta enviada a {customer_phone}",
-    }
 
 
 # ── SPLIT CHECKS / PAGOS MIXTOS (FASE 5) ──────────────────────────────────────
@@ -2080,8 +1711,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
 
                 for customer_phone in distinct_phones:
                     sess = await db.db_get_open_session_by_phone(customer_phone)
-                    session_phone_id = sess.get("meta_phone_id") if sess else None
-                    farewell_targets.append((customer_phone, order_row.get("table_id"), sess, session_phone_id))
+                    farewell_targets.append((customer_phone, order_row.get("table_id"), sess))
 
         # Outside the ambient scope on purpose — see comment above the `with` block.
         for args in farewell_targets:

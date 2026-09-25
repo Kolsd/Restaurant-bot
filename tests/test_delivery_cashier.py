@@ -749,7 +749,7 @@ def test_non_cashier_non_admin_role_is_refused(client):
 # order's `phone` — a `web:<uuid>` identity for web orders.
 
 
-def test_kitchen_marks_a_web_order_ready_without_whatsapp_and_notifies_the_customer(client):
+def test_kitchen_marks_a_web_order_ready_and_notifies_the_customer(client):
     from unittest.mock import AsyncMock, patch
 
     org_id = _run(_seed_org("Kitchen Ready Org"))
@@ -761,8 +761,7 @@ def test_kitchen_marks_a_web_order_ready_without_whatsapp_and_notifies_the_custo
             org_id=org_id, location_id=loc, status="en_preparacion", channel="web_chat",
         ))
 
-        with patch("app.routes.tables.send_wa_msg", new=AsyncMock()) as wa, \
-             patch("app.routes.tables.trigger_nps", new=AsyncMock()) as nps, \
+        with patch("app.routes.tables.trigger_nps", new=AsyncMock()) as nps, \
              patch("app.services.realtime.publish_delivery_status", new=AsyncMock()) as pub:
             resp = _patch(client, 
                 f"/api/kitchen/delivery-orders/{order_id}/status",
@@ -771,7 +770,6 @@ def test_kitchen_marks_a_web_order_ready_without_whatsapp_and_notifies_the_custo
 
         assert resp.status_code == 200, resp.text
         assert _run(_fetch_order(order_id))["status"] == "listo"
-        wa.assert_not_called()
         nps.assert_not_called()
         pub.assert_awaited_once()
         assert pub.await_args.args[2] == order_id, "the customer's page must be told about THIS order"

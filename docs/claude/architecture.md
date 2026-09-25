@@ -1,4 +1,4 @@
-# Architecture: structure, DB, webhook/inbox, Redis, scheduler, observability, repos, Decimal, prompt injection, feature flags
+# Architecture: structure, DB, Redis, scheduler, observability, repos, Decimal, prompt injection, feature flags
 
 > Moved verbatim from CLAUDE.md (2026-09-12) so it isn't loaded on every turn.
 
@@ -7,10 +7,9 @@
 ```
 Restaurant-bot/
 ├── app/
-│   ├── main.py                      # FastAPI entry point. @asynccontextmanager lifespan: scheduler, inbox_worker, Redis
+│   ├── main.py                      # FastAPI entry point. @asynccontextmanager lifespan: scheduler, Redis
 │   ├── routes/                      # HTTP layer — validation and response only (zero direct SQL)
 │   │   ├── deps.py                  # Dependencies: auth, get_current_restaurant, get_current_restaurant_scoped, get_current_user_scoped, require_module
-│   │   ├── chat.py                  # Meta webhook → ENQUEUES to webhook_inbox (no more create_task)
 │   │   ├── dashboard.py             # HTML pages, public APIs, geocode (~240 LOC)
 │   │   ├── auth_routes.py           # /api/auth/login, /api/auth/logout, /api/auth/verify-role
 │   │   ├── settings_routes.py       # Settings GET/POST, dashboard data, AI proxy (~290 LOC)
@@ -46,7 +45,6 @@ Restaurant-bot/
 │   │   ├── logging.py               # structlog wrapper with stdlib fallback. get_logger(name, **ctx)
 │   │   ├── redis_client.py          # Lazy singleton redis.asyncio. 30s circuit breaker
 │   │   ├── state_store.py           # High-level API: nps_*, checkout_*, table_cooldown_*, cart_lock_*, rate_limit_check, scheduler_leader_acquire
-│   │   ├── inbox_worker.py          # Claim-then-ack worker: fetch→claim→release conn→dispatch→ack (3 phases). Wraps _process_message in tenant_scope(rid) post-resolution.
 │   │   ├── alerts.py               # Automated health checks: dead letters, pool, latency, queue, errors → webhook
 │   │   ├── scheduler.py            # Background loop: inactivity, reminders, deposits, occupancy, alerts. Leader election via Redis. Tick wrapped in bypass_tenant_scope + per-iter tenant_scope(rid).
 │   │   ├── agent_tools.py           # 8 tool definitions for Claude's tool_use API (TOOLS_SALON, TOOLS_EXTERNAL)
@@ -57,7 +55,6 @@ Restaurant-bot/
 │   ├── repositories/                # Repository pattern — SQL fully extracted out of routes
 │   │   ├── __init__.py              # Re-exports InsufficientStockError, OrderCommitError, commit_order_transaction
 │   │   ├── orders_repo.py           # commit_order_transaction (ACID) + 8 delivery order CRUD functions
-│   │   ├── inbox_repo.py            # enqueue, fetch_batch (FOR UPDATE SKIP LOCKED), claim_rows, mark_processed, mark_failed
 │   │   ├── sessions_repo.py         # create/get/delete with SHA-256 hash + legacy fallback + cleanup
 │   │   ├── inventory_repo.py        # 17 inventory + recipes + availability-sync functions
 │   │   ├── staff_repo.py            # 62+ functions: staff, shifts, breaks, schedules, payroll, tips, contracts, overtime, webauthn, self-service
@@ -139,7 +136,6 @@ Restaurant-bot/
 Blindaje Refactor (Phases 1-8), Apparta Integration (Phases 1-7), Pre-launch hardening, "No-v2", E2E hardening, Optimization audit, LLM/DB perf — all shipped. Full detail in [docs/history/sprints.md](docs/history/sprints.md).
 
 Blindaje Refactor items that are STILL relevant today (no need to look in history):
-- **Separate worker**: `scripts/run_inbox_worker.py` + `railway.toml` with `WORKER_MODE=inbox`. `DISABLE_EMBEDDED_WORKER=1` for the web service.
 - **Lifespan pattern**: `@asynccontextmanager lifespan(app)` (not `@app.on_event`).
 - **Scheduler leader election**: via `state_store.scheduler_leader_acquire` (Redis SET NX EX).
 - **Rate limiting**: `state_store.rate_limit_check()` applied to `pay_check` (3 req/10s).
@@ -286,52 +282,15 @@ Indexes: `ix_webhook_inbox_pending` (partial WHERE processed_at IS NULL), `ux_we
 4. **Proof of payment**: customer sends a photo. Proxy `/api/media/{media_id}` downloads it with the Meta token.
 5. **Super Caja (cashier)**: the cashier validates the proof → confirms → the branch's KDS receives the order.
 
-## Meta Webhook (Phase 2 — durable, v10.3 claim-then-ack)
+## WhatsApp channel — removed 2026-09-25
 
-```
-POST /webhook (chat.py)
-  → verifies the META_APP_SECRET signature (failure → return 200 with a log, NOT 401)
-  → iterates ALL entries (not just entry[0])
-  → for each message: extracts wam_id or generates synth_sha256 if it has none
-  → inbox_repo.enqueue(provider='meta_whatsapp', external_id=..., payload=enriched)
-  → does NOT include access_token in the payload (looked up at dispatch time)
-  → if any enqueue fails: flag it, keep processing the rest, return 503 at the end
-  → global rate limit: 200 req/s via state_store.rate_limit_check (Redis, cross-worker)
-
-inbox_worker.py (claim-then-ack, 3 phases)
-  Phase 1 — Claim (short transaction, ~ms):
-    SELECT ... FROM webhook_inbox
-    WHERE processed_at IS NULL AND next_attempt_at <= NOW()
-    ORDER BY id FOR UPDATE SKIP LOCKED LIMIT batch_size
-    → claim_rows: SET next_attempt_at = NOW() + 3min, attempts++
-    → COMMIT, release the connection back to the pool
-
-  Phase 2 — Dispatch (no DB connection held):
-    → asyncio.wait_for(_dispatch(provider, payload), timeout=120)
-    → ValueError "No handler" → immediate dead-letter (no retry)
-
-  Phase 3 — Ack (new connection, ~ms):
-    → success: mark_processed (new connection)
-    → failure: mark_failed (new connection, already_incremented=True)
-    → if phase 3 fails: log and continue (the row is retried in 3 min)
-```
-
-- `meta_whatsapp` handler → looks up `access_token` from `db_get_restaurant_by_phone(bot_number)`, then calls `_process_message(...)`.
-- Double dedup: `db_is_duplicate_wam` (2-min in-memory table) as the first line, `ux_webhook_inbox_dedup` as a safety net for concurrent races.
-- Messages without a wam_id: deduped via `synth_sha256(phone:text:bot:epoch//10)` as the external_id.
-- Wompi remains untouched (not migrated to the inbox), a future provider.
-- **Voice notes (audio)**: the webhook enqueues `audio`-type messages with `{needs_transcription: true, audio_id, user_text: ""}`. The worker (`_handle_meta_whatsapp`) downloads the audio from Meta via `download_whatsapp_media`, transcribes it with Whisper (`transcribe_audio`), and feeds the text into `_process_message` exactly like normal text. Typed failures: `TranscriptionUnavailable` (no `OPENAI_API_KEY`) and `AudioTooLongError` → ack + friendly fallback to the customer. `TranscriptionError` (transient) → re-raise → inbox retry with backoff. Implemented in `app/services/transcription.py`.
-- **Separate worker** (Phase 8): `scripts/run_inbox_worker.py` — standalone entrypoint with signal handling (SIGTERM/SIGINT). On Railway: a service with `WORKER_MODE=inbox`. The web service can disable the embedded worker with `DISABLE_EMBEDDED_WORKER=1`.
-- **Inbox metrics**: `inbox_worker.get_metrics()` exposes `processed_total`, `errors_total`, `latency_avg_ms`, `latency_p95_ms` (rolling deque, maxlen=100).
-
-### Railway Deployment (Phase 8)
-```toml
-# railway.toml — conditional start
-startCommand = "alembic upgrade head && if [ \"$WORKER_MODE\" = 'inbox' ]; then python scripts/run_inbox_worker.py; else uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop; fi"
-```
-- **Web service**: 4 uvicorn workers, scheduler with leader election, embedded inbox worker (can be disabled)
-- **Worker service**: `WORKER_MODE=inbox`, dedicated to processing webhook_inbox
-- Both share the same DB and Redis. They compete via `FOR UPDATE SKIP LOCKED`.
+The Meta webhook (`routes/chat.py`), the `webhook_inbox` claim-then-ack worker
+(`services/inbox_worker.py`, `scripts/run_inbox_worker.py`), `meta_api.py`,
+audio transcription, the Twilio webhook and the `WORKER_MODE=inbox` Railway
+service were deleted. The bot is reached only via `POST /api/diner/chat` →
+`agent.chat()` inside `tenant_scope(org_id)`. The `webhook_inbox` and
+`processed_wam_ids` tables still exist (to be dropped in a later migration).
+Railway runs one web service: `alembic upgrade head && uvicorn ... --workers 4`.
 
 ## Shared State in Redis (Phase 3)
 
@@ -498,7 +457,6 @@ currency_exponent(currency) -> int               # 0 or 2
 | Repo | Functions | Tables it touches |
 |---|---|---|
 | `orders_repo` | `commit_order_transaction` + 8 delivery CRUD | `orders`, `inventory`, `carts` |
-| `inbox_repo` | `enqueue`, `fetch_batch`, `mark_processed`, `mark_failed` | `webhook_inbox` |
 | `sessions_repo` | `create_session`, `get_session`, `delete_session`, `cleanup_expired_sessions` + `db_*` aliases | `sessions` |
 | `inventory_repo` | 17 functions | `inventory`, `dish_recipes`, `inventory_movements` |
 | `staff_repo` | ~60 functions | `staff`, `staff_shifts`, `staff_breaks`, `staff_schedules`, `attendance_deductions`, `staff_deduction_items`, `payroll_runs`, `contract_templates`, `overtime_requests`, `webauthn_*` |

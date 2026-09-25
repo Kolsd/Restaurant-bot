@@ -95,8 +95,6 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
         # Catálogo visual v2 — Fase 1
         "bot_visual_menu":     features.get("bot_visual_menu", False),
         "catalog_v2_enabled":  features.get("catalog_v2_enabled", True),
-        # Voice notes transcription — opt-in, default OFF
-        "bot_voice_notes":     features.get("bot_voice_notes", False),
         # DIAN electronic invoicing — opt-in, default OFF (requires folio purchase ~$400K COP)
         "dian_enabled":        features.get("dian_enabled", False),
         # Wompi config (sensitive: secret never returned plaintext)
@@ -143,8 +141,6 @@ async def save_settings(request: Request):
         "timezone", "currency", "locale",
         # Catálogo visual v2 — Fase 1
         "bot_visual_menu", "catalog_v2_enabled",
-        # Voice notes transcription — opt-in, default OFF
-        "bot_voice_notes",
         # DIAN electronic invoicing — opt-in, default OFF
         "dian_enabled",
         # Extended info — no dedicated DB column; live in features JSONB

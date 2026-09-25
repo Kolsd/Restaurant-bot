@@ -267,7 +267,7 @@ async def _smoke_async() -> int:
             _step("A: seed_restaurant", False, str(exc))
 
         # ── Step B: tenant_scope plumbing ─────────────────────────────────────
-        # Mirrors the production pattern in inbox_worker._handle_meta_whatsapp.
+        # Mirrors POST /api/diner/chat, which runs agent.chat in tenant_scope.
         # Resolves org_id from bot_number (requires bypass for cross-tenant lookup),
         # then enters tenant_scope(org_id) — no agent.chat() call.
         try:

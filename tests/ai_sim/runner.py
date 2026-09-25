@@ -33,6 +33,22 @@ from app.services.logging import get_logger
 log = get_logger(__name__)
 
 
+async def _sit_at_table(org_id: int, phone: str, bot_number: str, table_id: str) -> None:
+    """Open the diner's table session, as a QR scan does."""
+    from app.services import database as db  # noqa: PLC0415
+    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
+
+    with tenant_scope(org_id):
+        table = await db.db_get_table_by_id(table_id)
+        if not table:
+            raise RuntimeError(f"runner: table {table_id!r} not seeded")
+        if not await db.db_get_active_session(phone, bot_number):
+            await db.db_create_table_session(
+                phone, bot_number, table["id"], table["name"],
+                org_id=table.get("org_id"), location_id=table.get("location_id"),
+            )
+
+
 async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult:
     """Run one scenario end-to-end and return a complete ScenarioResult.
 
@@ -58,18 +74,15 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
     from app.services.database import _normalize_phone as _norm  # noqa: PLC0415
     from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
 
-    # Match production's chat.py:284 behavior: Meta webhook normalizes bot_number
-    # via _normalize_phone (strips '+' and spaces) BEFORE calling chat().
-    # detect_table_context and a few other internal lookups assume this is already
-    # normalized. Scenarios use "+57TESTBOT1" for readability, we strip here.
+    # Scenarios use "+57TESTBOT1" for readability; the stored key is normalized
+    # (no '+' / spaces), and the internal lookups assume the normalized form.
     normalized_bot = _norm(scenario.bot_number)
     normalized_user = _norm(scenario.user_phone)
 
     # ── Resolve org_id for tenant_scope wrapping (Wave 2 / Rule 14) ───────────
-    # Production's inbox_worker._handle_meta_whatsapp wraps agent.chat in
-    # tenant_scope(org["id"]) after resolving from bot_number. The sim bypasses
-    # the inbox so it must do the same here — otherwise every repo call inside
-    # agent.chat raises TenantNotSetError. Cross-tenant lookup needs a bypass.
+    # POST /api/diner/chat runs agent.chat inside tenant_scope(org_id); the sim
+    # must do the same or every repo call inside it raises TenantNotSetError.
+    # Cross-tenant lookup needs a bypass.
     async with pool.acquire() as conn:
         with bypass_tenant_scope("ai_sim_resolve_org_for_scope"):
             org_id = await conn.fetchval(
@@ -89,23 +102,19 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
     for turn_idx, scripted_turn in enumerate(scenario.turns):
         user_text = scripted_turn.user
 
-        # Apply table_hint to first turn: inject a [table_id:...] bracketed tag,
-        # matching exactly how a real QR code scan appends the tag to the URL.
-        # Production seeds tables as id="sim_mesa_N" in seed.py, so that's what
-        # the QR would carry. The text prefix "Estoy en la mesa N." is ALSO kept
-        # for realism — but with `allow_manual_table_number=False` in features
-        # (the safe default), only the [table_id:...] tag actually creates the
-        # session. Pure text would be rejected, exactly as in production.
+        # table_hint: the diner scanned the QR of table sim_mesa_N (seed.py)
+        # before writing — open that table session the way
+        # POST /api/diner/session + diner_chat do. (Until 2026-09-25 the sim
+        # appended a "[table_id:...]" tag to the text instead; the bot no
+        # longer reads table ids from message text.)
         if turn_idx == 0 and scenario.table_hint is not None:
-            qr_tag = f"[table_id:sim_mesa_{scenario.table_hint}]"
-            text_prefix = f"Estoy en la mesa {scenario.table_hint}. "
-            # Prefix both so the bot gets: "<QR tag>\nEstoy en la mesa N. <original>"
-            user_text = f"{qr_tag}\n{text_prefix}{user_text}"
+            await _sit_at_table(
+                org_id, normalized_user, normalized_bot, f"sim_mesa_{scenario.table_hint}",
+            )
             log.debug(
                 "runner.table_hint_applied",
                 scenario_id=scenario.id,
                 table_hint=scenario.table_hint,
-                user_text_preview=user_text[:120],
             )
 
         bot_reply = "[SILENT]"
@@ -114,14 +123,13 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
 
         try:
             t_start = time.monotonic()
-            # Rule 14: agent.chat must run inside tenant_scope(org_id). In
-            # production, inbox_worker does this. The sim replicates that here.
+            # Rule 14: agent.chat must run inside tenant_scope(org_id), as
+            # POST /api/diner/chat does.
             with tenant_scope(org_id):
                 raw_result = await _agent.chat(
                     user_phone=normalized_user,
                     user_message=user_text,
                     bot_number=normalized_bot,
-                    meta_phone_id="",
                 )
             latency_ms = int((time.monotonic() - t_start) * 1000)
 
@@ -178,7 +186,6 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
             waiter_alerts=[],
             reservations=[],
             conversations=[],
-            webhook_inbox_stats={},
             subscription_usage={},
         )
 

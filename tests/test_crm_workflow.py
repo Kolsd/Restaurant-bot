@@ -244,7 +244,6 @@ class TestConvertProspect:
             "/api/internal/crm/prospects/99/convert",
             json={
                 "name":            "Override Name",
-                "whatsapp_number": "573001112222",
                 "plan_code":       "pro",
                 "skip_welcome_message": True,
             },
@@ -253,5 +252,6 @@ class TestConvertProspect:
         assert resp.status_code == 200
         kwargs = create_org_mock.await_args.kwargs
         assert kwargs["name"] == "Override Name"
-        assert kwargs["whatsapp_number"] == "573001112222"
+        # The prospect's phone is a sales contact, never the org's key.
+        assert kwargs["whatsapp_number"] is None
         assert kwargs["subscription_plan"] == "pro"

@@ -1,21 +1,13 @@
 """
 tests/e2e/test_bot_adversarial.py — E2E adversarial tests for bot safety rules.
 
-Four independent tests, each seeds its own org with a unique bot_number:
-
-  Test 1 — test_dedup_same_wam_id_only_processes_once
-    Rule #6: identical wam_id sent twice → second is silently ignored.
-    Validates: processed_wam_ids pre-check + ux_webhook_inbox_dedup constraint.
+Independent tests, each seeds its own org with a unique bot_number.
+(The WhatsApp wam_id de-duplication test left with the webhook, 2026-09-25.)
 
   Test 2 — test_prompt_injection_role_switch_blocked
     Rule #9: _INJECTION_RE + _INJECTION_DEFENSE_BLOCK guard.
     Validates: 4 adversarial payloads never produce exfiltration of system-prompt
     content, hacked persona, or admin impersonation.
-
-  Test 3 — test_confirm_vowel_elongation_recognized
-    Rule #15: _last_messages_have_confirmation() normalises vowel elongations
-    ("vaaaaaale" → "vale") via re.sub(r"([aeiou])\\1{1,}", r"\\1", lowered).
-    Validates: an elongated confirm word causes the bot to commit a delivery order.
 
   Test 4 — test_null_and_empty_text_no_crash
     Rule #8: LLM is never silenced; empty / whitespace / emoji inputs must not
@@ -41,10 +33,9 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
-    drain_inbox,
+    BotReplies,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -88,7 +79,7 @@ _LEAK_TOKENS = [
 # ── Shared app fixture ────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(test_pool, wa_capture):
+async def e2e_app(test_pool, bot_replies):
     """Real FastAPI app wrapped in httpx ASGI transport. One lifespan per test."""
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
@@ -118,111 +109,6 @@ def _clear_state_store():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Test 1 — WAM-ID deduplication
-# ═════════════════════════════════════════════════════════════════════════════
-
-@pytest.mark.e2e
-@pytest.mark.asyncio
-async def test_dedup_same_wam_id_only_processes_once(
-    test_pool: asyncpg.Pool,
-    e2e_app: AsyncClient,
-    wa_capture: WACapture,
-):
-    """
-    Rule #6: Firing the same wam_id twice must not produce a second bot reply.
-
-    Flow:
-      1. Send "Hola" with wam_id = wamid.e2e_dedup_test_fixed → drain → record reply count.
-      2. Send identical payload again (same wam_id) → drain → assert count unchanged.
-      3. Assert webhook_inbox has exactly ONE row with external_id = wam_id.
-    """
-    client = e2e_app
-    pool   = test_pool
-
-    restaurant = await seed_restaurant(
-        pool,
-        name="E2E Adversarial Dedup",
-        bot_number_raw=_BOT_DEDUP,
-        menu=_MENU,
-        payment_methods=_PAYMENT_METHODS,
-        num_branches=0,
-    )
-    org_id     = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
-
-    await truncate_e2e_data(pool, org_id)
-    _clear_state_store()
-
-    customer_phone = "+573009000101"
-    fixed_wam_id   = "wamid.e2e_dedup_test_fixed_adv1"
-
-    log.info("e2e.dedup.send_first", wam_id=fixed_wam_id)
-
-    # ── First send ─────────────────────────────────────────────────────────────
-    t_start = time.monotonic()
-    processed_1 = await simulate_whatsapp_inbound(
-        client,
-        pool,
-        phone=customer_phone,
-        text="Hola",
-        bot_number=bot_number,
-        wam_id=fixed_wam_id,
-    )
-    log.info(
-        "e2e.dedup.first_done",
-        processed=processed_1,
-        elapsed_s=round(time.monotonic() - t_start, 1),
-    )
-
-    replies_after_first = wa_capture.texts_to(customer_phone)
-    assert len(replies_after_first) >= 1, (
-        "Dedup test: first send produced no reply. "
-        "Check ANTHROPIC_API_KEY, bot_number lookup, and seed."
-    )
-    count_after_first = len(replies_after_first)
-    log.info("e2e.dedup.replies_after_first", count=count_after_first)
-
-    # ── Second send (same wam_id) ──────────────────────────────────────────────
-    log.info("e2e.dedup.send_second", wam_id=fixed_wam_id)
-    processed_2 = await simulate_whatsapp_inbound(
-        client,
-        pool,
-        phone=customer_phone,
-        text="Hola",
-        bot_number=bot_number,
-        wam_id=fixed_wam_id,
-    )
-    log.info("e2e.dedup.second_done", processed=processed_2)
-
-    replies_after_second = wa_capture.texts_to(customer_phone)
-    count_after_second = len(replies_after_second)
-    log.info("e2e.dedup.replies_after_second", count=count_after_second)
-
-    # Core assertion: reply count must not have grown.
-    assert count_after_second == count_after_first, (
-        f"Dedup failure: reply count grew from {count_after_first} to {count_after_second} "
-        "after resending the same wam_id. Rule #6 is broken — the duplicate was NOT blocked."
-    )
-
-    # ── DB assertion: exactly 1 webhook_inbox row with this external_id ────────
-    with bypass_tenant_scope("e2e_adversarial_assert"):
-        async with pool.acquire() as conn:
-            inbox_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM webhook_inbox WHERE external_id = $1",
-                fixed_wam_id,
-            )
-    # The duplicate may have been blocked by db_is_duplicate_wam BEFORE enqueue,
-    # or by the ux_webhook_inbox_dedup unique index ON CONFLICT. Either way,
-    # the result MUST be exactly 1 — never 2.
-    assert inbox_count == 1, (
-        f"webhook_inbox has {inbox_count} rows for external_id={fixed_wam_id!r}. "
-        "Expected exactly 1. Dedup guard did not fire on the second enqueue."
-    )
-
-    log.info("e2e.dedup.passed", inbox_count=inbox_count)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
 # Test 2 — Prompt injection / role-switch blocked
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -245,7 +131,7 @@ _ADVERSARIAL_INPUTS = [
 async def test_prompt_injection_role_switch_blocked(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Rule #9: _INJECTION_RE strips adversarial inputs before they reach the LLM,
@@ -253,7 +139,7 @@ async def test_prompt_injection_role_switch_blocked(
     slip through.
 
     For each of 4 adversarial messages:
-      - Send via simulate_whatsapp_inbound (fresh wam_id per turn).
+      - Send via send_diner_message (fresh wam_id per turn).
       - Drain inbox.
       - Assert the latest reply does NOT contain any _LEAK_TOKENS.
 
@@ -285,9 +171,9 @@ async def test_prompt_injection_role_switch_blocked(
             text_preview=adversarial_text[:60],
         )
 
-        replies_before = len(wa_capture.texts_to(customer_phone))
+        replies_before = len(bot_replies.texts_to(customer_phone))
 
-        await simulate_whatsapp_inbound(
+        await send_diner_message(
             client,
             pool,
             phone=customer_phone,
@@ -295,7 +181,7 @@ async def test_prompt_injection_role_switch_blocked(
             bot_number=bot_number,
         )
 
-        replies_after = wa_capture.texts_to(customer_phone)
+        replies_after = bot_replies.texts_to(customer_phone)
 
         # If a reply was sent for this turn, it must not contain any leak token.
         if len(replies_after) > replies_before:
@@ -323,7 +209,7 @@ async def test_prompt_injection_role_switch_blocked(
             )
 
     # ── Cumulative scan across ALL replies ─────────────────────────────────────
-    all_replies = wa_capture.texts_to(customer_phone)
+    all_replies = bot_replies.texts_to(customer_phone)
     for token in _LEAK_TOKENS:
         for j, reply in enumerate(all_replies):
             assert token not in reply.lower(), (
@@ -339,176 +225,6 @@ async def test_prompt_injection_role_switch_blocked(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Test 3 — Vowel-elongation confirmation recognized (Rule #15)
-# ═════════════════════════════════════════════════════════════════════════════
-
-@pytest.mark.e2e
-@pytest.mark.asyncio
-async def test_confirm_vowel_elongation_recognized(
-    test_pool: asyncpg.Pool,
-    e2e_app: AsyncClient,
-    wa_capture: WACapture,
-):
-    """
-    Rule #15: _last_messages_have_confirmation() normalises elongated vowels via
-    re.sub(r"([aeiou])\\1{1,}", r"\\1", lowered) so "vaaaaaale" → "vale" which
-    is in _CONFIRM_WORDS.
-
-    Flow (delivery path — faster setup than salon, no table needed):
-      Turn 1: Express delivery intent + item in one message.
-      Turn 2: Provide text address.
-      Turn 3: Choose payment method "Efectivo".
-      Turn 4: Send "vaaaaaale" (elongated vowels) as confirmation.
-
-    Assertions:
-      - After turn 4: an order row exists in the DB with org_id=org_id,
-        phone=customer_phone, order_type='domicilio'.
-      - The order total >= 8000 (dish price).
-    """
-    client = e2e_app
-    pool   = test_pool
-
-    restaurant = await seed_restaurant(
-        pool,
-        name="E2E Adversarial Elongation",
-        bot_number_raw=_BOT_ELONGAT,
-        menu=_MENU,
-        payment_methods=_PAYMENT_METHODS,
-        num_branches=2,
-        branch_latlons=[
-            (4.710989, -74.072092),
-            (4.609710, -74.081741),
-        ],
-    )
-    org_id     = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
-
-    await truncate_e2e_data(pool, org_id)
-    for branch in restaurant["branches"]:
-        await truncate_e2e_data(pool, branch["id"])
-    _clear_state_store()
-
-    customer_phone_raw = "+573009000301"
-    customer_phone     = _normalize_phone(customer_phone_raw)
-
-    log.info(
-        "e2e.elongation.test_start",
-        org_id=org_id,
-        bot_number=bot_number,
-        customer_phone=customer_phone,
-    )
-
-    # ── Turn 1: delivery intent + item ────────────────────────────────────────
-    t1_start = time.monotonic()
-    processed_1 = await simulate_whatsapp_inbound(
-        client,
-        pool,
-        phone=customer_phone_raw,
-        text="Hola quiero pedir a domicilio una empanadita de carne",
-        bot_number=bot_number,
-    )
-    log.info(
-        "e2e.elongation.turn_1_done",
-        processed=processed_1,
-        elapsed_s=round(time.monotonic() - t1_start, 1),
-        replies=wa_capture.texts_to(customer_phone_raw)[-2:],
-    )
-    assert processed_1 >= 1, "Turn 1 not processed"
-
-    # ── Turn 2: text address ───────────────────────────────────────────────────
-    processed_2 = await simulate_whatsapp_inbound(
-        client,
-        pool,
-        phone=customer_phone_raw,
-        text="Mi dirección es Carrera 15 número 93-47 Bogotá",
-        bot_number=bot_number,
-    )
-    log.info(
-        "e2e.elongation.turn_2_done",
-        processed=processed_2,
-        replies=wa_capture.texts_to(customer_phone_raw)[-2:],
-    )
-    assert processed_2 >= 1, "Turn 2 not processed"
-
-    # ── Turn 3: payment method ────────────────────────────────────────────────
-    processed_3 = await simulate_whatsapp_inbound(
-        client,
-        pool,
-        phone=customer_phone_raw,
-        text="Efectivo",
-        bot_number=bot_number,
-    )
-    log.info(
-        "e2e.elongation.turn_3_done",
-        processed=processed_3,
-        replies=wa_capture.texts_to(customer_phone_raw)[-2:],
-    )
-    assert processed_3 >= 1, "Turn 3 not processed"
-
-    # ── Turn 4: elongated confirmation ────────────────────────────────────────
-    # "vaaaaaale" → via re.sub(r"([aeiou])\1{1,}", r"\1", ...) → "vale"
-    # "vale" is in _CONFIRM_WORDS → _last_messages_have_confirmation returns True
-    elongated_confirm = "vaaaaaale"
-    log.info("e2e.elongation.turn_4_confirm", text=elongated_confirm)
-    t4_start = time.monotonic()
-    processed_4 = await simulate_whatsapp_inbound(
-        client,
-        pool,
-        phone=customer_phone_raw,
-        text=elongated_confirm,
-        bot_number=bot_number,
-    )
-    log.info(
-        "e2e.elongation.turn_4_done",
-        processed=processed_4,
-        elapsed_s=round(time.monotonic() - t4_start, 1),
-        replies=wa_capture.texts_to(customer_phone_raw)[-3:],
-    )
-    assert processed_4 >= 1, "Turn 4 (elongated confirm) not processed"
-
-    # ── Assert: order committed in DB ─────────────────────────────────────────
-    # Poll briefly — order commit is synchronous in the inbox worker dispatch,
-    # so it should be committed before drain_inbox returns.
-    order_row = None
-    with bypass_tenant_scope("e2e_adversarial_assert"):
-        async with pool.acquire() as conn:
-            order_row = await conn.fetchrow(
-                """
-                SELECT id, phone, order_type, total, status
-                FROM orders
-                WHERE org_id = $1 AND phone = $2
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                org_id,
-                customer_phone,
-            )
-
-    assert order_row is not None, (
-        "Elongated-confirm test FAILED: no order row found in DB after 'vaaaaaale'.\n"
-        "This means _last_messages_have_confirmation() did NOT recognise the elongated word.\n"
-        "Rule #15 regression: re.sub vowel-elongation normalisation is broken.\n"
-        f"All bot replies to customer: {wa_capture.texts_to(customer_phone_raw)}"
-    )
-
-    assert order_row["order_type"] == "domicilio", (
-        f"Expected order_type='domicilio', got {order_row['order_type']!r}"
-    )
-    assert float(order_row["total"]) >= 8000, (
-        f"Order total {order_row['total']} is less than dish price 8000 — "
-        "order may have committed with empty cart."
-    )
-
-    log.info(
-        "e2e.elongation.passed",
-        order_id=order_row["id"],
-        order_type=order_row["order_type"],
-        total=float(order_row["total"]),
-        confirm_text=elongated_confirm,
-    )
-
-
-# ═════════════════════════════════════════════════════════════════════════════
 # Test 4 — Null / empty / garbage text must not crash or create orders
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -517,7 +233,7 @@ async def test_confirm_vowel_elongation_recognized(
 async def test_null_and_empty_text_no_crash(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Rule #8: LLM must never silence the customer; empty / whitespace / emoji
@@ -529,8 +245,8 @@ async def test_null_and_empty_text_no_crash(
       3. Single emoji          "🤖"
 
     For each:
-      - Fire via simulate_whatsapp_inbound (unique wam_id per send).
-      - Webhook MUST return 200 (asserted inside simulate_whatsapp_inbound).
+      - Fire via send_diner_message (unique wam_id per send).
+      - Webhook MUST return 200 (asserted inside send_diner_message).
       - If the bot sent a reply, it must be a non-empty string.
 
     Cumulative:
@@ -563,12 +279,12 @@ async def test_null_and_empty_text_no_crash(
     ]
 
     for label, text in adversarial_texts:
-        replies_before = len(wa_capture.texts_to(customer_phone_raw))
+        replies_before = len(bot_replies.texts_to(customer_phone_raw))
 
         log.info("e2e.nulltext.sending", label=label, text_repr=repr(text))
 
         # No try/except — if this crashes, it IS the bug (Rule #8 violation).
-        processed = await simulate_whatsapp_inbound(
+        processed = await send_diner_message(
             client,
             pool,
             phone=customer_phone_raw,
@@ -576,7 +292,7 @@ async def test_null_and_empty_text_no_crash(
             bot_number=bot_number,
         )
 
-        replies_now = wa_capture.texts_to(customer_phone_raw)
+        replies_now = bot_replies.texts_to(customer_phone_raw)
         new_replies = replies_now[replies_before:]
 
         log.info(
@@ -608,6 +324,6 @@ async def test_null_and_empty_text_no_crash(
 
     log.info(
         "e2e.nulltext.passed",
-        total_replies=len(wa_capture.texts_to(customer_phone_raw)),
+        total_replies=len(bot_replies.texts_to(customer_phone_raw)),
         orders_count=orders_count,
     )

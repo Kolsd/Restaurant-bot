@@ -38,10 +38,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -92,7 +92,7 @@ UNAVAILABILITY_PHRASES = [
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
 
@@ -112,7 +112,7 @@ async def e2e_app(wa_capture):
 async def test_reservation_capacity_full(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     When the only table is already confirmed-reserved for the requested date/time,
@@ -239,7 +239,7 @@ async def test_reservation_capacity_full(
     )
     log.info("e2e.capacity.turn_1", phone=CUSTOMER_PHONE, text=request_text)
     t1_start = time.monotonic()
-    processed = await simulate_whatsapp_inbound(
+    processed = await send_diner_message(
         client,
         pool,
         phone=CUSTOMER_PHONE_RAW,
@@ -254,7 +254,7 @@ async def test_reservation_capacity_full(
     assert processed >= 1, "Turn 1: inbox item was not processed"
 
     # ── Assert: bot replied ────────────────────────────────────────────────────
-    customer_texts = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    customer_texts = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     assert len(customer_texts) >= 1, (
         "Bot sent no WA message. Check ANTHROPIC_API_KEY, bot_number lookup, "
         "and module_reservations feature flag."
@@ -274,7 +274,7 @@ async def test_reservation_capacity_full(
     )
     if needs_confirmation or not any(p in combined_after_turn1 for p in UNAVAILABILITY_PHRASES):
         log.info("e2e.capacity.turn_2_confirm", reason="bot asked for confirmation or no unavailability phrase yet")
-        proc_conf = await simulate_whatsapp_inbound(
+        proc_conf = await send_diner_message(
             client, pool,
             phone=CUSTOMER_PHONE_RAW,
             text="Sí, confirmo la reserva",
@@ -282,7 +282,7 @@ async def test_reservation_capacity_full(
         )
         assert proc_conf >= 1, "Confirmation turn not processed"
 
-    customer_texts = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    customer_texts = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     combined_reply = " ".join(customer_texts).lower()
     log.info(
         "e2e.capacity.bot_reply",
@@ -347,5 +347,5 @@ async def test_reservation_capacity_full(
         f"\n[OK] Reservation capacity full test passed: "
         f"bot replied with unavailability phrase '{matched_phrase}', "
         f"no new reservation created, seeded reservation unchanged. "
-        f"{len(wa_capture.messages)} WA messages captured."
+        f"{len(bot_replies.messages)} WA messages captured."
     )

@@ -48,11 +48,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
-    drain_inbox,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -100,7 +99,7 @@ TIP_ADVERSARIAL = 25000.0           # >50% of 40000 = 20001 → must be rejected
 # -- App fixture (function-scoped) --------------------------------------------
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
 
@@ -120,7 +119,7 @@ async def e2e_app(wa_capture):
 async def test_salon_split_checks_with_tips(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Full split-check + tip-enforcement lifecycle:
@@ -180,7 +179,7 @@ async def test_salon_split_checks_with_tips(
     # Turn 1: QR scan → opens dine-in session
     # =====================================================================
     qr_message = f"Hola, acabo de llegar [table_id:{table_id}]"
-    processed_1 = await simulate_whatsapp_inbound(
+    processed_1 = await send_diner_message(
         client, pool, phone=CUSTOMER_PHONE_RAW, text=qr_message, bot_number=bot_number
     )
     assert processed_1 >= 1, "Turn 1: inbox item not processed"
@@ -214,7 +213,7 @@ async def test_salon_split_checks_with_tips(
     order_text = (
         "Quiero pedir exactamente 2 empanaditas de carne y 1 ceviche especial por favor"
     )
-    processed_2 = await simulate_whatsapp_inbound(
+    processed_2 = await send_diner_message(
         client, pool, phone=CUSTOMER_PHONE_RAW, text=order_text, bot_number=bot_number
     )
     assert processed_2 >= 1, "Turn 2: inbox item not processed"
@@ -222,7 +221,7 @@ async def test_salon_split_checks_with_tips(
     # =====================================================================
     # Turn 3: Confirm order
     # =====================================================================
-    processed_3 = await simulate_whatsapp_inbound(
+    processed_3 = await send_diner_message(
         client, pool, phone=CUSTOMER_PHONE_RAW, text="sí confirmo", bot_number=bot_number
     )
     assert processed_3 >= 1, "Turn 3: confirmation not processed"
@@ -595,7 +594,7 @@ async def test_salon_split_checks_with_tips(
     log.info("e2e.split_session_closed", status=session_after["status"])
 
     # -- Final summary --------------------------------------------------------
-    all_texts = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    all_texts = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     log.info(
         "e2e.split_test_passed",
         base_order_id=base_order_id,
@@ -607,7 +606,7 @@ async def test_salon_split_checks_with_tips(
         total_tips=str(total_tips),
         final_order_status=final_order_row["status"],
         session_status=session_after["status"],
-        wa_messages=len(wa_capture.messages),
+        wa_messages=len(bot_replies.messages),
     )
     print(
         f"\n[OK] E2E split-checks test passed: "
@@ -615,5 +614,5 @@ async def test_salon_split_checks_with_tips(
         f"2 checks ({CHECK1_TOTAL}+{CHECK2_TOTAL}), "
         f"tip cap enforced, tips recorded ({TIP1}+{TIP2}={expected_total_tips}), "
         f"order={final_order_row['status']}, session={session_after['status']}. "
-        f"{len(wa_capture.messages)} WA messages captured."
+        f"{len(bot_replies.messages)} WA messages captured."
     )

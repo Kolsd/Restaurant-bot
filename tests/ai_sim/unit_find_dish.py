@@ -72,7 +72,7 @@ FLAT_MENU = {
     ],
 }
 
-# Nested format: {categories: [{name, items}]}  — used by setup_demo.py / seed.py
+# Nested format: {categories: [{name, items}]}  — used by scripts/demo_data.py / seed.py
 NESTED_MENU = {
     "categories": [
         {

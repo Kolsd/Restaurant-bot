@@ -14,13 +14,13 @@ import os
 
 import asyncpg
 
-# ── Re-use constants from setup_demo.py ───────────────────────────────────────
+# ── Re-use constants from scripts/demo_data.py ───────────────────────────────────────
 # sys.path adjustment so this works whether run from repo root or tests/
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from scripts.setup_demo import DEMO_MENU, DEMO_FEATURES  # noqa: E402
+from scripts.demo_data import DEMO_MENU, DEMO_FEATURES  # noqa: E402
 from app.services.database import _normalize_phone  # noqa: E402
 from app.services.logging import get_logger  # noqa: E402
 
@@ -218,7 +218,6 @@ _TRUNCATE_TABLES = [
     "nps_responses",
     "nps_waiting",
     "reservations",
-    "webhook_inbox",
     "subscription_usage",
 ]
 

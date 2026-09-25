@@ -215,13 +215,6 @@ async def subscribe(org_id: int) -> AsyncIterator["asyncio.Queue[dict]"]:
             await _maybe_stop_redis_listener_locked()
 
 
-def subscriber_count(org_id: Optional[int] = None) -> int:
-    """Introspection helper for tests: total subscribers, or for one org."""
-    if org_id is not None:
-        return len(_subscribers.get(org_id, ()))
-    return sum(len(v) for v in _subscribers.values())
-
-
 # ── Shared Redis PSUBSCRIBE connection (per worker) ──────────────────────────
 
 async def _ensure_redis_listener_locked() -> None:

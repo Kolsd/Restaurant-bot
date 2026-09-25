@@ -29,11 +29,6 @@ _COOLDOWN_SECONDS = 300  # 5 minutes
 # In-memory tracking of last alert time per alert_key
 _last_alert: dict[str, float] = {}
 
-# Thresholds
-_P95_LATENCY_THRESHOLD_MS = 500.0
-_QUEUE_DEPTH_THRESHOLD = 50
-_ERROR_RATE_THRESHOLD = 0.10  # 10%
-
 # Cost runaway — alert when a tenant exceeds this multiple of its daily budget
 _COST_RUNAWAY_MULTIPLIER = 2.0
 
@@ -45,29 +40,9 @@ async def check_alerts() -> None:
     Errors are caught internally — this must never crash the scheduler.
     """
     try:
-        await _check_dead_letters()
-    except Exception:
-        log.exception("alerts.check_dead_letters_failed")
-
-    try:
         await _check_pool_exhaustion()
     except Exception:
         log.exception("alerts.check_pool_exhaustion_failed")
-
-    try:
-        await _check_inbox_latency()
-    except Exception:
-        log.exception("alerts.check_inbox_latency_failed")
-
-    try:
-        await _check_queue_depth()
-    except Exception:
-        log.exception("alerts.check_queue_depth_failed")
-
-    try:
-        await _check_error_rate()
-    except Exception:
-        log.exception("alerts.check_error_rate_failed")
 
     try:
         await _check_cost_runaway()
@@ -82,24 +57,6 @@ async def check_alerts() -> None:
 
 # ── Individual checks ─────────────────────────────────────────────────────────
 
-async def _check_dead_letters() -> None:
-    from app.services.database import get_pool  # late import — avoids circular
-
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        count = await conn.fetchval(
-            "SELECT COUNT(*) FROM webhook_inbox WHERE last_error LIKE 'DEAD_LETTER:%'"
-        )
-    count = count or 0
-    if count > 0:
-        await _fire_alert(
-            key="dead_letters",
-            severity="HIGH",
-            title="Dead Letters Detected",
-            detail=f"{count} message(s) permanently failed in webhook_inbox.",
-        )
-
-
 async def _check_pool_exhaustion() -> None:
     from app.services.database import get_pool  # late import
 
@@ -112,58 +69,6 @@ async def _check_pool_exhaustion() -> None:
             severity="CRITICAL",
             title="DB Pool Exhausted",
             detail=f"0 free connections out of {total}.",
-        )
-
-
-async def _check_inbox_latency() -> None:
-    from app.services.inbox_worker import get_metrics  # late import
-
-    metrics = get_metrics()
-    p95_ms = metrics.get("inbox_latency_p95_ms", 0.0)
-    if p95_ms > _P95_LATENCY_THRESHOLD_MS:
-        await _fire_alert(
-            key="high_inbox_latency",
-            severity="MEDIUM",
-            title="High Inbox Latency",
-            detail=f"p95 latency is {p95_ms:.1f}ms (threshold: {_P95_LATENCY_THRESHOLD_MS}ms).",
-        )
-
-
-async def _check_queue_depth() -> None:
-    from app.services.database import get_pool  # late import
-
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        depth = await conn.fetchval(
-            "SELECT COUNT(*) FROM webhook_inbox WHERE processed_at IS NULL"
-        )
-    depth = depth or 0
-    if depth > _QUEUE_DEPTH_THRESHOLD:
-        await _fire_alert(
-            key="inbox_queue_backup",
-            severity="HIGH",
-            title="Inbox Queue Backup",
-            detail=f"Queue depth is {depth} (threshold: {_QUEUE_DEPTH_THRESHOLD}).",
-        )
-
-
-async def _check_error_rate() -> None:
-    from app.services.inbox_worker import get_metrics  # late import
-
-    metrics = get_metrics()
-    processed = metrics.get("inbox_processed_total", 0)
-    errors = metrics.get("inbox_errors_total", 0)
-    total = processed + errors
-    if total == 0:
-        return  # No traffic — nothing to check
-    rate = errors / total
-    if rate > _ERROR_RATE_THRESHOLD:
-        pct = rate * 100
-        await _fire_alert(
-            key="worker_error_spike",
-            severity="HIGH",
-            title="Worker Error Rate Spike",
-            detail=f"Error rate is {pct:.1f}% ({errors}/{total}) — threshold: {_ERROR_RATE_THRESHOLD * 100:.0f}%.",
         )
 
 

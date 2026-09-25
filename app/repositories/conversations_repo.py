@@ -7,7 +7,7 @@ Covers the conversations aggregate:
   - bot pause/unpause (toggle_bot, cleanup_old_conversations)
   - per-conversation NPS state (save_nps_response, pending score, waiting state)
   - cart CRUD (get, save, clear, migrate)
-  - WAM deduplication (db_is_duplicate_wam)
+
 
 Analytics-level NPS functions (db_get_nps_stats, db_get_nps_responses) remain
 in app.services.database — they are restaurant-wide aggregates, not conversation state.
@@ -200,13 +200,6 @@ async def db_get_conversation_details(phone: str, bot_number: str = ""):
             return {"history": history, "bot_paused": row["bot_paused"] or False, "bot_number": row["bot_number"]}
     return {"history": [], "bot_paused": False, "bot_number": bot_number}
 
-async def db_toggle_bot(phone: str, bot_number: str, pause: bool):
-    async with _tenant_connection() as conn:
-        await conn.execute("""
-            INSERT INTO conversations (phone, bot_number, bot_paused, org_id, updated_at)
-            VALUES ($1,$2,$3,NULLIF(current_setting('app.org_id', true), '')::bigint,NOW())
-            ON CONFLICT (phone, bot_number) DO UPDATE SET bot_paused=EXCLUDED.bot_paused, updated_at=NOW()
-        """, phone, bot_number, pause)
 
 async def db_cleanup_old_conversations(days: int = 7, bot_number: str = None):
     async with _tenant_connection() as conn:
@@ -300,19 +293,6 @@ async def db_update_nps_comment(phone: str, bot_number: str, comment: str) -> bo
         return result != "UPDATE 0"
 
 
-async def db_get_pending_nps_score(phone: str, bot_number: str) -> int | None:
-    """Check if there is a pending NPS comment request in the DB (score saved, comment missing)."""
-    async with _tenant_connection() as conn:
-        row = await conn.fetchrow(
-            """SELECT score FROM nps_responses
-               WHERE phone=$1 AND bot_number=$2 AND comment='__pending__'
-               AND created_at > NOW() - INTERVAL '24 hours'
-               ORDER BY created_at DESC LIMIT 1""",
-            phone, bot_number
-        )
-        return row["score"] if row else None
-
-
 # ── NPS WAITING STATE (persists the "waiting_score" state in DB) ──────
 
 async def db_save_nps_waiting(phone: str, bot_number: str, restaurant_id: int | None = None):
@@ -342,16 +322,6 @@ async def db_save_nps_waiting(phone: str, bot_number: str, restaurant_id: int | 
         """, phone, bot_number, resolved_org_id)
 
 
-async def db_get_nps_waiting(phone: str, bot_number: str) -> bool:
-    """Returns True if there is a pending NPS score request for this customer (within 48 hours)."""
-    async with _tenant_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT 1 FROM nps_waiting WHERE phone=$1 AND bot_number=$2 AND created_at > NOW() - INTERVAL '48 hours'",
-            phone, bot_number
-        )
-        return row is not None
-
-
 async def db_clear_nps_waiting(phone: str, bot_number: str):
     """Removes the pending NPS state — called after score is received or survey is skipped."""
     async with _tenant_connection() as conn:
@@ -363,49 +333,6 @@ async def db_clear_nps_waiting(phone: str, bot_number: str):
         await conn.execute(
             "DELETE FROM nps_waiting WHERE created_at < NOW() - INTERVAL '48 hours'"
         )
-
-
-async def db_get_nps_waiting_pending_reminder() -> list:
-    """Return nps_waiting rows that need a 24h reminder.
-
-    Returns rows where:
-      - reminded_at IS NULL (no reminder sent yet)
-      - created_at is between 24h and 48h ago (window for reminder)
-
-    Caller must enter bypass_tenant_scope() — this is a cross-tenant
-    scheduler scan. Each returned row carries org_id so the caller can
-    apply tenant_scope(org_id) per-row before sending the reminder.
-    """
-    async with _tenant_connection() as conn:
-        rows = await conn.fetch(
-            """SELECT phone, bot_number, org_id, created_at
-               FROM nps_waiting
-               WHERE reminded_at IS NULL
-                 AND created_at < NOW() - INTERVAL '24 hours'
-                 AND created_at > NOW() - INTERVAL '48 hours'"""
-        )
-    return [dict(r) for r in rows]
-
-
-async def db_mark_nps_reminded(phone: str, bot_number: str) -> int:
-    """Mark a pending NPS row as reminded. Returns affected row count.
-
-    Idempotent: a second call returns 0 because the WHERE clause requires
-    reminded_at IS NULL. Caller can safely retry on transient send failures
-    without double-marking.
-    """
-    async with _tenant_connection() as conn:
-        result = await conn.execute(
-            """UPDATE nps_waiting
-               SET reminded_at = NOW()
-               WHERE phone = $1 AND bot_number = $2 AND reminded_at IS NULL""",
-            phone, bot_number,
-        )
-    # asyncpg returns "UPDATE N" — extract the count
-    try:
-        return int(result.split()[-1])
-    except (ValueError, IndexError):
-        return 0
 
 
 async def db_cleanup_expired_nps_waiting() -> int:
@@ -463,40 +390,8 @@ async def db_migrate_cart(phone: str, from_bot_number: str, to_bot_number: str):
 
 # ── RATE LIMITING ─────────────────────────────────────────────────────
 
-async def db_check_rate_limit(phone: str, window_seconds: int, max_messages: int) -> bool:
-    """
-    Check and update rate limit for a phone number in meta_rate_limits table.
-    Returns True if the phone is rate-limited (should be blocked), False if allowed.
-    Deletes stale rows, counts recent messages, and inserts a new row atomically.
-    """
-    async with _tenant_connection() as conn:
-        await conn.execute(
-            "DELETE FROM meta_rate_limits WHERE phone = $1 AND created_at < NOW() - make_interval(secs => $2)",
-            phone, window_seconds,
-        )
-        count = await conn.fetchval(
-            "SELECT COUNT(*) FROM meta_rate_limits WHERE phone = $1",
-            phone,
-        )
-        if count >= max_messages:
-            return True
-        await conn.execute("INSERT INTO meta_rate_limits (phone) VALUES ($1)", phone)
-        return False
-
 
 # ── RESTAURANT WA_PHONE_ID AUTO-PERSIST ───────────────────────────────
-
-async def db_update_restaurant_phone_id(restaurant_id: int, wa_phone_id: str) -> None:
-    """Persist a discovered wa_phone_id back to the organization row. Non-critical.
-
-    Post-Wave-2: `restaurants` is a READ-ONLY VIEW. Write to `organizations` instead.
-    `restaurant_id` passed here is org_id (db_get_restaurant_by_phone sets d["id"] = org_id).
-    """
-    async with _tenant_connection() as conn:
-        await conn.execute(
-            "UPDATE organizations SET wa_phone_id=$1 WHERE id=$2",
-            wa_phone_id, restaurant_id,
-        )
 
 
 async def db_update_restaurant_features(restaurant_id: int, features: dict) -> None:
@@ -514,33 +409,6 @@ async def db_update_restaurant_features(restaurant_id: int, features: dict) -> N
 
 
 # ── WAM DEDUPLICATION ─────────────────────────────────────────────────
-
-async def db_is_duplicate_wam(wam_id: str) -> bool:
-    """
-    Idempotent deduplication by WAM_ID (WhatsApp Message ID).
-
-    Logic:
-    - Deletes entries older than 2 minutes (Meta's retry window).
-    - Tries to insert the wam_id with INSERT ... ON CONFLICT DO NOTHING.
-    - If the INSERT returns no rows → the ID already existed → duplicate (True).
-    - If the INSERT returns the wam_id → it was new → process it (False).
-
-    Using the PK as the sole constraint makes the INSERT atomic and safe
-    under multi-worker concurrency without needing additional locks.
-    """
-    if not wam_id:
-        return False
-    async with _tenant_connection() as conn:
-        await conn.execute(
-            "DELETE FROM processed_wam_ids WHERE received_at < NOW() - INTERVAL '2 minutes'"
-        )
-        result = await conn.fetchval(
-            "INSERT INTO processed_wam_ids (wam_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING wam_id",
-            wam_id,
-        )
-        # result is None  → row already existed → duplicate
-        # result is wam_id → freshly inserted   → new message
-        return result is None
 
 
 # ── Customer order history (Fase 5a — personalized recommendations) ───────────

@@ -35,11 +35,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
-    drain_inbox,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -70,7 +69,7 @@ PAYMENT_METHODS = ["Nequi", "Efectivo"]
 # -- App fixture (function-scoped so lifespan runs per test) ------------------
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     """
     Yields an httpx.AsyncClient wrapping the real FastAPI app via ASGI transport.
 
@@ -98,7 +97,7 @@ async def e2e_app(wa_capture):
 async def test_salon_qr_full_lifecycle(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Full salon QR lifecycle:
@@ -193,7 +192,7 @@ async def test_salon_qr_full_lifecycle(
     # The first message goes to the parent's bot_number.
     # The agent resolves the table -> branch, so we can send to parent bot.
     # However, to be deterministic, send to the branch bot that owns the table.
-    processed_1 = await simulate_whatsapp_inbound(
+    processed_1 = await send_diner_message(
         client,
         pool,
         phone=CUSTOMER_PHONE_RAW,
@@ -207,7 +206,7 @@ async def test_salon_qr_full_lifecycle(
     )
     assert processed_1 >= 1, "Turn 1: inbox item was not processed"
 
-    turn1_replies = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    turn1_replies = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     log.info(
         "e2e.salon_turn_1_replies",
         count=len(turn1_replies),
@@ -254,7 +253,7 @@ async def test_salon_qr_full_lifecycle(
     order_text = "Quiero pedir 2 empanaditas de carne"
     log.info("e2e.salon_turn_2", phone=CUSTOMER_PHONE, text=order_text)
     t2_start = time.monotonic()
-    processed_2 = await simulate_whatsapp_inbound(
+    processed_2 = await send_diner_message(
         client,
         pool,
         phone=CUSTOMER_PHONE_RAW,
@@ -268,7 +267,7 @@ async def test_salon_qr_full_lifecycle(
     )
     assert processed_2 >= 1, "Turn 2: order inbox item was not processed"
 
-    turn2_replies = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    turn2_replies = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     log.info(
         "e2e.salon_turn_2_replies",
         count=len(turn2_replies),
@@ -283,7 +282,7 @@ async def test_salon_qr_full_lifecycle(
     confirm_text = "sí confirmo"
     log.info("e2e.salon_turn_3", phone=CUSTOMER_PHONE, text=confirm_text)
     t3_start = time.monotonic()
-    processed_3 = await simulate_whatsapp_inbound(
+    processed_3 = await send_diner_message(
         client,
         pool,
         phone=CUSTOMER_PHONE_RAW,
@@ -511,7 +510,7 @@ async def test_salon_qr_full_lifecycle(
     )
 
     # -- Final summary --------------------------------------------------------
-    all_customer_texts = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    all_customer_texts = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     log.info(
         "e2e.salon_test_passed",
         base_order_id=base_order_id,
@@ -519,11 +518,11 @@ async def test_salon_qr_full_lifecycle(
         order_total=str(order_total),
         final_order_status=final_order_row["status"],
         session_status=session_after["status"],
-        total_wa_messages=len(wa_capture.messages),
+        total_wa_messages=len(bot_replies.messages),
         customer_wa_messages=len(all_customer_texts),
     )
     print(
         f"\n[OK] E2E salon test passed: order {base_order_id} completed full "
         f"dine-in lifecycle (QR scan -> order -> kitchen -> pay_check). "
-        f"{len(wa_capture.messages)} WA messages captured."
+        f"{len(bot_replies.messages)} WA messages captured."
     )

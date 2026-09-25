@@ -151,7 +151,7 @@ _END_SESSION = {
 _SEND_DISH_CARD = {
     "name": "send_dish_card",
     "description": (
-        "Envía al cliente una foto del plato con nombre, precio y descripción corta. "
+        "Muestra en el chat la tarjeta del plato: foto, nombre, precio y descripción corta. "
         "Úsalo SOLO cuando el cliente pide ver o recomendaciones de un plato específico "
         "Y el restaurante tiene imágenes configuradas. "
         "Si el plato no tiene foto disponible, NO uses esta tool — responde con texto normal."
@@ -266,9 +266,7 @@ TOOLS_SALON: list[dict] = [
 ]
 """Tools available in dine-in (salon/table) mode. Since chunk 9 of the web
 delivery wave, this is also the only tool list the agent ever uses — the old
-"external" (delivery/pickup) mode and its order-creation tools were removed;
-WhatsApp customers with no active table get a deterministic reply instead of
-an LLM tool-use loop (see app/services/agent.py's `_whatsapp_no_table_reply`)."""
+"external" (delivery/pickup) mode and its order-creation tools were removed."""
 
 # ---------------------------------------------------------------------------
 # Lookup dict: tool name → definition

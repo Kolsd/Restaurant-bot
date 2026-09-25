@@ -124,14 +124,6 @@ def check(expected: ExpectedState, snapshot: DBSnapshot) -> AssertionResult:
                     f"dish '{dish}' unexpectedly found in committed orders"
                 )
 
-    # ── inbox dead letters ────────────────────────────────────────────────────
-    actual_dead = snapshot.webhook_inbox_stats.get("dead_letters", 0)
-    if actual_dead > expected.inbox_dead_letters:
-        failures.append(
-            f"webhook_inbox dead letters: expected <= {expected.inbox_dead_letters}, "
-            f"got {actual_dead}"
-        )
-
     # ── tokens used ──────────────────────────────────────────────────────────
     if expected.tokens_used_gt_zero:
         tokens = snapshot.subscription_usage.get("total_tokens", 0)
@@ -291,22 +283,6 @@ async def snapshot_db_state(
         )
     )
 
-    # ── webhook_inbox stats ───────────────────────────────────────────────────
-    inbox_row = await conn.fetchrow(
-        """
-        SELECT
-            COUNT(*)                                          AS total,
-            COUNT(*) FILTER (WHERE processed_at IS NULL)     AS pending,
-            COUNT(*) FILTER (WHERE last_error LIKE 'DEAD_LETTER:%') AS dead_letters
-        FROM webhook_inbox
-        """
-    )
-    webhook_inbox_stats = {
-        "total": int(inbox_row["total"]) if inbox_row else 0,
-        "pending": int(inbox_row["pending"]) if inbox_row else 0,
-        "dead_letters": int(inbox_row["dead_letters"]) if inbox_row else 0,
-    }
-
     # ── subscription_usage (Wave 2: filter by org_id) ────────────────────────
     usage_row = None
     if org_id:
@@ -338,6 +314,5 @@ async def snapshot_db_state(
         waiter_alerts=waiter_alerts,
         reservations=reservations,
         conversations=conversations,
-        webhook_inbox_stats=webhook_inbox_stats,
         subscription_usage=subscription_usage,
     )

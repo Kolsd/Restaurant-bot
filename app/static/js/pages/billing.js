@@ -428,7 +428,7 @@
 
   // ── Dimension display metadata ─────────────────────────────────
   var DIMENSION_META = {
-    conversations: { label: 'Conversaciones WhatsApp', unit: 'conv.' },
+    conversations: { label: 'Conversaciones del bot', unit: 'conv.' },
     audio:         { label: 'Minutos de audio (voz)',  unit: 'min'   },
     storage:       { label: 'Almacenamiento',           unit: 'MB'    },
     staff:         { label: 'Empleados activos',        unit: ''      },

@@ -519,7 +519,7 @@ async function loadLiveOrders() {
       let nameTxt = '';
       if (o.table_name)   nameTxt = `Mesa ${o.table_name}`;
       else if (o.channel === 'delivery') nameTxt = `Domicilio · ${o.customer_phone || ''}`;
-      else if (o.channel === 'pickup')   nameTxt = `WhatsApp · ${o.customer_phone || ''}`;
+      else if (o.channel === 'pickup')   nameTxt = `Recoger · ${o.customer_phone || ''}`;
       else                               nameTxt = ORDER_TYPE_LABELS[o.order_type] || o.channel || '—';
       nameEl.textContent = nameTxt;
 

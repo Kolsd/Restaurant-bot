@@ -958,18 +958,6 @@ async def db_delete_staff_by_id(staff_id: str) -> bool:
     return deleted is not None
 
 
-async def db_find_restaurant_id_by_name(name: str) -> int | None:
-    """Lookup restaurant ID by case-insensitive name match. Legacy fallback."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT id, name FROM restaurants")
-        name_lower = name.lower().strip()
-        for r in rows:
-            if r["name"].lower().strip() == name_lower:
-                return r["id"]
-    return None
-
-
 # ── User functions ────────────────────────────────────────────────────────────
 
 async def db_get_user(username: str):

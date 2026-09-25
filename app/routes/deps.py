@@ -408,68 +408,6 @@ ROLE_PAGE_MAP = {
 
 ADMIN_ROLES = {"owner", "admin", "gerente"}
 
-def _extract_roles(role_str: str) -> set:
-    return {r.strip().lower() for r in (role_str or "").split(",") if r.strip()}
-
-async def require_page_access(request: Request, path: str):
-    """
-    Verifies token + role to serve a protected HTML page.
-    Redirects to /login if there's no token, to /staff if the role doesn't match.
-    """
-    from app.services.auth import verify_token
-    from app.services import database as db
-
-    token = None
-    # Look up token in cookie or header
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header.replace("Bearer ", "")
-    # HTML pages don't send an Authorization header — the token lives in localStorage
-    # so for page routes, we return the HTML and let the JS validate
-    # BUT: we can read a cookie if one exists
-    token = request.cookies.get("rb_token") or token
-
-    allowed_roles = ROLE_PAGE_MAP.get(path, set())
-    if not allowed_roles:
-        return None  # route has no restriction defined, let it through
-
-    if not token:
-        return None  # no cookie, the JS in the HTML will handle the redirect
-
-    username = await verify_token(token)
-    if not username:
-        return None
-
-    # Get the user's role
-    if username.startswith("staff:"):
-        staff_id = username.replace("staff:", "")
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT role, roles FROM staff WHERE id=$1::uuid", staff_id
-            )
-        if not row:
-            return None
-        roles_list = row.get("roles") or []
-        if not roles_list and row.get("role"):
-            roles_list = [row["role"]]
-        user_roles = {r.lower() for r in roles_list}
-    else:
-        user = await db.db_get_user(username)
-        if not user:
-            return None
-        user_roles = _extract_roles(user.get("role", ""))
-
-    # Admin can always access everything
-    if user_roles & ADMIN_ROLES:
-        return None  # allow
-
-    # Check whether they have any role allowed for this page
-    if not (user_roles & allowed_roles):
-        raise HTTPException(status_code=403, detail="Rol no autorizado para esta página")
-
-    return None
-
 
 # ── Org/Location dependencies (Bloque S3) ────────────────────────────────────
 #

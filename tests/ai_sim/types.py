@@ -57,8 +57,6 @@ class ExpectedState:
     items_not_in_orders: list[str] = field(default_factory=list)
     """Dish names (case-insensitive substring) that MUST NOT appear in any order."""
 
-    inbox_dead_letters: int = 0
-    """Number of webhook_inbox dead-letter rows. Default 0 (zero tolerance)."""
 
     tokens_used_gt_zero: bool = True
     """True = subscription_usage.total_tokens must be > 0 after the scenario."""
@@ -128,7 +126,6 @@ class DBSnapshot:
     waiter_alerts: list[dict]
     reservations: list[dict]
     conversations: list[dict]
-    webhook_inbox_stats: dict
     """Keys: total, pending, dead_letters."""
     subscription_usage: dict
     """Keys: total_tokens, total_invoices (or empty dict if no row)."""

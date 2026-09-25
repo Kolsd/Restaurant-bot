@@ -526,7 +526,6 @@ def test_pay_check_marks_invoiced_and_diner_status_flips_to_paid(client, org_a, 
     assert status_before.json()["checkout"]["status"] == "pending_waiter"
 
     _mock_pay_auth(monkeypatch, org_a["org_id"], org_a["bot_number"])
-    monkeypatch.setattr("app.routes.tables.send_wa_interactive_nps", AsyncMock())
     pay_resp = _pay_check(client, base_order_id, check_id, amount=28000)
     assert pay_resp.status_code == 200, pay_resp.text
 
@@ -535,15 +534,12 @@ def test_pay_check_marks_invoiced_and_diner_status_flips_to_paid(client, org_a, 
     assert status_after.json()["checkout"]["status"] == "paid"
 
 
-# ── 9. NPS: web identity never gets a WhatsApp push ─────────────────────────
+# ── 9. NPS: paying surfaces the survey in the diner's own chat ─────────────
 
-def test_pay_check_web_identity_never_sends_whatsapp_nps(client, org_a, monkeypatch):
-    """The bug this wave fixes: _farewell_and_nps used to call
-    send_wa_interactive_nps for ANY phone, including a diner-web
-    "web:<uuid4>" identity — a guaranteed-failing Meta API call on every
-    single web table payment. Assert the send function is never invoked,
-    while the (phone-agnostic) trigger_nps state machine still runs so the
-    web page can render the survey."""
+def test_pay_check_surfaces_nps_to_the_web_diner(client, org_a, monkeypatch):
+    """Paying runs the (phone-agnostic) trigger_nps state machine so the web
+    page renders the survey. (It also used to push a WhatsApp survey to every
+    phone, "web:<uuid4>" included — that channel is gone since 2026-09-25.)"""
     session = _open(client, org_a["table_id"])
     token = session["token"]
     assert token.startswith("web:")
@@ -556,13 +552,9 @@ def test_pay_check_web_identity_never_sends_whatsapp_nps(client, org_a, monkeypa
     check_id = resp.json()["check_id"]
 
     _mock_pay_auth(monkeypatch, org_a["org_id"], org_a["bot_number"])
-    wa_mock = AsyncMock()
-    monkeypatch.setattr("app.routes.tables.send_wa_interactive_nps", wa_mock)
 
     pay_resp = _pay_check(client, base_order_id, check_id, amount=28000)
     assert pay_resp.status_code == 200, pay_resp.text
-
-    wa_mock.assert_not_called()
 
     # NPS block should now be surfaced to the diner via GET /api/diner/status.
     status_resp = _status(client, token)
@@ -583,7 +575,6 @@ def test_nps_score_5_stores_without_comment(client, org_a, monkeypatch):
     check_id = resp.json()["check_id"]
 
     _mock_pay_auth(monkeypatch, org_a["org_id"], org_a["bot_number"])
-    monkeypatch.setattr("app.routes.tables.send_wa_interactive_nps", AsyncMock())
     _pay_check(client, base_order_id, check_id, amount=28000)
 
     chat_resp = _post(client, "/api/diner/chat", json={"token": token, "message": "5"})
@@ -619,7 +610,6 @@ def test_nps_score_2_asks_for_comment_then_stores_it(client, org_a, monkeypatch)
     check_id = resp.json()["check_id"]
 
     _mock_pay_auth(monkeypatch, org_a["org_id"], org_a["bot_number"])
-    monkeypatch.setattr("app.routes.tables.send_wa_interactive_nps", AsyncMock())
     _pay_check(client, base_order_id, check_id, amount=28000)
 
     score_resp = _post(client, "/api/diner/chat", json={"token": token, "message": "2"})
@@ -661,7 +651,6 @@ def test_nps_skip_closes_cleanly(client, org_a, monkeypatch):
     check_id = resp.json()["check_id"]
 
     _mock_pay_auth(monkeypatch, org_a["org_id"], org_a["bot_number"])
-    monkeypatch.setattr("app.routes.tables.send_wa_interactive_nps", AsyncMock())
     _pay_check(client, base_order_id, check_id, amount=28000)
 
     skip_resp = _post(client, "/api/diner/chat", json={"token": token, "message": "no calificar"})

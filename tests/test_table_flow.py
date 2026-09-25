@@ -51,8 +51,6 @@ async def test_button_generate_invoice(client, monkeypatch, mock_db_pool):
     mock_mark_factura = AsyncMock()
     monkeypatch.setattr(tables_routes.db, "db_mark_invoice_generated", mock_mark_factura)
 
-    mock_send_wa = AsyncMock()
-    monkeypatch.setattr(tables_routes, "send_wa_msg", mock_send_wa)
     monkeypatch.setattr(tables_routes.db, "db_update_table_order_status", AsyncMock())
 
     headers = {"Authorization": "Bearer token_mesero"}
@@ -64,13 +62,9 @@ async def test_button_generate_invoice(client, monkeypatch, mock_db_pool):
 
     assert response.status_code == 200
 
-    # 1. VERIFY db_mark_invoice_generated WAS INDEED CALLED
+    # VERIFY db_mark_invoice_generated WAS INDEED CALLED
     mock_mark_factura.assert_called_once_with("MESA-TEST")
-
-    # 2. Verify a WhatsApp notice was sent that the invoice is on its way
-    mock_send_wa.assert_called_once()
-    wa_args, _ = mock_send_wa.call_args
-    assert "Estamos preparando tu factura" in wa_args[1]
+    assert response.json()["status"] == "factura_generada"
 
 # ── TEST 2: "Close Table" button ──
 @pytest.mark.asyncio

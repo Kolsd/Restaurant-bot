@@ -8,7 +8,7 @@
  *   3. Include this script before </body>.
  *
  * Valid page keys (data-active values):
- *   resumen | pedidos | reservaciones | whatsapp | salon | menu | menu-eng
+ *   resumen | pedidos | reservaciones | salon | menu | menu-eng
  *   nps | fidelizacion | riesgo | staff | nomina | sucursales
  *   settings | billing
  *
@@ -62,11 +62,6 @@
       <a class="sb-item" data-key="reservaciones" href="/reservations">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M5 3V1M11 3V1M2 6h12"/></svg>
         Reservaciones
-      </a>
-      <a class="sb-item" data-key="whatsapp" href="/dashboard">
-        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8c0-3 2.5-5.5 6-5.5S14 5 14 8s-2.5 5.5-6 5.5c-1 0-2-.2-2.8-.6L3 14l.6-2.2C2.6 11 2 9.5 2 8z"/></svg>
-        WhatsApp
-        <span class="dot live" style="margin-left:auto;"></span>
       </a>
     </div>
 
@@ -275,8 +270,6 @@
       if (el) el.style.display = 'none';
     }
 
-    // Always hide the WhatsApp nav item (no standalone page)
-    hide('whatsapp');
 
     if (operationalRoles.includes(role)) {
       // Operational staff: hide all admin sections, show only their page link

@@ -31,7 +31,7 @@ from decimal import Decimal
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
     seed_restaurant,
     truncate_e2e_data,
@@ -51,7 +51,7 @@ EXPECTED_TOTAL = ITEM_PRICE * ITEM_QTY  # 56000
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
 
@@ -71,7 +71,7 @@ async def e2e_app(wa_capture):
 async def test_waiter_table_session_renders(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Waiter POS full flow:

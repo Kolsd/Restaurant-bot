@@ -37,10 +37,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -76,7 +76,7 @@ MENU = {
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(test_pool, wa_capture):
+async def e2e_app(test_pool, bot_replies):
     """
     Yields an httpx.AsyncClient wrapping the real FastAPI app via ASGI transport.
 
@@ -102,7 +102,7 @@ async def e2e_app(test_pool, wa_capture):
 async def test_customer_cancels_upcoming_reservation(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Customer cancels their own upcoming (pending) reservation via WhatsApp.
@@ -175,21 +175,21 @@ async def test_customer_cancels_upcoming_reservation(
     )
     log.info("e2e.cancel_reservation.turn_1", text=reservation_text)
     t1_start = time.monotonic()
-    processed_1 = await simulate_whatsapp_inbound(
+    processed_1 = await send_diner_message(
         client, pool, phone=CUSTOMER_PHONE_RAW, text=reservation_text, bot_number=bot_number,
     )
     log.info("e2e.cancel_reservation.turn_1_done",
              processed=processed_1, elapsed_s=round(time.monotonic() - t1_start, 1))
     assert processed_1 >= 1, "Turn 1 not processed"
 
-    turn1_replies = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    turn1_replies = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     assert len(turn1_replies) >= 1, "Turn 1: bot sent no reply"
 
     # ── Turn 2 (conditional): confirm ────────────────────────────────────────
     confirm_text = "Sí, confirmo la reserva"
     log.info("e2e.cancel_reservation.turn_2", text=confirm_text)
     t2_start = time.monotonic()
-    processed_2 = await simulate_whatsapp_inbound(
+    processed_2 = await send_diner_message(
         client, pool, phone=CUSTOMER_PHONE_RAW, text=confirm_text, bot_number=bot_number,
     )
     log.info("e2e.cancel_reservation.turn_2_done",
@@ -227,7 +227,7 @@ async def test_customer_cancels_upcoming_reservation(
     cancel_text = "Quiero cancelar mi reserva"
     log.info("e2e.cancel_reservation.turn_3", text=cancel_text)
     t3_start = time.monotonic()
-    processed_3 = await simulate_whatsapp_inbound(
+    processed_3 = await send_diner_message(
         client, pool, phone=CUSTOMER_PHONE_RAW, text=cancel_text, bot_number=bot_number,
     )
     log.info("e2e.cancel_reservation.turn_3_done",
@@ -240,7 +240,7 @@ async def test_customer_cancels_upcoming_reservation(
     confirm_cancel_text = "Sí, cancela la reserva"
     log.info("e2e.cancel_reservation.turn_4", text=confirm_cancel_text)
     t4_start = time.monotonic()
-    processed_4 = await simulate_whatsapp_inbound(
+    processed_4 = await send_diner_message(
         client, pool, phone=CUSTOMER_PHONE_RAW, text=confirm_cancel_text, bot_number=bot_number,
     )
     log.info("e2e.cancel_reservation.turn_4_done",
@@ -280,7 +280,7 @@ async def test_customer_cancels_upcoming_reservation(
     )
 
     # ── Assert: bot reply mentions cancellation ───────────────────────────────
-    all_replies = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    all_replies = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     log.info("e2e.cancel_reservation.replies",
              count=len(all_replies), last_replies=all_replies[-4:])
     all_texts = " ".join(all_replies).lower()
@@ -296,7 +296,7 @@ async def test_customer_cancels_upcoming_reservation(
 async def test_cancel_past_reservation_rejected(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     When there is no upcoming (future, cancellable) reservation, the bot
@@ -376,7 +376,7 @@ async def test_cancel_past_reservation_rejected(
     cancel_text = "cancela mi reserva"
     log.info("e2e.cancel_past_reservation.turn_1", text=cancel_text)
     t1_start = time.monotonic()
-    processed_1 = await simulate_whatsapp_inbound(
+    processed_1 = await send_diner_message(
         client, pool,
         phone=past_customer_phone_raw,
         text=cancel_text,
@@ -407,7 +407,7 @@ async def test_cancel_past_reservation_rejected(
              status=unchanged_row["status"])
 
     # ── Assert: bot reply mentions no upcoming reservation ────────────────────
-    replies = wa_capture.texts_to(past_customer_phone_raw)
+    replies = bot_replies.texts_to(past_customer_phone_raw)
     log.info("e2e.cancel_past_reservation.replies",
              count=len(replies), replies=replies[:5])
     assert len(replies) >= 1, "Bot sent no reply at all"

@@ -70,10 +70,6 @@ def _ok(data) -> dict:
     return {"success": True, "data": data}
 
 
-def _err(msg: str, code: int = 400) -> dict:
-    return {"success": False, "error": msg, "code": code}
-
-
 # ── Pydantic models (Org + Location) ────────────────────────────────────────
 
 _PHONE_RE = re.compile(r"^\+?\d[\d\s\-]{6,19}$")

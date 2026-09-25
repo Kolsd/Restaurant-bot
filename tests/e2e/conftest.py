@@ -5,23 +5,22 @@ Architecture:
 - Uses a REAL Postgres database (TEST_DATABASE_URL or DATABASE_URL_ADMIN with a fresh schema)
 - Uses a REAL Anthropic API
 - Redis is optional (state_store has graceful in-process fallback)
-- Outbound Meta WhatsApp HTTP calls are captured (not forwarded) via httpx patching
-- HMAC webhook signature verification is bypassed via env flag DISABLE_META_SIGNATURE_VERIFY=1
-- The inbox worker is driven manually (drain_inbox) rather than as a background loop
+- The bot's replies are collected by the `bot_replies` fixture
 
 Key design decision:
-  The E2E test calls POST /webhook/meta (through httpx ASGI), which enqueues into
-  webhook_inbox. Then drain_inbox() manually pulls from the queue and dispatches,
-  exactly replicating the inbox_worker logic but controllably within the test.
-  This avoids timing races from a concurrent background loop.
+  A diner message goes through send_diner_message(), which drives agent.chat()
+  inside tenant_scope(org_id) exactly as POST /api/diner/chat does. A
+  `[t:<table_id>]` marker in a test's text stands for "the diner scanned this
+  table's QR": the helper opens the table session the way
+  POST /api/diner/session + diner_chat do, then sends the rest of the text.
+  (Until 2026-09-25 this harness drove the retired WhatsApp webhook + inbox.)
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import json
 import os
+import re
 import time
 
 # .env loading is INTENTIONALLY deferred to fixture scope (see _ensure_dotenv_loaded
@@ -63,7 +62,6 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.services.logging import get_logger
-from app.repositories import inbox_repo
 
 log = get_logger(__name__)
 
@@ -105,11 +103,6 @@ def _same_host_and_db(url_a: str, url_b: str) -> bool:
     return m_a.group(1) == m_b.group(1) and m_a.group(2) == m_b.group(2)
 
 
-def _build_meta_signature(body: bytes, secret: str) -> str:
-    """Build X-Hub-Signature-256 for a given body and secret."""
-    return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-
-
 # ── Database fixture ──────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture(scope="function")
@@ -124,9 +117,6 @@ async def test_pool():
        prevent accidentally running against production).
 
     IMPORTANT: Do NOT use DATABASE_URL_ADMIN (production superuser) as the test DB.
-    If the production inbox worker is running against the same DB, it will race with
-    the test's drain_inbox(), consuming test rows before the test can process them.
-
     The test DB MUST be isolated from the production environment.
 
     Runs alembic upgrade head before yielding the pool.
@@ -154,8 +144,7 @@ async def test_pool():
                 "E2E tests require TEST_DATABASE_URL pointing at a DEDICATED (non-production) "
                 "Postgres database with the Mesio schema. "
                 "Example: export TEST_DATABASE_URL='postgresql://user:pass@localhost/mesio_test'\n"
-                "Do NOT use DATABASE_URL_ADMIN (production DB) — the production inbox worker "
-                "would race with the test drain and consume test rows."
+                "Do NOT use DATABASE_URL_ADMIN (the production DB)."
             )
 
     # Normalize postgres:// → postgresql://
@@ -165,10 +154,6 @@ async def test_pool():
     # Set DATABASE_URL so that app.services.database.get_pool() uses this URL.
     # This must happen BEFORE importing the FastAPI app.
     os.environ["DATABASE_URL"] = url
-    # Disable embedded inbox worker — the test drives it manually
-    os.environ["DISABLE_EMBEDDED_WORKER"] = "1"
-    # Bypass Meta HMAC verification in tests
-    os.environ["DISABLE_META_SIGNATURE_VERIFY"] = "1"
     # Limit LLM response length for faster E2E runs (doesn't change model reasoning)
     os.environ.setdefault("BOT_MAX_TOKENS", "512")
 
@@ -269,16 +254,16 @@ async def test_pool():
         pass
 
 
-# ── WA capture fixture ────────────────────────────────────────────────────────
+# ── Bot reply capture ─────────────────────────────────────────────────────────
 
-class WACapture:
-    """Collects outbound WhatsApp messages instead of sending them to Meta."""
+class BotReplies:
+    """The bot's replies to each diner, in order, as send_diner_message saw them."""
 
     def __init__(self):
         self.messages: list[dict] = []
 
-    def append(self, phone: str, text: str, phone_id: str):
-        self.messages.append({"phone": phone, "text": text, "phone_id": phone_id})
+    def append(self, phone: str, text: str):
+        self.messages.append({"phone": phone, "text": text})
 
     def all_texts(self) -> list[str]:
         return [m["text"] for m in self.messages]
@@ -288,73 +273,17 @@ class WACapture:
         return [m["text"] for m in self.messages if _normalize_phone(m["phone"]) == norm]
 
 
+_ACTIVE_REPLIES: list[BotReplies] = []
+
+
 @pytest.fixture()
-def wa_capture():
-    """
-    Captures all outbound WhatsApp messages sent via httpx to graph.facebook.com.
-
-    Patches httpx.AsyncClient at the module level so every POST to
-    graph.facebook.com/*/messages is intercepted. Other HTTP calls pass through.
-    """
-    capture = WACapture()
-
-    class _FakeResponse:
-        status_code = 200
-        text = '{"messages": [{"id": "wamid.fake"}]}'
-
-        def json(self):
-            return {"messages": [{"id": "wamid.fake"}]}
-
-    class _FakeClient:
-        """Minimal async context manager that intercepts graph.facebook.com posts."""
-
-        def __init__(self, *args, **kwargs):
-            self._kwargs = kwargs
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def post(self, url: str, **kwargs) -> _FakeResponse:
-            if "graph.facebook.com" in url and "/messages" in url:
-                # Parse the outbound payload
-                payload = kwargs.get("json", {})
-                phone = payload.get("to", "")
-                msg_type = payload.get("type", "")
-                if msg_type == "text":
-                    text = payload.get("text", {}).get("body", "")
-                elif msg_type == "interactive":
-                    # Extract body text from interactive message
-                    text = (
-                        payload.get("interactive", {})
-                        .get("body", {})
-                        .get("text", "[interactive]")
-                    )
-                else:
-                    text = f"[{msg_type}]"
-                # Extract phone_id from URL: .../v20.0/{phone_id}/messages
-                parts = url.split("/")
-                phone_id = parts[-2] if len(parts) >= 2 else ""
-                capture.append(phone, text, phone_id)
-                log.info(
-                    "wa_capture.intercepted",
-                    phone=phone,
-                    text_preview=text[:80],
-                    phone_id=phone_id,
-                )
-            return _FakeResponse()
-
-        async def get(self, url: str, **kwargs) -> _FakeResponse:
-            return _FakeResponse()
-
-    # Patch httpx.AsyncClient everywhere it is used for WA sends
-    import httpx
-    original_client = httpx.AsyncClient
-
-    with patch("httpx.AsyncClient", _FakeClient):
+def bot_replies():
+    capture = BotReplies()
+    _ACTIVE_REPLIES.append(capture)
+    try:
         yield capture
+    finally:
+        _ACTIVE_REPLIES.remove(capture)
 
 
 # ── Seed helper ───────────────────────────────────────────────────────────────
@@ -644,194 +573,69 @@ async def create_admin_token(pool: asyncpg.Pool, username: str) -> str:
     return token
 
 
-# ── Inbox drain helper ────────────────────────────────────────────────────────
+# ── Diner message helper ──────────────────────────────────────────────────────
 
-async def drain_inbox(
-    pool: asyncpg.Pool,
-    max_iterations: int = 30,
-    wait_for_first: float = 3.0,
-) -> int:
-    """
-    Manually drains the webhook_inbox table by running the production
-    claim-then-ack loop (matching inbox_worker.py) until empty or
-    max_iterations is reached.
-
-    Production pattern (3 phases, Rule #4 in CLAUDE.md):
-      Phase 1 — Claim (short transaction, ~ms):
-        SELECT FOR UPDATE SKIP LOCKED → claim_rows (SET next_attempt_at) → COMMIT
-      Phase 2 — Dispatch (no DB connection):
-        asyncio.wait_for(_dispatch(...), timeout=180)
-      Phase 3 — Ack (new short connection, ~ms):
-        mark_processed or mark_failed
-
-    Args:
-        wait_for_first: seconds to wait for at least one row to appear
-            before declaring the queue empty.
-
-    Returns number of items successfully processed.
-    """
-    from app.services import inbox_worker as _iw
-    import time as _time
-
-    total_processed = 0
-    deadline = _time.monotonic() + wait_for_first
-
-    for iteration in range(max_iterations):
-        # Phase 1: claim (short transaction — release conn before dispatch)
-        claimed = []
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                rows = await inbox_repo.fetch_batch(conn, limit=10)
-                if rows:
-                    await inbox_repo.claim_rows(conn, [r["id"] for r in rows])
-                    for r in rows:
-                        claimed.append({
-                            "id": r["id"],
-                            "provider": r["provider"],
-                            "payload": r["payload"],
-                            "attempts": r["attempts"] + 1,
-                        })
-        # conn released here — production pattern (no DB held during dispatch)
-
-        if not claimed:
-            # Wait briefly on first iteration in case the row just landed
-            if iteration == 0 and _time.monotonic() < deadline:
-                await asyncio.sleep(0.5)
-                continue
-            # After processing some items, allow one more poll for follow-on messages
-            if total_processed > 0 and _time.monotonic() < deadline:
-                await asyncio.sleep(0.2)
-                continue
-            break
-
-        # Phase 2: dispatch (no DB connection open — matches production)
-        for item in claimed:
-            inbox_id = item["id"]
-            provider = item["provider"]
-            payload = item["payload"]
-            attempts = item["attempts"]
-            dispatch_error = None
-
-            try:
-                await asyncio.wait_for(
-                    _iw._dispatch(provider, payload),
-                    timeout=180,
-                )
-            except asyncio.TimeoutError:
-                dispatch_error = "dispatch_timeout"
-                log.error("drain_inbox.timeout", inbox_id=inbox_id)
-            except Exception as exc:
-                import traceback
-                dispatch_error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
-                log.error("drain_inbox.dispatch_failed", inbox_id=inbox_id, error=str(exc))
-
-            # Phase 3: ack (new connection — matches production)
-            if dispatch_error is None:
-                async with pool.acquire() as conn:
-                    await inbox_repo.mark_processed(conn, inbox_id)
-                total_processed += 1
-            else:
-                async with pool.acquire() as conn:
-                    await inbox_repo.mark_failed(
-                        conn, inbox_id, dispatch_error, attempts, already_incremented=True
-                    )
-
-    return total_processed
+_TABLE_MARKER_RE = re.compile(r"\[(?:table_id|t):([^\]]+)\]")
 
 
-# ── Inbound simulation helper ─────────────────────────────────────────────────
+async def _scan_table(phone: str, bot_number: str, table_id: str, org_id: int) -> None:
+    """What a QR scan does for this diner: sit them at `table_id`."""
+    from app.services import database as db
+    from app.services.tenant_context import tenant_scope
 
-async def simulate_whatsapp_inbound(
+    with tenant_scope(org_id):
+        table = await db.db_get_table_by_id(table_id)
+        assert table, f"e2e: table {table_id!r} not found"
+        session = await db.db_get_active_session(phone, bot_number)
+        if session and session.get("table_id") == table["id"]:
+            return
+        if session:
+            await db.db_close_session(
+                phone, bot_number, reason="scanned_new_table", closed_by_username="system",
+            )
+        await db.db_create_table_session(
+            phone, bot_number, table["id"], table["name"],
+            org_id=table.get("org_id"), location_id=table.get("location_id"),
+        )
+
+
+async def send_diner_message(
     client: AsyncClient,
     pool: asyncpg.Pool,
     *,
     phone: str,
     text: str,
     bot_number: str,
-    wam_id: str | None = None,
-    lat: float | None = None,
-    lon: float | None = None,
 ) -> int:
-    """
-    Send a simulated inbound WhatsApp message to POST /webhook/meta,
-    then drain the inbox worker until the message is processed.
+    """Send one diner message to the bot; returns 1 once the turn is done.
 
-    For GPS location messages, set lat and lon (text is ignored for the
-    location payload but we also save coords to the cart directly).
-
-    Returns number of inbox items processed.
+    `client` and `pool` are unused and kept so the call sites read the same.
     """
-    # Generate a unique wam_id if not provided (avoids dedup collisions)
-    if wam_id is None:
-        wam_id = f"wamid.e2e_{uuid.uuid4().hex}"
+    from app.services import agent
+    from app.services import database as db
+    from app.services.tenant_context import tenant_scope
 
     normalized_bot = _normalize_phone(bot_number)
+    normalized_phone = _normalize_phone(phone)
+    restaurant = await db.db_get_restaurant_by_bot_number(normalized_bot)
+    assert restaurant, f"e2e: no restaurant for bot_number {normalized_bot!r}"
+    org_id = int(restaurant.get("org_id") or restaurant["id"])
 
-    if lat is not None and lon is not None:
-        # Location message
-        message = {
-            "id": wam_id,
-            "from": _normalize_phone(phone),
-            "type": "location",
-            "location": {"latitude": lat, "longitude": lon},
-        }
-    else:
-        message = {
-            "id": wam_id,
-            "from": _normalize_phone(phone),
-            "type": "text",
-            "text": {"body": text},
-        }
+    text = text or ""
+    marker = _TABLE_MARKER_RE.search(text)
+    if marker:
+        await _scan_table(normalized_phone, normalized_bot, marker.group(1).strip(), org_id)
+        text = (text[:marker.start()] + text[marker.end():]).strip()
 
-    payload = {
-        "object": "whatsapp_business_account",
-        "entry": [
-            {
-                "id": "e2e_entry",
-                "changes": [
-                    {
-                        "value": {
-                            "metadata": {
-                                "display_phone_number": normalized_bot,
-                                "phone_number_id": "e2e_phone_id",
-                            },
-                            "messages": [message],
-                        }
-                    }
-                ],
-            }
-        ],
-    }
-
-    body_bytes = json.dumps(payload).encode()
-
-    # Build a valid signature (DISABLE_META_SIGNATURE_VERIFY bypasses the check,
-    # but we send a dummy signature so the parser doesn't log noise).
-    app_secret = os.environ.get("META_APP_SECRET", "test_secret_e2e")
-    signature = _build_meta_signature(body_bytes, app_secret)
-
-    resp = await client.post(
-        "/api/webhook/meta",
-        content=body_bytes,
-        headers={
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": signature,
-        },
-    )
-    # The webhook should always return 200 (even on partial failures)
-    assert resp.status_code == 200, f"Webhook returned {resp.status_code}: {resp.text}"
-
-    # Drain the inbox using the production claim-then-ack pattern.
-    # The mesio_e2e_test database is isolated — the Railway production inbox worker
-    # does NOT poll it, so there is no race condition with a competing worker.
-    processed = await drain_inbox(pool)
-    log.info(
-        "simulate_whatsapp_inbound.done",
-        phone=phone,
-        text_preview=(text[:60] if text else f"GPS {lat},{lon}"),
-        inbox_processed=processed,
-    )
-    return processed
+    with tenant_scope(org_id):
+        result = await agent.chat(
+            user_phone=normalized_phone, user_message=text, bot_number=normalized_bot,
+        )
+    reply = (result or {}).get("message", "")
+    if reply and _ACTIVE_REPLIES:
+        _ACTIVE_REPLIES[-1].append(phone, reply)
+    log.info("send_diner_message.done", phone=phone, text_preview=text[:60])
+    return 1
 
 
 # ── Truncate volatile E2E tables between tests ────────────────────────────────
@@ -845,7 +649,6 @@ _E2E_VOLATILE_TABLES = [
     "table_checks",
     "waiter_alerts",
     "nps_responses",
-    "webhook_inbox",
 ]
 
 
@@ -856,7 +659,6 @@ async def truncate_e2e_data(pool: asyncpg.Pool, org_id: int) -> None:
 
     Post-Wave-2: volatile tables use org_id (not restaurant_id).
     table_checks has no tenant key — deleted via their parent table_orders.
-    webhook_inbox has no tenant key — deleted by bot_number pattern in payload.
 
     This function is called with both org_id and branch location_ids from tests
     (e.g. truncate_e2e_data(pool, parent_id) and truncate_e2e_data(pool, branch_1_id)).
@@ -885,9 +687,3 @@ async def truncate_e2e_data(pool: asyncpg.Pool, org_id: int) -> None:
             """,
             org_id,
         )
-
-        # webhook_inbox has no tenant key — match by bot_number patterns present
-        # in the payload JSONB.  This deletes all e2e inbox rows regardless of
-        # which org they belong to (acceptable since it's a test-only operation
-        # on an isolated test DB).
-        await conn.execute("DELETE FROM webhook_inbox WHERE payload IS NOT NULL")

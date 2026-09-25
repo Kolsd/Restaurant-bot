@@ -74,8 +74,6 @@ function renderSettings(r) {
   var notif = (r.features && r.features.notifications) ? r.features.notifications : {};
   renderNotifToggles(notif);
 
-  // Bot features — voice notes
-  renderBotFeatures(r.features || {});
 
   // Commerce features — DIAN toggle
   renderCommerceFeatures(r);
@@ -204,14 +202,6 @@ function renderNotifToggles(notif) {
   });
 }
 
-// ── Bot features toggles ──────────────────────────────────────────
-function renderBotFeatures(features) {
-  var voiceSw = document.getElementById('bot-sw-voice-notes');
-  if (voiceSw) {
-    if (features.bot_voice_notes) { voiceSw.classList.add('on'); } else { voiceSw.classList.remove('on'); }
-  }
-}
-
 // ── Commerce features toggles ─────────────────────────────────────
 function renderCommerceFeatures(features) {
   var dianSw = document.getElementById('commerce-sw-dian');
@@ -270,12 +260,6 @@ function collectFormData() {
     notifications[key] = sw ? sw.classList.contains('on') : true;
   });
 
-  // Bot features
-  var voiceSw = document.getElementById('bot-sw-voice-notes');
-  var botFeatures = {
-    bot_voice_notes: voiceSw ? voiceSw.classList.contains('on') : false,
-  };
-
   // Commerce features
   var dianSw = document.getElementById('commerce-sw-dian');
   var commerceFeatures = {
@@ -299,9 +283,6 @@ function collectFormData() {
     city: getVal('inputCity'),
     cuisine_type: getVal('inputCuisine'),
     wompi: wompiPayload,
-    // bot feature flags — sent as top-level keys so _features_updatable in
-    // settings_routes.py picks them up and writes them into features JSONB
-    bot_voice_notes: botFeatures.bot_voice_notes,
     // commerce feature flags
     dian_enabled: commerceFeatures.dian_enabled,
     features: Object.assign(currentFeatures, {

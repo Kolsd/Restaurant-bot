@@ -3,7 +3,6 @@ import json
 import os
 from datetime import date, datetime, timedelta, timezone
 
-import httpx
 
 from app.services import database as db
 from app.services import state_store
@@ -54,36 +53,9 @@ def _local_now(tz_name: str) -> datetime:
         except Exception:
             return datetime.now(timezone.utc)
 
-META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
 # Semáforo para limitar concurrencia del scheduler (V-13 parcial)
 _scheduler_semaphore = asyncio.Semaphore(10)
-
-
-async def _send_whatsapp(phone: str, message: str, bot_number: str, db_phone_id: str = None):
-    token    = os.getenv("META_ACCESS_TOKEN", "")
-    phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID", "")
-    if not token or not phone_id:
-        log.warning("scheduler.whatsapp_not_configured", phone=phone)
-        return False
-    clean_phone = phone.lstrip("+").replace(" ", "")
-    url  = f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages"
-    body = {
-        "messaging_product": "whatsapp",
-        "to":   clean_phone,
-        "type": "text",
-        "text": {"body": message},
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                url, json=body,
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-            )
-            return resp.status_code == 200
-    except Exception as e:
-        log.error("scheduler.whatsapp_send_failed", phone=phone, error=str(e))
-        return False
 
 
 async def _create_inactivity_alert(session: dict):
@@ -105,11 +77,7 @@ async def _process_stale_session(session: dict):
     """Processes a single session with a semaphore to limit concurrency."""
     async with _scheduler_semaphore:
         phone      = session["phone"]
-        bot_number = session["bot_number"]
         table_name = session.get("table_name", "tu mesa")
-        order_delivered = session.get("order_delivered", False)
-        has_order       = session.get("has_order", False)
-        db_phone_id     = session.get("meta_phone_id")
 
         # 🛡️ MULTI-WORKER FIX: Try to mark the session in the database FIRST.
         # If it returns False, another worker already did it in the same millisecond.
@@ -117,26 +85,11 @@ async def _process_stale_session(session: dict):
         if not warned:
             return
 
-        if order_delivered:
-            msg = (
-                f"¡Hola! Esperamos que hayas disfrutado tu comida en {table_name}. "
-                f"Cuando estés listo, puedes pedir la cuenta o llamar al mesero por aquí. ¡Es un placer atenderte!"
-            )
-        elif not has_order:
-            msg = (
-                f"¡Hola! Seguimos por aquí si necesitas algo en {table_name}. "
-                f"¿Te ayudo con algo o te muestro el menú?"
-            )
-        else:
-            msg = (
-                f"¡Hola! ¿Todo bien en {table_name}? "
-                f"Avísanos si necesitas algo más."
-            )
-
-        sent = await _send_whatsapp(phone, msg, bot_number, db_phone_id)
-        if sent:
-            await _create_inactivity_alert(session)
-            log.info("scheduler.inactivity_warning_sent", phone=phone, table_name=table_name)
+        # The waiter goes to check on the table. (Until 2026-09-25 this alert
+        # fired only if a WhatsApp nudge to the diner went out first, so a web
+        # diner's idle table never raised it.)
+        await _create_inactivity_alert(session)
+        log.info("scheduler.inactivity_alert_raised", phone=phone, table_name=table_name)
 
 
 async def _process_closeable_session(session: dict):
@@ -145,10 +98,9 @@ async def _process_closeable_session(session: dict):
         phone      = session["phone"]
         bot_number = session["bot_number"]
         table_name = session.get("table_name", "tu mesa")
-        db_phone_id = session.get("meta_phone_id")
 
-        # 🛡️ FIX MULTI-WORKER: Intentamos cerrar la sesión en la base de datos ANTES
-        # de mandar el WhatsApp. Si retorna None, otro worker ganó la carrera.
+        # 🛡️ FIX MULTI-WORKER: close in the DB first; None means another
+        # worker won the race.
         closed_session = await db.db_close_session(
             phone=phone,
             bot_number=bot_number,
@@ -158,13 +110,6 @@ async def _process_closeable_session(session: dict):
 
         if not closed_session:
             return  # Otro worker ya la cerró
-
-        await _send_whatsapp(
-            phone,
-            f"Tu sesión en {table_name} ha sido cerrada por inactividad. ¡Fue un placer atenderte, esperamos verte pronto! 👋",
-            bot_number,
-            db_phone_id
-        )
 
         # Cancelar NPS pendiente: si el usuario no respondió la encuesta antes de que
         # el scheduler cerrara la sesión por inactividad, no tiene sentido mantener el
@@ -301,103 +246,6 @@ async def _run_occupancy_snapshot():
                         )
     except Exception:
         log.exception("scheduler.occupancy_snapshot_failed")
-
-
-async def _run_reservation_reminders():
-    """Send WhatsApp reminders for upcoming confirmed reservations (24h ahead).
-
-    Cross-tenant scan + per-tenant send pattern (mirrors _run_nps_reminders):
-    - Enumerate active orgs under bypass.
-    - For each org, enter tenant_scope(org_id) so db_get_upcoming_unconfirmed
-      returns only that tenant's reservations (RLS enforces).
-    - Resolve restaurant credentials, send WhatsApp, mark confirmation_sent.
-
-    Without this scoping, db_get_upcoming_unconfirmed used `tenant_connection()`
-    with no scope active and crashed silently with TenantNotSetError, eaten by
-    the outer except — reminders never went out in production.
-    """
-    from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
-    from app.services.meta_api import send_text  # noqa: PLC0415
-
-    try:
-        with bypass_tenant_scope("scheduler.reservation_reminders.scan"):
-            orgs = await db.db_get_all_orgs(active_only=True)
-    except Exception:
-        log.exception("scheduler.reservation_reminder_orgs_failed")
-        return
-
-    for org in orgs:
-        org_id = org.get("id")
-        if org_id is None:
-            continue
-        try:
-            with tenant_scope(int(org_id)):
-                upcoming = await db.db_get_upcoming_unconfirmed(hours_ahead=24)
-
-            for res in upcoming:
-                phone = res.get("phone", "")
-                bot_number = res.get("bot_number", "")
-                name = res.get("name", "")
-                date_str = res.get("date", "")
-                time_str = res.get("time", "")
-                guests = res.get("guests", 1)
-                if not phone or not bot_number:
-                    continue
-
-                msg = (
-                    f"Hola {name}, te recordamos tu reserva para el {date_str} "
-                    f"a las {time_str} para {guests} persona(s). "
-                    f"Responde *CONFIRMAR* para confirmar o *CANCELAR* para cancelar."
-                )
-
-                # Resolve restaurant credentials by bot_number (cross-tenant
-                # lookup of the matching sede — bypass per Rule #14 pattern).
-                with bypass_tenant_scope("scheduler.reservation_reminder.resolve_restaurant"):
-                    restaurant = await db.db_get_restaurant_by_bot_number(bot_number)
-                if not restaurant:
-                    log.warning(
-                        "scheduler.reservation_reminder_no_restaurant",
-                        bot_number=bot_number, reservation_id=res.get("id"),
-                    )
-                    continue
-                access_token = restaurant.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN", "")
-                if not access_token:
-                    log.warning(
-                        "scheduler.reservation_reminder_no_token",
-                        bot_number=bot_number, reservation_id=res.get("id"),
-                    )
-                    continue
-                phone_id = restaurant.get("wa_phone_id") or restaurant.get("meta_phone_id")
-
-                ok = await send_text(
-                    bot_number=bot_number,
-                    access_token=access_token,
-                    phone=phone,
-                    text=msg,
-                    phone_id=phone_id,
-                )
-                if not ok:
-                    log.warning(
-                        "scheduler.reservation_reminder_send_failed",
-                        bot_number=bot_number,
-                        reservation_id=res.get("id"),
-                        phone_obf=phone[-4:] if phone else "",
-                    )
-                    continue
-
-                with tenant_scope(int(org_id)):
-                    await db.db_mark_confirmation_sent(res["id"])
-                log.info(
-                    "scheduler.reservation_reminder_sent",
-                    reservation_id=res.get("id"),
-                    bot_number=bot_number,
-                    phone_obf=phone[-4:] if phone else "",
-                )
-        except Exception:
-            log.exception(
-                "scheduler.reservation_reminder_org_failed",
-                org_id=org_id,
-            )
 
 
 async def _resolve_owner_email(restaurant: dict, org_id: int) -> "str | None":
@@ -644,192 +492,11 @@ async def _run_weekly_owner_reports():
             )
 
 
-async def _run_eta_communication():
-    """Send ETA WhatsApp messages for orders the admin priced but we haven't told the customer yet.
-
-    Cross-tenant scan + per-tenant send pattern (mirrors _run_reservation_reminders):
-      - Enumerate active orgs under bypass.
-      - Per org, enter tenant_scope(org_id) so db_get_orders_needing_eta_communication
-        returns only that tenant's orders (RLS enforces).
-      - Send the ETA text and atomically flag the row so a parallel worker can't
-        double-send.
-
-    The scheduler tick that calls this fires every 3 minutes. Admin entry to send
-    has a typical lag of a few seconds — fine for "your food is ~30 min away".
-
-    Pickup vs delivery wording — kept generic so a single template works for both.
-    """
-    from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
-    from app.services.meta_api import send_text  # noqa: PLC0415
-
+async def _run_nps_waiting_cleanup():
+    """Delete nps_waiting rows older than 48h, answered or not (idempotent)."""
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
     try:
-        with bypass_tenant_scope("scheduler.eta_communication.scan"):
-            orgs = await db.db_get_all_orgs(active_only=True)
-    except Exception:
-        log.exception("scheduler.eta_communication.scan_failed")
-        return
-
-    for org in orgs:
-        org_id = org.get("id")
-        if org_id is None:
-            continue
-        try:
-            with tenant_scope(int(org_id)):
-                pending = await db.db_get_orders_needing_eta_communication()
-
-            for order in pending:
-                order_id = order.get("id")
-                phone = order.get("phone") or ""
-                bot_number = order.get("bot_number") or ""
-                minutes = order.get("estimated_minutes")
-                if not order_id or not phone or not bot_number or not minutes:
-                    continue
-
-                # Resolve restaurant credentials by bot_number (cross-tenant lookup).
-                with bypass_tenant_scope("scheduler.eta_communication.resolve_restaurant"):
-                    restaurant = await db.db_get_restaurant_by_bot_number(bot_number)
-                if not restaurant:
-                    log.warning(
-                        "scheduler.eta_communication.no_restaurant",
-                        bot_number=bot_number, order_id=order_id,
-                    )
-                    continue
-                access_token = restaurant.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN", "")
-                if not access_token:
-                    log.warning(
-                        "scheduler.eta_communication.no_token",
-                        bot_number=bot_number, order_id=order_id,
-                    )
-                    continue
-                phone_id = restaurant.get("wa_phone_id") or restaurant.get("meta_phone_id")
-
-                # Short order tag for the customer (last 6 chars, uppercased).
-                short_id = str(order_id)[-6:].upper()
-                order_type = order.get("order_type") or "domicilio"
-                if order_type == "recoger":
-                    msg = (
-                        f"🍴 Tu pedido #{short_id} estará listo en aproximadamente "
-                        f"{minutes} min. Te avisamos cuando esté listo para recoger."
-                    )
-                else:
-                    msg = (
-                        f"🛵 Tu pedido #{short_id} llega en aproximadamente "
-                        f"{minutes} min. Te avisaremos cuando salga."
-                    )
-
-                ok = await send_text(
-                    bot_number=bot_number,
-                    access_token=access_token,
-                    phone=phone,
-                    text=msg,
-                    phone_id=phone_id,
-                )
-                if not ok:
-                    log.warning(
-                        "scheduler.eta_communication.send_failed",
-                        bot_number=bot_number,
-                        order_id=order_id,
-                        phone_obf=phone[-4:] if phone else "",
-                    )
-                    # Don't mark — let the next tick retry.
-                    continue
-
-                # Atomic single-winner mark: returns False if a parallel worker
-                # beat us. In that case the customer already got the message
-                # from the other worker — nothing to recover.
-                with tenant_scope(int(org_id)):
-                    flipped = await db.db_mark_eta_communicated(order_id)
-                if flipped:
-                    log.info(
-                        "scheduler.eta_communication.sent",
-                        order_id=order_id,
-                        bot_number=bot_number,
-                        minutes=minutes,
-                        phone_obf=phone[-4:] if phone else "",
-                    )
-                else:
-                    log.info(
-                        "scheduler.eta_communication.already_marked",
-                        order_id=order_id,
-                    )
-        except Exception:
-            log.exception(
-                "scheduler.eta_communication.org_failed",
-                org_id=org_id,
-            )
-
-
-async def _run_nps_reminders():
-    """Send a 24h follow-up to NPS surveys the customer ignored.
-
-    Scans nps_waiting for rows where created_at is 24-48h old and reminded_at
-    is NULL, then sends one polite reminder per row and marks reminded_at.
-    Also runs an idempotent cleanup of rows older than 48h (replied or not).
-
-    Cross-tenant scan + per-tenant send pattern: bypass for the scan, then
-    tenant_scope(org_id) for each individual restaurant lookup + WhatsApp send.
-    """
-    from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
-
-    try:
-        with bypass_tenant_scope("scheduler.nps_reminders.scan"):
-            pending = await db.db_get_nps_waiting_pending_reminder()
-    except Exception:
-        log.exception("scheduler.nps_reminder_scan_failed")
-        pending = []
-
-    for entry in pending:
-        bot_number = entry.get("bot_number") or ""
-        phone = entry.get("phone") or ""
-        org_id = entry.get("org_id")
-        if not bot_number or not phone or org_id is None:
-            continue
-        try:
-            with bypass_tenant_scope("scheduler.nps_reminders.resolve_restaurant"):
-                restaurant = await db.db_get_restaurant_by_phone(bot_number)
-            if not restaurant:
-                log.warning("scheduler.nps_reminder_no_restaurant", bot_number=bot_number)
-                continue
-            access_token = restaurant.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN", "")
-            if not access_token:
-                log.warning("scheduler.nps_reminder_no_token", bot_number=bot_number)
-                continue
-            phone_id = restaurant.get("wa_phone_id") or restaurant.get("meta_phone_id")
-
-            from app.services.meta_api import send_text  # noqa: PLC0415
-            msg = (
-                "Hola — ¿tuviste chance de calificar tu última visita? "
-                "Tomá 5 segundos y respondé del 1 al 5."
-            )
-            ok = await send_text(
-                bot_number=bot_number,
-                access_token=access_token,
-                phone=phone,
-                text=msg,
-                phone_id=phone_id,
-            )
-            if not ok:
-                log.warning(
-                    "scheduler.nps_reminder_send_failed",
-                    bot_number=bot_number, phone_obf=phone[-4:],
-                )
-                continue
-
-            with tenant_scope(int(org_id)):
-                await db.db_mark_nps_reminded(phone, bot_number)
-            log.info(
-                "scheduler.nps_reminder_sent",
-                bot_number=bot_number, phone_obf=phone[-4:],
-            )
-        except Exception:
-            log.exception(
-                "scheduler.nps_reminder_failed",
-                bot_number=bot_number, phone_obf=phone[-4:] if phone else "",
-            )
-
-    # Cleanup phase — bypass for cross-tenant DELETE
-    try:
-        with bypass_tenant_scope("scheduler.nps_reminders.cleanup"):
+        with bypass_tenant_scope("scheduler.nps_waiting.cleanup"):
             deleted = await db.db_cleanup_expired_nps_waiting()
         if deleted:
             log.info("scheduler.nps_cleanup", deleted=deleted)
@@ -931,20 +598,6 @@ async def _scheduler_loop():
 
             _reminder_counter += 1
 
-            # Run delivery ETA communication every 3 minutes
-            if _reminder_counter % 3 == 0:
-                await _run_eta_communication()
-                if not await _renew_or_abort(leader_token):
-                    log.warning("scheduler.tick_aborted_after_eta_communication")
-                    continue
-
-            # Run reservation reminders every 5 minutes
-            if _reminder_counter % 5 == 0:
-                await _run_reservation_reminders()
-                if not await _renew_or_abort(leader_token):
-                    log.warning("scheduler.tick_aborted_after_reminders")
-                    continue
-
             # Run deposit expiry every 10 minutes
             if _reminder_counter % 10 == 0:
                 await _run_deposit_expiry()
@@ -959,11 +612,12 @@ async def _scheduler_loop():
                     log.warning("scheduler.tick_aborted_after_occupancy_snapshot")
                     continue
 
-            # Send NPS 24h reminders + cleanup every 30 minutes
+            # Expire unanswered NPS surveys every 30 minutes. (The 24h
+            # WhatsApp reminder that ran here was dropped with the channel.)
             if _reminder_counter % 30 == 0:
-                await _run_nps_reminders()
+                await _run_nps_waiting_cleanup()
                 if not await _renew_or_abort(leader_token):
-                    log.warning("scheduler.tick_aborted_after_nps_reminders")
+                    log.warning("scheduler.tick_aborted_after_nps_cleanup")
                     continue
 
             # Send weekly owner reports (runs every tick; skips internally when not Monday 09:xx)

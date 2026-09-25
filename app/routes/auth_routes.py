@@ -89,10 +89,7 @@ class ResetPasswordRequest(BaseModel):
 async def forgot_password(body: ForgotPasswordRequest):
     """Send a 6-digit OTP to the restaurant owner's email.
 
-    WhatsApp is being retired as a delivery channel; email replaces it here
-    (see app/services/email.py — `send_password_reset_code` in
-    whatsapp_messaging.py is left in place, unused, per the "don't delete
-    features outright" rule, for the wave that retires WhatsApp entirely).
+    Email is the only delivery channel (WhatsApp retired 2026-09-25).
 
     ALWAYS returns HTTP 200 with the SAME generic
     { "sent": true, "channel": "email" } response for any well-formed,

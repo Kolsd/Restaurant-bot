@@ -306,161 +306,30 @@ def test_menu_analytics_endpoint_days_clamp(monkeypatch):
 # 10. POST /api/public/menu/track inserts a row (happy path)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_menu_track_inserts_row(monkeypatch):
-    from app.repositories import menu_analytics_repo
-
-    fake_restaurant = {"id": 42, "name": "Test Resto", "whatsapp_number": "5731234"}
-    monkeypatch.setattr(
-        "app.repositories.restaurant_repo.db_get_restaurant_by_bot_number",
-        AsyncMock(return_value=fake_restaurant),
-    )
-
-    recorded = {}
-    async def fake_record_event(restaurant_id, dish_name, event_type, phone=None, bot_number=None):
-        recorded.update(locals())
-
-    monkeypatch.setattr(menu_analytics_repo, "record_event", fake_record_event)
-
-    resp = client.post("/api/public/menu/track", json={
-        "dish_name":  "Bandeja Paisa",
-        "event_type": "view",
-        "bot_number": "5731234",
-    })
-    assert resp.status_code == 200
-    assert resp.json() == {"ok": True}
-    assert recorded.get("restaurant_id") == 42
-    assert recorded.get("dish_name") == "Bandeja Paisa"
-    assert recorded.get("event_type") == "view"
-    assert recorded.get("phone") is None
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 11. POST /api/public/menu/track: unknown bot_number → 200 (no DB insert)
 # ─────────────────────────────────────────────────────────────────────────────
-
-def test_menu_track_unknown_bot_returns_200(monkeypatch):
-    from app.repositories import menu_analytics_repo
-
-    monkeypatch.setattr(
-        "app.repositories.restaurant_repo.db_get_restaurant_by_bot_number",
-        AsyncMock(return_value=None),
-    )
-
-    record_called = []
-    async def fake_record(*args, **kwargs):
-        record_called.append(True)
-
-    monkeypatch.setattr(menu_analytics_repo, "record_event", fake_record)
-
-    resp = client.post("/api/public/menu/track", json={
-        "dish_name":  "Tacos",
-        "event_type": "add_to_cart",
-        "bot_number": "9999999",
-    })
-    assert resp.status_code == 200
-    assert resp.json() == {"ok": True}
-    assert len(record_called) == 0   # no insert when restaurant not found
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 12. POST /api/public/menu/track: rate limit (120/min)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_menu_track_rate_limit(monkeypatch):
-    """After 120 requests the 121st is silently dropped (still returns 200)."""
-    from app.repositories import menu_analytics_repo
-    from app.services import state_store
-
-    # Reset in-process rate limit state
-    state_store._fb_rate_limits.clear()
-
-    fake_restaurant = {"id": 1, "name": "Test", "whatsapp_number": "111"}
-    monkeypatch.setattr(
-        "app.repositories.restaurant_repo.db_get_restaurant_by_bot_number",
-        AsyncMock(return_value=fake_restaurant),
-    )
-
-    insert_count = []
-    async def fake_record(*args, **kwargs):
-        insert_count.append(1)
-
-    monkeypatch.setattr(menu_analytics_repo, "record_event", fake_record)
-
-    for _ in range(121):
-        resp = client.post("/api/public/menu/track", json={
-            "dish_name":  "Soup",
-            "event_type": "view",
-            "bot_number": "111",
-        })
-        assert resp.status_code == 200
-
-    # First 120 should insert; 121st is rate-limited
-    assert len(insert_count) == 120
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 13. POST /api/public/menu/track: 'ordered' is a valid event_type
 # ─────────────────────────────────────────────────────────────────────────────
-
-def test_menu_track_ordered_event_valid(monkeypatch):
-    from app.repositories import menu_analytics_repo
-
-    fake_restaurant = {"id": 1, "name": "Test", "whatsapp_number": "222"}
-    monkeypatch.setattr(
-        "app.repositories.restaurant_repo.db_get_restaurant_by_bot_number",
-        AsyncMock(return_value=fake_restaurant),
-    )
-    monkeypatch.setattr(menu_analytics_repo, "record_event", AsyncMock())
-
-    resp = client.post("/api/public/menu/track", json={
-        "dish_name":  "Jugo",
-        "event_type": "ordered",
-        "bot_number": "222",
-    })
-    assert resp.status_code == 200
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 14. POST /api/public/menu/track: invalid event_type → 422
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_menu_track_invalid_event_type():
-    resp = client.post("/api/public/menu/track", json={
-        "dish_name":  "Agua",
-        "event_type": "hack",
-        "bot_number": "333",
-    })
-    assert resp.status_code == 422
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 15. POST /api/public/menu/track: phone forwarded to record_event when present
 # ─────────────────────────────────────────────────────────────────────────────
-
-def test_menu_track_phone_forwarded(monkeypatch):
-    from app.repositories import menu_analytics_repo
-
-    fake_restaurant = {"id": 5, "name": "Test", "whatsapp_number": "444"}
-    monkeypatch.setattr(
-        "app.repositories.restaurant_repo.db_get_restaurant_by_bot_number",
-        AsyncMock(return_value=fake_restaurant),
-    )
-
-    recorded = {}
-    async def fake_record(restaurant_id, dish_name, event_type, phone=None, bot_number=None):
-        recorded.update({"phone": phone, "bot_number": bot_number})
-
-    monkeypatch.setattr(menu_analytics_repo, "record_event", fake_record)
-
-    resp = client.post("/api/public/menu/track", json={
-        "dish_name":  "Sopa",
-        "event_type": "modal_open",
-        "bot_number": "444",
-        "phone":      "573009876543",
-    })
-    assert resp.status_code == 200
-    assert recorded["phone"] == "573009876543"
-    assert recorded["bot_number"] == "444"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

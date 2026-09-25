@@ -34,9 +34,9 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -75,7 +75,7 @@ _UNAVAIL_KEYWORDS = [
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
 
@@ -95,7 +95,7 @@ async def e2e_app(wa_capture):
 async def test_86d_dish_rejected_by_bot(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Marks a dish as unavailable in menu_availability, then asks the bot for it.
@@ -151,14 +151,14 @@ async def test_86d_dish_rejected_by_bot(
             log.info("e2e.86.marked_unavailable", dish=DISH_NAME, org_id=org_id)
 
     # ── Customer asks for the 86'd dish ───────────────────────────────────────
-    await simulate_whatsapp_inbound(
+    await send_diner_message(
         client, pool,
         phone=PHONE_RAW,
         text="Hola, quiero pedir a domicilio 2 empanaditas de carne",
         bot_number=bot_number,
     )
 
-    all_replies = wa_capture.texts_to(PHONE_RAW)
+    all_replies = bot_replies.texts_to(PHONE_RAW)
     combined = " ".join(all_replies).lower()
 
     log.info(

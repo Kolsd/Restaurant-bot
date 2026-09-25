@@ -34,7 +34,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     seed_restaurant,
     truncate_e2e_data,
 )
@@ -56,7 +56,7 @@ async def _create_staff_token(staff_id: str) -> str:
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
 
@@ -76,7 +76,7 @@ async def e2e_app(wa_capture):
 async def test_staff_clock_full_cycle(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Full staff clock lifecycle:

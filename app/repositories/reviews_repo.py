@@ -30,16 +30,6 @@ def _serialize(d: dict) -> dict:
     return _db_serialize(d)
 
 
-async def db_verify_review_ownership(nps_id: int, bot_number: str) -> bool:
-    """Return True if the NPS response exists and belongs to this bot_number."""
-    async with _tenant_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT id FROM nps_responses WHERE id = $1 AND bot_number = $2",
-            nps_id, bot_number,
-        )
-    return row is not None
-
-
 async def db_verify_review_ownership_by_org(nps_id: int) -> bool:
     """Return True if the NPS response exists within the current tenant scope.
 
@@ -53,24 +43,6 @@ async def db_verify_review_ownership_by_org(nps_id: int) -> bool:
             nps_id,
         )
     return row is not None
-
-
-async def db_get_public_reviews(bot_number: str, limit: int = 50) -> list[dict]:
-    """Return public reviews for a restaurant ordered by most recent."""
-    async with _tenant_connection() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, phone, score, comment, feedback, is_public,
-                   customer_name, owner_reply, owner_reply_at, created_at
-            FROM nps_responses
-            WHERE is_public = TRUE AND bot_number = $1
-            ORDER BY created_at DESC
-            LIMIT $2
-            """,
-            bot_number,
-            limit,
-        )
-    return [_serialize(dict(r)) for r in rows]
 
 
 async def db_get_public_reviews_by_org(limit: int = 50) -> list[dict]:
@@ -166,35 +138,6 @@ async def db_add_owner_reply(nps_id: int, reply_text: str) -> dict | None:
             nps_id,
         )
     return _serialize(dict(row)) if row else None
-
-
-async def db_get_review(nps_id: int) -> dict | None:
-    """Fetch a review row by id (RLS-scoped to the current tenant)."""
-    async with _tenant_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM nps_responses WHERE id = $1",
-            nps_id,
-        )
-    return _serialize(dict(row)) if row else None
-
-
-async def db_mark_review_reply_delivered(nps_id: int) -> bool:
-    """Mark the WhatsApp delivery of the owner reply as completed.
-
-    Sets owner_reply_delivered_at = NOW(). Returns True if a row was updated.
-    Tenant-scoped via RLS.
-    """
-    async with _tenant_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE nps_responses
-            SET owner_reply_delivered_at = NOW()
-            WHERE id = $1
-            RETURNING id
-            """,
-            nps_id,
-        )
-    return row is not None
 
 
 async def db_get_review_summary(bot_number: str) -> dict:

@@ -4,7 +4,7 @@
 
 ## Bot Rules — DO NOT BREAK (learned from 79 bugs across 4 audits)
 
-These rules protect the WhatsApp bot's critical flows. Any change to `agent.py`, `agent_salon.py`, `orders.py`, `orders_repo.py`, `inbox_worker.py`, `state_store.py`, or `chat.py` MUST comply with ALL of these rules. (`agent_external.py` — the WhatsApp delivery/pickup "external" flow — was deleted in chunk 9 of the web delivery wave; see `delivery-web.md`.)
+These rules protect the bot's critical flows. Any change to `agent.py`, `agent_salon.py`, `orders.py`, `orders_repo.py`, `state_store.py` or `routes/diner.py` MUST comply with ALL of these rules. The bot is reached only through the web chat (`POST /api/diner/chat` → `agent.chat()`); the WhatsApp channel — webhook, inbox worker, Meta API — was deleted on 2026-09-25, and rules 4 and 6 went with it.
 
 ### 1. Serialization: Decimal NEVER in state_store
 - `state_store` serializes with `json.dumps`. `Decimal` is not JSON-serializable.
@@ -26,13 +26,7 @@ These rules protect the WhatsApp bot's critical flows. Any change to `agent.py`,
 - `requires_proof` MUST be persisted BEFORE `checkout_set`, not after.
 - The `total` check in `_save_checkout_proposal` is the subtotal per check. The payment in `_auto_confirm_checks` MUST include `tip_per_check` in the amount.
 
-### 4. DB connections: NEVER hold during dispatch
-- The inbox worker uses a claim-then-ack pattern in 3 phases:
-  1. **Claim** (ms): `fetch_batch` + `claim_rows` inside a short transaction → release the connection
-  2. **Dispatch** (up to 120s): no open DB connection, `asyncio.wait_for(timeout=120)`
-  3. **Ack** (ms): a new short connection for `mark_processed` or `mark_failed`
-- FORBIDDEN to put the dispatch inside an `async with conn.transaction()`. This causes pool deadlock under load.
-- If `mark_processed` or `mark_failed` fail in phase 3, log and continue — the row will be retried when the claim expires (3 min).
+### 4. (retired) — was the WhatsApp inbox worker's claim-then-ack. Never hold a DB connection across an LLM call still applies.
 
 ### 5. Cart Locks: Ownership required
 - `cart_lock_acquire` returns a UUID token. `cart_lock_release` MUST receive that token.
@@ -41,16 +35,10 @@ These rules protect the WhatsApp bot's critical flows. Any change to `agent.py`,
 - `migrate_cart` MUST lock BOTH bot_numbers (source AND destination) in a deterministic order to avoid deadlock.
 - Fallback cart lock timeout: 5 seconds max (not 30s, it blocks the event loop).
 
-### 6. Meta Webhook: Never lose messages
-- Returning 200 to Meta = "message received, don't resend". Returning 503 = "resend the whole batch".
-- If `enqueue` fails for ONE message in the batch, do NOT return 503 immediately — process the rest and return 503 at the end.
-- `changes: []` or `messages: []` (empty list, not a missing key) MUST be handled with `if not list: continue`, not with direct `[0]` indexing.
-- Invalid Meta signature → return 200 (not 401). 401 causes an infinite retry flood.
-- Messages without a `wam_id` MUST get a synthetic `external_id` (`synth_sha256(phone:text:bot:epoch//10)`) so the dedup index works.
-- NEVER store Meta's `access_token` in the inbox payload. The token is looked up from the DB at dispatch time.
+### 6. (retired) — was the Meta webhook contract.
 
 ### 7. Rate Limiting: Redis for cross-worker
-- Global rate limits (webhook flood) MUST use `state_store.rate_limit_check` (Redis INCR), NOT module-level counters (those are per-worker, not per-platform).
+- Global rate limits (e.g. the diner chat's per-IP / per-token limits) MUST use `state_store.rate_limit_check` (Redis INCR), NOT module-level counters (those are per-worker, not per-platform).
 - `rate_limit_check` in Redis: `EXPIRE` is only set when `count == 1` (first request). NEVER reset the TTL on every request.
 - In-process fallback: dicts with a size cap of 10K entries. Eviction by oldest timestamp, NOT insertion order.
 
@@ -75,7 +63,7 @@ These rules protect the WhatsApp bot's critical flows. Any change to `agent.py`,
 
 ### 11. GPS and Branch Routing
 - Coordinates 0,0 are valid (Gulf of Guinea). Use `if lat is None` instead of `if not lat`.
-- A branch with `whatsapp_number = NULL` → falls back to the parent's number.
+- `restaurants.whatsapp_number` is the bot key (`bot_number`): a sede with none falls back to the org's, and an org with none gets `web<org_id>` (0096).
 - `restaurant_obj` MUST be updated when a branch override happens (don't keep the Matriz/head-office ID).
 - `_try_checkout_flow` and `db_save_history` MUST propagate `branch_id` from the table_context.
 
@@ -92,10 +80,9 @@ These rules protect the WhatsApp bot's critical flows. Any change to `agent.py`,
 - `commit_order_transaction` MUST receive the real cart with items, NEVER `cart={}`.
 
 ### 14. Tenant scope in bot runtime (RLS Phase 1)
-- `inbox_worker._handle_meta_whatsapp` MUST wrap `_process_message(...)` in `with tenant_scope(_tenant_id):` once the restaurant has been resolved from `bot_number`. If you don't, ANY migrated repo blows up with `TenantNotSetError` inside the bot flow.
+- `routes/diner.py diner_chat` MUST call `agent.chat(...)` inside `with tenant_scope(org_id):` (it does, from the diner session). If you don't, ANY migrated repo blows up with `TenantNotSetError` inside the bot flow. Test harnesses (`tests/e2e/conftest.send_diner_message`, `tests/ai_sim/runner.py`) do the same.
 - `scheduler._scheduler_loop` MUST enter `bypass_tenant_scope("scheduler_leader_tick")` before the leader tick, AND wrap each per-restaurant iteration in `tenant_scope(rid)`.
-- `chat.py meta_webhook` MUST enter `bypass_tenant_scope("webhook_enqueue_cross_tenant")` during enqueue (pre-resolution).
-- `agent.py detect_table_context / get_session_state / _handle_nps_guard / _resolve_branch_id` use `_bypass_tenant` (aliased to `bypass_tenant_scope_if_unset`, **soft-bypass**). In production they run inside the `tenant_scope(rid)` set by `inbox_worker`, so the helper is a **no-op** — the query runs under the real scope. In legacy call sites (internal `/chat` POST endpoint, Twilio webhook) without a prior scope, it does enter a real bypass to preserve compatibility. Use the strict `bypass_tenant_scope` (not the soft one) only for genuinely cross-tenant cases (internal admin, scheduler leader, inbox pre-resolution).
+- `agent.py detect_table_context / get_session_state / _handle_nps_guard / _resolve_branch_id` use `_bypass_tenant` (aliased to `bypass_tenant_scope_if_unset`, **soft-bypass**). In production they run inside the `tenant_scope(org_id)` set by `diner_chat`, so the helper is a **no-op** — the query runs under the real scope. Use the strict `bypass_tenant_scope` (not the soft one) only for genuinely cross-tenant cases (internal admin, scheduler leader).
 - `orders.py process_order_callback` (Wompi) MUST enter `tenant_scope(order["restaurant_id"])` after loading the order.
 - Do NOT go back to "silent fail" in the bot runtime. If a `TenantNotSetError` shows up in production, it's a wiring gap, NOT a case to suppress.
 

@@ -18,11 +18,6 @@ def _serialize(d: dict) -> dict:
     return _serialize(d)
 
 
-async def db_init_fiscal_tables():
-    """No-op: fiscal_resolution and fiscal_invoices managed by Alembic (0001_initial_schema.py)."""
-    pass
-
-
 async def db_get_fiscal_resolution(restaurant_id: int) -> dict | None:
     """Returns the restaurant's active DIAN resolution, or None if it doesn't exist.
 

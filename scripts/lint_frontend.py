@@ -57,22 +57,14 @@ CSS_ALLOW_MARKER = re.compile(r"/\*\s*lint-allow:\s*(\S.+?)\s*\*/")
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Files that are allowed to contain mock data by design.
-# These power the public marketing demo at /demo and /dashboard-demo.
-# Not served to real admins.
-MOCK_FILE_ALLOWLIST = {
-    "mesio-demo-bus.js",
-    "mesio-demo-orchestrator.js",
-    "mesio-demo-scenarios.js",
-    "dashboard-demo-mesio.js",
-}
+# Files that are allowed to contain mock data by design. Empty since the
+# scripted WhatsApp-era demo was deleted (2026-09-25).
+MOCK_FILE_ALLOWLIST: set[str] = set()
 
 # HTML pages exempt from seed-data checks — these are marketing/demo surfaces
 # where fake names and hardcoded numbers are the point (landing, sales demo).
 HTML_SEED_EXEMPT = {
     "landing.html",
-    "demo.html",
-    "dashboard-demo.html",
     "privacy.html",
     "terms.html",
     "menu.html",  # public QR menu — restaurants edit content via admin
