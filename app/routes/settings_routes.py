@@ -17,9 +17,7 @@ from app.routes.deps import (
 )
 from app.repositories import restaurant_repo, tables_repo as tr
 from app.repositories import weekly_reports_repo
-from app.repositories.staff_repo import db_has_staff
 from app.services.tenant_context import bypass_tenant_scope, tenant_scope
-from app.repositories.restaurant_repo import db_has_orders_by_bot_number
 from app.services.logging import get_logger
 from app.services import state_store
 from pydantic import BaseModel
@@ -548,118 +546,6 @@ async def patch_weekly_report_settings(
 
 # ── ONBOARDING STATUS ────────────────────────────────────────────────
 
-@router.get("/api/onboarding/status")
-async def get_onboarding_status(request: Request):
-    """
-    Returns the onboarding completion status for the currently authenticated restaurant.
-    Each criterion is checked independently; failures default to done=False.
-    Score = number of completed steps × 20 (5 steps × 20 = 100 max).
-    """
-    # P0 fix (2026-09): resolve via get_current_restaurant (see get_settings).
-    restaurant = await get_current_restaurant(request)
-
-    restaurant_id = restaurant["id"]
-    whatsapp_number = restaurant.get("whatsapp_number") or ""
-
-    raw_features = restaurant.get("features") or {}
-    if isinstance(raw_features, str):
-        try:
-            features = json.loads(raw_features)
-        except Exception:
-            features = {}
-    else:
-        features = dict(raw_features)
-
-    # ── 1. has_menu ───────────────────────────────────────────────────
-    has_menu = False
-    try:
-        raw_menu = restaurant.get("menu")
-        if raw_menu:
-            if isinstance(raw_menu, str):
-                menu = json.loads(raw_menu)
-            else:
-                menu = raw_menu
-            if isinstance(menu, dict):
-                has_menu = any(
-                    isinstance(v, list) and len(v) > 0
-                    for v in menu.values()
-                )
-            elif isinstance(menu, list):
-                has_menu = len(menu) > 0
-    except Exception as exc:
-        log.warning("onboarding.menu_check_failed", error=str(exc))
-
-    # If the restaurant dict doesn't carry menu directly, fall back to db_get_menu
-    if not has_menu and whatsapp_number:
-        try:
-            menu = await db.db_get_menu(whatsapp_number) or {}
-            if isinstance(menu, dict):
-                has_menu = any(
-                    isinstance(v, list) and len(v) > 0
-                    for v in menu.values()
-                )
-            elif isinstance(menu, list):
-                has_menu = len(menu) > 0
-        except Exception as exc:
-            log.warning("onboarding.menu_fallback_check_failed", error=str(exc))
-
-    # ── 2. has_staff ──────────────────────────────────────────────────
-    has_staff = False
-    try:
-        with bypass_tenant_scope("onboarding_has_staff"):
-            has_staff = await db_has_staff(restaurant_id)
-    except Exception as exc:
-        log.warning("onboarding.staff_check_failed", error=str(exc))
-
-    # ── 3. has_billing ────────────────────────────────────────────────
-    has_billing = bool(
-        features.get("billing_provider")
-        or features.get("alegra_email")
-        or features.get("billing_enabled")
-    )
-
-    # ── 4. has_whatsapp ───────────────────────────────────────────────
-    has_whatsapp = bool(whatsapp_number.strip())
-
-    # ── 5. has_first_order ───────────────────────────────────────────
-    has_first_order = False
-    if whatsapp_number:
-        try:
-            has_first_order = await db_has_orders_by_bot_number(whatsapp_number)
-        except Exception as exc:
-            log.warning("onboarding.first_order_check_failed", error=str(exc))
-
-    steps = {
-        "menu": {
-            "done": has_menu,
-            "label": "Carta del restaurante",
-            "description": "Sube tu menú para que los clientes puedan pedir por WhatsApp",
-        },
-        "staff": {
-            "done": has_staff,
-            "label": "Equipo operativo",
-            "description": "Agrega al menos un empleado para gestionar turnos y nómina",
-        },
-        "billing": {
-            "done": has_billing,
-            "label": "Facturación electrónica",
-            "description": "Configura tu proveedor de facturación DIAN",
-        },
-        "whatsapp": {
-            "done": has_whatsapp,
-            "label": "WhatsApp conectado",
-            "description": "Conecta tu número de WhatsApp Business",
-        },
-        "first_order": {
-            "done": has_first_order,
-            "label": "Primer pedido",
-            "description": "Recibe tu primer pedido a través del bot",
-        },
-    }
-
-    score = sum(20 for s in steps.values() if s["done"])
-    return {"score": score, "steps": steps}
-
 
 # ── SHARED FILTER HELPER ─────────────────────────────────────────────
 
@@ -904,9 +790,6 @@ async def get_dashboard_reservations(request: Request, period: str = "today", cu
 @router.get("/api/dashboard/conversations")
 async def get_dashboard_conversations(request: Request):
     branch_id, bot_number, _, _ = await get_dashboard_filters(request, "today")
-
-    if bot_number:
-        bot_number = bot_number.split("_b")[0]
 
     rows = await restaurant_repo.db_get_dashboard_conversations(branch_id, bot_number)
 

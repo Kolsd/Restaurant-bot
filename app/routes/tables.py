@@ -71,10 +71,10 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
 
 async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict | None, username: str) -> None:
     rest = await _get_restaurant_for_table(table_id, session_data)
-    # Use the clean bot_number so it matches Meta's webhook
-    raw_bot_num = rest.get("whatsapp_number", "")
-    clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
-    final_bot_num = (session_data.get("bot_number") if session_data else None) or clean_bot_num
+    final_bot_num = (
+        (session_data.get("bot_number") if session_data else None)
+        or rest.get("whatsapp_number") or ""  # the org's bot key
+    )
 
     rest_name = rest.get("name", "nuestro restaurante")
     # The diner answers the survey in their own chat: GET /api/diner/status

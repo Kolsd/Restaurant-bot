@@ -255,20 +255,21 @@ async def _seed_checkout_org(
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         suffix = uuid.uuid4().hex[:10]
-        bot_number = f"573{suffix[:9]}"
         org_id = await conn.fetchval(
             "INSERT INTO organizations (name, slug, features, menu) VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id",
             f"Cashier Checkout Org {suffix}", f"cashier-checkout-{suffix}", json.dumps({"currency": "COP"}), _TEST_CARTA,
         )
+        # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
+        bot_number = f"web{org_id}"
         location_id = await conn.fetchval(
             """
             INSERT INTO locations
-                (org_id, name, whatsapp_number, latitude, longitude, phone, address,
+                (org_id, name, latitude, longitude, phone, address,
                  delivery_config, opening_hours)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
             RETURNING id
             """,
-            org_id, f"Sede {suffix}", bot_number, 4.6097, -74.0817, "3011234567", "Cra 1 # 2-3",
+            org_id, f"Sede {suffix}", 4.6097, -74.0817, "3011234567", "Cra 1 # 2-3",
             json.dumps({
                 "delivery_enabled": True, "pickup_enabled": True,
                 "delivery_fee": delivery_fee, "min_order": min_order, "radius_km": 50,

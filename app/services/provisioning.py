@@ -129,7 +129,6 @@ async def create_tenant(
     username: str | None = None,
     password: str | None = None,
     owner_email: str | None = None,
-    whatsapp_number: str | None = None,
     plan_code: str = "restaurante",
     trial_days: int = DEFAULT_TRIAL_DAYS,
     features: dict | None = None,
@@ -142,11 +141,6 @@ async def create_tenant(
     `password` is the owner's own when the caller has one (self-serve
     signup, where the person typed it) and None when it should be generated
     and handed back for someone to relay (CRM convert).
-
-    `whatsapp_number` is optional and stays optional: the product's channel
-    is the web, and requiring a phone at creation made the unique index on
-    `organizations.whatsapp_number` the reason a second restaurant owned by
-    the same person could not be registered.
 
     `allow_username_suffix` decides what happens when the login name is
     taken. The CRM convert wants a working account no matter what, so it
@@ -196,7 +190,6 @@ async def create_tenant(
     try:
         org = await restaurant_repo.db_create_organization(
             name=restaurant_name,
-            whatsapp_number=whatsapp_number or None,
             features=features or {},
             subscription_plan=plan_code,
         )

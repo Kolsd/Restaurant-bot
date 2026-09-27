@@ -70,7 +70,6 @@ def _post(client, url, **kwargs):
 
 async def _make_org(conn, *, with_stock_dish: bool = False) -> dict:
     suffix = uuid.uuid4().hex[:10]
-    bot_number = f"573{suffix[:9]}"
     menu = {
         "Principales": [
             {"name": "Bandeja Paisa", "description": "", "price": 28000, "active": True, "sku": "bandeja"},
@@ -88,9 +87,11 @@ async def _make_org(conn, *, with_stock_dish: bool = False) -> dict:
         f"Order Flow Org {suffix}", f"order-flow-{suffix}",
         json.dumps(menu), json.dumps({"currency": "COP"}),
     )
+    # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
+    bot_number = f"web{org_id}"
     location_id = await conn.fetchval(
-        "INSERT INTO locations (org_id, name, whatsapp_number) VALUES ($1, $2, $3) RETURNING id",
-        org_id, f"Sede {suffix}", bot_number,
+        "INSERT INTO locations (org_id, name) VALUES ($1, $2) RETURNING id",
+        org_id, f"Sede {suffix}",
     )
     table_id = f"t-{suffix}"
     await conn.execute(
@@ -177,7 +178,6 @@ def org_stock():
 
 async def _make_colliding_org(conn, collide_with_org_id: int) -> dict:
     suffix = uuid.uuid4().hex[:10]
-    bot_number = f"573{suffix[:9]}"
     menu = {"Principales": [{"name": "Sancocho", "description": "", "price": 26000, "active": True, "sku": "sancocho"}]}
     org_id = await conn.fetchval(
         "INSERT INTO organizations (name, slug, menu, features) VALUES ($1,$2,$3::jsonb,$4::jsonb) RETURNING id",
@@ -185,9 +185,11 @@ async def _make_colliding_org(conn, collide_with_org_id: int) -> dict:
     )
     # Force this location's PRIMARY KEY to equal another org's id.
     location_id = collide_with_org_id
+    # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
+    bot_number = f"web{org_id}"
     await conn.execute(
-        "INSERT INTO locations (id, org_id, name, whatsapp_number) VALUES ($1, $2, $3, $4)",
-        location_id, org_id, f"Sede Collide {suffix}", bot_number,
+        "INSERT INTO locations (id, org_id, name) VALUES ($1, $2, $3)",
+        location_id, org_id, f"Sede Collide {suffix}",
     )
     table_id = f"t-collide-{suffix}"
     await conn.execute(

@@ -420,7 +420,7 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
         restaurant = await _resolve_diner_restaurant(org_id, location_id)
         if not restaurant or not restaurant.get("whatsapp_number"):
             raise HTTPException(status_code=404, detail="Restaurante no configurado para esta sede")
-        bot_number = str(restaurant["whatsapp_number"]).split("_b")[0]
+        bot_number = str(restaurant["whatsapp_number"])  # the org's bot key
         # display_name says WHICH sede when the org has several (0092).
         restaurant_name = (
             restaurant.get("display_name") or restaurant.get("name") or "nuestro restaurante"
@@ -532,9 +532,7 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         if not restaurant or not restaurant.get("whatsapp_number"):
             raise HTTPException(status_code=404, detail="Restaurante no configurado para esta mesa")
 
-        # Strip the "_b<timestamp>" branch suffix (see get_table_wa_number
-        # in tables.py) so the bot_number matches what the inbox worker uses.
-        bot_number = str(restaurant["whatsapp_number"]).split("_b")[0]
+        bot_number = str(restaurant["whatsapp_number"])  # the org's bot key
         # display_name says WHICH sede when the org has several (0092).
         restaurant_name = (
             restaurant.get("display_name") or restaurant.get("name") or "nuestro restaurante"

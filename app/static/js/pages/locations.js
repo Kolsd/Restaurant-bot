@@ -26,24 +26,20 @@
       modal.classList.remove('open');
       var nameEl = document.getElementById('branchName');
       var addrEl = document.getElementById('branchAddress');
-      var waEl = document.getElementById('branchWhatsapp');
       if (nameEl) nameEl.value = '';
       if (addrEl) addrEl.value = '';
-      if (waEl) waEl.value = '';
     }
   }
 
   async function submitAddBranch() {
     var nameEl = document.getElementById('branchName');
     var addrEl = document.getElementById('branchAddress');
-    var waEl = document.getElementById('branchWhatsapp');
     if (!nameEl || !nameEl.value.trim()) { mesioToast('Nombre requerido', 'warn'); return; }
     if (!addrEl || !addrEl.value.trim()) { mesioToast('Dirección requerida', 'warn'); return; }
 
     var payload = {
       name: nameEl.value.trim(),
-      address: addrEl.value.trim(),
-      whatsapp_number: waEl ? waEl.value.trim() : ''
+      address: addrEl.value.trim()
     };
 
     try {

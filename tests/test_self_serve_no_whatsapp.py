@@ -84,6 +84,7 @@ async def _provision() -> dict:
     _reset_pool()
     return {
         "org_id": org_id, "location_id": location_id, "table_id": table_id, "slug": slug,
+        "username": tenant.username,
     }
 
 
@@ -163,3 +164,43 @@ def test_pickup_from_pedir_opens_without_whatsapp(client, self_serve_org):
     })
     assert resp.status_code == 200, resp.text
     assert resp.json()["token"].startswith("web:")
+
+
+async def _owner_token(username: str) -> str:
+    from app.repositories.sessions_repo import create_session
+    return await create_session(username)
+
+
+def test_owner_creates_a_sede_inside_their_own_org(client, self_serve_org):
+    """POST /api/team/branches created a brand-new ORGANIZATION (a copy of the
+    owner's menu and features) and then tried to re-parent its sede by a
+    WhatsApp number that sede was never given — so it matched nothing and the
+    owner never saw the sede they created (found 2026-09-25)."""
+    org_id = self_serve_org["org_id"]
+    _reset_pool()
+    token = _run(_owner_token(self_serve_org["username"]))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    orgs_before = _run(_fetch("SELECT count(*) AS n FROM organizations"))[0]["n"]
+
+    _reset_pool()
+    resp = client.post("/api/team/branches", headers=headers, json={
+        "name": "Sede Norte", "address": "Calle 1 # 2-3",
+        "latitude": 4.7, "longitude": -74.05,
+    })
+    assert resp.status_code == 200, resp.text
+
+    orgs_after = _run(_fetch("SELECT count(*) AS n FROM organizations"))[0]["n"]
+    assert orgs_after == orgs_before, "creating a sede must not create an organization"
+
+    sedes = _run(_fetch(
+        "SELECT name, latitude FROM locations WHERE org_id = $1 ORDER BY id", org_id,
+    ))
+    assert [r["name"] for r in sedes][-1] == "Sede Norte"
+    assert len(sedes) == 2
+
+    _reset_pool()
+    listed = client.get("/api/team/branches", headers=headers)
+    assert listed.status_code == 200, listed.text
+    names = [b.get("location_name") or b.get("name") for b in listed.json()["branches"]]
+    assert "Sede Norte" in names

@@ -1,8 +1,6 @@
 """
 Team routes: branch CRUD and user/team management for restaurant owners and admins.
 """
-import time
-import json
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
@@ -33,9 +31,7 @@ class TeamInviteRequest(BaseModel):
 
 class CreateBranchRequest(BaseModel):
     name: str
-    whatsapp_number: str = ""
     address: str
-    menu: dict = {}
     latitude: float = None
     longitude: float = None
 
@@ -64,87 +60,44 @@ async def list_team_branches(request: Request):
 
 @router.post("/api/team/branches")
 async def create_branch(request: Request, body: CreateBranchRequest):
+    """Add a sede to the owner's organization.
+
+    A sede is a `locations` row of the org: the carta and features are the
+    org's (plus that sede's own overrides, 0093), so nothing is copied.
+    Fixed 2026-09-25: this created a whole new ORGANIZATION through the
+    legacy `db_create_restaurant` (a copy of the menu and features) and then
+    tried to re-parent its sede by a WhatsApp number that sede never had, so
+    the owner never got the sede — and since 0034 it 500'd outright on an
+    ON CONFLICT with no matching unique index.
+    """
     from app.routes.dashboard import geocode_address
     user = await get_current_user(request)
     roles_list = [r.strip() for r in (user.get("role") or "").split(",")]
     if "owner" not in roles_list:
         raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
 
-    # P0 fix (2026-09): db_get_matriz_details/db_set_branch_parent expect a
-    # LOCATION id (they query `restaurants`/`locations` by PK) while
-    # tenant_scope() expects the org_id — the old code fed the same
-    # ambiguous user["branch_id"] into both. Resolve them explicitly:
-    # the owner's own assigned location (if any), else the org's
-    # deterministic default location.
     org_id = user.get("org_id")
     if not org_id:
         raise HTTPException(status_code=400, detail="Tu usuario no tiene una organización asignada.")
     org_id = int(org_id)
 
-    my_location_id = user.get("location_id")
-    if not my_location_id:
-        default_loc = await restaurant_repo.db_get_default_location(org_id)
-        if not default_loc:
-            raise HTTPException(status_code=404, detail="No se encontró la Casa Matriz.")
-        my_location_id = default_loc["id"]
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="La sede necesita un nombre.")
 
-    wa_number = body.whatsapp_number.strip()
-
-    with tenant_scope(org_id):
-        matriz_row = await restaurant_repo.db_get_matriz_details(my_location_id)
-    if not matriz_row:
-        raise HTTPException(status_code=404, detail="No se encontró la Casa Matriz.")
-
-    if not wa_number:
-        wa_number = f"{matriz_row['whatsapp_number']}_b{int(time.time())}"
-
-    menu_heredado = matriz_row['menu']
-    if isinstance(menu_heredado, str):
-        try:
-            menu_heredado = json.loads(menu_heredado)
-            if isinstance(menu_heredado, str):
-                menu_heredado = json.loads(menu_heredado)
-        except Exception:
-            menu_heredado = {}
-    elif not menu_heredado:
-        menu_heredado = {}
-
-    features_heredado = matriz_row['features']
-    if isinstance(features_heredado, str):
-        try:
-            features_heredado = json.loads(features_heredado)
-            if isinstance(features_heredado, str):
-                features_heredado = json.loads(features_heredado)
-        except Exception:
-            features_heredado = {}
-    elif not features_heredado:
-        features_heredado = {}
-
-    lat = body.latitude
-    lon = body.longitude
-    display = ""
-
+    lat, lon, display = body.latitude, body.longitude, ""
     if lat is None or lon is None:
         lat, lon, display = await geocode_address(body.address)
 
-    await db.db_create_restaurant(
-        name=body.name,
-        whatsapp_number=wa_number,
-        address=body.address,
-        menu=menu_heredado,
-        latitude=lat,
-        longitude=lon,
-        features=features_heredado
-    )
-
-    await restaurant_repo.db_set_branch_parent(
-        wa_number,
-        my_location_id,
-        matriz_row.get('wa_phone_id', ''),
-        matriz_row.get('wa_access_token', ''),
-    )
-
-    return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
+    with tenant_scope(org_id):
+        location = await restaurant_repo.db_create_location(
+            org_id, name, address=body.address, latitude=lat, longitude=lon,
+        )
+    log.info("team.branch_created", org_id=org_id, location_id=location["id"])
+    return {
+        "success": True, "location_id": location["id"],
+        "latitude": lat, "longitude": lon, "display_name": display,
+    }
 
 
 @router.delete("/api/team/branches/{branch_id}")

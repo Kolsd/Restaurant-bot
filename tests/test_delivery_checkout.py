@@ -447,20 +447,21 @@ async def _http_seed_checkout_org(
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         suffix = uuid.uuid4().hex[:10]
-        bot_number = f"573{suffix[:9]}"
         org_id = await conn.fetchval(
             "INSERT INTO organizations (name, slug, features, menu) VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id",
             f"Checkout Org {suffix}", f"checkout-org-{suffix}", json.dumps({"currency": "COP"}), _TEST_CARTA,
         )
+        # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
+        bot_number = f"web{org_id}"
         location_id = await conn.fetchval(
             """
             INSERT INTO locations
-                (org_id, name, whatsapp_number, latitude, longitude, phone, address,
+                (org_id, name, latitude, longitude, phone, address,
                  delivery_config, opening_hours)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
             RETURNING id
             """,
-            org_id, f"Sede {suffix}", bot_number, 4.6097, -74.0817, "3011234567", "Cra 1 # 2-3",
+            org_id, f"Sede {suffix}", 4.6097, -74.0817, "3011234567", "Cra 1 # 2-3",
             json.dumps({
                 "delivery_enabled": delivery_enabled, "pickup_enabled": pickup_enabled,
                 "delivery_fee": delivery_fee, "min_order": min_order, "radius_km": radius_km,
@@ -790,11 +791,11 @@ def test_checkout_tenant_isolation_with_colliding_ids(client):
                 "INSERT INTO organizations (name, slug, menu) VALUES ($1, $2, $3::jsonb) RETURNING id",
                 f"Checkout Collision B {suffix}", f"checkout-collision-b-{suffix}", _TEST_CARTA,
             )
-            bot_number = f"573{suffix}0"
+            bot_number = f"web{org_a}"  # production shape: no WhatsApp number
             loc_l = await conn.fetchval(
-                """INSERT INTO locations (id, org_id, name, whatsapp_number, latitude, longitude, delivery_config)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) RETURNING id""",
-                org_b, org_a, "A sede (collides with org B id)", bot_number, 4.6097, -74.0817,
+                """INSERT INTO locations (id, org_id, name, latitude, longitude, delivery_config)
+                   VALUES ($1, $2, $3, $4, $5, $6::jsonb) RETURNING id""",
+                org_b, org_a, "A sede (collides with org B id)", 4.6097, -74.0817,
                 json.dumps({"delivery_enabled": True, "pickup_enabled": True, "radius_km": 50, "payment_methods": ["efectivo"]}),
             )
             # A forced explicit id does NOT advance locations' BIGSERIAL

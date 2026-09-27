@@ -2131,19 +2131,6 @@ async def db_get_active_staff_basic(staff_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-async def db_has_staff(restaurant_id: int) -> bool:
-    """Return True if the restaurant has at least one staff record. Uses EXISTS for efficiency.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with tenant_connection() as conn:
-        exists = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM staff WHERE org_id = $1 LIMIT 1)",
-            restaurant_id,
-        )
-    return bool(exists)
-
-
 # ── Self-service: tips for a specific staff member ────────────────────────────
 
 async def db_calculate_tips_for_staff(

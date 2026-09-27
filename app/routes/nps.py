@@ -40,18 +40,16 @@ async def get_nps_stats(request: Request, period: str = "month", days: int = Non
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     branch_id = _resolve_branch_id(request, user, restaurant)
-    raw_bot_num = restaurant.get("whatsapp_number", "")
-    clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
-    return await db.db_get_nps_stats(clean_bot_num, period, branch_id=branch_id, days=days)
+    bot_number = restaurant.get("whatsapp_number") or ""  # the org's bot key
+    return await db.db_get_nps_stats(bot_number, period, branch_id=branch_id, days=days)
     
 @router.get("/api/nps/responses")
 async def get_nps_responses(request: Request, period: str = "month", limit: int = 50):
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     branch_id = _resolve_branch_id(request, user, restaurant)
-    raw_bot_num = restaurant.get("whatsapp_number", "")
-    clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
-    return {"responses": await db.db_get_nps_responses(clean_bot_num, period, limit, branch_id=branch_id)}
+    bot_number = restaurant.get("whatsapp_number") or ""  # the org's bot key
+    return {"responses": await db.db_get_nps_responses(bot_number, period, limit, branch_id=branch_id)}
 
 @router.get("/api/nps/google-maps-url")
 async def get_google_maps_url(request: Request):

@@ -284,7 +284,8 @@ async def test_patch_organization_changes_a_and_never_touches_b(
 async def test_wa_access_token_never_returned_in_plaintext(
     seed_pool, collision_orgs,
 ):
-    """GET and PATCH handler results must never carry the raw Meta access token."""
+    """GET and PATCH never carry a Meta credential — not even a masked hint.
+    (WhatsApp was removed 2026-09-25; these columns are no longer read.)"""
     admin_module, PatchOrgRequest = _import_admin_route_pieces()
 
     org_a_id = collision_orgs["org_a"]["id"]
@@ -293,9 +294,7 @@ async def test_wa_access_token_never_returned_in_plaintext(
     get_result = await admin_module.get_organization_detail(org_a_id, None, None)
     org_payload = get_result["data"]["org"]
     assert real_secret not in json.dumps(get_result)
-    assert "wa_access_token" not in org_payload
-    assert org_payload["wa_access_token_set"] is True
-    assert org_payload["wa_access_token_last4"] == real_secret[-4:]
+    assert not [k for k in org_payload if k.startswith("wa_")]
 
     patch_result = await admin_module.update_organization(
         org_a_id,
@@ -305,55 +304,7 @@ async def test_wa_access_token_never_returned_in_plaintext(
     )
     assert real_secret not in json.dumps(patch_result)
     patched_org = patch_result["data"]["org"]
-    assert "wa_access_token" not in patched_org
-    assert patched_org["wa_access_token_set"] is True
-    assert patched_org["wa_access_token_last4"] == real_secret[-4:]
-
-
-@pytest.mark.asyncio
-async def test_empty_wa_access_token_preserves_existing_secret(
-    seed_pool, collision_orgs,
-):
-    """Saving an empty wa_access_token must NOT null out the stored secret."""
-    admin_module, PatchOrgRequest = _import_admin_route_pieces()
-
-    org_a_id = collision_orgs["org_a"]["id"]
-    real_secret = collision_orgs["org_a"]["wa_access_token"]
-
-    await admin_module.update_organization(
-        org_a_id,
-        PatchOrgRequest(wa_access_token="", wa_phone_id="updated_phone_id"),
-        None,
-        None,
-    )
-
-    org_db = await _fetch_org(seed_pool, org_a_id)
-    assert org_db["wa_access_token"] == real_secret, (
-        "An empty wa_access_token on save must preserve the existing secret, "
-        "not overwrite it with NULL/empty string."
-    )
-    assert org_db["wa_phone_id"] == "updated_phone_id"
-
-
-@pytest.mark.asyncio
-async def test_masked_placeholder_wa_access_token_preserves_existing_secret(
-    seed_pool, collision_orgs,
-):
-    """A masked placeholder (e.g. from a UI echo) must also preserve the secret."""
-    admin_module, PatchOrgRequest = _import_admin_route_pieces()
-
-    org_a_id = collision_orgs["org_a"]["id"]
-    real_secret = collision_orgs["org_a"]["wa_access_token"]
-
-    await admin_module.update_organization(
-        org_a_id,
-        PatchOrgRequest(wa_access_token=f"•••• {real_secret[-4:]}"),
-        None,
-        None,
-    )
-
-    org_db = await _fetch_org(seed_pool, org_a_id)
-    assert org_db["wa_access_token"] == real_secret
+    assert not [k for k in patched_org if k.startswith("wa_")]
 
 
 @pytest.mark.asyncio

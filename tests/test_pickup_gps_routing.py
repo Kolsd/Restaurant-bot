@@ -132,17 +132,15 @@ async def org_id(db_conn):
     return row["id"]
 
 
-async def _insert_location(conn, org_id_, *, name, lat, lon, whatsapp=None):
+async def _insert_location(conn, org_id_, *, name, lat, lon):
     row = await conn.fetchrow(
         """
         INSERT INTO locations
-            (org_id, name, code, address, latitude, longitude,
-             whatsapp_number, active)
-        VALUES ($1, $2, $3, 'Test addr', $4, $5, $6, TRUE)
+            (org_id, name, code, address, latitude, longitude, active)
+        VALUES ($1, $2, $3, 'Test addr', $4, $5, TRUE)
         RETURNING id
         """,
         org_id_, name, name.lower().replace(" ", "-"), lat, lon,
-        whatsapp or "",
     )
     return row["id"]
 
@@ -158,11 +156,11 @@ async def test_pickup_gps_resolves_to_nearest_location(db_conn, org_id):
     # Two sedes in Bogotá: zona norte (~4.7110) and zona sur (~4.6000)
     norte_id = await _insert_location(
         db_conn, org_id, name="Sede Norte",
-        lat=4.7110, lon=-74.0721, whatsapp="+5715551111",
+        lat=4.7110, lon=-74.0721,
     )
     await _insert_location(
         db_conn, org_id, name="Sede Sur",
-        lat=4.6000, lon=-74.0900, whatsapp="+5715552222",
+        lat=4.6000, lon=-74.0900,
     )
 
     # Customer near Sede Norte (within ~150m)

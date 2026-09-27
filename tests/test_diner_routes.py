@@ -114,7 +114,6 @@ async def _scope(conn, org_id: int) -> None:
 
 async def _make_org(conn, *, with_menu: bool) -> dict:
     suffix = uuid.uuid4().hex[:10]
-    bot_number = f"573{suffix[:9]}"
     menu = {
         "Pastas": [
             {"name": "Spaghetti Carbonara", "description": "Con panceta", "price": 32000, "active": True},
@@ -132,9 +131,11 @@ async def _make_org(conn, *, with_menu: bool) -> dict:
         f"Diner Test Org {suffix}", f"diner-test-{suffix}",
         json.dumps(menu), json.dumps({"currency": "COP"}),
     )
+    # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
+    bot_number = f"web{org_id}"
     location_id = await conn.fetchval(
-        "INSERT INTO locations (org_id, name, whatsapp_number) VALUES ($1, $2, $3) RETURNING id",
-        org_id, f"Sede {suffix}", bot_number,
+        "INSERT INTO locations (org_id, name) VALUES ($1, $2) RETURNING id",
+        org_id, f"Sede {suffix}",
     )
     table_id = f"t-{suffix}"
     # restaurant_tables has RLS ENABLE + FORCE: its WITH CHECK requires

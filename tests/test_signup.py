@@ -92,7 +92,7 @@ class TestSignupEndpoint:
         assert r.status_code == 200
         assert mock.await_args.kwargs["password"] == "  espacios  al  borde  "
         # And the phone never becomes the org's WhatsApp line (UNIQUE index).
-        assert mock.await_args.kwargs["whatsapp_number"] is None
+        assert "whatsapp_number" not in mock.await_args.kwargs
 
     def test_missing_required_field_returns_422(self, client):
         payload = {**VALID_PAYLOAD}

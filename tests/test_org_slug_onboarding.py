@@ -62,8 +62,7 @@ def test_new_org_gets_a_slug_without_the_caller_passing_one():
     """CRM conversion passes no slug — the org must still be reachable."""
     created = []
     try:
-        phone = f"57300{uuid.uuid4().int % 10_000_000:07d}"
-        org = _create_org("El Fogón de Ana", whatsapp_number=phone)
+        org = _create_org("El Fogón de Ana")
         created.append(org["id"])
 
         assert org["slug"], "an org with no slug has no /pedir link at all"
@@ -85,9 +84,9 @@ def test_two_orgs_with_the_same_name_get_different_slugs():
     created = []
     try:
         name = f"Donde Pepe {uuid.uuid4().hex[:6]}"
-        first = _create_org(name, whatsapp_number=f"57301{uuid.uuid4().int % 10_000_000:07d}")
+        first = _create_org(name)
         created.append(first["id"])
-        second = _create_org(name, whatsapp_number=f"57302{uuid.uuid4().int % 10_000_000:07d}")
+        second = _create_org(name)
         created.append(second["id"])
 
         assert first["slug"] and second["slug"]
@@ -105,7 +104,6 @@ def test_an_explicit_slug_is_still_honoured():
         chosen = f"mi-slug-{uuid.uuid4().hex[:8]}"
         org = _create_org(
             "Nombre Cualquiera",
-            whatsapp_number=f"57303{uuid.uuid4().int % 10_000_000:07d}",
             slug=chosen,
         )
         created.append(org["id"])

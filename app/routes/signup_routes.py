@@ -159,10 +159,6 @@ async def create_signup(payload: SignupPayload, request: Request):
             username=payload.email,
             password=payload.password,
             owner_email=payload.email,
-            # No WhatsApp number. The phone is a sales contact, and writing
-            # it onto organizations.whatsapp_number (UNIQUE) would stop the
-            # same owner from ever registering a second restaurant.
-            whatsapp_number=None,
             plan_code=payload.plan.lower(),
             trial_days=DEFAULT_TRIAL_DAYS,
             # A person who typed their own password must be able to log in

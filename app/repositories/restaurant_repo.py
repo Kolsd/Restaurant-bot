@@ -4,7 +4,7 @@ Restaurant repository — superadmin and restaurant-level SQL operations.
 Covers:
   - Admin stats (global counts)
   - User management (delete)
-  - Restaurant credential/settings updates (wa_phone_id, wa_access_token, name, address, etc.)
+  - Restaurant settings updates (name, address, etc.)
   - Billing stats (fiscal_invoices aggregate)
   - Maintenance utilities (fix-branch-ids, fix-conversations)
   - Restaurant detail stats for superadmin dashboard
@@ -157,21 +157,6 @@ def _validate_and_normalize_menu(menu_data: dict, restaurant_id: int) -> dict:
     return result
 
 
-def _mask_wa_access_token(d: dict) -> dict:
-    """Replace a raw organizations.wa_access_token value with masked hints.
-
-    The Meta access token is a secret credential and must never leave the
-    server in a GET/list/PATCH response — mirrors the Wompi integrity_secret
-    convention (see app/routes/settings_routes.py::_mask_wompi_for_response).
-    Mutates and returns *d*: pops the plaintext key, adds `wa_access_token_set`
-    (bool) and `wa_access_token_last4` (str, "" if unset/too short).
-    """
-    token = (d.pop("wa_access_token", None) or "").strip()
-    d["wa_access_token_set"] = bool(token)
-    d["wa_access_token_last4"] = token[-4:] if len(token) >= 4 else ""
-    return d
-
-
 def _normalize_menu_dishes(menu: dict) -> dict:
     """
     Walk a {category: [dish, ...]} menu and run normalize_dish_shape on every dish.
@@ -276,33 +261,6 @@ async def db_delete_user(username: str) -> None:
 
 
 # ── Restaurant credential update ─────────────────────────────────────────────
-
-async def db_set_restaurant_wa_credentials(
-    whatsapp_number: str, wa_phone_id: str, wa_access_token: str
-) -> None:
-    """Persist wa_phone_id + wa_access_token right after restaurant creation.
-
-    Targets organizations first (default number), then falls back to locations
-    (override number for multi-number chains).
-    """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        # Try organization-level number first
-        updated_org = await conn.execute(
-            """UPDATE organizations
-               SET wa_phone_id = $1, wa_access_token = $2
-               WHERE replace(replace(whatsapp_number, '+', ''), ' ', '') =
-                     replace(replace($3, '+', ''), ' ', '')""",
-            wa_phone_id, wa_access_token, whatsapp_number,
-        )
-        # Also update location-level override if this number is a location override
-        await conn.execute(
-            """UPDATE locations
-               SET wa_phone_id = $1, wa_access_token = $2
-               WHERE replace(replace(whatsapp_number, '+', ''), ' ', '') =
-                     replace(replace($3, '+', ''), ' ', '')""",
-            wa_phone_id, wa_access_token, whatsapp_number,
-        )
 
 
 # db_update_restaurant_fields was DELETED 2026-09-12 — P0 cross-tenant write.
@@ -415,53 +373,6 @@ async def db_get_billing_stats() -> list[dict]:
 
 
 # ── Maintenance utilities ─────────────────────────────────────────────────────
-
-async def db_fix_branch_ids() -> list[dict]:
-    """
-    Assign branch_id + role='owner' to users whose branch_id is NULL
-    by matching restaurant_name. Returns list of fixed records.
-
-    P0 fix (2026-09): `restaurants.id` (the VIEW's own PK) IS a location_id
-    — also populate the explicit `location_id` and `org_id` columns so
-    downstream auth resolution (deps.get_current_user/get_current_restaurant)
-    never has to guess the kind of `branch_id` again.
-    """
-    pool = await _get_pool()
-    fixed = []
-    async with pool.acquire() as conn:
-        restaurants = await conn.fetch(
-            "SELECT r.id, r.name, r.whatsapp_number, l.org_id "
-            "FROM restaurants r JOIN locations l ON l.id = r.id"
-        )
-        rest_map    = {r["name"].lower().strip(): dict(r) for r in restaurants}
-        users       = await conn.fetch(
-            "SELECT username, restaurant_name, role FROM users WHERE branch_id IS NULL"
-        )
-        for user in users:
-            rname = user["restaurant_name"].lower().strip()
-            if rname in rest_map:
-                rest = rest_map[rname]
-                await conn.execute(
-                    "UPDATE users SET branch_id=$1, role='owner', location_id=$1, org_id=$2 WHERE username=$3",
-                    rest["id"], rest["org_id"], user["username"],
-                )
-                fixed.append({
-                    "username": user["username"],
-                    "branch_id": rest["id"],
-                    "location_id": rest["id"],
-                    "org_id": rest["org_id"],
-                })
-    return fixed
-
-
-async def db_fix_conversations_bot_number(bot_number: str) -> None:
-    """Backfill empty bot_number in conversations rows."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE conversations SET bot_number=$1 WHERE bot_number='' OR bot_number IS NULL",
-            bot_number,
-        )
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
@@ -808,63 +719,6 @@ async def db_get_branches(org_id: int) -> list[dict]:
     return [_serialize(dict(r)) for r in rows]
 
 
-async def db_get_matriz_details(restaurant_id: int) -> dict | None:
-    """Return whatsapp_number, menu, features, wa_phone_id, wa_access_token for a restaurant.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with _tenant_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT whatsapp_number, menu, features, wa_phone_id, wa_access_token "
-            "FROM restaurants WHERE id = $1",
-            restaurant_id,
-        )
-    return dict(row) if row else None
-
-
-async def db_set_branch_parent(
-    whatsapp_number: str,
-    parent_restaurant_id: int,
-    wa_phone_id: str,
-    wa_access_token: str,
-) -> None:
-    """Link a newly created location to its org (branch creation flow).
-
-    The second arg is a location.id used to resolve the org_id for the new branch.
-    The new location (looked up by whatsapp_number) is assigned to the same org.
-    wa_phone_id and wa_access_token are branch-level overrides stored on locations.
-
-    Cross-tenant: resolves org_id from one location, then updates another.
-    Uses bypass_tenant_scope since this operates across location boundaries.
-    """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
-    with bypass_tenant_scope("db_set_branch_parent: link new location to org across tenant boundary"):
-        async with _tenant_connection() as conn:
-            # Resolve the org_id from the parent location id
-            org_id = await conn.fetchval(
-                "SELECT org_id FROM locations WHERE id = $1",
-                parent_restaurant_id,
-            )
-            if org_id is None:
-                log.warning(
-                    "db_set_branch_parent.parent_not_found",
-                    parent_restaurant_id=parent_restaurant_id,
-                    whatsapp_number=whatsapp_number,
-                )
-                return
-            # Update the branch location: assign to same org, set wa credentials
-            await conn.execute(
-                """UPDATE locations
-                   SET org_id = $1, wa_phone_id = $2, wa_access_token = $3
-                   WHERE replace(replace(whatsapp_number, '+', ''), ' ', '') =
-                         replace(replace($4, '+', ''), ' ', '')""",
-                org_id,
-                wa_phone_id,
-                wa_access_token,
-                whatsapp_number,
-            )
-
-
 async def db_delete_branch(branch_id: int, parent_restaurant_id: int) -> bool:
     """
     Verify the branch belongs to the same org as the parent, then delete its location row.
@@ -1198,55 +1052,6 @@ async def db_check_module(bot_number: str, module_name: str) -> bool:
         )
     # fetchval returns None when no rows match; bool(None) == False
     return bool(val)
-
-
-async def db_create_restaurant(name: str, whatsapp_number: str, address: str, menu: dict,
-                                latitude: float = None, longitude: float = None, features: dict = None):
-    """Create a new restaurant (organization + primary location).
-
-    Preserves legacy signature; internally creates an organization row and
-    a primary location row.  ON CONFLICT: if the whatsapp_number already belongs
-    to an organization, updates that org and its primary location instead.
-    """
-    if features is None:
-        features = {}
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            menu_json = _json.dumps(menu) if isinstance(menu, dict) else (menu or "[]")
-            features_json = _json.dumps(features) if isinstance(features, dict) else (features or "{}")
-            normalized_wa = _normalize_phone(whatsapp_number) if whatsapp_number else None
-
-            # Upsert organization
-            org_row = await conn.fetchrow(
-                """INSERT INTO organizations (name, whatsapp_number, menu, features)
-                   VALUES ($1, $2, $3::jsonb, $4::jsonb)
-                   ON CONFLICT (whatsapp_number) DO UPDATE
-                   SET name = EXCLUDED.name,
-                       menu = EXCLUDED.menu,
-                       features = EXCLUDED.features,
-                       updated_at = NOW()
-                   WHERE organizations.whatsapp_number IS NOT NULL
-                   RETURNING id""",
-                name, normalized_wa, menu_json, features_json,
-            )
-            if org_row is None:
-                # whatsapp_number is NULL — no conflict clause applies; just fetch
-                org_row = await conn.fetchrow(
-                    "SELECT id FROM organizations WHERE name=$1 ORDER BY id DESC LIMIT 1", name
-                )
-
-            org_id = org_row["id"]
-
-            # Insert default location (no conflict clause — partial unique index
-            # on is_primary is dropped in migration 0038; callers must not
-            # call this function twice for the same org).
-            await conn.execute(
-                """INSERT INTO locations
-                       (org_id, name, code, address, latitude, longitude, active, timezone)
-                   VALUES ($1, $2, 'principal', $3, $4, $5, true, 'America/Bogota')""",
-                org_id, name, address, latitude, longitude,
-            )
 
 
 async def db_sync_menu_to_branches(parent_restaurant_id: int) -> int:
@@ -1770,17 +1575,6 @@ async def db_check_usage_limits(restaurant_id: int) -> None:
             raise UsageLimitExceeded("facturas", used_invoices, int(invoice_limit))
 
 
-async def db_has_orders_by_bot_number(bot_number: str) -> bool:
-    """Return True if any order exists for this bot_number. Uses EXISTS for efficiency."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        exists = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM orders WHERE bot_number = $1 LIMIT 1)",
-            bot_number,
-        )
-    return bool(exists)
-
-
 # ── Slug helpers (Catálogo v2 Fase 6 — SEO routes) ───────────────────────────
 
 import re as _re
@@ -1860,10 +1654,6 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
 
     organizations has no RLS policy (it IS the tenant container), so we use
     bypass_tenant_scope for audit-log consistency.  Safe from any call site.
-
-    wa_access_token is a secret and is NEVER returned in plaintext here — see
-    _mask_wa_access_token. The bot runtime reads the real token via
-    db_get_org_by_phone, not this function.
     """
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
@@ -1872,7 +1662,7 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, name, slug, whatsapp_number, wa_phone_id, wa_access_token,
+                SELECT id, name, slug, whatsapp_number,
                        menu, features, subscription_plan, subscription_status,
                        plan_code, comp_until,
                        created_at, updated_at
@@ -1894,7 +1684,7 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
                 d[field] = {} if field == "features" else []
         elif val is None:
             d[field] = {} if field == "features" else []
-    return _mask_wa_access_token(d)
+    return d
 
 
 async def db_get_all_orgs(active_only: bool = True) -> list[dict]:
@@ -1926,7 +1716,7 @@ async def db_get_all_orgs(active_only: bool = True) -> list[dict]:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT id, name, slug, whatsapp_number, wa_phone_id, wa_access_token,
+                SELECT id, name, slug, whatsapp_number,
                        menu, features, subscription_plan, subscription_status,
                        created_at, updated_at
                 FROM organizations
@@ -1946,85 +1736,8 @@ async def db_get_all_orgs(active_only: bool = True) -> list[dict]:
                     d[field] = {} if field == "features" else []
             elif val is None:
                 d[field] = {} if field == "features" else []
-        result.append(_mask_wa_access_token(d))
+        result.append(d)
     return result
-
-
-async def db_get_org_by_phone(phone: str) -> dict | None:
-    """Resolve which Organization owns a given WhatsApp number.
-
-    Checks both:
-      1. organizations.whatsapp_number (Org-level default number)
-      2. locations.whatsapp_number (Location-level override for multi-number chains)
-
-    Location match is preferred (more specific).  If matched via a Location
-    override, the returned dict includes ``matched_location_id`` (else None).
-
-    This is called PRE-SCOPE from inbox_worker dispatch resolution, so it uses
-    the GLOBAL pool pattern + bypass_tenant_scope for audit-log consistency.
-
-    Phone normalization is applied before querying (strip +, spaces).
-    """
-    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
-
-    normalized = _normalize_phone(phone)
-    pool = await _get_pool()
-    with bypass_tenant_scope_if_unset("db_get_org_by_phone_webhook_resolve"):
-        async with pool.acquire() as conn:
-            # Try Location-level override first (more specific routing)
-            loc_row = await conn.fetchrow(
-                """
-                SELECT l.id AS location_id, o.id, o.name, o.slug,
-                       o.whatsapp_number, o.wa_phone_id, o.wa_access_token,
-                       o.menu, o.features, o.subscription_plan, o.subscription_status,
-                       o.created_at, o.updated_at
-                FROM locations l
-                JOIN organizations o ON o.id = l.org_id
-                WHERE replace(replace(l.whatsapp_number, '+', ''), ' ', '') = $1
-                  AND l.active = true
-                """,
-                normalized,
-            )
-            if loc_row:
-                d = _serialize(dict(loc_row))
-                matched_location_id = d.pop("location_id", None)
-                for field in ("menu", "features"):
-                    val = d.get(field)
-                    if isinstance(val, str):
-                        try:
-                            d[field] = _json.loads(val)
-                        except Exception:
-                            d[field] = {} if field == "features" else []
-                    elif val is None:
-                        d[field] = {} if field == "features" else []
-                d["matched_location_id"] = matched_location_id
-                return d
-
-            # Fall back to Org-level number
-            org_row = await conn.fetchrow(
-                """
-                SELECT id, name, slug, whatsapp_number, wa_phone_id, wa_access_token,
-                       menu, features, subscription_plan, subscription_status,
-                       created_at, updated_at
-                FROM organizations
-                WHERE replace(replace(whatsapp_number, '+', ''), ' ', '') = $1
-                """,
-                normalized,
-            )
-            if not org_row:
-                return None
-            d = _serialize(dict(org_row))
-            for field in ("menu", "features"):
-                val = d.get(field)
-                if isinstance(val, str):
-                    try:
-                        d[field] = _json.loads(val)
-                    except Exception:
-                        d[field] = {} if field == "features" else []
-                elif val is None:
-                    d[field] = {} if field == "features" else []
-            d["matched_location_id"] = None
-            return d
 
 
 async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[dict]:
@@ -2044,7 +1757,7 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
                 rows = await conn.fetch(
                     """
                     SELECT id, org_id, name, code, address, latitude, longitude,
-                           whatsapp_number, wa_phone_id, wa_access_token,
+                           whatsapp_number,
                            active, timezone, opening_hours,
                            created_at, updated_at
                     FROM locations
@@ -2057,7 +1770,7 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
                 rows = await conn.fetch(
                     """
                     SELECT id, org_id, name, code, address, latitude, longitude,
-                           whatsapp_number, wa_phone_id, wa_access_token,
+                           whatsapp_number,
                            active, timezone, opening_hours,
                            created_at, updated_at
                     FROM locations
@@ -2098,7 +1811,7 @@ async def db_get_default_location(org_id: int) -> dict | None:
                 """
                 SELECT id, org_id, name, code, address, phone,
                        latitude, longitude,
-                       whatsapp_number, wa_phone_id, wa_access_token,
+                       whatsapp_number,
                        active, timezone, opening_hours,
                        created_at, updated_at
                 FROM locations
@@ -2165,7 +1878,7 @@ async def db_get_location_by_id(location_id: int) -> dict | None:
             row = await conn.fetchrow(
                 """
                 SELECT id, org_id, name, code, address, phone, latitude, longitude,
-                       whatsapp_number, wa_phone_id, wa_access_token,
+                       whatsapp_number,
                        active, timezone, opening_hours, delivery_config,
                        created_at, updated_at
                 FROM locations
@@ -2248,7 +1961,7 @@ async def db_resolve_location_by_gps(
             rows = await conn.fetch(
                 """
                 SELECT id, org_id, name, code, address, latitude, longitude,
-                       whatsapp_number, wa_phone_id, wa_access_token,
+                       whatsapp_number,
                        active, timezone, opening_hours,
                        created_at, updated_at
                 FROM locations
@@ -2290,8 +2003,8 @@ async def db_resolve_location_by_gps(
 async def db_update_organization(org_id: int, **fields) -> dict | None:
     """Update Org fields.  Returns the updated row or None if not found.
 
-    Accepted fields: name, slug, whatsapp_number, wa_phone_id, wa_access_token,
-    menu, features, subscription_plan, subscription_status.
+    Accepted fields: name, slug, menu, features, subscription_plan,
+    subscription_status.
 
     Called from authenticated admin routes; uses bypass_tenant_scope since
     organizations has no RLS and we need to update the container itself.
@@ -2299,17 +2012,11 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
     `menu`, when present, is routed through `_validate_and_normalize_menu`
     (same normalization + cross-tenant image-ownership check as
     db_update_menu) — never written as a raw, unvalidated blob.
-
-    `wa_access_token` is a secret: the returned dict never carries the
-    plaintext (see _mask_wa_access_token). Preserving vs. overwriting the
-    stored secret on an empty/masked input is the caller's responsibility
-    (simply omit the key from **fields to preserve).
     """
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     _ALLOWED_ORG_FIELDS = {
-        "name", "slug", "whatsapp_number", "wa_phone_id", "wa_access_token",
-        "menu", "features", "subscription_plan", "subscription_status",
+        "name", "slug", "menu", "features", "subscription_plan", "subscription_status",
     }
     _JSONB_FIELDS = {"menu", "features"}
 
@@ -2342,8 +2049,8 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
 
     sql = (
         f"UPDATE organizations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted above
-        f"WHERE id = ${idx} RETURNING id, name, slug, whatsapp_number, wa_phone_id, "
-        f"wa_access_token, menu, features, subscription_plan, subscription_status, "
+        f"WHERE id = ${idx} RETURNING id, name, slug, whatsapp_number, "
+        f"menu, features, subscription_plan, subscription_status, "
         f"created_at, updated_at"
     )
 
@@ -2364,21 +2071,19 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
                 d[field] = {} if field == "features" else []
         elif val is None:
             d[field] = {} if field == "features" else []
-    return _mask_wa_access_token(d)
+    return d
 
 
 async def db_update_location(location_id: int, **fields) -> dict | None:
     """Update Location fields.  Returns the updated row or None if not found.
 
-    Accepted fields: name, code, address, latitude, longitude,
-    whatsapp_number, wa_phone_id, wa_access_token, active,
-    opening_hours, timezone.
+    Accepted fields: name, code, address, phone, latitude, longitude,
+    active, opening_hours, timezone.
     """
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     _ALLOWED_LOC_FIELDS = {
         "name", "code", "address", "phone", "latitude", "longitude",
-        "whatsapp_number", "wa_phone_id", "wa_access_token",
         "active", "opening_hours", "timezone",
     }
     _JSONB_FIELDS = {"opening_hours"}
@@ -2407,7 +2112,7 @@ async def db_update_location(location_id: int, **fields) -> dict | None:
         f"UPDATE locations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted
         f"WHERE id = ${idx} RETURNING id, org_id, name, code, address, phone, "
         f"latitude, longitude, "
-        f"whatsapp_number, wa_phone_id, wa_access_token, active, timezone, "
+        f"whatsapp_number, active, timezone, "
         f"opening_hours, created_at, updated_at"
     )
 
@@ -2433,9 +2138,8 @@ async def db_update_location(location_id: int, **fields) -> dict | None:
 async def db_create_location(org_id: int, name: str, **fields) -> dict:
     """Create a new Location for an Org.  is_primary defaults to false.
 
-    Accepted extra fields: code, address, latitude, longitude,
-    whatsapp_number, wa_phone_id, wa_access_token, active,
-    opening_hours, timezone.
+    Accepted extra fields: code, address, phone, latitude, longitude,
+    active, opening_hours, timezone.
 
     Returns the created row as a dict.
     """
@@ -2443,7 +2147,6 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
 
     _ALLOWED_CREATE_FIELDS = {
         "code", "address", "phone", "latitude", "longitude",
-        "whatsapp_number", "wa_phone_id", "wa_access_token",
         "active", "opening_hours", "timezone",
     }
 
@@ -2456,11 +2159,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
     idx = 3
     for col, val in extra.items():
         col_names.append(col)
-        if col == "opening_hours" and isinstance(val, dict):
-            val = _json.dumps(val)
-            placeholders.append(f"${idx}::jsonb")
-        else:
-            placeholders.append(f"${idx}")
+        placeholders.append(f"${idx}")  # jsonb opening_hours: the pool codec serializes
         col_values.append(val)
         idx += 1
 
@@ -2468,7 +2167,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
         f"INSERT INTO locations ({', '.join(col_names)}) "  # noqa: S608 — col names are whitelisted
         f"VALUES ({', '.join(placeholders)}) "
         f"RETURNING id, org_id, name, code, address, phone, latitude, longitude, "
-        f"whatsapp_number, wa_phone_id, wa_access_token, active, timezone, "
+        f"whatsapp_number, active, timezone, "
         f"opening_hours, created_at, updated_at"
     )
 
@@ -2502,7 +2201,7 @@ async def db_list_organizations() -> list[dict]:
             rows = await conn.fetch(
                 """
                 SELECT o.id, o.name, o.slug, o.whatsapp_number,
-                       o.wa_phone_id, o.subscription_plan, o.subscription_status,
+                       o.subscription_plan, o.subscription_status,
                        o.features, o.created_at, o.updated_at,
                        COUNT(l.id)::int AS location_count
                 FROM organizations o
@@ -2528,9 +2227,6 @@ async def db_list_organizations() -> list[dict]:
 
 async def db_create_organization(
     name: str,
-    whatsapp_number: str | None = None,
-    wa_phone_id: str | None = None,
-    wa_access_token: str | None = None,
     slug: str | None = None,
     features: dict | None = None,
     subscription_plan: str = "free",
@@ -2556,20 +2252,17 @@ async def db_create_organization(
                 slug = await _unique_org_slug(conn, name)
             row = await conn.fetchrow(
                 """
-                INSERT INTO organizations
-                    (name, slug, whatsapp_number, wa_phone_id, wa_access_token,
-                     features, subscription_plan)
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-                RETURNING id, name, slug, whatsapp_number, wa_phone_id, wa_access_token,
+                INSERT INTO organizations (name, slug, features, subscription_plan)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, name, slug, whatsapp_number,
                           menu, features, subscription_plan, subscription_status,
                           created_at, updated_at
                 """,
                 name,
                 slug or None,
-                whatsapp_number or None,
-                wa_phone_id or None,
-                wa_access_token or None,
-                _json.dumps(features),
+                # The pool's jsonb codec serializes; json.dumps here stored
+                # every new org's features as a JSON string (2026-09-25).
+                features,
                 subscription_plan,
             )
     d = _serialize(dict(row))

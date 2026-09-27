@@ -328,7 +328,6 @@ from app.repositories.restaurant_repo import (
     db_get_restaurant_by_org_id,
     db_get_all_restaurants,
     db_check_module,
-    db_create_restaurant,
     db_sync_menu_to_branches,
     db_update_menu,
     db_get_menu,
@@ -351,7 +350,6 @@ from app.repositories.restaurant_repo import (
 from app.repositories.restaurant_repo import (
     db_get_all_orgs,
     db_get_org_by_id,
-    db_get_org_by_phone,
     db_get_org_locations,
     db_get_default_location,
     db_get_primary_location,  # Deprecated alias — use db_get_default_location

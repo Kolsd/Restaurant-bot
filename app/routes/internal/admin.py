@@ -42,7 +42,6 @@ import os
 import io
 import base64
 import json
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends, Query
@@ -72,15 +71,11 @@ def _ok(data) -> dict:
 
 # ── Pydantic models (Org + Location) ────────────────────────────────────────
 
-_PHONE_RE = re.compile(r"^\+?\d[\d\s\-]{6,19}$")
 
 
 class CreateOrgRequest(BaseModel):
     name: str
     slug: Optional[str] = None
-    whatsapp_number: Optional[str] = None
-    wa_phone_id: Optional[str] = None
-    wa_access_token: Optional[str] = None
     features: Optional[dict] = None
     subscription_plan: Optional[str] = "free"
 
@@ -91,30 +86,13 @@ class CreateOrgRequest(BaseModel):
             raise ValueError("name cannot be empty")
         return v.strip()
 
-    @field_validator("whatsapp_number")
-    @classmethod
-    def phone_format(cls, v):
-        if v and not _PHONE_RE.match(v.strip()):
-            raise ValueError("whatsapp_number format invalid")
-        return v.strip() if v else None
-
 
 class PatchOrgRequest(BaseModel):
     name: Optional[str] = None
     slug: Optional[str] = None
-    whatsapp_number: Optional[str] = None
-    wa_phone_id: Optional[str] = None
-    wa_access_token: Optional[str] = None
     features: Optional[dict] = None
     subscription_plan: Optional[str] = None
     subscription_status: Optional[str] = None
-
-    @field_validator("whatsapp_number")
-    @classmethod
-    def phone_format(cls, v):
-        if v and not _PHONE_RE.match(v.strip()):
-            raise ValueError("whatsapp_number format invalid")
-        return v.strip() if v else None
 
 
 class CreateLocationRequest(BaseModel):
@@ -123,9 +101,6 @@ class CreateLocationRequest(BaseModel):
     address: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    whatsapp_number: Optional[str] = None
-    wa_phone_id: Optional[str] = None
-    wa_access_token: Optional[str] = None
     active: Optional[bool] = True
     timezone: Optional[str] = "America/Bogota"
 
@@ -150,13 +125,6 @@ class CreateLocationRequest(BaseModel):
             raise ValueError("longitude must be in [-180, 180]")
         return v
 
-    @field_validator("whatsapp_number")
-    @classmethod
-    def phone_format(cls, v):
-        if v and not _PHONE_RE.match(v.strip()):
-            raise ValueError("whatsapp_number format invalid")
-        return v.strip() if v else None
-
 
 class PatchLocationRequest(BaseModel):
     name: Optional[str] = None
@@ -164,9 +132,6 @@ class PatchLocationRequest(BaseModel):
     address: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    whatsapp_number: Optional[str] = None
-    wa_phone_id: Optional[str] = None
-    wa_access_token: Optional[str] = None
     active: Optional[bool] = None
     timezone: Optional[str] = None
     is_primary: Optional[bool] = None
@@ -185,13 +150,6 @@ class PatchLocationRequest(BaseModel):
             raise ValueError("longitude must be in [-180, 180]")
         return v
 
-    @field_validator("whatsapp_number")
-    @classmethod
-    def phone_format(cls, v):
-        if v and not _PHONE_RE.match(v.strip()):
-            raise ValueError("whatsapp_number format invalid")
-        return v.strip() if v else None
-
 
 async def _bypass_internal_admin():
     """FastAPI dependency: enter bypass_tenant_scope for all internal admin routes.
@@ -207,7 +165,6 @@ async def _bypass_internal_admin():
 # ── Pydantic models ──────────────────────────────────────────────────────────
 class AdminLoginRequest(BaseModel): key: str
 class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id: int; admin_key: str = ""
-class CreateRestaurantRequest(BaseModel): admin_key: str = ""; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}; wa_phone_id: str = ""; wa_access_token: str = ""
 # SetSubscriptionRequest / UpdateRestaurantRequest and the routes that used
 # them (POST /set-subscription, POST /update-restaurant) were DELETED
 # 2026-09-12 along with db_update_subscription/db_update_restaurant_fields —
@@ -336,29 +293,6 @@ async def admin_list_users(
     return {"users": await get_users()}
 
 
-@router.post("/create-restaurant")
-async def admin_create_restaurant(
-    request: CreateRestaurantRequest,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    from app.routes.dashboard import geocode_address
-    try:
-        menu_dict = json.loads(request.menu)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Menú no es JSON válido")
-    lat, lon, _ = await geocode_address(request.address)
-
-    await db.db_create_restaurant(request.name, request.whatsapp_number, request.address, menu_dict, lat, lon, request.features)
-
-    if request.wa_access_token:
-        await restaurant_repo.db_set_restaurant_wa_credentials(
-            request.whatsapp_number, request.wa_phone_id, request.wa_access_token
-        )
-
-    return {"success": True}
-
-
 @router.get("/restaurant/{restaurant_id}")
 async def admin_get_restaurant_detail(
     restaurant_id: int,
@@ -368,8 +302,9 @@ async def admin_get_restaurant_detail(
     rest = await db.db_get_restaurant_by_org_id(restaurant_id)
     if not rest:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-    wa = rest.get("whatsapp_number", "")
-    stats = await restaurant_repo.db_get_restaurant_detail_stats(restaurant_id, wa)
+    stats = await restaurant_repo.db_get_restaurant_detail_stats(
+        restaurant_id, rest.get("whatsapp_number", ""),  # the org's bot key
+    )
     return {"restaurant": rest, "stats": stats}
 
 
@@ -380,27 +315,6 @@ async def admin_billing_stats(
 ):
     stats = await restaurant_repo.db_get_billing_stats()
     return {"stats": stats}
-
-
-@router.post("/fix-branch-ids")
-async def fix_branch_ids(
-    request: Request,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    fixed = await restaurant_repo.db_fix_branch_ids()
-    return {"success": True, "fixed": fixed}
-
-
-@router.post("/fix-conversations")
-async def fix_conversations_bot_number(
-    request: Request,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    body = await request.json()
-    await restaurant_repo.db_fix_conversations_bot_number(body.get("bot_number", ""))
-    return {"success": True}
 
 
 @router.post("/parse-menu")
@@ -465,16 +379,13 @@ async def create_organization(
     try:
         org = await restaurant_repo.db_create_organization(
             name=body.name,
-            whatsapp_number=body.whatsapp_number,
-            wa_phone_id=body.wa_phone_id,
-            wa_access_token=body.wa_access_token,
             slug=body.slug,
             features=body.features or {},
             subscription_plan=body.subscription_plan or "free",
         )
     except asyncpg.UniqueViolationError as exc:
         log.warning("create_organization.conflict", detail=str(exc))
-        raise HTTPException(status_code=409, detail="slug or whatsapp_number already exists")
+        raise HTTPException(status_code=409, detail="slug already exists")
     except Exception as exc:
         log.exception("create_organization.error", detail=str(exc))
         raise HTTPException(status_code=500, detail="Error al crear la organizacion")
@@ -537,22 +448,6 @@ async def update_organization(
         updates["name"] = name
     if body.slug is not None:
         updates["slug"] = body.slug or None
-    if body.whatsapp_number is not None:
-        updates["whatsapp_number"] = body.whatsapp_number or None
-    if body.wa_phone_id is not None:
-        updates["wa_phone_id"] = body.wa_phone_id or None
-    if body.wa_access_token is not None:
-        # wa_access_token is a secret: GET/PATCH responses only ever carry
-        # wa_access_token_set/_last4 (see _mask_wa_access_token), never the
-        # plaintext — so the UI cannot echo it back. An empty string or a
-        # masked placeholder (the UI would only ever send one it invented,
-        # never one we returned) means "admin didn't touch this field":
-        # simply omit the column from the UPDATE so the stored secret is
-        # preserved untouched, mirroring the Wompi integrity_secret pattern
-        # in app/routes/settings_routes.py.
-        token = body.wa_access_token.strip()
-        if token and not token.startswith(("•", "xxxx", "****")):
-            updates["wa_access_token"] = token
     if body.subscription_plan is not None:
         updates["subscription_plan"] = body.subscription_plan
     if body.subscription_status is not None:
@@ -568,7 +463,7 @@ async def update_organization(
     try:
         updated = await restaurant_repo.db_update_organization(org_id, **updates)
     except asyncpg.UniqueViolationError:
-        raise HTTPException(status_code=409, detail="slug or whatsapp_number already exists")
+        raise HTTPException(status_code=409, detail="slug already exists")
     except ValueError as exc:
         # Cross-tenant dish image (validate_dish_image_ownership) — only
         # reachable if a future caller adds `menu` to PatchOrgRequest.
@@ -652,24 +547,18 @@ async def create_location(
     _bypass: None = Depends(_bypass_internal_admin),
 ):
     """Create a new (non-primary) Location under an Org."""
-    import asyncpg  # noqa: PLC0415
-
     org = await restaurant_repo.db_get_org_by_id(org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organizacion no encontrada")
 
     kwargs: dict = {}
-    for field in ("code", "address", "latitude", "longitude",
-                  "whatsapp_number", "wa_phone_id", "wa_access_token",
-                  "active", "timezone"):
+    for field in ("code", "address", "latitude", "longitude", "active", "timezone"):
         val = getattr(body, field)
         if val is not None:
             kwargs[field] = val
 
     try:
         loc = await restaurant_repo.db_create_location(org_id=org_id, name=body.name, **kwargs)
-    except asyncpg.UniqueViolationError:
-        raise HTTPException(status_code=409, detail="whatsapp_number already assigned to another location")
     except Exception as exc:
         log.exception("create_location.error", org_id=org_id, detail=str(exc))
         raise HTTPException(status_code=500, detail="Error al crear la sede")
@@ -690,16 +579,12 @@ async def update_location(
     Post-Wave-2: is_primary is vestigial and will be dropped in migration 0038.
     The is_primary field in the request body is silently ignored.
     """
-    import asyncpg  # noqa: PLC0415
-
     loc = await restaurant_repo.db_get_location_by_id(location_id)
     if not loc:
         raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     updates: dict = {}
-    for field in ("name", "code", "address", "latitude", "longitude",
-                  "whatsapp_number", "wa_phone_id", "wa_access_token",
-                  "active", "timezone"):
+    for field in ("name", "code", "address", "latitude", "longitude", "active", "timezone"):
         val = getattr(body, field)
         if val is not None:
             updates[field] = val
@@ -707,10 +592,7 @@ async def update_location(
     if not updates:
         return _ok({"location": loc})
 
-    try:
-        updated = await restaurant_repo.db_update_location(location_id, **updates)
-    except asyncpg.UniqueViolationError:
-        raise HTTPException(status_code=409, detail="whatsapp_number conflict")
+    updated = await restaurant_repo.db_update_location(location_id, **updates)
 
     return _ok({"location": updated})
 

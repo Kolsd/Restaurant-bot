@@ -486,20 +486,21 @@ async def _http_seed_delivery_org(*, with_delivery_sede: bool = True) -> dict:
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         suffix = uuid.uuid4().hex[:10]
-        bot_number = f"573{suffix[:9]}"
         org_id = await conn.fetchval(
             "INSERT INTO organizations (name, slug, features) VALUES ($1, $2, $3::jsonb) RETURNING id",
             f"Delivery Entry Org {suffix}", f"delivery-entry-{suffix}",
             json.dumps({"currency": "COP"}),
         )
+        # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
+        bot_number = f"web{org_id}"
         location_id = await conn.fetchval(
             """
             INSERT INTO locations
-                (org_id, name, whatsapp_number, latitude, longitude, phone, address, delivery_config)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                (org_id, name, latitude, longitude, phone, address, delivery_config)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
             RETURNING id
             """,
-            org_id, f"Sede {suffix}", bot_number, 4.6097, -74.0817,
+            org_id, f"Sede {suffix}", 4.6097, -74.0817,
             "3011234567", "Cra 1 # 2-3",
             json.dumps({"delivery_enabled": True, "pickup_enabled": True, "radius_km": 50})
             if with_delivery_sede else json.dumps({}),

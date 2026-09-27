@@ -291,8 +291,8 @@ Matched by dish NAME, case-insensitive (unique on `lower(dish_name)`), like
 
 - Matriz (head office): `parent_restaurant_id IS NULL`.
 - Branch: `parent_restaurant_id` points to the Matriz.
-- WhatsApp: branches use a `_b[TIMESTAMP]` suffix on `whatsapp_number` to avoid collisions.
-- **Orgs with no WhatsApp (every self-serve signup) — 0096.** `restaurants.whatsapp_number` (the bot runtime's `bot_number`) falls back to `web<org_id>`: one key per org, shared by its sedes like a WhatsApp org's number; the sede is told apart by `location_id`. Before 0096 the table QR and `/pedir` 404'd for these orgs. Diner tests must also cover an org with NO number (`tests/test_self_serve_no_whatsapp.py`); every older seed sets one.
+- **The bot key** (`restaurants.whatsapp_number` in the view, `bot_number` in code) is `web<org_id>` for any org without a WhatsApp number (0096): one key per org, shared by its sedes; the sede is told apart by `location_id`. Since 2026-09-26 no code path can set a WhatsApp number or a Meta credential (signup, CRM convert, superadmin, sede creation), and the `_b<timestamp>` branch suffix is gone. Clearing the numbers/tokens already stored in prod and rewriting their rows' keys (draft migration 0097) awaits the PM's approval — it is irreversible.
+- **Tests seed production shape:** the diner (`test_diner_*`) and delivery (`test_delivery_*`, `test_pickup_gps_routing`) suites seed sedes with NO number and `bot_number = f"web{org_id}"`; `tests/test_self_serve_no_whatsapp.py` provisions like `/api/signup`. Do not reintroduce `whatsapp_number` in new seeds.
 - **jsonb writes:** the app pool's codec (`database.init_connection`) serializes jsonb parameters, so never pass `json.dumps(x)` — that stores a JSON string. Test pools must use `init=init_connection`; ~29 older test files still don't (sweep pending).
 
 ## Wave 2 (Org/Location) — Post-deploy summary
