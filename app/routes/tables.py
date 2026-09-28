@@ -648,6 +648,8 @@ async def get_delivery_orders(request: Request):
             except: items = []
         orders.append({
             "id": r["id"],
+            # The code the customer holds (/pedido/{code}) — what they say at pickup.
+            "public_code": r.get("public_code"),
             "phone": r["phone"],
             "items": items,
             "order_type": r["order_type"],

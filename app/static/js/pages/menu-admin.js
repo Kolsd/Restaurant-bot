@@ -1474,6 +1474,12 @@
     newRecipeBtn.addEventListener('click', function () { openRecipeModal(null); });
   }
 
+  // The carta editor (dashboard-features.js) saves on its own; refresh our list.
+  document.addEventListener('mesio:menu-saved', function () {
+    loadMenu();
+    loadPhotoCoverage();
+  });
+
   // ── Boot ──────────────────────────────────────────────────────────
   loadMenu();
   loadPhotoCoverage();

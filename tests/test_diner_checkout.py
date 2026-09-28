@@ -39,6 +39,7 @@ import asyncio
 import json
 import os
 import uuid
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import asyncpg
@@ -319,6 +320,64 @@ def test_checkout_table_scope_excludes_already_claimed_items(client, org_a):
     assert len(checks) == 2  # A's check + B's remainder check, never merged/re-billed
 
 
+# ── 2b. The waiter's table tile shows the bill once, however many alerts ──
+
+async def _enrichment_async(org_id: int, location_id: int) -> dict:
+    from app.repositories import tables_repo
+    from app.services.tenant_context import tenant_scope
+    with tenant_scope(org_id):
+        return await tables_repo.db_get_tables_status_enrichment(location_id)
+
+
+def _enrichment(org_id: int, location_id: int) -> dict:
+    _reset_pool()
+    return _run(_enrichment_async(org_id, location_id))
+
+
+async def _add_alert_async(org_id: int, info: dict, alert_type: str) -> dict:
+    from app.repositories import tables_repo
+    from app.services.tenant_context import tenant_scope
+    with tenant_scope(org_id):
+        return await tables_repo.db_create_waiter_alert(
+            "kitchen", info["bot_number"], alert_type, "Pedido listo en pase",
+            table_id=info["table_id"], location_id=info["location_id"],
+        )
+
+
+async def _dismiss_all_async(org_id: int, bot_number: str) -> None:
+    from app.repositories import tables_repo
+    from app.services.tenant_context import tenant_scope
+    with tenant_scope(org_id):
+        for alert in await tables_repo.db_get_waiter_alerts(bot_number):
+            await tables_repo.db_dismiss_waiter_alert(alert["id"])
+
+
+def test_waiter_tile_total_is_not_multiplied_by_alerts(client, org_a):
+    """Found 2026-09-28 in the browser: kitchen "listo" + diner "la cuenta"
+    left two alerts on the table and the waiter's tile showed $82.000 for a
+    $41.000 bill — the open-check SUM ran after the alert join."""
+    table_id = org_a["table_id"]
+    token = _open(client, table_id)["token"]
+    _add(client, token, "bandeja", qty=1)  # 28000
+    _send(client, token)
+    assert _checkout(client, token, scope="table", method="cash").status_code == 200
+    _reset_pool()
+    _run(_add_alert_async(org_a["org_id"], org_a, "ready"))
+    assert len(_alerts(org_a["org_id"], org_a["bot_number"])) >= 2
+
+    tile = _enrichment(org_a["org_id"], org_a["location_id"])[table_id]
+    assert tile["has_open_check"] is True
+    assert tile["current_total"] == 28000
+    assert tile["has_waiter_alert"] is True
+
+    # A dismissed alert no longer flags the table.
+    _reset_pool()
+    _run(_dismiss_all_async(org_a["org_id"], org_a["bot_number"]))
+    tile = _enrichment(org_a["org_id"], org_a["location_id"])[table_id]
+    assert tile["has_waiter_alert"] is False
+    assert tile["current_total"] == 28000
+
+
 # ── 3. An item cannot be charged twice (double-tap idempotency) ────────────
 
 def test_double_checkout_same_diner_is_idempotent_no_second_check(client, org_a):
@@ -533,6 +592,25 @@ def test_pay_check_marks_invoiced_and_diner_status_flips_to_paid(client, org_a, 
     status_after = _status(client, token)
     assert status_after.status_code == 200
     assert status_after.json()["checkout"]["status"] == "paid"
+
+    # The owner's dashboard headline counts it (found 2026-09-28: INGRESOS
+    # read only delivery `orders`, so a table restaurant always showed $0).
+    sales = _sales_today(org_a["org_id"], org_a["location_id"])
+    assert sum(d["total"] for d in sales.values()) == 28000
+    assert sum(d["count"] for d in sales.values()) == 1
+
+
+async def _sales_today_async(org_id: int, location_id: int) -> dict:
+    from app.repositories import stats_repo
+    from app.services.tenant_context import tenant_scope
+    today = datetime.utcnow().date().isoformat()  # created_at is stored in UTC
+    with tenant_scope(org_id):
+        return await stats_repo.db_sales_daily(today, today, location_id=location_id)
+
+
+def _sales_today(org_id: int, location_id: int) -> dict:
+    _reset_pool()
+    return _run(_sales_today_async(org_id, location_id))
 
 
 # ── 9. NPS: paying surfaces the survey in the diner's own chat ─────────────

@@ -171,7 +171,8 @@ function _channelBadge(channel) {
 
 // ── Status → CSS class + label ───────────────────────
 function _tableState(t) {
-  if (t.has_waiter_alert ?? false) return { cls: 'alert', label: '🙋 Llamó al mesero' };
+  // Alerts are also "listo en pase" and "la cuenta", not only a call.
+  if (t.has_waiter_alert ?? false) return { cls: 'alert', label: '🔔 Atención' };
   if (!(t.session_active ?? false)) return { cls: '', label: 'Libre' };
   const orders = t.pending_orders || [];
   const anyListo = orders.some(s => s === 'listo');
@@ -664,6 +665,13 @@ async function _markOrderDelivered(orderId) {
 }
 
 // ── Waiter alerts banner ─────────────────────────────
+// Table names are now plain numbers ("3"); say "Mesa 3", keep custom names as-is.
+function _alertTableLabel(a) {
+  const name = String(a.table_name || '').trim();
+  if (!name) return `Mesa ${a.table_id}`;
+  return /^\d+$/.test(name) ? `Mesa ${name}` : name;
+}
+
 async function _loadAlerts() {
   try {
     const res = await fetch('/api/waiter-alerts?resolved=false', { headers: _hdr() });
@@ -676,12 +684,14 @@ async function _loadAlerts() {
     banner.classList.remove('hidden');
     const first = alerts[0];
     const tableEl = document.createElement('strong');
-    tableEl.textContent = first.table_name || `Mesa ${first.table_id}`;
+    tableEl.textContent = _alertTableLabel(first);
     banner.innerHTML = '';
     const icon = document.createTextNode('🔔 ');
     banner.appendChild(icon);
     banner.appendChild(tableEl);
-    const msg = document.createTextNode(` llamó al mesero · ${alerts.length} alerta${alerts.length > 1 ? 's' : ''}`);
+    // The alert's own message says what happened (listo en pase, la cuenta…).
+    const what = first.message || 'llamó al mesero';
+    const msg = document.createTextNode(` · ${what} · ${alerts.length} alerta${alerts.length > 1 ? 's' : ''}`);
     banner.appendChild(msg);
     const btn = document.createElement('button');
     btn.className = 'm-btn m-btn--sm m-btn--ghost';
@@ -754,10 +764,10 @@ function _showAllAlerts(alerts) {
     li.style.cssText = 'background:var(--surface-3,#252d40);border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:center;';
     const badge = document.createElement('span');
     badge.style.cssText = 'font-size:11px;font-weight:600;color:var(--warn,#f59e0b);white-space:nowrap;flex:1;';
-    badge.textContent = a.table_name || `Mesa ${a.table_id}`;
+    badge.textContent = _alertTableLabel(a);
     const type = document.createElement('span');
     type.style.cssText = 'font-size:12px;color:var(--text-2,#94a3b8);flex:1;';
-    type.textContent = a.alert_type || '';
+    type.textContent = a.message || a.alert_type || '';
     const resolveBtn = document.createElement('button');
     resolveBtn.className = 'm-btn m-btn--sm';
     resolveBtn.style.cssText = 'font-size:11px;padding:4px 10px;min-height:28px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;';

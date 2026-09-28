@@ -291,12 +291,23 @@
         const opsEl = sb.querySelector('[data-key="' + opsKey + '"]');
         if (opsEl) opsEl.style.display = '';
       }
-    } else if (role === 'gerente') {
-      hide('billing');
-      const locations = restaurant.locations || [];
-      if (locations.length <= 1) hide('sucursales');
+    } else {
+      if (role === 'gerente') {
+        hide('billing');
+        const locations = restaurant.locations || [];
+        if (locations.length <= 1) hide('sucursales');
+      }
+      // owner / admin / gerente run the floor too (a small restaurant has no
+      // one else): without these links the kitchen screen was only reachable
+      // by typing /staff.
+      const opsGroup = sb.querySelector('#sb-ops-group');
+      if (opsGroup) {
+        opsGroup.style.display = '';
+        const label = opsGroup.querySelector('.sb-group-label');
+        if (label) label.textContent = 'Operación';
+        opsGroup.querySelectorAll('.sb-item').forEach(function (el) { el.style.display = ''; });
+      }
     }
-    // owner / admin: show everything (already rendered)
 
     // Feature-flag gating
     if (features.module_loyalty === false) hide('fidelizacion');

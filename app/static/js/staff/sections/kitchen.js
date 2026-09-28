@@ -110,7 +110,7 @@
   <header class="k-top">
     <div class="k-brand">
       <div class="k-mark">M</div>
-      <div class="k-brand-name">Kitchen</div>
+      <div class="k-brand-name">Cocina</div>
     </div>
     <div class="k-sep"></div>
     <div class="k-station">Estación <strong id="kds-station-name">Todas</strong></div>
@@ -362,7 +362,7 @@
 
       return `<article class="tkt ${cls} ${isDone ? 'done' : ''}" data-id="${_esc(o.id)}" data-idx="${idx}" data-delivery="${o._is_delivery ? '1' : '0'}" style="${doneStyle}${selectedStyle}">
         <div class="tkt-head">
-          <div class="tkt-table"><span class="n">${tblCls}</span><span class="sub">#${_esc(String(o.id).slice(0,6))}</span></div>
+          <div class="tkt-table"><span class="n">${tblCls}</span><span class="sub">#${_esc(o.public_code || String(o.id).slice(0,6))}</span></div>
           <div class="tkt-time">${_fmtTime(mins, secs)}</div>
         </div>
         <div class="tkt-meta">${metaPax}${hotBadge}${srcBadge}</div>

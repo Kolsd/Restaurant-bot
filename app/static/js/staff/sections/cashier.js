@@ -161,16 +161,6 @@
 .mesio-sec-cashier .cust-name { font-size: 12.5px; font-weight: 500; }
 .mesio-sec-cashier .cust-sub { font-size: 10.5px; color: #6B7280; }
 
-/* AI suggestion */
-.mesio-sec-cashier .ai-sug {
-  margin: 10px 18px 0; background: linear-gradient(135deg, rgba(29,158,117,0.1), rgba(29,158,117,0.02));
-  border: 1px solid rgba(29,158,117,0.25); border-radius: 10px; padding: 10px 12px; flex-shrink: 0;
-}
-.mesio-sec-cashier .ai-sug-head { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #9FE1CB; margin-bottom: 5px; }
-.mesio-sec-cashier .ai-sug-body { font-size: 11.5px; color: #C9D2DB; line-height: 1.4; }
-.mesio-sec-cashier .ai-sug-body strong { color: #fff; }
-.mesio-sec-cashier .ai-sug-close { margin-left: auto; background: none; border: none; color: #6B7280; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
-
 /* Cart lines */
 .mesio-sec-cashier .cart-lines { flex: 1; overflow-y: auto; padding: 6px 0; }
 .mesio-sec-cashier .cart-lines::-webkit-scrollbar { width: 4px; }
@@ -306,20 +296,6 @@
       <div>
         <div class="cust-name" id="cust-name"></div>
         <div class="cust-sub" id="cust-sub"></div>
-      </div>
-    </div>
-
-    <!-- AI suggestion card -->
-    <div class="ai-sug" id="caja-ai-sug">
-      <div class="ai-sug-head">
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M8 1l1.5 3.5L13 6l-2.5 2.5.5 3.5L8 10.5 5 12l.5-3.5L3 6l3.5-.5z"/>
-        </svg>
-        Sugerencia IA
-        <button class="ai-sug-close" id="ai-sug-dismiss" aria-label="Cerrar sugerencia">✕</button>
-      </div>
-      <div class="ai-sug-body">
-        Clientes en mesa similar suelen pedir <strong>postre o café</strong> al finalizar. ¿Ofrecerlo?
       </div>
     </div>
 
@@ -644,7 +620,7 @@ async function loadOpenTables() {
 }
 // ── Table grid mode helpers ─────────────────────────────
 function _tableStateCashier(t) {
-  if (t.has_waiter_alert) return { cls: 'alert',   label: 'Llamó al mesero' };
+  if (t.has_waiter_alert) return { cls: 'alert',   label: 'Atención' };
   if (!(t.session_active || t.bot_active)) return { cls: 'free', label: 'Libre' };
   if (t.has_open_check) return { cls: 'billing', label: 'Facturando' };
   if ((t.pending_orders || []).some(s => s === 'listo')) return { cls: 'active', label: 'Comiendo' };
@@ -728,7 +704,7 @@ function _renderTableGrid() {
       if (t.has_waiter_alert) {
         const alertEl = document.createElement('div');
         alertEl.style.cssText = 'font-size:10px;color:#EF4444;font-weight:600;';
-        alertEl.textContent = '🔔 Llamó';
+        alertEl.textContent = '🔔 Atención';
         tile.appendChild(alertEl);
       }
       if (t.guests) {
@@ -2000,11 +1976,6 @@ async function _boot() {
 
   document.querySelectorAll('.seg-btn').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-  });
-
-  document.getElementById('ai-sug-dismiss')?.addEventListener('click', () => {
-    const aiCard = document.getElementById('caja-ai-sug');
-    if (aiCard) aiCard.style.display = 'none';
   });
 
   const payModal = document.getElementById('pay-modal');

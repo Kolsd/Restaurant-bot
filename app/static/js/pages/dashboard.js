@@ -65,21 +65,26 @@ function _setupChrome() {
 
   // User info
   const role     = (localStorage.getItem('rb_role') || '').toLowerCase();
-  const userName = localStorage.getItem('rb_user_name') || localStorage.getItem('rb_username') || 'Usuario';
+  // Login writes rb_name only for staff accounts; an owner account has no
+  // person name, so fall back to the restaurant's name, never "Usuario".
+  const userName = (localStorage.getItem('rb_name') || '').trim();
+  let restaurantName = '';
+  try { restaurantName = (JSON.parse(localStorage.getItem('rb_restaurant') || '{}').name || '').trim(); } catch (e) { /* corrupt key */ }
+  const shownName = userName || restaurantName || 'Mi cuenta';
   const roleLabel = { owner: 'Propietario', admin: 'Administrador', gerente: 'Gerente' }[role.split(',')[0].trim()] || 'Administrador';
 
   const userNameEl = document.getElementById('sb-user-name');
   const userRoleEl = document.getElementById('sb-user-role');
   const userAvaEl  = document.getElementById('sb-user-avatar');
-  if (userNameEl) userNameEl.textContent = userName;
+  if (userNameEl) userNameEl.textContent = shownName;
   if (userRoleEl) userRoleEl.textContent = roleLabel;
-  if (userAvaEl) userAvaEl.textContent   = (userName.split(' ').map(w => w[0]).join('').slice(0, 2) || 'U').toUpperCase();
+  if (userAvaEl) userAvaEl.textContent   = (shownName.split(' ').map(w => w[0]).join('').slice(0, 2) || 'M').toUpperCase();
 
   // Greeting
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Buenos días' : hour < 18 ? 'Buenas tardes' : 'Buenas noches';
   const greetEl  = document.getElementById('page-greeting');
-  if (greetEl) greetEl.textContent = `${greeting}, ${userName.split(' ')[0]}`;
+  if (greetEl) greetEl.textContent = userName ? `${greeting}, ${userName.split(' ')[0]}` : greeting;
 
   // Date subtitle (filled dynamically after first load)
   const subPageEl = document.getElementById('page-sub');
@@ -400,7 +405,7 @@ async function loadSalesByChannel() {
     }
 
     list.innerHTML = '';
-    const maxRev = Math.max(...channels.map(c => c.revenue || 0), 1);
+    const maxRev = Math.max(...channels.map(c => c.total || 0), 1);
 
     channels.forEach(ch => {
       const meta    = CHANNEL_META[ch.channel] || {
@@ -409,8 +414,8 @@ async function loadSalesByChannel() {
         svg: '',
         barColor: 'var(--brand)',
       };
-      const pct     = totalRev ? Math.round(ch.revenue / totalRev * 100) : 0;
-      const barPct  = Math.round(ch.revenue / maxRev * 100);
+      const pct     = totalRev ? Math.round((ch.total || 0) / totalRev * 100) : 0;
+      const barPct  = Math.round((ch.total || 0) / maxRev * 100);
 
       const item = document.createElement('div');
       item.className = 'chan';
@@ -434,7 +439,7 @@ async function loadSalesByChannel() {
 
       const valEl = document.createElement('div');
       valEl.className   = 'chan-value';
-      valEl.textContent = mesioFmt(ch.revenue || 0);
+      valEl.textContent = mesioFmt(ch.total || 0);
 
       row1.appendChild(nameEl);
       row1.appendChild(valEl);
@@ -689,7 +694,7 @@ async function loadTopDishes() {
       // Count
       const tdCount = document.createElement('td');
       tdCount.className   = 'num';
-      tdCount.textContent = (dish.count || 0).toLocaleString('es-CO');
+      tdCount.textContent = (dish.sold || 0).toLocaleString('es-CO');
 
       // Margin badge
       const tdMargin = document.createElement('td');

@@ -2,6 +2,7 @@ import os
 import json
 from fastapi import APIRouter, Request, HTTPException, Query, Depends
 from datetime import datetime, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 from app.services import database as db
 from app.routes.deps import (
@@ -14,6 +15,7 @@ from app.routes.deps import (
 )
 from app.repositories import reviews_repo as rr, conversations_repo
 from app.repositories import stats_repo
+from app.services.money import quantize_money
 from app.services.sede_menu import parse_price
 from app.services.tenant_context import tenant_scope
 from app.services.logging import get_logger
@@ -22,6 +24,16 @@ _log = get_logger(__name__)
 
 
 router = APIRouter()
+
+# strftime("%a") follows the server locale (English on Railway); the dashboard is Spanish.
+_ES_WEEKDAYS = ("Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom")
+
+
+def _chart_label(d: datetime, period: str) -> str:
+    if period in ("today", "week"):
+        return f"{_ES_WEEKDAYS[d.weekday()]} {d.day:02d}"
+    return d.strftime("%d/%m")
+
 
 def get_tz(restaurant: dict) -> str:
     feats = restaurant.get("features", {})
@@ -81,8 +93,12 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
     date_from, date_to = get_date_range(period, get_tz(restaurant))
     branch_id = _resolve_branch_id(request, user, restaurant)
     effective_bot = await _get_effective_bot_number(restaurant)
+    sede_id = resolve_sede_filter(request, user)
 
     with tenant_scope(restaurant["id"]):
+        # Revenue/orders/chart: table rounds + paid delivery, same rules as the
+        # channel card. `orders` alone (below) never saw a single table sale.
+        sales_by_day  = await stats_repo.db_sales_daily(date_from, date_to, location_id=sede_id)
         orders        = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
         reservations  = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
         all_convs     = await db.db_get_all_conversations(
@@ -113,33 +129,24 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
             "time": created.strftime("%d/%m %H:%M") if period != "today" else created.strftime("%H:%M")
         })
 
-    by_date = {}
-    current = datetime.strptime(date_from, "%Y-%m-%d").date()
-    end     = datetime.strptime(date_to, "%Y-%m-%d").date()
-    while current <= end:
-        by_date[str(current)] = {"revenue": 0, "orders": 0, "paid": 0}
-        current += timedelta(days=1)
-        
-    for o in orders:
-        day = o["created_at"][:10]
-        if day in by_date:
-            by_date[day]["orders"] += 1
-            if o["paid"]:
-                by_date[day]["revenue"] += o["total"]
-                by_date[day]["paid"]    += 1
-
     labels, revenue_data, orders_data = [], [], []
-    for date_str, data in sorted(by_date.items()):
-        d = datetime.strptime(date_str, "%Y-%m-%d")
-        labels.append(d.strftime("%a %d") if period in ("today", "week") else d.strftime("%d/%m"))
-        revenue_data.append(data["revenue"])
-        orders_data.append(data["orders"])
+    current = datetime.strptime(date_from, "%Y-%m-%d")
+    end     = datetime.strptime(date_to, "%Y-%m-%d")
+    while current <= end:
+        day = sales_by_day.get(current.date().isoformat(), {})
+        labels.append(_chart_label(current, period))
+        revenue_data.append(float(day.get("total", 0)))  # JSON boundary
+        orders_data.append(day.get("count", 0))
+        current += timedelta(days=1)
 
     return {
         "stats": {
             "orders": {
-                "total": len(orders), "paid": len(paid), "pending": len(pending), 
-                "revenue": sum(o["total"] for o in paid),
+                "total": sum(orders_data),
+                "revenue": float(quantize_money(sum(
+                    (d["total"] for d in sales_by_day.values()), Decimal("0")))),  # JSON boundary
+                # Delivery only: a table round is settled on its check, not here.
+                "paid": len(paid), "pending": len(pending),
                 "pending_revenue": sum(o["total"] for o in pending)
             },
             "reservations": {
@@ -153,67 +160,6 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
         "reservations": reservations,
         "conversations": conversations
     }
-
-@router.get("/api/dashboard/stats")
-async def dashboard_stats(request: Request, period: str = Query("today")):
-    user = await get_current_user(request)
-    restaurant = await get_current_restaurant(request)
-    bot_number = restaurant["whatsapp_number"]
-    date_from, date_to = get_date_range(period, get_tz(restaurant))
-    effective_bot = await _get_effective_bot_number(restaurant)
-
-    with tenant_scope(restaurant["id"]):
-        orders       = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
-        reservations = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
-        all_convs    = await db.db_get_all_conversations(
-            bot_number=effective_bot,
-            date_from=date_from,
-            date_to=date_to
-        )
-    paid         = [o for o in orders if o["paid"]]
-    pending      = [o for o in orders if not o["paid"]]
-    conversations = await filter_conversations_for_branch(all_convs, _resolve_branch_id(request, user, restaurant), effective_bot)
-
-    return {
-        "period": period, "date_from": date_from, "date_to": date_to,
-        "orders": {
-            "total": len(orders), "paid": len(paid), "pending": len(pending),
-            "revenue": sum(o["total"] for o in paid),
-            "pending_revenue": sum(o["total"] for o in pending)
-        },
-        "reservations": {
-            "total": len(reservations),
-            "guests": sum(r.get("guests", 0) for r in reservations)
-        },
-        "conversations": {"active": len(conversations)}
-    }
-
-@router.get("/api/dashboard/orders")
-async def dashboard_orders(request: Request, period: str = Query("today")):
-    restaurant = await get_current_restaurant(request)
-    bot_number = restaurant["whatsapp_number"]
-    date_from, date_to = get_date_range(period, get_tz(restaurant))
-    with tenant_scope(restaurant["id"]):
-        orders = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
-    result = []
-    for o in orders:
-        try:
-            items = o.get("items", [])
-            if isinstance(items, str):
-                import json
-                items = json.loads(items)
-            items_summary = ", ".join(f"{i.get('quantity',1)}x {i.get('name','')}" for i in items) if isinstance(items, list) else str(items)
-        except:
-            items_summary = str(o.get("items", ""))
-        created = datetime.fromisoformat(o["created_at"])
-        result.append({
-            "id": o["id"], "items": items_summary or "-", "type": o["order_type"],
-            "paid": o["paid"], "total": o["total"], "address": o.get("address", ""),
-            "status": o["status"],
-            "time": created.strftime("%d/%m %H:%M") if period != "today" else created.strftime("%H:%M"),
-            "phone": o.get("phone", "")
-        })
-    return {"orders": result}
 
 @router.get("/api/dashboard/conversations")
 async def get_conversations(request: Request):
@@ -238,33 +184,6 @@ async def get_conversations(request: Request):
     with tenant_scope(restaurant["id"]):
         conversations = await db.db_get_all_conversations(bot_number=bot_number, branch_id=branch_id)
     return {"conversations": conversations}
-
-@router.get("/api/dashboard/chart")
-async def dashboard_chart(request: Request, period: str = Query("week")):
-    restaurant = await get_current_restaurant(request)
-    date_from, date_to = get_date_range(period, get_tz(restaurant))
-    with tenant_scope(restaurant["id"]):
-        orders = await db.db_get_orders_range(date_from, date_to, bot_number=restaurant["whatsapp_number"])
-    by_date = {}
-    current = datetime.strptime(date_from, "%Y-%m-%d").date()
-    end     = datetime.strptime(date_to, "%Y-%m-%d").date()
-    while current <= end:
-        by_date[str(current)] = {"revenue": 0, "orders": 0, "paid": 0}
-        current += timedelta(days=1)
-    for o in orders:
-        day = o["created_at"][:10]
-        if day in by_date:
-            by_date[day]["orders"] += 1
-            if o["paid"]:
-                by_date[day]["revenue"] += o["total"]
-                by_date[day]["paid"]    += 1
-    labels, revenue_data, orders_data = [], [], []
-    for date_str, data in sorted(by_date.items()):
-        d = datetime.strptime(date_str, "%Y-%m-%d")
-        labels.append(d.strftime("%a %d") if period in ("today", "week") else d.strftime("%d/%m"))
-        revenue_data.append(data["revenue"])
-        orders_data.append(data["orders"])
-    return {"labels": labels, "revenue": revenue_data, "orders": orders_data}
 
 @router.get("/api/menu/availability")
 async def get_menu_availability(request: Request):

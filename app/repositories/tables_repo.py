@@ -108,7 +108,7 @@ async def db_create_table(table_id: str, number: int, name: str, branch_id: int 
 async def db_auto_create_table(restaurant_id: int) -> dict:
     """
     Automatically creates a table by finding the first available number.
-    The name will be {restaurant_id}-{number}. (E.g. "1-1", "2-1").
+    The name is the plain number ("1", "2"); the id is table-{restaurant_id}-{number}.
     Automatically reuses numbers from tables that have been deleted.
 
     Wave-2: `restaurant_id` here is the location_id of the branch where
@@ -131,8 +131,9 @@ async def db_auto_create_table(restaurant_id: int) -> dict:
         while new_number in used_numbers:
             new_number += 1
 
-        # 3. Build the clean name the user and bot will see
-        table_name = f"{restaurant_id}-{new_number}"
+        # 3. The name diners and staff see is just the number ("Mesa 3"); the
+        #    sede only goes into the id, which must be unique across sedes.
+        table_name = str(new_number)
         table_id = f"table-{restaurant_id}-{new_number}"
 
         # 4. Insert or reactivate if the ID already existed in the database
@@ -193,14 +194,15 @@ async def db_save_table_order(order: dict):
             INSERT INTO table_orders
                 (id, table_id, table_name, phone, items, status, notes, total,
                  base_order_id, sub_number, station, branch_id, org_id,
-                 channel, waiter_staff_id, pending_table_validation)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                 channel, waiter_staff_id, pending_table_validation, location_id)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::integer,$13,$14,$15,$16,$17::bigint)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items,
                 status=EXCLUDED.status,
                 notes=EXCLUDED.notes,
                 total=EXCLUDED.total,
                 branch_id=EXCLUDED.branch_id,
+                location_id=EXCLUDED.location_id,
                 updated_at=NOW()
             RETURNING id, table_id, org_id, branch_id, (xmax = 0) AS inserted
         """, order['id'], order['table_id'], order['table_name'], order['phone'],
@@ -217,7 +219,11 @@ async def db_save_table_order(order: dict):
             rid,
             order.get('channel'),
             order.get('waiter_staff_id'),
-            bool(order.get('pending_table_validation', False)))
+            bool(order.get('pending_table_validation', False)),
+            # branch_id IS the sede id (post-0057). Every sede-filtered read
+            # (kitchen, bar, waiter) filters location_id, and no trigger fills
+            # it, so without this a sede never saw its own table orders.
+            order.get('branch_id'))
 
     # Publish OUTSIDE the transaction block (tenant_connection() has already
     # committed and released the connection by here) — table_order.created on
@@ -1790,16 +1796,29 @@ async def db_get_tables_status_enrichment(branch_id: int) -> dict:
                 FROM table_sessions
                 WHERE status IN ('active', 'nps_pending')
                 ORDER BY table_id, started_at DESC
+            ),
+            -- Aggregated on its own: summed after the alert/order joins, one
+            -- open check was counted once per alert row (a table with two
+            -- alerts showed twice its bill — found 2026-09-28).
+            open_checks AS (
+                SELECT tord.table_id,
+                       COUNT(tc.id)   AS n_open,
+                       SUM(tc.total)  AS total
+                FROM table_orders tord
+                JOIN table_checks tc ON tc.base_order_id = tord.id
+                                    AND tc.status = 'open'
+                WHERE tord.branch_id = $1
+                  AND tord.status NOT IN ('factura_entregada', 'cancelado')
+                GROUP BY tord.table_id
             )
             SELECT
                 rt.id                              AS table_id,
-                COUNT(DISTINCT wa.id) > 0          AS has_waiter_alert,
-                COUNT(DISTINCT tc.id) FILTER (
-                    WHERE tc.status = 'open'
-                ) > 0                              AS has_open_check,
-                COALESCE(SUM(tc.total) FILTER (
-                    WHERE tc.status = 'open'
-                ), 0)                              AS current_total,
+                EXISTS (
+                    SELECT 1 FROM waiter_alerts wa
+                    WHERE wa.table_id = rt.id AND wa.dismissed = FALSE
+                )                                  AS has_waiter_alert,
+                COALESCE(oc.n_open, 0) > 0         AS has_open_check,
+                COALESCE(oc.total, 0)              AS current_total,
                 (asess.table_id IS NOT NULL)       AS session_active,
                 asess.started_at                   AS session_started_at,
                 ao.order_id                        AS active_order_id,
@@ -1808,22 +1827,12 @@ async def db_get_tables_status_enrichment(branch_id: int) -> dict:
                 asess.assigned_staff_id::text      AS assigned_staff_id,
                 COALESCE(sw.name, sa.name)         AS waiter_name
             FROM restaurant_tables rt
-            LEFT JOIN waiter_alerts   wa    ON wa.table_id = rt.id
             LEFT JOIN active_session  asess ON asess.table_id = rt.id
             LEFT JOIN active_order    ao    ON ao.table_id = rt.id
+            LEFT JOIN open_checks     oc    ON oc.table_id = rt.id
             LEFT JOIN staff           sw    ON sw.id = ao.waiter_staff_id
             LEFT JOIN staff           sa    ON sa.id = asess.assigned_staff_id
-            LEFT JOIN table_orders    tord  ON tord.table_id = rt.id
-                                           AND tord.branch_id = $1
-                                           AND tord.status NOT IN ('factura_entregada', 'cancelado')
-            LEFT JOIN table_checks    tc    ON tc.base_order_id = tord.id
-                                           AND tc.status = 'open'
             WHERE rt.branch_id = $1
-            GROUP BY
-                rt.id,
-                asess.table_id, asess.started_at, asess.assigned_staff_id,
-                ao.order_id, ao.channel, ao.waiter_staff_id,
-                sw.name, sa.name
             """,
             branch_id,
         )

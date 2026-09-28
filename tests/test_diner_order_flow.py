@@ -254,16 +254,21 @@ def _table_view(client, token: str):
     return _get(client, "/api/diner/table", params={"token": token})
 
 
-async def _kitchen_rows_async(org_id: int) -> list:
+async def _kitchen_rows_async(org_id: int, location_id: int | None) -> list:
     from app.repositories import tables_repo
     from app.services.tenant_context import tenant_scope
     with tenant_scope(org_id):
-        return await tables_repo.db_get_table_orders_for_branch(branch_id=None, org_id=org_id, status=None)
+        return await tables_repo.db_get_table_orders_for_branch(
+            branch_id=location_id, org_id=org_id, status=None,
+        )
 
 
-def _kitchen_rows(org_id: int) -> list:
+def _kitchen_rows(org_id: int, location_id: int | None = None) -> list:
+    """location_id=None is the owner's all-sedes view; a real kitchen screen
+    always asks for its own sede (found 2026-09-28: that query returned
+    nothing because table_orders.location_id was never written)."""
     _reset_pool()
-    return _run(_kitchen_rows_async(org_id))
+    return _run(_kitchen_rows_async(org_id, location_id))
 
 
 async def _rescatados_async(org_id: int) -> dict:
@@ -341,13 +346,15 @@ def test_full_diner_flow_two_diners_one_table(client, org_a):
 
     # 7. Kitchen query sees BOTH rounds — channel, branch_id, phone, and the
     #    note under `notes` (plural — the naming trap the brief calls out).
-    rows = _kitchen_rows(org_id)
+    rows = _kitchen_rows(org_id, org_a["location_id"])
     assert len(rows) == 2
+    assert len(_kitchen_rows(org_id)) == 2  # the owner's all-sedes view too
     by_phone = {r["phone"]: r for r in rows}
     assert set(by_phone.keys()) == {token_a, token_b}
     for row in rows:
         assert row["channel"] == "web_chat"
         assert row["branch_id"] == org_a["location_id"]
+        assert row["location_id"] == org_a["location_id"]
 
     ajiaco_row = by_phone[token_b]
     items_b = ajiaco_row["items"]
@@ -533,7 +540,7 @@ def test_full_diner_flow_survives_org_location_id_collision(client, org_a, org_c
     assert resp_send.status_code == 200, resp_send.text
     order = resp_send.json()
 
-    rows = _kitchen_rows(org_collide["org_id"])
+    rows = _kitchen_rows(org_collide["org_id"], org_collide["location_id"])
     assert len(rows) == 1
     assert rows[0]["org_id"] == org_collide["org_id"]
     assert rows[0]["branch_id"] == org_collide["location_id"]

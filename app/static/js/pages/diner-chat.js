@@ -648,7 +648,9 @@ function renderHeader() {
       var modeLabel = state.orderMode === 'delivery' ? 'Domicilio' : 'Recoger en tienda';
       tableEl.textContent = state.sedeName ? (modeLabel + ' · ' + state.sedeName) : modeLabel;
     } else {
-      tableEl.textContent = state.tableLabel || '';
+      // Table names are plain numbers now ("3"); custom names stay as-is.
+      var label = String(state.tableLabel || '');
+      tableEl.textContent = /^\d+$/.test(label) ? ('Mesa ' + label) : label;
     }
   }
   if (codeEl) {
@@ -2316,7 +2318,11 @@ var CheckoutSheet = (function () {
       var data = await DinerSession.fetch('/api/diner/checkout', 'POST', body, getToken());
       close();
       var bubble = createBotBubble();
-      bubble.appendChild(createTextNode(data.message || 'Ya le avisamos al mesero.'));
+      // The status card already says "ya le avisamos al mesero"; the text
+      // above it gives the amount instead of repeating that sentence.
+      if (data.total != null) {
+        bubble.appendChild(createTextNode('Tu cuenta: ' + renderer().fmtPrice(data.total, state.locale, state.currency) + '.'));
+      }
       bubble.appendChild(renderCheckoutStatusBlock({ status: data.status }));
       appendBubble(bubble);
       mesioToast('Ya avisamos al mesero', 'success', 4000);

@@ -20,6 +20,7 @@ Covers:
 import json
 import pytest
 from datetime import datetime, date
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock, patch
 
@@ -204,9 +205,18 @@ def test_dashboard_sync_uses_restaurant_timezone(client, monkeypatch):
     async def mock_get_conversations(bot_number=None, date_from=None, date_to=None):
         return []
 
+    bogota_today = str(datetime.now(ZoneInfo("America/Bogota")).date())
+
+    async def mock_sales_daily(date_from, date_to, location_id=None):
+        captured_calls["sales_range"] = (date_from, date_to)
+        # One table round of 41.000 today — the headline must show it.
+        return {bogota_today: {"total": Decimal("41000"), "count": 1}}
+
+    from app.repositories import stats_repo
     monkeypatch.setattr(db_mod, "db_get_orders_range",       mock_get_orders)
     monkeypatch.setattr(db_mod, "db_get_reservations_range", mock_get_reservations)
     monkeypatch.setattr(db_mod, "db_get_all_conversations",  mock_get_conversations)
+    monkeypatch.setattr(stats_repo, "db_sales_daily",        mock_sales_daily)
 
     r = client.get(
         "/api/dashboard/sync?period=today",
@@ -215,6 +225,12 @@ def test_dashboard_sync_uses_restaurant_timezone(client, monkeypatch):
     assert r.status_code == 200
 
     # The date used must be the local Bogota date, not necessarily UTC
-    bogota_today = str(datetime.now(ZoneInfo("America/Bogota")).date())
     assert captured_calls.get("date_from") == bogota_today
     assert captured_calls.get("date_to")   == bogota_today
+    assert captured_calls.get("sales_range") == (bogota_today, bogota_today)
+
+    # Revenue/orders come from sales (table rounds included), not `orders` only.
+    body = r.json()
+    assert body["stats"]["orders"]["revenue"] == 41000
+    assert body["stats"]["orders"]["total"] == 1
+    assert body["chart"]["revenue"] == [41000]

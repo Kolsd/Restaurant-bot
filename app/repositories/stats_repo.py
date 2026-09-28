@@ -98,6 +98,77 @@ def _classify_channel(channel: str | None, order_type: str | None) -> str:
     return "unknown"
 
 
+async def _fetch_sales_rows(
+    period_start: str, period_end: str, location_id: int | None,
+) -> tuple[list, list]:
+    """What counts as a sale, in one place: PAID delivery/pickup `orders`
+    plus every non-cancelled salon `table_orders` round. Both the channel
+    card and the dashboard headline read this, so they always agree."""
+    ps = _to_date(period_start)
+    # Make end date inclusive by querying < (end + 1 day)
+    d_to_inclusive = _to_date(period_end) + timedelta(days=1)
+
+    async with _tenant_connection() as conn:
+        # ── delivery/pickup orders ──────────────────────────────────────────
+        if location_id is not None:
+            order_rows = await conn.fetch(
+                """SELECT channel, order_type, total, created_at
+                   FROM orders
+                   WHERE created_at >= $1 AND created_at < $2
+                     AND paid = TRUE
+                     AND location_id = $3""",
+                ps, d_to_inclusive, location_id,
+            )
+        else:
+            order_rows = await conn.fetch(
+                """SELECT channel, order_type, total, created_at
+                   FROM orders
+                   WHERE created_at >= $1 AND created_at < $2
+                     AND paid = TRUE""",
+                ps, d_to_inclusive,
+            )
+
+        # ── salon table orders ──────────────────────────────────────────────
+        if location_id is not None:
+            table_rows = await conn.fetch(
+                # branch_id-guard-allow: location_id passed by caller; table_orders.branch_id == location_id post-0057
+                """SELECT channel, total, created_at
+                   FROM table_orders
+                   WHERE created_at >= $1 AND created_at < $2
+                     AND status NOT IN ('cancelado')
+                     AND branch_id = $3""",
+                ps, d_to_inclusive, location_id,
+            )
+        else:
+            table_rows = await conn.fetch(
+                """SELECT channel, total, created_at
+                   FROM table_orders
+                   WHERE created_at >= $1 AND created_at < $2
+                     AND status NOT IN ('cancelado')""",
+                ps, d_to_inclusive,
+            )
+    return order_rows, table_rows
+
+
+async def db_sales_daily(
+    period_start: str,
+    period_end: str,
+    location_id: int | None = None,
+) -> dict[str, dict]:
+    """Sales per day ({"YYYY-MM-DD": {"total": Decimal, "count": int}}) with
+    the same rules as db_sales_by_channel. Days without sales are absent.
+
+    Requires an active tenant_scope(org_id)."""
+    order_rows, table_rows = await _fetch_sales_rows(period_start, period_end, location_id)
+    days: dict[str, dict] = {}
+    for row in [*order_rows, *table_rows]:
+        day = row["created_at"].date().isoformat()
+        d = days.setdefault(day, {"total": Decimal("0"), "count": 0})
+        d["total"] += to_decimal(row["total"])
+        d["count"] += 1
+    return days
+
+
 async def db_sales_by_channel(
     org_id: int,
     period_start: str,
@@ -111,51 +182,7 @@ async def db_sales_by_channel(
     channel breakdown.  Both tables are RLS-protected via org_id; the caller
     must be inside tenant_scope(org_id).
     """
-    from datetime import timedelta as _td  # noqa: PLC0415
-
-    ps = _to_date(period_start)
-    # Make end date inclusive by querying < (end + 1 day)
-    d_to_inclusive = _to_date(period_end) + _td(days=1)
-
-    async with _tenant_connection() as conn:
-        # ── delivery/pickup orders ──────────────────────────────────────────
-        if location_id is not None:
-            order_rows = await conn.fetch(
-                """SELECT channel, order_type, total
-                   FROM orders
-                   WHERE created_at >= $1 AND created_at < $2
-                     AND paid = TRUE
-                     AND location_id = $3""",
-                ps, d_to_inclusive, location_id,
-            )
-        else:
-            order_rows = await conn.fetch(
-                """SELECT channel, order_type, total
-                   FROM orders
-                   WHERE created_at >= $1 AND created_at < $2
-                     AND paid = TRUE""",
-                ps, d_to_inclusive,
-            )
-
-        # ── salon table orders ──────────────────────────────────────────────
-        if location_id is not None:
-            table_rows = await conn.fetch(
-                # branch_id-guard-allow: location_id passed by caller; table_orders.branch_id == location_id post-0057
-                """SELECT channel, total
-                   FROM table_orders
-                   WHERE created_at >= $1 AND created_at < $2
-                     AND status NOT IN ('cancelado')
-                     AND branch_id = $3""",
-                ps, d_to_inclusive, location_id,
-            )
-        else:
-            table_rows = await conn.fetch(
-                """SELECT channel, total
-                   FROM table_orders
-                   WHERE created_at >= $1 AND created_at < $2
-                     AND status NOT IN ('cancelado')""",
-                ps, d_to_inclusive,
-            )
+    order_rows, table_rows = await _fetch_sales_rows(period_start, period_end, location_id)
 
     # ── aggregate ──────────────────────────────────────────────────────────
     buckets: dict[str, dict] = {}

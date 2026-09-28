@@ -864,7 +864,8 @@ function _renderDishModalBody(dish) {
   // ── 4. Tags (dietary) ─────────────────────────────────────────────
   const tagsSection = _makeChipsSection(
     'Categorías dietarias',
-    Object.keys(DISH_LABELS.tags),
+    // "Popular" is offered once, as a badge; old dishes keep these tags on re-save.
+    Object.keys(DISH_LABELS.tags).filter(s => s !== 'popular' && s !== 'popular_latam'),
     dish.tags || [],
     'tags',
     'tag',
@@ -1293,9 +1294,11 @@ async function saveMenuEditor() {
     });
 
     if (r.ok) {
-      mesioToast('Carta actualizada en la Casa Matriz', 'success');
+      mesioToast('Carta guardada', 'success');
       closeMenuEditor();
       loadMenu();
+      // The page that hosts the editor owns the dish list; tell it to reload.
+      document.dispatchEvent(new CustomEvent('mesio:menu-saved'));
     } else {
       const e = await r.json().catch(() => ({}));
       mesioToast('Error al guardar: ' + (e.detail || 'Fallo desconocido'), 'error');

@@ -266,7 +266,7 @@ function _buildTile(tbl) {
   // Number label
   var numDiv = document.createElement('div');
   numDiv.className = 'tn';
-  numDiv.textContent = tbl.table_number || tbl.id;
+  numDiv.textContent = tbl.number || tbl.id;
   tile.appendChild(numDiv);
 
   // Status + capacity inline: "LIBRE · 4P"
@@ -428,7 +428,7 @@ function _openPropsModal(tableId) {
   var tbl = _tables.find(function (t) { return String(t.id) === String(tableId); });
   if (!tbl) return;
 
-  el('propNum').value      = tbl.table_number || '';
+  el('propNum').value      = tbl.number || '';
   el('propName').value     = tbl.name || '';
   el('propCapacity').value = tbl.capacity || '';
   el('propType').value     = tbl.table_type || 'interior';
@@ -465,7 +465,7 @@ async function _saveProps() {
 async function _deleteTable() {
   if (!_propsTableId) return;
   var tbl = _tables.find(function (t) { return String(t.id) === String(_propsTableId); });
-  var name = tbl ? 'Mesa ' + (tbl.table_number || _propsTableId) : 'esta mesa';
+  var name = tbl ? 'Mesa ' + (tbl.number || _propsTableId) : 'esta mesa';
   var ok = await mesioConfirm('¿Eliminar ' + name + '? Esta acción no se puede deshacer.', { confirmText: 'Eliminar', danger: true });
   if (!ok) return;
   try {
@@ -508,7 +508,7 @@ async function _createTable() {
     }
     var created = await r.json();
     var tableId = created.table_id;
-    var tableName = created.name || ('Mesa ' + tableId);
+    var tableName = 'Mesa ' + (created.name || tableId);
 
     // Step 2: if user filled capacity/type/zone, apply via PUT /api/tables/{id}/properties
     var capacity   = parseInt(el('ntCapacity').value) || null;
@@ -612,7 +612,7 @@ async function selectTable(tableId) {
   var status = (tbl.status || 'free').toLowerCase();
   var numEl = el('dNum');
   if (numEl) {
-    numEl.textContent = 'M' + (tbl.table_number || tbl.id);
+    numEl.textContent = 'M' + (tbl.number || tbl.id);
     var stateColors = { seated: 'fp-sentados-text', eating: 'fp-ocupada-text', billing: 'fp-factura-text', reserved: 'fp-reservada-text' };
     numEl.style.color = 'var(--' + (stateColors[status] || 'fp-libre-text') + ')';
   }
@@ -855,7 +855,7 @@ function renderQrGrid() {
 
     var name = document.createElement('div');
     name.className = 'qr-card-name';
-    name.textContent = 'Mesa ' + (tbl.table_number || tbl.id);
+    name.textContent = 'Mesa ' + (tbl.number || tbl.id);
     card.appendChild(name);
 
     var meta = document.createElement('div');
@@ -951,7 +951,7 @@ function _populateReservationTables() {
     var opt = document.createElement('option');
     opt.value = t.id;
     var cap = t.capacity ? ' (' + t.capacity + 'p)' : '';
-    opt.textContent = 'Mesa ' + (t.table_number || t.id) + (t.zone ? ' — ' + t.zone : '') + cap;
+    opt.textContent = 'Mesa ' + (t.number || t.id) + (t.zone ? ' — ' + t.zone : '') + cap;
     sel.appendChild(opt);
   });
   if (current) sel.value = current;
