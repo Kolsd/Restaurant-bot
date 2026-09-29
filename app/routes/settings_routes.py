@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Request, HTTPException, Depends
-from anthropic import Anthropic
 
 from app.services import database as db
 from app.routes.deps import (
@@ -16,7 +15,6 @@ from app.routes.deps import (
     may_span_locations, resolve_sede_filter,
 )
 from app.repositories import restaurant_repo, tables_repo as tr
-from app.repositories import weekly_reports_repo
 from app.services.tenant_context import bypass_tenant_scope, tenant_scope
 from app.services.logging import get_logger
 from app.services import state_store
@@ -414,134 +412,6 @@ async def unblock_phone(phone: str, request: Request):
         org_id=org_id,
     )
     return {"success": True, "phone": phone_clean}
-
-
-# ── WEEKLY REPORTS ────────────────────────────────────────────────────
-
-_PHONE_RE = re.compile(r"^\+?\d{10,15}$")
-
-
-class WeeklyReportSettings(BaseModel):
-    enabled: bool | None = None
-    owner_phone: str | None = None
-    timezone: str | None = None
-
-
-@router.get("/api/weekly-reports")
-async def get_weekly_reports(
-    restaurant: dict = Depends(get_current_restaurant),
-):
-    """Return the last 12 weekly reports and current settings for the authenticated restaurant."""
-    restaurant_id = restaurant["id"]
-
-    with tenant_scope(restaurant_id):
-        reports_raw = await weekly_reports_repo.get_recent_reports(restaurant_id, limit=12)
-
-    reports = []
-    for r in reports_raw:
-        reports.append({
-            "id": r["id"],
-            "week_start": r["week_start"].isoformat() if hasattr(r.get("week_start"), "isoformat") else str(r.get("week_start", "")),
-            "generated_at": r["generated_at"].isoformat() + "Z" if r.get("generated_at") else None,
-            "sent_at": r["sent_at"].isoformat() + "Z" if r.get("sent_at") else None,
-            "delivery_status": r.get("delivery_status"),
-            "error_message": r.get("error_message"),
-            "payload": r.get("payload"),
-        })
-
-    raw_features = restaurant.get("features") or {}
-    if isinstance(raw_features, str):
-        try:
-            features = json.loads(raw_features)
-        except Exception:
-            features = {}
-    else:
-        features = dict(raw_features)
-
-    settings = {
-        "enabled": features.get("weekly_report_enabled", True),
-        "owner_phone": features.get("owner_phone"),
-        "timezone": features.get("timezone") or "America/Bogota",
-    }
-
-    return {"reports": reports, "settings": settings}
-
-
-@router.patch("/api/weekly-reports/settings")
-async def patch_weekly_report_settings(
-    body: WeeklyReportSettings,
-    restaurant: dict = Depends(get_current_restaurant),
-):
-    """Update weekly report settings (enabled flag, owner_phone, timezone)."""
-    restaurant_id = restaurant["id"]
-
-    with tenant_scope(restaurant_id):
-        # ── Validate owner_phone ──────────────────────────────────────────
-        if body.owner_phone is not None:
-            phone = body.owner_phone.strip()
-            if phone == "":
-                # Empty string clears the phone
-                phone = None
-            else:
-                # Normalize: leading "00" → "+"
-                if phone.startswith("00"):
-                    phone = "+" + phone[2:]
-                if not _PHONE_RE.match(phone):
-                    raise HTTPException(
-                        status_code=422,
-                        detail="owner_phone debe seguir el formato E.164 (ej. +573001234567, 10–15 dígitos)",
-                    )
-            await restaurant_repo.db_update_restaurant_owner_phone(restaurant_id, phone)
-            log.info("weekly_reports.settings.phone_updated", restaurant_id=restaurant_id)
-
-        # ── Validate timezone ─────────────────────────────────────────────
-        if body.timezone is not None:
-            tz_str = body.timezone.strip()
-            if tz_str == "":
-                raise HTTPException(
-                    status_code=422,
-                    detail="timezone no puede ser vacío. Usa un nombre IANA válido (ej. America/Bogota)",
-                )
-            try:
-                ZoneInfo(tz_str)
-            except ZoneInfoNotFoundError:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"timezone inválido: '{tz_str}'. Usa un nombre IANA válido (ej. America/Bogota, America/New_York)",
-                )
-            await restaurant_repo.db_update_restaurant_timezone(restaurant_id, tz_str)
-            log.info("weekly_reports.settings.timezone_updated", restaurant_id=restaurant_id, timezone=tz_str)
-
-        # ── Update enabled flag in features JSONB ────────────────────────
-        if body.enabled is not None:
-            await restaurant_repo.db_merge_restaurant_features(
-                restaurant_id, {"weekly_report_enabled": body.enabled}
-            )
-            log.info(
-                "weekly_reports.settings.enabled_updated",
-                restaurant_id=restaurant_id,
-                enabled=body.enabled,
-            )
-
-    # ── Re-fetch to return authoritative state (restaurant_id is org_id) ──
-    updated = await db.db_get_restaurant_by_org_id(restaurant_id)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
-    raw_features = updated.get("features") or {}
-    if isinstance(raw_features, str):
-        try:
-            features = json.loads(raw_features)
-        except Exception:
-            features = {}
-    else:
-        features = dict(raw_features)
-
-    return {
-        "enabled": features.get("weekly_report_enabled", True),
-        "owner_phone": updated.get("owner_phone"),
-        "timezone": updated.get("timezone") or "America/Bogota",
-    }
 
 
 # ── ONBOARDING STATUS ────────────────────────────────────────────────
@@ -1015,56 +885,6 @@ async def session_alert_waiter(
     return {"success": True}
 
 
-# ── AI PROXY ─────────────────────────────────────────────────────────
-
-class _AIProxyRequest(BaseModel):
-    system: str
-    user: str
-    max_tokens: int = 1000
-
-
-_ai_client: Anthropic | None = None
-
-
-def _get_ai_client() -> Anthropic:
-    global _ai_client
-    if _ai_client is None:
-        _ai_client = Anthropic()
-    return _ai_client
-
-
-@router.post("/api/ai/proxy")
-async def ai_proxy(payload: _AIProxyRequest, request: Request, _user: str = Depends(require_auth)):
-    """
-    Authenticated proxy for AI model calls from the dashboard.
-    ANTHROPIC_API_KEY lives only on the server — never exposed to the client.
-    Requires a valid admin Bearer token.
-    Rate limit: 20 req/min per authenticated user.
-    """
-    # ── Rate limit: 20 req/min per user ───────────────────────────────────────
-    rl_key = f"ai_proxy:{_user}"
-    allowed = await state_store.rate_limit_check(rl_key, max_requests=20, window_seconds=60)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="Demasiadas solicitudes al proxy de IA. Espera un momento e intenta de nuevo.",
-        )
-
-    max_tok = min(max(1, payload.max_tokens), 1000)  # clamp 1–1000 (conservador)
-    try:
-        client = _get_ai_client()
-        resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=max_tok,
-            system=payload.system,
-            messages=[{"role": "user", "content": payload.user}],
-        )
-        text = resp.content[0].text if resp.content else ""
-        return {"text": text}
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"AI service error: {exc}") from exc
-
-
 # ── CATÁLOGO VISUAL v2 — Image endpoints ──────────────────────────────────────
 
 class _ImageSignRequest(BaseModel):
@@ -1252,93 +1072,3 @@ async def get_dishes_missing_photos(
         "missing_count": len(missing),
         "missing":       missing,
     }
-
-
-# ── Catalog v2: menu engineering analytics (Fase 5b) ─────────────────────────
-
-@router.get("/api/menu/analytics")
-async def menu_analytics(
-    days: int = 30,
-    restaurant: dict = Depends(get_current_restaurant),
-):
-    """
-    Return per-dish event counts and menu-engineering quadrant matrix.
-    Auth: admin/owner Bearer token.
-    Query param: days (default 30, max 365).
-    """
-    from app.repositories import menu_analytics_repo
-
-    days = max(1, min(days, 365))
-    restaurant_id = restaurant["id"]
-
-    with tenant_scope(restaurant_id):
-        per_dish = await menu_analytics_repo.get_dish_analytics(restaurant_id, days)
-        matrix   = await menu_analytics_repo.get_menu_engineering_matrix(restaurant_id, days)
-
-    return {"per_dish": per_dish, "matrix": matrix}
-
-
-@router.get("/api/menu/analytics/export")
-async def menu_analytics_export(
-    days: int = 30,
-    restaurant: dict = Depends(get_current_restaurant),
-):
-    """
-    Export menu engineering data as CSV download.
-    Aggregates per_dish stats + quadrant classification from get_menu_engineering_matrix.
-    Auth: admin/owner Bearer token.
-    """
-    import io
-    import csv
-    from fastapi.responses import StreamingResponse
-    from app.repositories import menu_analytics_repo
-
-    days = max(1, min(days, 365))
-    restaurant_id = restaurant["id"]
-
-    with tenant_scope(restaurant_id):
-        per_dish = await menu_analytics_repo.get_dish_analytics(restaurant_id, days)
-        matrix   = await menu_analytics_repo.get_menu_engineering_matrix(restaurant_id, days)
-
-    # Build quadrant lookup: dish_name -> quadrant label
-    quad_lookup: dict[str, str] = {}
-    for q_name, label in (
-        ("stars", "Star"),
-        ("puzzles", "Puzzle"),
-        ("plowhorses", "Plowhorse"),
-        ("dogs", "Dog"),
-    ):
-        for entry in matrix.get(q_name, []) or []:
-            quad_lookup[entry["dish_name"]] = label
-
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow([
-        "Plato",
-        "Vistas",
-        "Apertura modal",
-        "Agregados al carrito",
-        "Pedidos",
-        "Conversión vista→carrito (%)",
-        "Conversión carrito→pedido (%)",
-        "Cuadrante",
-    ])
-    for row in per_dish:
-        writer.writerow([
-            row.get("dish_name", ""),
-            row.get("views", 0),
-            row.get("modal_opens", 0),
-            row.get("add_to_carts", 0),
-            row.get("orders", 0),
-            round((row.get("cart_conversion_rate", 0) or 0) * 100, 2),
-            round((row.get("order_conversion_rate", 0) or 0) * 100, 2),
-            quad_lookup.get(row.get("dish_name", ""), ""),
-        ])
-
-    buf.seek(0)
-    filename = f"menu-engineering-{restaurant_id}-{days}d.csv"
-    return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )

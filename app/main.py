@@ -54,7 +54,6 @@ from app.routes.staff_delivery import router as staff_delivery_router
 from app.routes.staff_webauthn import router as staff_webauthn_router
 from app.routes.staff_comms import router as staff_comms_router
 from app.routes.reservations import router as reservations_router
-from app.routes.reviews import router as reviews_router
 from app.routes.health import router as health_router
 from app.routes.subscription import router as subscription_router
 from app.routes.billing_subscription import router as billing_subscription_router
@@ -340,7 +339,6 @@ _maybe_include("staff", staff_router)
 _maybe_include("staff_delivery", staff_delivery_router)
 _maybe_include("staff_webauthn", staff_webauthn_router)
 _maybe_include("staff_comms", staff_comms_router)
-_maybe_include("reviews", reviews_router)
 # ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
 app.include_router(internal_crm_router)
 app.include_router(internal_admin_router)

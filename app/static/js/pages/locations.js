@@ -458,44 +458,6 @@
     }
   }
 
-  // ── AI Benchmark ─────────────────────────────────────────────────
-
-  async function loadBenchmark() {
-    const aiEl = document.getElementById('ai-benchmark');
-    if (!aiEl) return;
-    try {
-      const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-
-      // Gather the consolidated numbers first for the AI prompt
-      const consRes = await fetch('/api/stats/branches-consolidated?days=30', { headers });
-      if (!consRes.ok) return;
-      const consData = await consRes.json();
-
-      const fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
-      const salesTxt = consData.total_sales   != null ? fmt(consData.total_sales) : 'N/A';
-      const npsTxt   = consData.avg_nps       != null ? String(consData.avg_nps)  : 'N/A';
-      const growthTxt = consData.growth_yoy   != null ? consData.growth_yoy + '%' : 'N/A';
-
-      const aiRes = await fetch('/api/ai/proxy', {
-        method: 'POST',
-        headers: Object.assign({ 'Content-Type': 'application/json' }, headers),
-        body: JSON.stringify({
-          prompt: 'Análisis ejecutivo conciso (2 frases) para el dueño de un restaurante multi-sede. ' +
-            'Ventas totales 30 días: ' + salesTxt + '. NPS promedio: ' + npsTxt + '. ' +
-            'Crecimiento YoY: ' + growthTxt + '. ' +
-            consData.total_staff + ' empleados activos. Sé directo y accionable.',
-          max_tokens: 130
-        })
-      });
-      if (aiRes.ok) {
-        const aiData = await aiRes.json();
-        const text = (aiData.content || aiData.response || aiData.text || '').trim();
-        if (text) aiEl.textContent = text; // textContent — untrusted LLM output
-      }
-    } catch (_) { /* AI benchmark is best-effort */ }
-  }
-
   loadConsolidated(7);
   loadComparison(30);
-  loadBenchmark();
 })();

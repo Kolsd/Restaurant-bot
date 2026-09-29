@@ -301,7 +301,7 @@ class TestTopDishesCompare:
 # The 3 *_compare_empty_db tests were removed because they used TestClient(app)
 # against the real DB pool from within synchronous test methods — a pattern that
 # caused asyncpg "another operation is in progress" interference with
-# test_weekly_reports.py when both files ran in the same pytest session.
+# other DB tests in the same pytest session.
 #
 # Coverage is fully preserved by the unit tests above
 # (TestByChannelCompare.test_compare_true_zero_prev_returns_null_deltas,

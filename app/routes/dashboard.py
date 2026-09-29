@@ -4,7 +4,7 @@ the geocode helper, and the service worker.
 
 Business logic is split into:
   - app.routes.auth_routes   → /api/auth/*, /api/admin/*
-  - app.routes.settings_routes → /api/settings, /api/dashboard/*, /api/ai/proxy,
+  - app.routes.settings_routes → /api/settings, /api/dashboard/*,
                                   /api/orders/{id}/status, /api/table-sessions/*
   - app.routes.team_routes   → /api/team/*
 """
@@ -237,11 +237,6 @@ async def reservations_page():
 async def menu_admin_page():
     p = STATIC / "html" / "menu-admin.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Menu Admin no disponible</h1>", status_code=404)
-
-@router.get("/menu-engineering", response_class=HTMLResponse)
-async def menu_engineering_page():
-    p = STATIC / "html" / "menu-engineering.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Menu Engineering no disponible</h1>", status_code=404)
 
 @router.get("/nps", response_class=HTMLResponse)
 async def nps_page():

@@ -13,7 +13,7 @@ from app.routes.deps import (
     may_span_locations,
     resolve_sede_filter,
 )
-from app.repositories import reviews_repo as rr, conversations_repo
+from app.repositories import conversations_repo
 from app.repositories import stats_repo
 from app.services.money import quantize_money
 from app.services.sede_menu import parse_price
@@ -319,69 +319,6 @@ async def get_conversation(phone: str, request: Request):
     with tenant_scope(restaurant["id"]):
         details = await db.db_get_conversation_details(phone, restaurant["whatsapp_number"])
     return {"phone": phone, "history": details.get("history", []), "bot_paused": details.get("bot_paused", False)}
-
-# ── ADVANCED ANALYTICS ───────────────────────────────────────────────────────
-
-@router.get("/api/stats/turn-time")
-async def get_turn_time_stats(
-    request: Request,
-    period_start: str = Query(...),
-    period_end: str = Query(...),
-    branch_id: str | None = Query(None),
-):
-    """Average, min and max table turn times (closed sessions) for a period."""
-    restaurant = await get_current_restaurant(request)
-    bot_number = restaurant["whatsapp_number"]
-    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
-    with tenant_scope(restaurant["id"]):
-        stats = await rr.db_get_turn_time_stats(bot_number, period_start, period_end, branch_id=bid)
-    return stats
-
-
-@router.get("/api/stats/occupancy")
-async def get_occupancy_stats(
-    request: Request,
-    period_start: str = Query(...),
-    period_end: str = Query(...),
-    branch_id: str | None = Query(None),
-):
-    """Aggregated occupancy and utilization rates from 15-min snapshots."""
-    restaurant = await get_current_restaurant(request)
-    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
-    with tenant_scope(restaurant["id"]):
-        stats = await rr.db_get_occupancy_stats(
-            restaurant["id"], period_start, period_end, branch_id=bid
-        )
-    return stats
-
-
-@router.get("/api/stats/no-show-rate")
-async def get_no_show_rate(
-    request: Request,
-    period_start: str = Query(...),
-    period_end: str = Query(...),
-    branch_id: str | None = Query(None),
-):
-    """No-show rate derived from reservation stats for the given period."""
-    restaurant = await get_current_restaurant(request)
-    bot_number = restaurant["whatsapp_number"]
-    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
-    with tenant_scope(restaurant["id"]):
-        stats = await db.db_get_reservation_stats(
-            bot_number,
-            date_from=period_start,
-            date_to=period_end,
-            branch_id=bid,
-        )
-    total = stats.get("total", 0) or 0
-    no_shows = stats.get("no_show", 0) or 0
-    rate = round(no_shows / total * 100, 1) if total > 0 else 0.0
-    return {
-        "total_reservations": total,
-        "no_shows": no_shows,
-        "no_show_rate_pct": rate,
-    }
-
 
 # ── DASHBOARD ANALYTICS — TIER 2 ─────────────────────────────────────────────
 

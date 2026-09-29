@@ -56,47 +56,6 @@ def _captured_sql(conn) -> str:
     return " ".join(parts).lower()
 
 
-# ── 1. weekly_reports_repo.compute_weekly_stats ───────────────────────────────
-
-@pytest.mark.asyncio
-async def test_compute_weekly_stats_uses_org_id():
-    """delivery_row query must filter by l.org_id, NOT r.id."""
-    from datetime import date, timedelta
-    from app.repositories.weekly_reports_repo import compute_weekly_stats
-
-    # compute_weekly_stats executes 3 fetchrow calls (delivery, table, nps) then
-    # 1 fetchval call (dormant_count).
-    delivery_row = {
-        "revenue_current": 0, "revenue_previous": 0,
-        "count_current": 0, "count_previous": 0,
-    }
-    table_row = {
-        "revenue_current": 0, "revenue_previous": 0,
-        "count_current": 0, "count_previous": 0,
-    }
-    nps_row = {"nps_count": 0, "nps_avg": None, "reviews_public_new": 0}
-
-    conn = AsyncMock()
-    conn.fetchrow = AsyncMock(side_effect=[delivery_row, table_row, nps_row])
-    conn.fetch = AsyncMock(return_value=[])
-    conn.fetchval = AsyncMock(return_value=0)  # dormant_count
-
-    patch_path = "app.repositories.weekly_reports_repo._tenant_connection"
-    with patch(patch_path, _make_tenant_conn_ctx(conn)):
-        week_start = date.today()
-        week_end = week_start + timedelta(days=7)
-        await compute_weekly_stats(42, week_start, week_end)
-
-    sql = _captured_sql(conn)
-    assert "l.org_id" in sql, "Must filter by l.org_id (Wave-2 tenant key)"
-    assert "join locations" in sql, "Must JOIN locations to resolve org_id"
-    # The delivery (orders) query must use l.org_id, not a bare WHERE r.id = $1.
-    # (NPS query may legitimately use JOIN restaurants r ON r.id = $1 to get
-    # whatsapp_number — that's fine; we assert the org_id pattern is present
-    # to confirm the delivery fix landed.)
-    assert "l.org_id = $1" in sql, "Delivery query must specifically use l.org_id = $1"
-
-
 # ── 2. conversations_repo.db_save_nps_waiting (bot_number resolution) ─────────
 
 @pytest.mark.asyncio

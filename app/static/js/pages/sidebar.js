@@ -8,7 +8,7 @@
  *   3. Include this script before </body>.
  *
  * Valid page keys (data-active values):
- *   resumen | pedidos | reservaciones | salon | menu | menu-eng
+ *   resumen | pedidos | reservaciones | salon | menu
  *   nps | staff | nomina | sucursales
  *   settings | billing
  *
@@ -18,7 +18,6 @@
  *   reservations.html       → /reservations
  *   floorplan.html          → /floorplan
  *   menu-admin.html         → /menu-admin
- *   menu-engineering.html   → /menu-engineering
  *   nps.html                → /nps
  *   staff-hq.html           → /staff-hq   (employee portal — Agent B)
  *   payroll.html            → /payroll
@@ -73,17 +72,13 @@
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M3 8c0-2.8 2.2-5 5-5"/></svg>
         Menú
       </a>
-      <a class="sb-item" data-key="menu-eng" href="/menu-engineering">
-        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13V8l3-4h6l3 4v5"/><path d="M2 13h12M5 13v-3h6v3"/></svg>
-        Menu Engineering
-      </a>
     </div>
 
     <div class="sb-group">
       <div class="sb-group-label">Clientes</div>
       <a class="sb-item" data-key="nps" href="/nps">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5l1.8 4.2 4.5.4-3.4 3 1 4.4L8 11.2 4.1 13.5l1-4.4-3.4-3 4.5-.4z"/></svg>
-        NPS &amp; Reseñas
+        NPS
       </a>
     </div>
 
@@ -262,7 +257,7 @@
 
     if (operationalRoles.includes(role)) {
       // Operational staff: hide all admin sections, show only their page link
-      const adminKeys = ['resumen', 'pedidos', 'reservaciones', 'salon', 'menu', 'menu-eng',
+      const adminKeys = ['resumen', 'pedidos', 'reservaciones', 'salon', 'menu',
         'nps', 'staff', 'nomina', 'sucursales', 'settings', 'billing'];
       adminKeys.forEach(function(k) { hide(k); });
 

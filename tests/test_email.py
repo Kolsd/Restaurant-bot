@@ -4,7 +4,7 @@ tests/test_email.py
 Unit tests for app/services/email.py (provider-agnostic transactional email)
 and app/services/email_templates.py.
 
-Context: Mesio is retiring WhatsApp. Password resets, weekly owner reports,
+Context: Mesio is retiring WhatsApp. Password resets
 and the CRM welcome message all now go out via this module. There is NO
 Resend/SendGrid account yet — EMAIL_BACKEND defaults to "console" and MUST
 work with zero credentials so a missing/unset provider key can never
@@ -24,7 +24,6 @@ from app.services import email as email_mod
 from app.services.email_templates import (
     render_password_reset_email,
     render_welcome_email,
-    render_weekly_report_email,
 )
 
 
@@ -232,24 +231,4 @@ class TestEmailTemplates:
         assert "don.chepe" in html and "don.chepe" in text
         assert "Xk7mPz2q" in html and "Xk7mPz2q" in text
         assert "https://mesio.app/login" in html
-        assert subject
-
-    def test_weekly_report_email_wraps_message_text(self):
-        from datetime import date
-        msg = (
-            "📊 Reporte semanal — Restaurante Demo\n"
-            "Ventas: $3.200.000 (+14% vs semana anterior)\n"
-            "87 pedidos esta semana\n"
-            "Ver detalle en tu dashboard"
-        )
-        subject, html, text = render_weekly_report_email(
-            restaurant_name="Restaurante Demo",
-            message_text=msg,
-            dashboard_url="https://mesio.com/dashboard",
-            week_start=date(2026, 4, 6),
-            week_end=date(2026, 4, 13),
-        )
-        assert text == msg  # plain-text alt reuses the WhatsApp-style text verbatim
-        assert "https://mesio.com/dashboard" in html
-        assert "3.200.000" in html
         assert subject

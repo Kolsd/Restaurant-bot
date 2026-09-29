@@ -10,15 +10,12 @@ Design notes:
   - Inline styles only. Email clients (Outlook, Gmail app, etc.) are not
     browsers — no external stylesheets, no <style> blocks relied upon for
     critical layout, no JS.
-  - Spanish copy for Colombian restaurant owners — matches the tone used in
-    weekly_reports_repo.format_report_message and the existing WhatsApp
-    copy in whatsapp_messaging.py / routes/internal/crm.py.
+  - Spanish copy for Colombian restaurant owners.
   - Every function returns a plain-text alternative too. Some clients and
     spam filters penalize HTML-only email.
 """
 from __future__ import annotations
 
-from datetime import date
 from html import escape as _esc
 
 _BRAND_COLOR = "#1D9E75"        # tokens.css --brand
@@ -97,67 +94,6 @@ def render_password_reset_email(code: str, restaurant_name: str) -> tuple[str, s
 
 
 # ── 2. Weekly owner report ────────────────────────────────────────────────
-
-_MONTHS_ES = [
-    "", "enero", "febrero", "marzo", "abril", "mayo", "junio",
-    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
-]
-
-
-def render_weekly_report_email(
-    restaurant_name: str,
-    message_text: str,
-    dashboard_url: str,
-    week_start: date,
-    week_end: date,
-) -> tuple[str, str, str]:
-    """Wrap the existing WhatsApp-style report text into an HTML email.
-
-    `message_text` is `weekly_reports_repo.format_report_message(...)`'s
-    output — a short Spanish summary with emoji bullets. We reuse it
-    verbatim as the plain-text alternative and render each line as an HTML
-    paragraph/list item so the same underlying stats logic (untouched)
-    drives both channels.
-    """
-    from datetime import timedelta
-
-    last_day = week_end - timedelta(days=1)
-    month_name = _MONTHS_ES[week_start.month]
-    name = _esc(restaurant_name or "tu restaurante")
-    subject = f"Tu reporte semanal Mesio — {restaurant_name or 'tu restaurante'}"
-
-    # Split the WhatsApp-style message into non-empty lines and render each
-    # as its own paragraph, preserving the original text as the `text` alt.
-    lines = [ln for ln in message_text.split("\n") if ln.strip()]
-    # First line is the greeting/header — treat it separately for styling.
-    header_line = _esc(lines[0]) if lines else f"Tu reporte Mesio — semana del {week_start.day} al {last_day.day} de {month_name}"
-    body_lines = lines[1:] if len(lines) > 1 else []
-
-    items_html = "".join(
-        f'<p style="margin:0 0 10px;font-size:15px;">{_esc(line)}</p>'
-        for line in body_lines
-        if not line.startswith("Ver detalle")
-    )
-
-    body_html = f"""\
-      <p style="margin:0 0 4px;font-size:13px;color:{_MUTED_COLOR};text-transform:uppercase;letter-spacing:0.5px;">
-        Reporte semanal · {name}
-      </p>
-      <p style="margin:0 0 20px;font-size:17px;font-weight:bold;">{header_line}</p>
-      {items_html}
-      <div style="margin:24px 0 4px;text-align:center;">
-        <a href="{_esc(dashboard_url)}"
-           style="display:inline-block;background:{_BRAND_COLOR};color:#ffffff;text-decoration:none;
-                  padding:12px 28px;border-radius:8px;font-weight:bold;font-size:14px;">
-          Ver detalle en el dashboard
-        </a>
-      </div>
-    """
-    html = _wrap_html(header_line, body_html)
-    return subject, html, message_text
-
-
-# ── 3. Client welcome (CRM convert flow) ──────────────────────────────────
 
 def render_welcome_email(
     restaurant_name: str,
