@@ -243,11 +243,6 @@ async def nps_page():
     p = STATIC / "html" / "nps.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>NPS no disponible</h1>", status_code=404)
 
-@router.get("/payroll", response_class=HTMLResponse)
-async def payroll_page():
-    p = STATIC / "html" / "payroll.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Nómina no disponible</h1>", status_code=404)
-
 @router.get("/locations", response_class=HTMLResponse)
 async def locations_page():
     p = STATIC / "html" / "locations.html"

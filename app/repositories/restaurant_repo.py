@@ -1121,41 +1121,12 @@ def _register_sync_handler(type_name: str):
     return decorator
 
 
-@_register_sync_handler("staff_shift")
-async def _sync_staff_shift(conn, restaurant_id: int, data: dict):
-    """Upsert a staff_shifts record by its client-generated UUID.
-
-    Wave-2: the `restaurant_id` parameter name is the legacy interface
-    (kept for backwards compat with sync route signature) — the value is
-    the canonical tenant key (org_id), so we write it to the `org_id`
-    column. `location_id` is left NULL (post-0037d nullable) because the
-    offline client only knows its tenant, not which sede the shift was
-    clocked at; the staff_id FK still ties the row back to a sede.
-    """
-    await conn.execute(
-        """
-        INSERT INTO staff_shifts
-            (id, staff_id, org_id, clock_in, clock_out, notes)
-        VALUES ($1, $2::uuid, $3, $4::timestamptz, $5::timestamptz, $6)
-        ON CONFLICT (id) DO UPDATE
-            SET clock_out = EXCLUDED.clock_out,
-                notes     = EXCLUDED.notes
-        """,
-        data.get("id"),
-        data.get("staff_id"),
-        restaurant_id,
-        data.get("clock_in"),
-        data.get("clock_out"),
-        data.get("notes", ""),
-    )
-
-
 @_register_sync_handler("staff")
 async def _sync_staff(conn, restaurant_id: int, data: dict):
     """Upsert a staff record by its client-generated UUID.
 
-    Wave-2: same convention as _sync_staff_shift — the legacy
-    restaurant_id param name carries the tenant key (org_id) value.
+    Wave-2: the legacy restaurant_id param name carries the tenant key
+    (org_id) value.
     location_id is nullable post-0037d.
     """
     await conn.execute(

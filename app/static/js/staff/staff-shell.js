@@ -30,16 +30,14 @@
       icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6a4 4 0 018 0v2H4V6z"/><path d="M3 8h10v6H3z"/><path d="M6 11h4"/></svg>' },
     bar:     { label: 'Bar',        jsFile: 'bar.js',
       icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2h6l2 5H3L5 2z"/><path d="M3 7v7h10V7"/><path d="M7 10v4M9 10v4"/></svg>' },
-    courier: { label: 'Domicilios', jsFile: 'courier.js',
+    courier: { label: 'Repartos',   jsFile: 'courier.js',
       icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><path d="M1 3h2l2 7h6l2-5H5"/></svg>' },
-    myshift: { label: 'Mi turno',   jsFile: 'myshift.js',
-      icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l2.5 1.5"/></svg>' },
   };
   // Mirrors app.services.staff_sections.ALL_SECTIONS ordering exactly
-  // (cashier, delivery, waiter, kitchen, bar, courier, myshift) — "delivery"
+  // (cashier, delivery, waiter, kitchen, bar, courier) — "delivery"
   // (Domicilios) sits right after "cashier" since it's granted to the same
   // roles (docs/claude/delivery-web.md, "Cashier UI").
-  var SECTION_ORDER = ['cashier', 'delivery', 'waiter', 'kitchen', 'bar', 'courier', 'myshift'];
+  var SECTION_ORDER = ['cashier', 'delivery', 'waiter', 'kitchen', 'bar', 'courier'];
   var LAST_SECTION_KEY = 'rb_staff_last_section';
 
   var _currentSection = null;
@@ -122,7 +120,7 @@
     if (!nav) return;
     nav.innerHTML = '';
 
-    var opsKeys = SECTION_ORDER.filter(function (k) { return k !== 'myshift' && allowedSections.indexOf(k) !== -1; });
+    var opsKeys = SECTION_ORDER.filter(function (k) { return allowedSections.indexOf(k) !== -1; });
     var hasOps = opsKeys.length > 0;
 
     if (hasOps) {
@@ -136,16 +134,6 @@
       nav.appendChild(opsGroup);
     }
 
-    if (allowedSections.indexOf('myshift') !== -1) {
-      var meGroup = document.createElement('div');
-      meGroup.className = 'sb-group';
-      var meLabel = document.createElement('div');
-      meLabel.className = 'sb-group-label';
-      meLabel.textContent = 'Mi cuenta';
-      meGroup.appendChild(meLabel);
-      meGroup.appendChild(_navItem('myshift'));
-      nav.appendChild(meGroup);
-    }
   }
 
   function _navItem(key) {
@@ -230,7 +218,7 @@
     try { fromStorage = localStorage.getItem(LAST_SECTION_KEY); } catch (e) { /* ignore */ }
     if (fromStorage && allowedSections.indexOf(fromStorage) !== -1) return fromStorage;
 
-    return allowedSections[0] || 'myshift';
+    return allowedSections[0] || null;
   }
 
   // ── Mobile drawer ──────────────────────────────────────────────────
@@ -313,10 +301,22 @@
       if (res.status === 401) { localStorage.clear(); window.location.href = '/login'; return; }
       if (!res.ok) throw new Error('status ' + res.status);
       const data = await res.json();
-      sections = Array.isArray(data.sections) && data.sections.length ? data.sections : ['myshift'];
+      sections = Array.isArray(data.sections) ? data.sections : [];
     } catch (e) {
-      console.error('staff-shell: /api/staff/sections failed, defaulting to Mi turno only', e);
-      sections = ['myshift'];
+      console.error('staff-shell: /api/staff/sections failed', e);
+      sections = [];
+    }
+
+    if (!sections.length) {
+      // A role that grants no section ("otro"): say so instead of a blank page.
+      var emptyRoot = document.getElementById('staff-section-root');
+      if (emptyRoot) {
+        var msg = document.createElement('p');
+        msg.style.cssText = 'padding:32px;color:var(--text-3);font-size:14px;';
+        msg.textContent = 'Tu usuario todavía no tiene un rol con pantalla asignada. Pídele al administrador que te asigne uno (mesero, caja, cocina, bar o domiciliario).';
+        emptyRoot.appendChild(msg);
+      }
+      return;
     }
 
     _allowedSectionsCache = sections;

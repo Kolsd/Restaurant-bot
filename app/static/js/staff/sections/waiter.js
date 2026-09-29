@@ -83,10 +83,6 @@
         <div class="m-act-val" id="m-stat-ventas">—</div>
       </div>
       <div class="m-act-metric">
-        <div class="m-act-label">Propinas hoy</div>
-        <div class="m-act-val" id="m-stat-propinas">—</div>
-      </div>
-      <div class="m-act-metric">
         <div class="m-act-label">Mesas atendidas</div>
         <div class="m-act-val" id="m-stat-mesas">—</div>
       </div>
@@ -826,14 +822,6 @@ async function _updateActionBar() {
     setVal('m-stat-ventas', data.total_sales != null ? mesioFmt(data.total_sales) : '—');
     setVal('m-stat-mesas', data.tables_served != null ? String(data.tables_served) : '—');
     setVal('m-stat-ticket', data.avg_ticket != null ? mesioFmt(data.avg_ticket) : '—');
-  } catch (_) { /* non-critical */ }
-
-  try {
-    const res2 = await fetch('/api/stats/tips-pool', { headers: _hdr() });
-    if (!res2.ok) return;
-    const data2 = await res2.json();
-    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    setVal('m-stat-propinas', data2.my_pool != null ? mesioFmt(data2.my_pool) : '—');
   } catch (_) { /* non-critical */ }
 }
 

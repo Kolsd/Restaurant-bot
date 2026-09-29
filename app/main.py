@@ -51,8 +51,6 @@ from app.routes import nps, inventory
 from app.routes.sync import router as sync_router
 from app.routes.staff import router as staff_router
 from app.routes.staff_delivery import router as staff_delivery_router
-from app.routes.staff_webauthn import router as staff_webauthn_router
-from app.routes.staff_comms import router as staff_comms_router
 from app.routes.reservations import router as reservations_router
 from app.routes.health import router as health_router
 from app.routes.subscription import router as subscription_router
@@ -156,7 +154,6 @@ async def security_headers_middleware(request: Request, call_next):
     # before this middleware — keeps it.
     if response.headers.get("content-type", "").startswith("text/html"):
         response.headers.setdefault("Cache-Control", "no-cache")
-    # WebAuthn (publickey-credentials-*) required for biometric staff clock-in.
     # geolocation=(self) — NOT (): the delivery/pickup ordering page
     # (docs/claude/delivery-web.md chunk 5, /pedir/{slug}) calls
     # navigator.geolocation.getCurrentPosition() from OUR OWN origin to
@@ -166,7 +163,7 @@ async def security_headers_middleware(request: Request, call_next):
     # entire entry flow. `self` still denies every third-party/iframe embed.
     response.headers["Permissions-Policy"] = (
         "geolocation=(self), microphone=(), camera=(), "
-        "publickey-credentials-get=*, publickey-credentials-create=*"
+        "publickey-credentials-get=(), publickey-credentials-create=()"
     )
     # HSTS — only set over HTTPS to avoid breaking local dev over plain HTTP
     if request.url.scheme == "https":
@@ -296,7 +293,7 @@ app.mount("/static", _CachedStaticFiles(directory=str(STATIC_DIR)), name="static
 # DISABLED_MODULES env var is a comma-separated list of module keys to skip.
 # Default is empty — all revenue-bearing modules are ON. Per-plan enforcement
 # comes from plan_limits (db_check_caps in agent.py), not from this gate.
-# To disable specific modules, set: DISABLED_MODULES="staff_webauthn"
+# To disable specific modules, set: DISABLED_MODULES="reservations"
 _DEFAULT_DISABLED = ""
 _disabled_modules = {
     m.strip()
@@ -337,8 +334,6 @@ app.include_router(signup_router)
 # Feature-gated (disabled by default for MVP bot scope)
 _maybe_include("staff", staff_router)
 _maybe_include("staff_delivery", staff_delivery_router)
-_maybe_include("staff_webauthn", staff_webauthn_router)
-_maybe_include("staff_comms", staff_comms_router)
 # ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
 app.include_router(internal_crm_router)
 app.include_router(internal_admin_router)

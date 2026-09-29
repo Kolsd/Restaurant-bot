@@ -640,11 +640,6 @@ _MODULE_RULES: dict = {
         ["order"],
         "no utiliza sistema de mesas — todos los pedidos son externos",
     ),
-    "staff_tips": (
-        "Sistema de Propinas para Staff",
-        [],
-        "no cuenta con sistema de distribución de propinas activo",
-    ),
 }
 
 

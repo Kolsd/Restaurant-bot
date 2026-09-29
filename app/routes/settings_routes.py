@@ -3,10 +3,8 @@ Settings routes: restaurant settings (GET/POST) and all /api/dashboard/* data en
 Also includes the order-status update and table-session helpers that power the dashboard UI.
 """
 import json
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Request, HTTPException, Depends
 
 from app.services import database as db

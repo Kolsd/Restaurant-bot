@@ -20,7 +20,7 @@ Seeding strategy:
   - Wrap every test in a rolled-back transaction via the `db_conn` fixture
   - Set app.org_id GUC explicitly on the raw connection to satisfy RLS policies
 
-Fixture pattern mirrors test_loyalty_aggregates.py:
+Fixture pattern:
   - _ConnProxy / _PoolShim / _AcquireCtx — work around asyncpg Connection __slots__
   - async def _fake_get_pool() — patch target for app.services.database.get_pool
   - SET LOCAL ROLE mesio_app — enforce RLS (test pool connects as postgres superuser)
@@ -43,7 +43,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-# ── Connection proxy helpers (mirror test_loyalty_aggregates.py) ──────────────
+# ── Connection proxy helpers ─────────────────────────────────────────────────
 
 
 class _ConnProxy:
@@ -95,42 +95,6 @@ class _AcquireCtx:
         pass
 
 
-def _strip_tz(args):
-    """Strip tzinfo from all datetime args so they work with TIMESTAMP WITHOUT TIME ZONE columns.
-
-    orders.created_at (and most timestamp columns in this schema) are
-    TIMESTAMP WITHOUT TIME ZONE.  db_branches_consolidated / db_branches_comparison
-    use datetime.now(timezone.utc) which produces tz-aware datetimes; asyncpg
-    rejects those for tz-naive columns.  Stripping tzinfo is safe here because
-    the DB timezone is UTC.
-    """
-    from datetime import datetime
-    return tuple(
-        v.replace(tzinfo=None) if isinstance(v, datetime) and v.tzinfo is not None else v
-        for v in args
-    )
-
-
-class _TzStripProxy(_ConnProxy):
-    """Like _ConnProxy but strips tzinfo from all datetime query args.
-
-    Used for stats tests that call repo functions which pass tz-aware datetimes
-    to TIMESTAMP WITHOUT TIME ZONE columns.
-    """
-
-    async def execute(self, query, *args, **kw):
-        return await object.__getattribute__(self, "_c").execute(query, *_strip_tz(args), **kw)
-
-    async def fetch(self, query, *args, **kw):
-        return await object.__getattribute__(self, "_c").fetch(query, *_strip_tz(args), **kw)
-
-    async def fetchrow(self, query, *args, **kw):
-        return await object.__getattribute__(self, "_c").fetchrow(query, *_strip_tz(args), **kw)
-
-    async def fetchval(self, query, *args, **kw):
-        return await object.__getattribute__(self, "_c").fetchval(query, *_strip_tz(args), **kw)
-
-
 # ── Module-level fixture: connection pool ─────────────────────────────────────
 
 
@@ -146,12 +110,12 @@ async def raw_pool():
 
 @pytest.fixture
 async def db_conn(raw_pool, monkeypatch):
-    """Yield a rolled-back _TzStripProxy with get_pool mocked.
+    """Yield a rolled-back _ConnProxy with get_pool mocked.
 
-    Mirrors test_loyalty_aggregates.py exactly, plus timezone stripping:
-      - wraps raw connection in _TzStripProxy to avoid __slots__ issues AND to
-        strip tzinfo from datetime query args (orders.created_at is TIMESTAMP
-        WITHOUT TIME ZONE; stats_repo passes datetime.now(timezone.utc))
+      - wraps raw connection in _ConnProxy to avoid __slots__ issues. It does
+        NOT touch query args: a tz-stripping proxy used to live here and hid a
+        500 on every /locations load (2026-09-29) — the repo passed aware
+        datetimes to TIMESTAMP WITHOUT TIME ZONE columns.
       - patches app.services.database.get_pool with an async function returning _PoolShim
       - SET LOCAL ROLE mesio_app so RLS policies actually enforce
         (test pool connects as postgres/superuser — without this, FORCE RLS is bypassed)
@@ -160,7 +124,7 @@ async def db_conn(raw_pool, monkeypatch):
     from app.services import database as db_module
 
     async with raw_pool.acquire() as conn:
-        proxy = _TzStripProxy(conn)
+        proxy = _ConnProxy(conn)
         shim = _PoolShim(proxy)
 
         # get_pool is async in app.services.database; mock must be too.

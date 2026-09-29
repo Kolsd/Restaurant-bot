@@ -47,7 +47,6 @@
           <a class="set-nav-item" href="#dian">📄 DIAN / Facturación</a>
           <a class="set-nav-item" href="#notif">🔔 Notificaciones</a>
           <div class="set-nav-sub">Plataforma</div>
-          <a class="set-nav-item" href="#kiosko">📱 Kiosko de personal</a>
           <a class="set-nav-item" href="#seguridad">🛡️ Seguridad</a>
           <a class="set-nav-item danger" href="#peligro">⚠️ Zona peligrosa</a>
         </nav>
@@ -369,23 +368,6 @@
 
           </section>
 
-          <!-- Staff kiosk -->
-          <section id="kiosko" class="card set-sec">
-            <h2>Kiosko de personal</h2>
-            <div class="s-sub">Esta URL es la dirección que tu tablet compartida usa para que los empleados fichen su entrada y salida. Abrí este link en el navegador de la tablet y agregalo a la pantalla de inicio.</div>
-
-            <div class="field-group">
-              <div>
-                <label class="fg-label" for="kiosko-url-input">URL del kiosko</label>
-                <div class="fg-hint">Copiá este link y abrilo en la tablet compartida del equipo.</div>
-              </div>
-              <div class="kiosko-url-row">
-                <input id="kiosko-url-input" class="input mono" type="text" readonly aria-label="URL del kiosko de personal" />
-                <button class="btn brand" id="kiosko-copy-btn" type="button">Copiar URL</button>
-              </div>
-            </div>
-          </section>
-
           <!-- Security: phone blocklist -->
           <section id="seguridad" class="card set-sec">
             <h2>Seguridad &middot; Teléfonos bloqueados</h2>
@@ -462,7 +444,7 @@
             <div class="field-group">
               <div>
                 <div class="fg-label">Eliminar restaurante</div>
-                <div class="fg-hint">Borra todo: menú, pedidos, clientes, nómina. No se puede deshacer.</div>
+                <div class="fg-hint">Borra todo: menú, pedidos, clientes, equipo. No se puede deshacer.</div>
               </div>
               <div>
                 <button class="btn" id="btnDelete" disabled style="background:#FEE2E2;color:#991B1B;border-color:#FCA5A5;opacity:0.6;cursor:not-allowed;">

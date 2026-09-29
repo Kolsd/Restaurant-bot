@@ -99,7 +99,6 @@ function _setupChrome() {
   const features = _features();
   if (features.module_reservations === false)   _hideNav('nav-reservaciones');
   if (!features.module_nps)                     _hideNav('nav-nps');
-  if (!features.staff_tips)                     _hideNav('nav-payroll');
   if (!(role.includes('owner')))                _hideNav('nav-equipo');
 }
 

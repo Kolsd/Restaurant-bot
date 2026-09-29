@@ -61,52 +61,6 @@ def _all_execute_sql(conn) -> str:
 
 # ── _sync_staff_shift ─────────────────────────────────────────────────────────
 
-async def test_sync_staff_shift_inserts_org_id_not_restaurant_id():
-    """
-    _sync_staff_shift must INSERT into staff_shifts using the org_id column.
-    The restaurant_id column was dropped from staff_shifts in migration 0037
-    — referencing it now would crash with UndefinedColumnError at runtime.
-    """
-    from app.repositories.restaurant_repo import _sync_staff_shift
-
-    conn = _make_conn()
-    await _sync_staff_shift(
-        conn,
-        restaurant_id=42,
-        data={
-            "id": "shift-uuid-1",
-            "staff_id": "staff-uuid-1",
-            "clock_in": "2026-04-18T09:00:00Z",
-            "clock_out": "2026-04-18T17:00:00Z",
-            "notes": "test",
-        },
-    )
-
-    sql_blob = _all_execute_sql(conn)
-    assert "insert into staff_shifts" in sql_blob
-    assert "org_id" in sql_blob, "INSERT must reference org_id (Wave-2 canonical)"
-    # Must NOT mention the dropped legacy column anywhere in the staff_shifts insert
-    assert "restaurant_id" not in sql_blob, (
-        "INSERT must NOT reference the dropped restaurant_id column"
-    )
-
-
-async def test_sync_staff_shift_passes_tenant_id_as_param():
-    """The tenant integer must be passed as a positional param (no f-strings)."""
-    from app.repositories.restaurant_repo import _sync_staff_shift
-
-    conn = _make_conn()
-    await _sync_staff_shift(
-        conn,
-        restaurant_id=99,
-        data={"id": "x", "staff_id": "y", "clock_in": "2026-04-18T09:00:00Z"},
-    )
-    # The third positional arg to execute (after the SQL) is restaurant_id
-    args = conn.execute.call_args.args
-    # args[0] is the SQL; subsequent are params
-    assert 99 in args[1:], "Tenant id must be passed as a query parameter"
-
-
 # ── _sync_staff ───────────────────────────────────────────────────────────────
 
 async def test_sync_staff_inserts_org_id_not_restaurant_id():

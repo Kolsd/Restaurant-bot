@@ -598,7 +598,7 @@ function mesioDateTime(isoStr) { return mesioDate(isoStr, { format: 'short' }); 
     // Only show on known admin paths — don't show on public menu.html etc.
     var ADMIN_PATHS = [
       '/dashboard', '/orders', '/reservations', '/menu-admin',
-      '/nps', '/payroll', '/locations',
+      '/nps', '/locations',
       '/floorplan', '/team', '/settings', '/billing', '/stats',
       '/internal/analytics', '/internal/monitoring', '/internal/superadmin', '/internal/crm',
     ];

@@ -710,7 +710,6 @@ const MODULES_CONFIG = [
   { key:'module_nps',         label:'⭐ NPS',                   desc:'Encuestas de satisfacción',       defaultOn:false },
   { key:'module_inventory',   label:'📦 Inventario',            desc:'Control de stock',                defaultOn:false },
   { key:'wompi_active',       label:'💳 Pagos Wompi',           desc:'Pagos en línea integrados',       defaultOn:false },
-  { key:'staff_tips',         label:'👤 Staff & Propinas',      desc:'Turnos y corte de propinas',      defaultOn:false },
   { key:'dian_active',        label:'📑 DIAN (Factura electrónica)', desc:'Integración MATIAS API',    defaultOn:false },
 ];
 
@@ -874,7 +873,7 @@ function getFeatures(r) {
 }
 
 function renderModuleChips(feats) {
-  const labels = {module_orders:'Dom',module_tables:'QR',module_pos:'POS',module_nps:'NPS',module_inventory:'Inv',wompi_active:'Wompi',staff_tips:'Staff',dian_active:'DIAN'};
+  const labels = {module_orders:'Dom',module_tables:'QR',module_pos:'POS',module_nps:'NPS',module_inventory:'Inv',wompi_active:'Wompi',dian_active:'DIAN'};
   return Object.entries(labels).filter(([k])=>feats[k]===true||(feats[k]!==false&&['module_orders','module_tables','module_pos','module_reservations'].includes(k)))
     .map(([k,v])=>`<span class="badge-chip">${v}</span>`).join('');
 }

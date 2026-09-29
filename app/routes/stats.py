@@ -581,55 +581,6 @@ async def get_staff_performance(
         )
 
 
-@router.get("/api/stats/tips-pool")
-async def get_tips_pool(
-    request: Request,
-    period_start: str | None = Query(None),
-    period_end:   str | None = Query(None),
-    branch_id:    str | None = Query(None),
-):
-    """Tip pool summary for a period (default: current week).
-
-    Wraps db_calculate_tips_by_attendance and returns pool_total, top-5
-    entries_preview, unallocated amount, and my_pool (when called by staff).
-    """
-    restaurant = await get_current_restaurant(request)
-    org_id = restaurant["id"]
-    # `restaurant` is already the caller's own sede for anyone who cannot
-    # span locations (app/routes/deps.py), so no org_id fallback here — an
-    # org id in a location_id slot is the ambiguity rls-multitenant.md bans.
-    location_id = restaurant.get("location_id")
-    caller = await get_current_user(request)
-    if may_span_locations(caller):
-        bid = int(branch_id) if branch_id and branch_id.isdigit() else None
-    else:
-        # ?branch_id= used to be honoured for anyone: a waiter could read
-        # another sede's tip pool by changing one number in the URL.
-        bid = resolve_sede_filter(request, caller)
-        location_id = location_id or bid
-
-    # Detect if caller is a staff member (JWT claim "staff:<uuid>").
-    # `caller` is already resolved above — the function-local
-    # `from app.routes.deps import get_current_user` that used to sit here
-    # shadowed the module-level name for the WHOLE function body, so the
-    # sede resolution above raised UnboundLocalError.
-    caller_staff_id: str | None = None
-    username = caller.get("username") or caller.get("sub") or ""
-    if username.startswith("staff:"):
-        caller_staff_id = username[len("staff:"):]
-
-    with tenant_scope(org_id):
-        result = await stats_repo.db_tips_pool(
-            org_id=org_id,
-            location_id=location_id,
-            period_start=period_start,
-            period_end=period_end,
-            branch_id=bid,
-            caller_staff_id=caller_staff_id,
-        )
-    return result
-
-
 # ── DASHBOARD ANALYTICS — TIER 5 (Churn + Branches) ─────────────────────────
 
 
@@ -677,7 +628,7 @@ async def get_branches_comparison(
                     top_location_id — int|null, id of the best-performing location
                     vs_target_pct   — float|null, % vs target (null if no target or no data)
 
-    Metrics with null values: Rotación mesas/día, Food cost %, Costo nómina/ventas,
+    Metrics with null values: Rotación mesas/día, Food cost %,
     Rotación de personal, Crecimiento YoY — pending additional schema/telemetry.
     """
     org_id = restaurant["id"]

@@ -1,14 +1,11 @@
 import asyncio
 import json
-import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 
 from app.services import database as db
 from app.services import state_store
-from app.repositories import restaurant_repo
-from app.services.logging import get_logger, mask_email
-from app.services.email import send_email
+from app.services.logging import get_logger
 
 try:
     from zoneinfo import ZoneInfo

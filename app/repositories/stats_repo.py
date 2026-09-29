@@ -872,83 +872,6 @@ async def db_staff_performance(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. Tips pool summary
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _current_week_bounds() -> tuple[str, str]:
-    """Return (monday_iso, sunday_iso) for the current week."""
-    today = date.today()
-    monday = today - timedelta(days=today.weekday())
-    sunday = monday + timedelta(days=6)
-    return str(monday), str(sunday)
-
-
-async def db_tips_pool(
-    org_id: int,
-    location_id: int,
-    period_start: str | None,
-    period_end: str | None,
-    branch_id: int | None = None,
-    caller_staff_id: str | None = None,
-) -> dict:
-    """Summarise the tip pool for a period.
-
-    Wraps staff_repo.db_calculate_tips_by_attendance.
-    Returns top-5 entries_preview, pool_total, entries_count, unallocated,
-    and my_pool (tip amount for caller_staff_id, if provided).
-    Default period: current week (Mon–Sun).
-    """
-    from app.repositories.staff_repo import db_calculate_tips_by_attendance  # noqa: PLC0415
-
-    if not period_start or not period_end:
-        period_start, period_end = _current_week_bounds()
-
-    result = await db_calculate_tips_by_attendance(
-        restaurant_id=location_id,
-        period_start=period_start,
-        period_end=period_end,
-        branch_id=branch_id,
-    )
-
-    entries = result.get("entries", [])
-    total_tips = float(result.get("total_tips", 0))
-    unallocated = float(result.get("unallocated", 0))
-
-    # Top 5 preview with pct
-    top5 = entries[:5]
-    preview = []
-    for e in top5:
-        tip_amt = float(e.get("total_tips", 0))
-        pct = round(tip_amt / total_tips * 100, 1) if total_tips else 0.0
-        preview.append({
-            "staff_id":  e.get("staff_id"),
-            "name":      e.get("name"),
-            "role":      e.get("role"),
-            "total_tips": tip_amt,
-            "pct":        pct,
-        })
-
-    # my_pool: tip allocation for the requesting staff member
-    my_pool: float | None = None
-    if caller_staff_id:
-        for e in entries:
-            if str(e.get("staff_id", "")) == str(caller_staff_id):
-                my_pool = float(e.get("total_tips", 0))
-                break
-        if my_pool is None:
-            my_pool = 0.0  # caller had no allocations this period
-
-    return {
-        "period":          {"start": period_start, "end": period_end},
-        "pool_total":      total_tips,
-        "entries_count":   len(entries),
-        "entries_preview": preview,
-        "unallocated":     unallocated,
-        "my_pool":         my_pool,
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # 10. Branches consolidated  (GET /api/stats/branches-consolidated)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -970,7 +893,9 @@ async def db_branches_consolidated(org_id: int, days: int = 7) -> dict:
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td  # noqa: PLC0415
 
     days = max(1, min(365, days))
-    now = _dt.now(_tz.utc)
+    # created_at columns are TIMESTAMP WITHOUT TIME ZONE holding UTC; asyncpg
+    # refuses an aware datetime for them, so every call here used to 500.
+    now = _dt.now(_tz.utc).replace(tzinfo=None)
     window_start = now - _td(days=days)
 
     # 30-day window for NPS and YoY calculations
@@ -1122,7 +1047,6 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
 
     Metrics returning null (pending data sources):
       Table turnover / day     — TODO: requires table_sessions with open/close timestamps
-      Payroll cost / sales     — TODO: requires payroll_runs linked to sales period
       Staff turnover (12m)     — TODO: requires staff.termination_date or departure_events table
       YoY growth               — TODO: computed at org level in branches_consolidated; per-location
                                        requires historical order data with location_id (available
@@ -1131,7 +1055,9 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td  # noqa: PLC0415
 
     days = max(1, min(365, days))
-    now = _dt.now(_tz.utc)
+    # created_at columns are TIMESTAMP WITHOUT TIME ZONE holding UTC; asyncpg
+    # refuses an aware datetime for them, so every call here used to 500.
+    now = _dt.now(_tz.utc).replace(tzinfo=None)
     window_start = now - _td(days=days)
     nps_start    = now - _td(days=30)
 
@@ -1405,8 +1331,6 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
         # no recipes defined for the org (food_costs_by_dish is empty), or
         # when a location had zero matched revenue in the window.
         _build_row("Food cost %",                    food_cost_pct_per_loc),
-        # TODO: Costo nómina / ventas — requires payroll_runs joined to a period matching sales window
-        _build_row("Costo nómina / ventas",          [None] * len(locations)),
         _build_row("Tasa de reserva confirmada",     conf_rate_per_loc),
         _build_row("No-show rate",                   noshow_rate_per_loc),
         # TODO: Rotación de personal (12m) — requires staff.termination_date or departure events

@@ -134,7 +134,8 @@
   function sourceChip(source) {
     const map = { google: 'source-google', tripadvisor: 'source-tripadvisor', whatsapp: 'source-wa', internal: 'source-internal' };
     const cls = map[(source || '').toLowerCase()] || 'source-internal';
-    return '<span class="source-chip ' + cls + '">' + _escHtml(source || 'Encuesta') + '</span>';
+    const label = cls === 'source-internal' ? 'Encuesta' : source;
+    return '<span class="source-chip ' + cls + '">' + _escHtml(label) + '</span>';
   }
 
   function renderReviews(reviews) {

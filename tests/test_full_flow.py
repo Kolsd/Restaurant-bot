@@ -814,23 +814,6 @@ class TestCashierFlows:
         )
         assert resp.status_code == 409
 
-    def test_get_open_shifts_summary(self, client, monkeypatch):
-        """GET /api/staff/open-shifts returns current open shifts for admin dashboard."""
-        patch_auth(monkeypatch, role="owner", features={"staff_tips": True})
-        monkeypatch.setattr(db, "db_get_open_shifts", AsyncMock(return_value=[
-            {"id": "s1", "staff_name": "Juan", "clock_in": _now_iso()}
-        ]))
-        # require_module checks this
-        monkeypatch.setattr(db, "db_check_module", AsyncMock(return_value=True))
-
-        resp = client.get(
-            "/api/staff/open-shifts",
-            headers={"Authorization": "Bearer fake"},
-        )
-        assert resp.status_code == 200
-        assert "shifts" in resp.json()
-
-
 # ===========================================================================
 # E. Bot WhatsApp + Anthropic flow
 # ===========================================================================

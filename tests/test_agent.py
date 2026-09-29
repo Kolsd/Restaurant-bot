@@ -105,19 +105,6 @@ def test_module_restrictions_empty_dict():
     assert _build_module_restrictions({}) == ""
 
 
-def test_module_restrictions_staff_tips_no_action_prohibition():
-    """
-    staff_tips has no forbidden actions in _MODULE_RULES (it's UI-only).
-    Restriction text should still mention the module but omit the action clause.
-    """
-    from app.services.agent import _build_module_restrictions
-    result = _build_module_restrictions(_features(staff_tips=False))
-
-    assert "RESTRICCIÓN ACTIVA" in result
-    # No action=".." clause expected for staff_tips
-    assert 'action=' not in result
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 6–9. build_system_prompt  (async, no Claude API call)
 # ══════════════════════════════════════════════════════════════════════════════

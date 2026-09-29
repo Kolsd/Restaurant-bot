@@ -476,27 +476,12 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/table-orders",
         ],
     },
-    "staff:myshift": {
-        "js": "staff/sections/myshift.js",
-        "required_button_labels": [
-            "Confirmar entrada",
-            "Confirmar salida",
-            "Entrada registrada",
-            "Salida registrada",
-        ],
-        "required_fetches": [
-            "/api/staff/self/profile",
-            "/api/staff/self/clock-in",
-            "/api/staff/self/clock-out",
-        ],
-    },
     "settings.html": {
         "js": "pages/settings.js",
         # Labels are JS strings that must exist in settings.js to prove wiring:
-        # saveBtnTop/js-save-btn = Guardar changes; kiosko-copy-btn = copy kiosko URL; btnPause = danger zone
+        # saveBtnTop/js-save-btn = Guardar changes; btnPause = danger zone
         "required_button_labels": [
             "saveBtnTop",
-            "kiosko-copy-btn",
             "btnPause",
         ],
         "required_fetches": [
@@ -513,7 +498,6 @@ PAGE_CONTRACTS: dict[str, dict] = {
         ],
         "required_fetches": [
             "/api/staff",
-            "/api/staff/schedules",
         ],
     },
     "diner-chat.html": {

@@ -235,45 +235,44 @@ def test_login_rate_limit(client, monkeypatch):
 def test_require_module_absent_flag_returns_403(client, monkeypatch):
     """
     When features does not contain the module key, db_check_module returns False
-    and the endpoint must return 403.
+    and the endpoint must return 403. Reservations are the module-gated router
+    left after the 2026-09 cleanup (the staff_tips-gated shift routes are gone).
     """
-    patch_auth(monkeypatch, features={})  # staff_tips absent → False
+    patch_auth(monkeypatch, features={})  # module_reservations absent → False
     monkeypatch.setattr("app.services.database.db_check_module",
                         AsyncMock(return_value=False))
 
-    # /api/staff itself is no longer gated (the roster must work on every
-    # plan); open-shifts is, so it is what exercises require_module here.
-    r = client.get("/api/staff/open-shifts", headers={"Authorization": "Bearer tok"})
+    r = client.get("/api/reservations", headers={"Authorization": "Bearer tok"})
     assert r.status_code == 403
-    assert "staff_tips" in r.json()["detail"]
+    assert "module_reservations" in r.json()["detail"]
 
 
 def test_require_module_flag_true_allows_access(client, monkeypatch):
     """
-    When features.staff_tips = true, db_check_module returns True and the
-    endpoint proceeds (200, not 403).
+    When features.module_reservations = true, db_check_module returns True and
+    the endpoint runs its own handler.
     """
-    patch_auth(monkeypatch, features={"staff_tips": True})
+    patch_auth(monkeypatch, features={"module_reservations": True})
     monkeypatch.setattr("app.services.database.db_check_module",
                         AsyncMock(return_value=True))
-
-    # Also mock the DB call inside the endpoint itself
     import app.services.database as db_mod
-    monkeypatch.setattr(db_mod, "db_get_open_shifts", AsyncMock(return_value=[]))
+    monkeypatch.setattr(db_mod, "db_get_reservations_range",
+                        AsyncMock(return_value=[{"id": 7, "customer_name": "Ana"}]))
 
-    r = client.get("/api/staff/open-shifts", headers={"Authorization": "Bearer tok"})
+    r = client.get("/api/reservations", headers={"Authorization": "Bearer tok"})
     assert r.status_code == 200
+    assert r.json() == {"reservations": [{"id": 7, "customer_name": "Ana"}]}
 
 
 def test_require_module_flag_false_returns_403(client, monkeypatch):
     """
-    When features.staff_tips is explicitly False, the endpoint must return 403.
+    When features.module_reservations is explicitly False, the endpoint must return 403.
     """
-    patch_auth(monkeypatch, features={"staff_tips": False})
+    patch_auth(monkeypatch, features={"module_reservations": False})
     monkeypatch.setattr("app.services.database.db_check_module",
                         AsyncMock(return_value=False))
 
-    r = client.get("/api/staff/open-shifts", headers={"Authorization": "Bearer tok"})
+    r = client.get("/api/reservations", headers={"Authorization": "Bearer tok"})
     assert r.status_code == 403
 
 

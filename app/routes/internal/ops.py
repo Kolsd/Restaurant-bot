@@ -107,15 +107,4 @@ async def health_metrics(_: None = Depends(verify_superadmin)):
             log.exception("ops.metrics.restaurants_total_error", exc_type=type(exc).__name__)
             metrics["restaurants_total"] = None
 
-        # Staff currently on shift
-        try:
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                metrics["staff_clocked_in"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM staff_shifts WHERE clock_out IS NULL"
-                )
-        except Exception as exc:
-            log.exception("ops.metrics.staff_clocked_in_error", exc_type=type(exc).__name__)
-            metrics["staff_clocked_in"] = None
-
     return metrics

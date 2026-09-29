@@ -34,42 +34,41 @@ from app.services.staff_sections import (
 # 1. Role -> section mapping (pure function, no I/O)
 # ══════════════════════════════════════════════════════════════════════
 
-def test_waiter_only_sees_waiter_and_myshift():
-    assert sections_for_roles(["mesero"]) == ["waiter", "myshift"]
+def test_waiter_only_sees_waiter():
+    assert sections_for_roles(["mesero"]) == ["waiter"]
 
 
-def test_cashier_only_sees_cashier_and_myshift():
+def test_cashier_only_sees_cashier_and_delivery():
     """Cashier roles also grant "delivery" (Domicilios, chunk 4 of the web
     delivery/pickup wave — docs/claude/delivery-web.md) — a cashier logs
     into ONE section key that shows both queues, not two separate logins."""
-    assert sections_for_roles(["caja"]) == ["cashier", "delivery", "myshift"]
+    assert sections_for_roles(["caja"]) == ["cashier", "delivery"]
 
 
-def test_kitchen_only_sees_kitchen_and_myshift():
-    assert sections_for_roles(["cocina"]) == ["kitchen", "myshift"]
+def test_kitchen_only_sees_kitchen():
+    assert sections_for_roles(["cocina"]) == ["kitchen"]
 
 
-def test_bar_only_sees_bar_and_myshift():
-    assert sections_for_roles(["bar"]) == ["bar", "myshift"]
+def test_bar_only_sees_bar():
+    assert sections_for_roles(["bar"]) == ["bar"]
 
 
-def test_courier_only_sees_courier_and_myshift():
-    assert sections_for_roles(["domiciliario"]) == ["courier", "myshift"]
+def test_courier_only_sees_courier():
+    assert sections_for_roles(["domiciliario"]) == ["courier"]
 
 
-def test_multi_role_caja_mesero_sees_both_plus_myshift():
+def test_multi_role_caja_mesero_sees_both():
     """A user with roles.staff = ['caja', 'mesero'] must see BOTH sections."""
     sections = sections_for_roles(["caja", "mesero"])
     assert "cashier" in sections
     assert "delivery" in sections  # caja also grants Domicilios (chunk 4)
     assert "waiter" in sections
-    assert "myshift" in sections
     # No section the user doesn't have a role for.
     assert "kitchen" not in sections
     assert "bar" not in sections
     assert "courier" not in sections
-    # Sidebar order is stable: operational sections first, "myshift" last.
-    assert sections[-1] == "myshift"
+    # Sidebar order is stable regardless of role order.
+    assert sections == ["cashier", "delivery", "waiter"]
 
 
 def test_admin_roles_see_every_section():
@@ -77,30 +76,31 @@ def test_admin_roles_see_every_section():
         assert sections_for_roles([role]) == list(ALL_SECTIONS)
 
 
-def test_unrecognized_role_still_sees_myshift_only():
-    """`otro` (or any role with no dedicated station) still gets 'My shift'."""
-    assert sections_for_roles(["otro"]) == ["myshift"]
+def test_unrecognized_role_gets_no_section():
+    """`otro` (or any role with no station) gets none — the Staff App shows
+    "ask an admin for a role" instead of an empty shell."""
+    assert sections_for_roles(["otro"]) == []
 
 
-def test_empty_roles_defaults_to_myshift_only():
-    assert sections_for_roles([]) == ["myshift"]
+def test_empty_roles_get_no_section():
+    assert sections_for_roles([]) == []
 
 
 def test_legacy_english_role_aliases_map_correctly():
     """cashier/waiter/cook/cocinero/cajero/delivery aliases used elsewhere
     in the codebase (auth_routes._ROLE_REDIRECT) must resolve the same as
     their Spanish canonical role."""
-    assert sections_for_roles(["waiter"]) == ["waiter", "myshift"]
-    assert sections_for_roles(["cashier"]) == ["cashier", "delivery", "myshift"]
-    assert sections_for_roles(["cajero"]) == ["cashier", "delivery", "myshift"]
-    assert sections_for_roles(["cook"]) == ["kitchen", "myshift"]
-    assert sections_for_roles(["cocinero"]) == ["kitchen", "myshift"]
-    assert sections_for_roles(["delivery"]) == ["courier", "myshift"]
+    assert sections_for_roles(["waiter"]) == ["waiter"]
+    assert sections_for_roles(["cashier"]) == ["cashier", "delivery"]
+    assert sections_for_roles(["cajero"]) == ["cashier", "delivery"]
+    assert sections_for_roles(["cook"]) == ["kitchen"]
+    assert sections_for_roles(["cocinero"]) == ["kitchen"]
+    assert sections_for_roles(["delivery"]) == ["courier"]
 
 
 def test_default_section_for_roles_prefers_operational_section():
     assert default_section_for_roles(["mesero"]) == "waiter"
-    assert default_section_for_roles(["otro"]) == "myshift"
+    assert default_section_for_roles(["otro"]) is None
     assert default_section_for_roles(["owner"]) == "cashier"  # first in ALL_SECTIONS
 
 
@@ -123,14 +123,11 @@ def test_staff_sections_endpoint_waiter_only(client, monkeypatch):
     response = client.get("/api/staff/sections", headers={"Authorization": "Bearer t"})
     assert response.status_code == 200
     body = response.json()
-    assert body["sections"] == ["waiter", "myshift"]
+    assert body["sections"] == ["waiter"]
 
 
 def test_staff_sections_endpoint_admin_sees_all_operational_sections(client, monkeypatch):
-    """Admins (users-table accounts, not a `staff` row) get every operational
-    section but NOT 'myshift' — there is no staff record for them to clock
-    in/out with, so GET /api/staff/self/profile would 401 them. See
-    app/routes/auth_routes.py::staff_visible_sections."""
+    """Admins (users-table accounts, not a `staff` row) get every section."""
     monkeypatch.setattr(
         "app.routes.auth_routes.get_current_user",
         AsyncMock(return_value={"username": "owner@test.com", "role": "owner"}),
@@ -140,9 +137,8 @@ def test_staff_sections_endpoint_admin_sees_all_operational_sections(client, mon
     assert response.json()["sections"] == list(ALL_OPERATIONAL_SECTIONS)
 
 
-def test_staff_sections_endpoint_staff_gerente_keeps_myshift(client, monkeypatch):
-    """A `staff`-table account with role gerente (username 'staff:<uuid>') DOES
-    have a profile row, so it keeps 'myshift' alongside every section."""
+def test_staff_sections_endpoint_staff_gerente_sees_every_section(client, monkeypatch):
+    """A `staff`-table gerente (username 'staff:<uuid>') sees every section."""
     monkeypatch.setattr(
         "app.routes.auth_routes.get_current_user",
         AsyncMock(return_value={"username": "staff:mgr-1", "role": "gerente"}),
@@ -160,7 +156,7 @@ def test_staff_sections_endpoint_multi_role(client, monkeypatch):
     response = client.get("/api/staff/sections", headers={"Authorization": "Bearer t"})
     assert response.status_code == 200
     sections = response.json()["sections"]
-    assert "cashier" in sections and "waiter" in sections and "myshift" in sections
+    assert sections == ["cashier", "delivery", "waiter"]
 
 
 # ══════════════════════════════════════════════════════════════════════

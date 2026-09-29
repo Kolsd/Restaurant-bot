@@ -143,85 +143,8 @@ def test_create_staff_inserts_with_org_id_not_location_id(client):
 
 # ── GET /api/staff/payroll/calculate ─────────────────────────────────────────
 
-def test_payroll_calculate_passes_org_id_and_propagates_location_id_to_branch(client):
-    """Payroll is org-level. X-Branch-ID becomes the OPTIONAL branch_id
-    param (for tip scoping per-sede), NOT the tenant key."""
-    calc_mock = AsyncMock(return_value=[])
-    with patch("app.routes.staff.db.db_calculate_payroll", calc_mock):
-        resp = client.get(
-            "/api/staff/payroll/calculate?period_start=2026-01-01&period_end=2026-01-31",
-            headers={"X-Branch-ID": str(LOCATION), "Authorization": "Bearer test"},
-        )
-
-    assert resp.status_code == 200, resp.text
-    args = calc_mock.await_args.args
-    kwargs = calc_mock.await_args.kwargs
-    assert args[0] == ORG_OWN, f"first arg (org_id) must be {ORG_OWN}, got {args[0]}"
-    assert kwargs.get("branch_id") == LOCATION, (
-        f"branch_id kwarg should propagate the X-Branch-ID location ({LOCATION})"
-    )
-
-
-def test_payroll_calculate_branch_id_None_when_header_absent(client):
-    calc_mock = AsyncMock(return_value=[])
-    with patch("app.routes.staff.db.db_calculate_payroll", calc_mock):
-        resp = client.get(
-            "/api/staff/payroll/calculate?period_start=2026-01-01&period_end=2026-01-31",
-            headers={"Authorization": "Bearer test"},
-        )
-
-    assert resp.status_code == 200, resp.text
-    assert calc_mock.await_args.kwargs.get("branch_id") is None
-
-
 # ── POST /api/staff/payroll/runs (save) ──────────────────────────────────────
-
-def test_save_payroll_run_keys_by_org_id_not_location(client):
-    calc_mock = AsyncMock(return_value=[])
-    save_mock = AsyncMock(return_value={"id": "r1"})
-    with (
-        patch("app.routes.staff.db.db_calculate_payroll", calc_mock),
-        patch("app.routes.staff.db.db_save_payroll_run", save_mock),
-    ):
-        resp = client.post(
-            "/api/staff/payroll/runs",
-            headers={"X-Branch-ID": str(LOCATION), "Authorization": "Bearer test"},
-            json={"period_start": "2026-01-01", "period_end": "2026-01-31"},
-        )
-
-    assert resp.status_code == 201, resp.text
-    save_kwargs = save_mock.await_args.kwargs
-    assert save_kwargs["restaurant_id"] == ORG_OWN, (
-        f"db_save_payroll_run must key by ORG_OWN, got {save_kwargs['restaurant_id']}"
-    )
-
 
 # ── GET /api/staff/payroll/runs (list) ───────────────────────────────────────
 
-def test_list_payroll_runs_filters_by_org_id_not_location(client):
-    runs_mock = AsyncMock(return_value=[])
-    with patch("app.routes.staff.db.db_get_payroll_runs", runs_mock):
-        resp = client.get(
-            "/api/staff/payroll/runs",
-            headers={"X-Branch-ID": str(LOCATION), "Authorization": "Bearer test"},
-        )
-
-    assert resp.status_code == 200, resp.text
-    runs_mock.assert_awaited_once_with(ORG_OWN)
-
-
 # ── GET /api/staff/payroll/overtime (list) ───────────────────────────────────
-
-def test_list_overtime_filters_by_org_id_not_location(client):
-    overtime_mock = AsyncMock(return_value=[])
-    with patch("app.routes.staff.db.db_list_overtime_requests", overtime_mock):
-        resp = client.get(
-            "/api/staff/payroll/overtime?week_start=2026-01-05",
-            headers={"X-Branch-ID": str(LOCATION), "Authorization": "Bearer test"},
-        )
-
-    assert resp.status_code == 200, resp.text
-    args = overtime_mock.await_args.args
-    assert args[0] == ORG_OWN, (
-        f"db_list_overtime_requests first arg must be ORG_OWN, got {args[0]}"
-    )

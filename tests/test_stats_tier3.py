@@ -178,42 +178,6 @@ MOCK_TIPS_POOL = {
 }
 
 
-def test_tips_pool_shape(client, patched_auth, monkeypatch):
-    """Returns documented shape: period, pool_total, entries_count, entries_preview, unallocated."""
-    monkeypatch.setattr(
-        stats_repo, "db_tips_pool",
-        AsyncMock(return_value=MOCK_TIPS_POOL),
-    )
-    with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-        resp = client.get("/api/stats/tips-pool", headers=_auth_headers())
-    assert resp.status_code == 200
-    data = resp.json()
-    for key in ("period", "pool_total", "entries_count", "entries_preview", "unallocated"):
-        assert key in data, f"Missing field: {key}"
-    assert isinstance(data["entries_preview"], list)
-    assert isinstance(data["period"], dict)
-    assert "start" in data["period"] and "end" in data["period"]
-
-
-def test_tips_pool_default_period_set(client, patched_auth, monkeypatch):
-    """When no period params given, the repo must still be called with valid dates."""
-    captured = {}
-
-    async def _mock(org_id, location_id, period_start, period_end, branch_id=None, caller_staff_id=None):
-        captured["period_start"] = period_start
-        captured["period_end"] = period_end
-        return MOCK_TIPS_POOL
-
-    monkeypatch.setattr(stats_repo, "db_tips_pool", _mock)
-    with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-        resp = client.get("/api/stats/tips-pool", headers=_auth_headers())
-    assert resp.status_code == 200
-    # Default period is current week — values must be set by db_tips_pool internals
-    # (period_start/end default to None; db_tips_pool fills them)
-    # We just ensure no crash and shape OK.
-    assert "pool_total" in resp.json()
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 5. GET /api/public/menu-context/{table_id} — table_context field
 # ══════════════════════════════════════════════════════════════════════════════
@@ -271,26 +235,3 @@ async def test_integration_staff_performance_empty(db_pool):
     assert result["weeks"] == []
     assert result["staff_name"] is None
 
-
-@pytest.mark.asyncio
-async def test_integration_tips_pool_empty(db_pool):
-    """Empty DB returns zero pool_total and empty entries_preview."""
-    import app.services.database as _db
-    from unittest.mock import patch as _patch
-    from app.services.tenant_context import tenant_scope
-
-    async def _test_pool():
-        return db_pool
-
-    with _patch.object(_db, "get_pool", _test_pool):
-        org_id = 999999
-        with tenant_scope(org_id):
-            result = await stats_repo.db_tips_pool(
-                org_id=org_id,
-                location_id=999999,
-                period_start="2026-01-01",
-                period_end="2026-01-07",
-            )
-    assert result["pool_total"] == 0
-    assert result["entries_preview"] == []
-    assert result["unallocated"] == 0

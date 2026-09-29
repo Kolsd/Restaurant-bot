@@ -119,14 +119,15 @@ async def test_staff_pin_login_returns_token(
     )
 
     # The token must actually authenticate downstream (proves session was created).
-    profile_resp = await e2e_app.get(
-        "/api/staff/self/profile",
+    sections_resp = await e2e_app.get(
+        "/api/staff/sections",
         headers={"Authorization": f"Bearer {data['token']}"},
     )
-    assert profile_resp.status_code == 200, (
-        f"Token from pin-login does not authenticate /api/staff/self/profile: "
-        f"{profile_resp.status_code} {profile_resp.text}"
+    assert sections_resp.status_code == 200, (
+        f"Token from pin-login does not authenticate /api/staff/sections: "
+        f"{sections_resp.status_code} {sections_resp.text}"
     )
+    assert "waiter" in sections_resp.json()["sections"]
 
 
 @pytest.mark.e2e_no_llm

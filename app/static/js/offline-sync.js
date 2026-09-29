@@ -11,7 +11,7 @@
  * safely upsert them without duplicates (ON CONFLICT (id) DO UPDATE).
  *
  * Phase 6 usage example:
- *   await MesioSync.enqueue('staff_shift', { staff_id: '...', clock_in: new Date().toISOString() });
+ *   await MesioSync.enqueue('staff', { id: '...', name: '...' });
  */
 
 const MesioSync = (() => {
@@ -72,7 +72,7 @@ const MesioSync = (() => {
 
   /**
    * Add an operation to the offline queue.
-   * @param {string} type  - Entity type: 'staff_shift', 'table_order', etc.
+   * @param {string} type  - Entity type: 'staff', 'table_order', etc.
    * @param {object} data  - The record to upsert. May include an 'id' UUID;
    *                         if absent, one is generated here.
    * @returns {string} The operation ID (UUID).

@@ -9,7 +9,7 @@
  *
  * Valid page keys (data-active values):
  *   resumen | pedidos | reservaciones | salon | menu
- *   nps | staff | nomina | sucursales
+ *   nps | staff | sucursales
  *   settings | billing
  *
  * Route mapping (.html → production URL):
@@ -20,7 +20,6 @@
  *   menu-admin.html         → /menu-admin
  *   nps.html                → /nps
  *   staff-hq.html           → /staff-hq   (employee portal — Agent B)
- *   payroll.html            → /payroll
  *   locations.html          → /locations
  *   settings.html           → /settings
  *   billing.html            → /billing
@@ -88,10 +87,6 @@
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>
         Equipo
       </a>
-      <a class="sb-item" data-key="nomina" href="/payroll">
-        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l2.5 1.5"/></svg>
-        Nómina
-      </a>
       <a class="sb-item" data-key="sucursales" href="/locations">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13V6l6-4 6 4v7"/><path d="M2 13h12M6 13V9h4v4"/></svg>
         Sucursales
@@ -118,7 +113,7 @@
       </a>
       <a class="sb-item" data-key="ops-domiciliario" href="/staff?section=courier" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><path d="M1 3h2l2 7h6l2-5H5"/></svg>
-        Domicilios
+        Repartos
       </a>
     </div>
 
@@ -258,7 +253,7 @@
     if (operationalRoles.includes(role)) {
       // Operational staff: hide all admin sections, show only their page link
       const adminKeys = ['resumen', 'pedidos', 'reservaciones', 'salon', 'menu',
-        'nps', 'staff', 'nomina', 'sucursales', 'settings', 'billing'];
+        'nps', 'staff', 'sucursales', 'settings', 'billing'];
       adminKeys.forEach(function(k) { hide(k); });
 
       const opsGroup = sb.querySelector('#sb-ops-group');

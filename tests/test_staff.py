@@ -104,15 +104,6 @@ def test_create_staff_without_module_is_allowed(client, monkeypatch):
     assert r.status_code == 201
 
 
-def test_open_shifts_without_module_returns_403(client, monkeypatch):
-    """Shifts/tips/payroll ARE still behind staff_tips — the module is sold
-    for those, not for having employees at all."""
-    _auth(monkeypatch, features={"staff_tips": False})
-    r = client.get("/api/staff/open-shifts", headers=_HEADERS)
-    assert r.status_code == 403
-    assert "staff_tips" in r.json()["detail"]
-
-
 def test_list_staff_with_module_returns_200(client, monkeypatch):
     """staff_tips=True → 200, returns staff list."""
     _auth(monkeypatch)
@@ -179,188 +170,14 @@ def test_create_staff_short_pin_422(client, monkeypatch):
 # 5–6. Clock-in
 # ══════════════════════════════════════════════════════════════════════════════
 
-def test_clock_in_success(client, monkeypatch):
-    """Successful clock-in returns 200 with shift data."""
-    _auth(monkeypatch)
-    import app.services.database as db_mod
-    monkeypatch.setattr(db_mod, "db_clock_in", AsyncMock(return_value=_SHIFT_ROW))
-
-    r = client.post(
-        "/api/staff/clock-in",
-        json={"staff_id": _STAFF_ROW["id"]},
-        headers=_HEADERS,
-    )
-    assert r.status_code == 200
-    assert r.json()["shift"]["staff_id"] == _STAFF_ROW["id"]
-
-
-def test_clock_in_duplicate_returns_409(client, monkeypatch):
-    """
-    When the employee already has an open shift, db_clock_in raises ValueError.
-    The endpoint must convert this to 409 Conflict.
-    """
-    _auth(monkeypatch)
-    import app.services.database as db_mod
-
-    async def _raise(*a, **kw):
-        raise ValueError("El empleado ya tiene un turno abierto.")
-
-    monkeypatch.setattr(db_mod, "db_clock_in", _raise)
-
-    r = client.post(
-        "/api/staff/clock-in",
-        json={"staff_id": _STAFF_ROW["id"]},
-        headers=_HEADERS,
-    )
-    assert r.status_code == 409
-    assert "turno abierto" in r.json()["detail"]
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 7–8. Clock-out
 # ══════════════════════════════════════════════════════════════════════════════
-
-def test_clock_out_success(client, monkeypatch):
-    """Successful clock-out returns 200 with closed shift."""
-    _auth(monkeypatch)
-    import app.services.database as db_mod
-
-    closed = dict(_SHIFT_ROW, clock_out="2026-03-25T16:00:00+00:00")
-    monkeypatch.setattr(db_mod, "db_clock_out", AsyncMock(return_value=closed))
-
-    r = client.post(
-        "/api/staff/clock-out",
-        json={"staff_id": _STAFF_ROW["id"]},
-        headers=_HEADERS,
-    )
-    assert r.status_code == 200
-    assert r.json()["shift"]["clock_out"] is not None
-
-
-def test_clock_out_no_open_shift_returns_404(client, monkeypatch):
-    """
-    db_clock_out returns None when no open shift exists.
-    The endpoint must convert this to 404.
-    """
-    _auth(monkeypatch)
-    import app.services.database as db_mod
-    monkeypatch.setattr(db_mod, "db_clock_out", AsyncMock(return_value=None))
-
-    r = client.post(
-        "/api/staff/clock-out",
-        json={"staff_id": _STAFF_ROW["id"]},
-        headers=_HEADERS,
-    )
-    assert r.status_code == 404
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 9–10. Shifts
 # ══════════════════════════════════════════════════════════════════════════════
 
-def test_get_open_shifts(client, monkeypatch):
-    """GET /api/staff/open-shifts returns open shift list."""
-    _auth(monkeypatch)
-    import app.services.database as db_mod
-
-    open_shift = {
-        "id":         _SHIFT_ROW["id"],
-        "staff_id":   _SHIFT_ROW["staff_id"],
-        "clock_in":   _SHIFT_ROW["clock_in"],
-        "staff_name": "Ana García",
-        "staff_role": "mesero",
-    }
-    monkeypatch.setattr(db_mod, "db_get_open_shifts", AsyncMock(return_value=[open_shift]))
-
-    r = client.get("/api/staff/open-shifts", headers=_HEADERS)
-    assert r.status_code == 200
-    assert len(r.json()["shifts"]) == 1
-    assert r.json()["shifts"][0]["staff_name"] == "Ana García"
-
-
-def test_get_shifts_with_date_range(client, monkeypatch):
-    """GET /api/staff/shifts?date_from=...&date_to=... returns shift history."""
-    _auth(monkeypatch)
-    import app.services.database as db_mod
-
-    shift_with_hours = dict(_SHIFT_ROW,
-                            clock_out="2026-03-25T16:00:00+00:00",
-                            staff_name="Ana García",
-                            staff_role="mesero",
-                            hours_worked=8.0)
-    monkeypatch.setattr(db_mod, "db_get_shifts", AsyncMock(return_value=[shift_with_hours]))
-
-    r = client.get(
-        "/api/staff/shifts?date_from=2026-03-25T00:00:00Z&date_to=2026-03-26T00:00:00Z",
-        headers=_HEADERS,
-    )
-    assert r.status_code == 200
-    assert r.json()["shifts"][0]["hours_worked"] == 8.0
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 14. DB layer unit tests (no HTTP)
 # ══════════════════════════════════════════════════════════════════════════════
-
-@pytest.mark.asyncio
-async def test_db_clock_in_unique_violation_raises_value_error():
-    """
-    asyncpg.UniqueViolationError from the partial unique index
-    uq_staff_shifts_one_open must be converted to ValueError by db_clock_in.
-
-    Adapted for tenant_connection(): requires tenant_scope(1) active.
-    """
-    import asyncpg
-    from app.services import database as db
-    from app.services.tenant_context import tenant_scope
-    from tests.conftest import make_pool
-
-    mock_conn = AsyncMock()
-    mock_conn.fetchrow = AsyncMock(
-        side_effect=asyncpg.UniqueViolationError("duplicate key")
-    )
-    mock_conn.fetchval = AsyncMock(return_value=None)  # set_config call in tenant_connection
-
-    txn = MagicMock()
-    txn.__aenter__ = AsyncMock(return_value=txn)
-    txn.__aexit__ = AsyncMock(return_value=False)
-    mock_conn.transaction = MagicMock(return_value=txn)
-
-    with patch.object(db, "get_pool", AsyncMock(return_value=make_pool(mock_conn))):
-        with tenant_scope(1):
-            with pytest.raises(ValueError, match="turno abierto"):
-                await db.db_clock_in(
-                    staff_id="aaaaaaaa-0000-4000-8000-000000000001",
-                    restaurant_id=1,
-                )
-
-
-@pytest.mark.asyncio
-async def test_db_clock_out_returns_none_when_no_open_shift():
-    """
-    When no open shift exists for the employee, fetchrow returns None.
-    db_clock_out must propagate None (not raise).
-
-    Adapted for tenant_connection(): requires tenant_scope(1) active.
-    """
-    from app.services import database as db
-    from app.services.tenant_context import tenant_scope
-    from tests.conftest import make_pool
-
-    mock_conn = AsyncMock()
-    mock_conn.fetchrow = AsyncMock(return_value=None)
-    mock_conn.fetchval = AsyncMock(return_value=None)  # set_config call in tenant_connection
-
-    txn = MagicMock()
-    txn.__aenter__ = AsyncMock(return_value=txn)
-    txn.__aexit__ = AsyncMock(return_value=False)
-    mock_conn.transaction = MagicMock(return_value=txn)
-
-    with patch.object(db, "get_pool", AsyncMock(return_value=make_pool(mock_conn))):
-        with tenant_scope(1):
-            result = await db.db_clock_out(
-                staff_id="aaaaaaaa-0000-4000-8000-000000000001",
-                restaurant_id=1,
-            )
-
-    assert result is None

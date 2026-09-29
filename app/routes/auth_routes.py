@@ -295,17 +295,6 @@ async def staff_visible_sections(request: Request):
     roles = [r.strip() for r in (user.get("role") or "").split(",") if r.strip()]
     sections = sections_for_roles(roles)
 
-    # "My shift" (clock in/out, timecard, tips) reads from the `staff` table
-    # (GET /api/staff/self/profile and friends, app/routes/staff.py) — a
-    # `users`-table admin/owner account (username NOT "staff:<uuid>") has no
-    # such row, so showing them this tab would 401 the moment it tries to
-    # load. owner/admin/gerente still get every OPERATIONAL section; "My
-    # shift" only shows for an actual staff login, matching the product
-    # decision literally ("everyone with a staff login sees 'My shift'").
-    is_staff_account = user.get("username", "").startswith("staff:")
-    if not is_staff_account:
-        sections = [s for s in sections if s != "myshift"]
-
     return {"ok": True, "roles": roles, "sections": sections}
 
 

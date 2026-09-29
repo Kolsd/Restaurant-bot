@@ -74,17 +74,17 @@ async def test_a_db_get_staff_calls_set_config_with_tenant_id():
     )
 
 
-async def test_a_db_list_shifts_in_range_calls_set_config():
+async def test_a_db_get_staff_other_tenant_calls_set_config():
     """
-    db_get_shifts inside tenant_scope(99) must trigger set_config with '99'.
+    db_get_staff inside tenant_scope(99) must trigger set_config with '99'.
     """
     conn = _make_conn()
     pool = _make_pool(conn)
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(99):
-            from app.repositories.staff_repo import db_get_shifts
-            await db_get_shifts(99, "2024-01-01", "2024-01-31")
+            from app.repositories.staff_repo import db_get_staff
+            await db_get_staff(99)
 
     set_config_calls = [
         c for c in conn.fetchval.call_args_list
@@ -113,13 +113,13 @@ async def test_b_no_scope_raises_before_pool_acquire():
 
 
 async def test_b_no_scope_write_fn_raises_before_pool_acquire():
-    """Same check for a write-path function (db_clock_in)."""
+    """Same check for a write-path function (db_update_staff)."""
     conn = _make_conn()
     pool = _make_pool(conn)
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with pytest.raises(TenantNotSetError):
-            from app.repositories.staff_repo import db_clock_in
-            await db_clock_in("aaaaaaaa-0000-4000-8000-000000000001", 1)
+            from app.repositories.staff_repo import db_update_staff
+            await db_update_staff("aaaaaaaa-0000-4000-8000-000000000001", 1, {"phone": "300"})
 
     pool.acquire.assert_not_called()
