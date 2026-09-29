@@ -99,7 +99,6 @@ function _setupChrome() {
   const features = _features();
   if (features.module_reservations === false)   _hideNav('nav-reservaciones');
   if (!features.module_nps)                     _hideNav('nav-nps');
-  if (!features.loyalty)                        _hideNav('nav-loyalty');
   if (!features.staff_tips)                     _hideNav('nav-payroll');
   if (!(role.includes('owner')))                _hideNav('nav-equipo');
 }
@@ -190,7 +189,6 @@ async function _apiFetch(url) {
 async function _loadAll() {
   await Promise.allSettled([
     loadRescuedOrders(),
-    loadDailyInsight(),
     loadMetricsRow(),
     loadRevenueChart(),
     loadSalesByChannel(),
@@ -198,7 +196,6 @@ async function _loadAll() {
     loadPaymentStatus(),
     loadTopDishes(),
     loadInventoryCritical(),
-    loadAtRiskBadge(),
   ]);
 }
 
@@ -220,24 +217,6 @@ async function loadRescuedOrders() {
   } catch (e) {
     console.warn('[dashboard] loadRescuedOrders failed', e);
     if (countEl) countEl.textContent = '—';
-  }
-}
-
-// ── 1. Daily insight banner ───────────────────────────────────────────────────
-async function loadDailyInsight() {
-  const banner = document.getElementById('ai-insight-banner');
-  const textEl = document.getElementById('ai-insight-text');
-  if (!banner || !textEl) return;
-  try {
-    const data = await _apiFetch('/api/stats/daily-insight');
-    if (!data.enabled) { banner.style.display = 'none'; return; }
-    banner.style.display = '';
-    // Sanitise: render insight text safely
-    // Use textContent only — user data may be embedded in the insight
-    textEl.textContent = data.insight || data.text || '';
-  } catch (e) {
-    console.warn('[dashboard] loadDailyInsight failed', e);
-    banner.style.display = 'none';
   }
 }
 
@@ -809,24 +788,6 @@ async function loadInventoryCritical() {
   } catch (e) {
     console.warn('[dashboard] loadInventoryCritical failed', e);
     if (tbody) { tbody.setAttribute('data-error', 'true'); tbody.textContent = 'No se pudo cargar'; }
-  }
-}
-
-// ── 9. At-risk customers badge (/api/stats/customers-at-risk) ─────────────────
-async function loadAtRiskBadge() {
-  const badgeEl = document.getElementById('sb-risk-badge');
-  if (!badgeEl) return;
-  try {
-    const data  = await _apiFetch('/api/stats/customers-at-risk?limit=1');
-    const count = data.count || 0;
-    if (count > 0) {
-      badgeEl.textContent   = String(count);
-      badgeEl.style.display = '';
-    } else {
-      badgeEl.style.display = 'none';
-    }
-  } catch {
-    badgeEl.style.display = 'none';
   }
 }
 

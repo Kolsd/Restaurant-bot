@@ -73,7 +73,6 @@ def _build_patches(branches_return):
         patch.object(agent.db, "db_get_menu_availability", AsyncMock(return_value={})),
         patch.object(agent.db, "db_get_menu", AsyncMock(return_value={"Pizzas": [{"name": "Margarita", "price": 10000}]})),
         patch.object(agent.db, "db_get_branches", AsyncMock(return_value=branches_return)),
-        patch.object(agent.db, "db_get_loyalty_balance", AsyncMock(return_value=None)),
         patch.object(agent, "_tenant_conn", _fake_tenant_conn),
     ]
 
@@ -194,7 +193,6 @@ async def test_branches_db_error_does_not_crash_builder():
         patch.object(agent.db, "db_get_menu_availability", AsyncMock(return_value={})),
         patch.object(agent.db, "db_get_menu", AsyncMock(return_value={"Pizzas": [{"name": "X", "price": 1}]})),
         patch.object(agent.db, "db_get_branches", AsyncMock(side_effect=RuntimeError("boom"))),
-        patch.object(agent.db, "db_get_loyalty_balance", AsyncMock(return_value=None)),
         patch.object(agent, "_tenant_conn", _fake_tenant_conn),
     ]
     for p in patches:

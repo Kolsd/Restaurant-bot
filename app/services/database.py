@@ -533,20 +533,6 @@ from app.repositories.staff_repo import (
 )
 
 
-# === Loyalty: moved to app.repositories.loyalty_repo (Fase 6) ===
-from app.repositories.loyalty_repo import (
-    db_get_loyalty_balance,
-    db_accrue_loyalty_points,
-    db_redeem_loyalty_points,
-    db_apply_redemption_to_order,
-    db_apply_redemption_to_table_check,
-    db_adjust_loyalty_points,
-    db_get_loyalty_ledger,
-    db_get_loyalty_stats,
-    db_get_phone_for_base_order,
-)
-
-
 # === Conversations (WAM deduplication): moved to app.repositories.conversations_repo (Fase 6) ===
 
 

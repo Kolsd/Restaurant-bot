@@ -9,7 +9,7 @@
  *
  * Valid page keys (data-active values):
  *   resumen | pedidos | reservaciones | salon | menu | menu-eng
- *   nps | fidelizacion | riesgo | staff | nomina | sucursales
+ *   nps | staff | nomina | sucursales
  *   settings | billing
  *
  * Route mapping (.html → production URL):
@@ -20,8 +20,6 @@
  *   menu-admin.html         → /menu-admin
  *   menu-engineering.html   → /menu-engineering
  *   nps.html                → /nps
- *   loyalty.html            → /loyalty
- *   customers-at-risk.html  → /customers-at-risk
  *   staff-hq.html           → /staff-hq   (employee portal — Agent B)
  *   payroll.html            → /payroll
  *   locations.html          → /locations
@@ -86,15 +84,6 @@
       <a class="sb-item" data-key="nps" href="/nps">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5l1.8 4.2 4.5.4-3.4 3 1 4.4L8 11.2 4.1 13.5l1-4.4-3.4-3 4.5-.4z"/></svg>
         NPS &amp; Reseñas
-      </a>
-      <a class="sb-item" data-key="fidelizacion" href="/loyalty">
-        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="12" height="9" rx="1"/><path d="M2 8h12M8 5V2M5 5v-.5a1 1 0 011-1h4a1 1 0 011 1V5"/></svg>
-        Fidelización
-      </a>
-      <a class="sb-item" data-key="riesgo" href="/customers-at-risk">
-        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5.5" cy="5" r="2.5"/><path d="M1.5 13c0-2.2 1.8-4 4-4s4 1.8 4 4"/><circle cx="11.5" cy="6" r="2"/><path d="M9.5 13c0-1.6 1-3 2-3"/></svg>
-        Clientes en riesgo
-        <span class="badge" id="sb-risk-badge" style="display:none;background:var(--warning-light,#fef3c7);color:var(--warning-text,#92400e);"></span>
       </a>
     </div>
 
@@ -274,7 +263,7 @@
     if (operationalRoles.includes(role)) {
       // Operational staff: hide all admin sections, show only their page link
       const adminKeys = ['resumen', 'pedidos', 'reservaciones', 'salon', 'menu', 'menu-eng',
-        'nps', 'fidelizacion', 'riesgo', 'staff', 'nomina', 'sucursales', 'settings', 'billing'];
+        'nps', 'staff', 'nomina', 'sucursales', 'settings', 'billing'];
       adminKeys.forEach(function(k) { hide(k); });
 
       const opsGroup = sb.querySelector('#sb-ops-group');
@@ -310,7 +299,6 @@
     }
 
     // Feature-flag gating
-    if (features.module_loyalty === false) hide('fidelizacion');
     if (features.module_reservations === false) hide('reservaciones');
 
     // Fix 3: initialize mobile hamburger + drawer after sidebar is fully rendered

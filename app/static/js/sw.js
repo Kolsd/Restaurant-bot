@@ -28,7 +28,7 @@
  * Cache-Control fix just removed unless the version bump is disciplined.
  */
 
-const CACHE_VERSION  = 'v67';
+const CACHE_VERSION  = 'v68';
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
@@ -47,7 +47,6 @@ const SHELL_ASSETS = [
   '/static/js/pages/team.js',
   '/static/js/pages/reservations.js',
   '/static/js/pages/nps.js',
-  '/static/js/pages/loyalty.js',
   '/static/js/pages/locations.js',
   '/static/js/pages/settings.js',
   '/static/js/pages/billing.js',

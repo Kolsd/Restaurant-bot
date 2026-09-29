@@ -2,14 +2,11 @@ import hashlib
 import hmac
 import json as _json
 import os
-import asyncio
 from fastapi import APIRouter, Request, HTTPException
 from app.services import database as db
 from app.services.orders import cart_summary
 from app.routes.deps import require_auth, get_current_restaurant, get_current_user
 from app.services.logging import get_logger
-from app.services.money import to_decimal
-from app.repositories.loyalty_repo import db_accrue_loyalty_points
 from app.repositories.orders_repo import record_wompi_event
 from app.services.tenant_context import tenant_scope, bypass_tenant_scope
 
@@ -199,48 +196,6 @@ async def wompi_webhook(request: Request):
                     reference=reference,
                     total=str(result.get("total", "")),
                 )
-
-                # Bug 1 fix: call loyalty_repo directly instead of dead loyalty_svc.accrue_on_order.
-                # Bug 10 fix: pass total as Decimal, not float.
-                # Bug 14 (RLS): loyalty_repo is tenant-scoped — enter tenant_scope after resolving
-                # restaurant_id from the confirmed order.
-                restaurant_id = result.get("restaurant_id")
-                if not restaurant_id:
-                    # Fallback: resolve via bot_number
-                    bot_number = result.get("bot_number", "")
-                    if bot_number:
-                        rest = await db.db_get_restaurant_by_bot_number(bot_number)
-                        restaurant_id = rest["id"] if rest else None
-
-                if restaurant_id:
-                    async def _accrue_loyalty(rid: int, res: dict) -> None:
-                        try:
-                            with tenant_scope(rid):
-                                pts = await db_accrue_loyalty_points(
-                                    restaurant_id=rid,
-                                    phone=res.get("phone", ""),
-                                    order_id=reference,
-                                    total_cop=to_decimal(res.get("total", 0)),  # Bug 10: Decimal, not float
-                                )
-                                if pts:
-                                    log.info(
-                                        "orders.loyalty_accrued",
-                                        reference=reference,
-                                        points=pts,
-                                    )
-                        except Exception:
-                            log.exception(
-                                "orders.loyalty_accrue_failed",
-                                reference=reference,
-                                restaurant_id=rid,
-                            )
-
-                    asyncio.create_task(_accrue_loyalty(restaurant_id, result))
-                else:
-                    log.warning(
-                        "orders.loyalty_skipped_no_restaurant",
-                        reference=reference,
-                    )
 
         return {"status": "ok"}
 

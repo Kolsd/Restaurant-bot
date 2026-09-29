@@ -733,35 +733,6 @@ async def db_payment_status(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. Customers at risk (wrap marketing_repo)
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def db_customers_at_risk(org_id: int, limit: int = 50) -> dict:
-    """Return at-risk frequent customers (dormant >= 21 days, min 3 orders).
-
-    Wraps marketing_repo.get_at_risk_customers and normalises the response
-    shape to match the documented API contract.
-    """
-    from app.repositories.marketing_repo import get_at_risk_customers  # noqa: PLC0415
-
-    limit = max(1, min(200, limit))
-    rows = await get_at_risk_customers(restaurant_id=org_id, limit=limit)
-
-    customers = []
-    for r in rows:
-        customers.append({
-            "phone":        r["customer_phone"],
-            "name":         r["customer_name"],
-            "total_orders": r["total_orders"],
-            "last_seen":    r["last_order_at"],
-            "days_since":   r["days_since"],
-            "total_spent":  r["total_spent"],  # already quantized float (JSON boundary in marketing_repo)
-        })
-
-    return {"count": len(customers), "customers": customers}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # 7. Staff performance sparkline
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -974,99 +945,6 @@ async def db_tips_pool(
         "entries_preview": preview,
         "unallocated":     unallocated,
         "my_pool":         my_pool,
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 9. Churn summary  (GET /api/stats/churn-summary)
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def db_churn_summary(org_id: int) -> dict:
-    """Aggregate churn risk buckets for the clientes-riesgo page.
-
-    Bins customers by churn_score derived from recency (days_since_last_order):
-      high   — score >= 0.80  (dormant >= 56 days for ≥3-order customers)
-      medium — 0.50 <= score < 0.80  (dormant 21–55 days, ≥3 orders)
-      watch  — 0.30 <= score < 0.50  (dormant 14–20 days, ≥2 orders)
-
-    Score formula:  min(1.0, days_since / 70.0)  — linear ramp, caps at 1.0.
-    Threshold mapping:
-      days >= 56  → score ≥ 0.80  → high
-      days >= 35  → score ≥ 0.50  → medium
-      days >= 21  → score ≥ 0.30  → watch (≥2 orders threshold to include newer customers)
-
-    ltv_sum: sum of total_spent for high + medium bins. DB NUMERIC → Decimal → float.
-    reactivated_count: customers who were dormant (>21d) but have a recent order in
-        last 30 days.
-        # TODO: customer_profiles.last_seen is updated on every order; there is no
-        # "previously_dormant" flag in the current schema.  Counting customers whose
-        # last_seen is in the last 30 days AND who had been dormant before requires
-        # order-level history which customer_profiles does not expose.  Returning 0
-        # until a dedicated "reactivation_events" table or a second latest_order_date
-        # column is added.
-
-    medium_risk: top 6 from the medium bin, ordered by churn_score DESC.
-    """
-    from datetime import date as _date, timedelta as _td  # noqa: PLC0415
-
-    async with _tenant_connection() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT
-                phone,
-                COALESCE(display_name, phone)                              AS name,
-                total_orders,
-                total_spent,
-                EXTRACT(DAY FROM NOW() - last_seen)::INT                   AS days_since,
-                last_seen
-            FROM customer_profiles
-            WHERE org_id       = $1
-              AND total_orders >= 2
-              AND last_seen    <  NOW() - INTERVAL '14 days'
-            ORDER BY last_seen ASC
-            """,
-            org_id,
-        )
-
-    high_count = 0
-    medium_count = 0
-    watch_count = 0
-    ltv_high_medium = Decimal("0")
-    medium_risk_rows: list[dict] = []
-
-    for r in rows:
-        days = int(r["days_since"] or 0)
-        score = min(1.0, days / 70.0)
-        total_orders = int(r["total_orders"] or 0)
-
-        # Enforce minimum order thresholds per bin
-        if score >= 0.80 and total_orders >= 3:
-            high_count += 1
-            ltv_high_medium += to_decimal(r["total_spent"])
-        elif score >= 0.50 and total_orders >= 3:
-            medium_count += 1
-            ltv_high_medium += to_decimal(r["total_spent"])
-            medium_risk_rows.append({
-                "name":         r["name"],
-                "phone":        r["phone"],
-                "churn_score":  round(score, 4),
-                "days_since":   days,
-                "total_visits": total_orders,
-            })
-        elif score >= 0.30 and total_orders >= 2:
-            watch_count += 1
-
-    # Sort medium bin by score DESC, take top 6
-    medium_risk_rows.sort(key=lambda x: -x["churn_score"])
-    medium_risk_top6 = medium_risk_rows[:6]
-
-    return {
-        "high_count":       high_count,
-        "medium_count":     medium_count,
-        "watch_count":      watch_count,
-        "ltv_sum":          float(quantize_money(ltv_high_medium)),  # JSON boundary
-        "reactivated_count": 0,  # TODO: requires order-history or reactivation_events table
-        "medium_risk":      medium_risk_top6,
     }
 
 

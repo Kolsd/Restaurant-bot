@@ -1,9 +1,8 @@
 """
 tests/test_stats_tier3.py
 
-Unit + integration tests for the five Tier-3 Dashboard/Staff-HQ endpoints:
+Unit + integration tests for the Tier-3 Dashboard/Staff-HQ endpoints:
   GET /api/stats/payment-status
-  GET /api/stats/customers-at-risk
   GET /api/stats/staff-performance
   GET /api/stats/tips-pool
   GET /api/public/menu-context/{table_id}  — table_context field
@@ -110,52 +109,6 @@ def test_payment_bucket_logic():
     assert stats_repo._payment_bucket(False, "disputed", 50000) == "disputed"
     assert stats_repo._payment_bucket(True, "cortesia", 0) == "courtesy"
     assert stats_repo._payment_bucket(True, "paid", 0) == "courtesy"  # zero total → courtesy
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 2. GET /api/stats/customers-at-risk
-# ══════════════════════════════════════════════════════════════════════════════
-
-MOCK_AT_RISK = {
-    "count": 2,
-    "customers": [
-        {
-            "phone": "+57301...", "name": "Ana M.", "total_orders": 12,
-            "last_seen": "2026-03-28T00:00:00", "days_since": 22,
-            "total_spent": 340000,
-        },
-        {
-            "phone": "+57310...", "name": "Beto R.", "total_orders": 5,
-            "last_seen": "2026-03-30T00:00:00", "days_since": 20,
-            "total_spent": 80000,
-        },
-    ],
-}
-
-
-def test_customers_at_risk_shape(client, patched_auth, monkeypatch):
-    """Returns count + customers list with required fields."""
-    monkeypatch.setattr(
-        stats_repo, "db_customers_at_risk",
-        AsyncMock(return_value=MOCK_AT_RISK),
-    )
-    with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-        resp = client.get("/api/stats/customers-at-risk", headers=_auth_headers())
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "count" in data
-    assert "customers" in data
-    assert data["count"] == len(data["customers"])
-    c = data["customers"][0]
-    for key in ("phone", "name", "total_orders", "last_seen", "days_since", "total_spent"):
-        assert key in c, f"Missing field: {key}"
-
-
-def test_customers_at_risk_limit_validation(client, patched_auth, monkeypatch):
-    """limit must be 1–200; 0 and 201 rejected with 422."""
-    monkeypatch.setattr(stats_repo, "db_customers_at_risk", AsyncMock(return_value=MOCK_AT_RISK))
-    assert client.get("/api/stats/customers-at-risk?limit=0", headers=_auth_headers()).status_code == 422
-    assert client.get("/api/stats/customers-at-risk?limit=201", headers=_auth_headers()).status_code == 422
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -295,24 +248,6 @@ async def test_integration_payment_status_empty(db_pool):
     assert len(result["buckets"]) == 4
     keys = {b["key"] for b in result["buckets"]}
     assert keys == {"paid", "pending", "disputed", "courtesy"}
-
-
-@pytest.mark.asyncio
-async def test_integration_customers_at_risk_empty(db_pool):
-    """Empty DB returns empty customers list."""
-    import app.services.database as _db
-    from unittest.mock import patch as _patch
-    from app.services.tenant_context import tenant_scope
-
-    async def _test_pool():
-        return db_pool
-
-    with _patch.object(_db, "get_pool", _test_pool):
-        org_id = 999999
-        with tenant_scope(org_id):
-            result = await stats_repo.db_customers_at_risk(org_id=org_id, limit=10)
-    assert result["count"] == 0
-    assert result["customers"] == []
 
 
 @pytest.mark.asyncio

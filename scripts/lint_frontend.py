@@ -516,21 +516,6 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/staff/schedules",
         ],
     },
-    "loyalty.html": {
-        "js": "pages/loyalty.js",
-        # Labels are JS getElementById strings that must exist to prove handler wiring:
-        # btn-new-campaign = Nueva campaña; btn-configure = Configurar programa; campaigns-list = render target
-        "required_button_labels": [
-            "btn-new-campaign",
-            "btn-configure",
-            "campaigns-list",
-        ],
-        "required_fetches": [
-            "/api/loyalty/aggregates",
-            "/api/loyalty/segments",
-            "/api/loyalty/campaigns",
-        ],
-    },
     "diner-chat.html": {
         "js": "pages/diner-chat.js",
         # Labels prove the core diner flows are wired: adding a dish (with a

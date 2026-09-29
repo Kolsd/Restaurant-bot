@@ -645,16 +645,6 @@ _MODULE_RULES: dict = {
         [],
         "no cuenta con sistema de distribución de propinas activo",
     ),
-    "loyalty": (
-        "Programa de Lealtad / Puntos",
-        [],
-        "no cuenta con programa de puntos ni recompensas",
-    ),
-    "dynamic_discounts": (
-        "Descuentos Dinámicos",
-        [],
-        "no cuenta con sistema de descuentos por horario",
-    ),
 }
 
 
@@ -712,33 +702,11 @@ async def build_system_prompt(
     `table_context` may still be None here for the web ordering chat
     (order_mode delivery/pickup has no table), in which case
     `build_salon_prompt` simply omits the table-greeting block.
-    Appends an active-discount block when dynamic_discounts is enabled.
     Appends a customer memory block when customer_context is non-empty.
     Appends a customer history block when order_history has >= 2 items (Fase 5a).
     """
     features = features or {}
     restrictions = _build_module_restrictions(features)
-
-    # Inject active discount block when the module is enabled
-    discount_block = ""
-    if features.get("dynamic_discounts") and restaurant_id:
-        try:
-            from app.repositories.discounts_repo import db_get_active_discount  # noqa: PLC0415
-            tz = features.get("timezone", "America/Bogota")
-            discount = await db_get_active_discount(restaurant_id, tz=tz)
-            if discount:
-                end_str = str(discount.get("end_time", ""))[:5]  # HH:MM
-                pct = discount.get("discount_percent", "")
-                label = discount.get("label", "")
-                label_text = f" ({label})" if label else ""
-                discount_block = (
-                    "\n[DESCUENTO_ACTIVO]\n"
-                    f"Hay un descuento activo del {pct}%{label_text} hasta las {end_str}.\n"
-                    "Menciónalo al cliente al inicio de la conversación de forma natural.\n"
-                    f"Aplica SOLO a pedidos realizados antes de las {end_str}.\n"
-                )
-        except Exception:
-            log.exception("build_system_prompt.discount_lookup_error", restaurant_id=restaurant_id)
 
     # Customer memory block — appended after injection-defense, never prepended
     customer_block = ""
@@ -773,8 +741,8 @@ async def build_system_prompt(
     # Anthropic caches up to the last cache_control breakpoint; anything
     # appended after is charged as uncached input, which is cheap vs. the
     # cache-miss cost of mutating the cached text on every request.
-    if discount_block or customer_block or history_block:
-        combined = discount_block + customer_block + history_block
+    if customer_block or history_block:
+        combined = customer_block + history_block
         prompt.append({"type": "text", "text": combined})
 
     return prompt
@@ -901,7 +869,6 @@ _TOOL_TO_ACTION = {
     "end_session": "end_session",
     "remember_customer_preference": "remember",
     "send_dish_card": "send_dish_card",
-    "redeem_loyalty_points": "redeem_loyalty",
 }
 
 
@@ -942,9 +909,6 @@ def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> 
         parsed["dish_name"] = tool_input.get("dish_name", "")
         parsed["caption"] = tool_input.get("caption", "")
         parsed["_resolved_dish"] = tool_input.get("_resolved_dish", {})
-
-    if action == "redeem_loyalty":
-        parsed["points"] = tool_input.get("points", 0)
 
     return parsed
 
@@ -1354,220 +1318,7 @@ async def _validate_tool_call(
             log.warning("guard.remember_rate_limited", phone=_obfuscate_phone(phone))
             return None, reply, {}
 
-    # 10. redeem_loyalty_points — validate points > 0 (Regla 2: validate before execute)
-    if tool_name == "redeem_loyalty_points":
-        if not isinstance(tool_input, dict):
-            log.warning("guard.redeem_loyalty_input_not_dict", phone=_obfuscate_phone(phone))
-            return None, reply or "No pude procesar tu canje. ¿Cuántos puntos querés canjear?", {}
-        try:
-            pts = int(tool_input.get("points", 0))
-        except (ValueError, TypeError):
-            log.warning(
-                "guard.redeem_loyalty_invalid_points",
-                phone=_obfuscate_phone(phone),
-                points=tool_input.get("points"),
-            )
-            return None, "No entendí cuántos puntos querés canjear. ¿Me decís el número?", {}
-        if pts <= 0:
-            log.warning("guard.redeem_loyalty_non_positive", phone=_obfuscate_phone(phone), points=pts)
-            return None, "Tenés que canjear al menos 1 punto. ¿Cuántos querés usar?", {}
-        # Cap at a sane maximum to prevent runaway tool calls.
-        if pts > 1_000_000:
-            log.warning("guard.redeem_loyalty_too_many", phone=_obfuscate_phone(phone), points=pts)
-            return None, "Esa cantidad de puntos parece demasiado alta. ¿Me confirmás el número?", {}
-        tool_input = {**tool_input, "points": pts}
-
     return tool_name, reply, tool_input
-
-
-# ── Loyalty redemption helper (shared salon + external) ─────────────────────
-
-async def _execute_redeem_loyalty(
-    parsed: dict,
-    phone: str,
-    bot_number: str,
-    table_context: dict | None,
-    restaurant_obj: dict | None,
-) -> str:
-    """
-    Apply a loyalty redemption to the customer's current order/check.
-
-    Salon (table_context): redeem against the most recent OPEN check of the
-    table session. If no open check exists, do not touch the balance and ask
-    the customer to wait until they ask for the bill.
-
-    External: redeem against the most recent unpaid delivery/pickup order
-    (mirroring db_update_pending_order_payment_method). If no such order
-    exists, do not touch the balance and explain politely.
-
-    All money math is Decimal end-to-end. Failures of the second update step
-    (apply_redemption_to_*) are logged but do NOT roll back the ledger
-    decrement — the customer balance is the source of truth and caja can
-    reconcile manually if the order/check fails to take the discount.
-    """
-    points = parsed.get("points", 0)
-    try:
-        points = int(points)
-    except (ValueError, TypeError):
-        points = 0
-    if points <= 0:
-        # Validation already filtered this; defensive fallback.
-        return "Tenés que canjear al menos 1 punto. ¿Cuántos querés usar?"
-
-    restaurant_id = (restaurant_obj or {}).get("id")
-    if not restaurant_id:
-        log.warning(
-            "loyalty.redeem_no_restaurant_id",
-            phone=_obfuscate_phone(phone), bot_number=bot_number,
-        )
-        return "No pudimos canjear tus puntos en este momento. Avisale al equipo."
-
-    # ── Locate the order/check we will apply the discount to ──────────────
-    target_kind: str | None = None        # "table_check" | "external_order"
-    target_id: str | None = None
-    base_order_id_for_redeem: str | None = None
-
-    if table_context:
-        # Salon: redemption only allowed AFTER the customer asks for the
-        # bill (table_checks rows exist). Without an open check there is
-        # nothing for the cashier to discount, and we'd burn the customer's points
-        # on a transaction that hasn't been priced yet.
-        try:
-            base_order_id = await db.db_get_base_order_id(table_context["id"])
-        except Exception:
-            log.exception(
-                "loyalty.redeem_get_base_order_failed",
-                phone=_obfuscate_phone(phone), bot_number=bot_number,
-            )
-            return "No pudimos canjear tus puntos en este momento. Avisale al mesero."
-        if not base_order_id:
-            return (
-                "No tenés una cuenta abierta para aplicar el canje. "
-                "Cuando pidas la cuenta podés usar tus puntos."
-            )
-        try:
-            async with _tenant_conn() as _conn:
-                row = await _conn.fetchrow(
-                    """SELECT id FROM table_checks
-                        WHERE base_order_id = $1
-                          AND status = 'open'
-                        ORDER BY check_number DESC, created_at DESC
-                        LIMIT 1""",
-                    base_order_id,
-                )
-        except Exception:
-            log.exception(
-                "loyalty.redeem_lookup_check_failed",
-                phone=_obfuscate_phone(phone), base_order_id=base_order_id,
-            )
-            return "No pudimos canjear tus puntos en este momento. Avisale al mesero."
-
-        if row is None:
-            # Per spec: refuse redemption pre-checkout.
-            return (
-                "No tenés una cuenta abierta para aplicar el canje. "
-                "Pedile la cuenta al mesero y aplicamos los puntos al cobrar."
-            )
-        target_kind = "table_check"
-        target_id = row["id"]
-        base_order_id_for_redeem = base_order_id
-    else:
-        # External: most recent unpaid delivery/pickup order
-        try:
-            async with _tenant_conn() as _conn:
-                row = await _conn.fetchrow(
-                    """SELECT id FROM orders
-                        WHERE phone = $1
-                          AND bot_number = $2
-                          AND order_type IN ('domicilio', 'recoger')
-                          AND paid = false
-                          AND status NOT IN ('cancelado', 'entregado')
-                        ORDER BY created_at DESC
-                        LIMIT 1""",
-                    phone, bot_number,
-                )
-        except Exception:
-            log.exception(
-                "loyalty.redeem_lookup_order_failed",
-                phone=_obfuscate_phone(phone), bot_number=bot_number,
-            )
-            return "No pudimos canjear tus puntos en este momento. Probá de nuevo en un momento."
-
-        if row is None:
-            return (
-                "No encontré un pedido activo donde aplicar el canje. "
-                "Cuando hagas tu próximo pedido podés usar tus puntos."
-            )
-        target_kind = "external_order"
-        target_id = row["id"]
-        base_order_id_for_redeem = row["id"]  # ledger order_id == orders.id
-
-    # ── Decrement balance + write ledger entry ────────────────────────────
-    try:
-        result = await db.db_redeem_loyalty_points(
-            restaurant_id, phone, points,
-            order_id=base_order_id_for_redeem or "",
-        )
-    except ValueError as e:
-        # Insufficient balance or invalid input. Surface a friendly message
-        # with the actual current balance so the customer knows what's
-        # available without a follow-up turn.
-        log.info(
-            "loyalty.redeem_value_error",
-            phone=_obfuscate_phone(phone), points=points, reason=str(e),
-        )
-        balance = None
-        try:
-            balance = await db.db_get_loyalty_balance(restaurant_id, phone)
-        except Exception:
-            log.exception("loyalty.redeem_balance_lookup_failed", phone=_obfuscate_phone(phone))
-        current = balance.get("puntos_actuales") if balance else 0
-        return (
-            f"No alcanzan los puntos: tenés {current} y querías canjear {points}. "
-            "¿Querés usar lo que tenés?"
-        )
-    except Exception:
-        log.exception(
-            "loyalty.redeem_db_failed",
-            phone=_obfuscate_phone(phone), bot_number=bot_number, points=points,
-        )
-        return "No pudimos canjear tus puntos en este momento. Probá de nuevo en un momento."
-
-    redeemed = int(result.get("redeemed", points))
-    cop_discount = int(result.get("cop_discount", 0))
-    new_balance = int(result.get("new_balance", 0))
-
-    # ── Annotate the order/check so caja sees the discount ────────────────
-    # Best-effort: if this step fails we log but do NOT roll back the ledger,
-    # because the canonical source of truth is loyalty_customers.points_balance.
-    # Caja can reconcile from the ledger if the column update fails.
-    try:
-        if target_kind == "table_check" and target_id is not None:
-            await db.db_apply_redemption_to_table_check(target_id, redeemed, cop_discount)
-        elif target_kind == "external_order" and target_id is not None:
-            await db.db_apply_redemption_to_order(target_id, redeemed, cop_discount)
-        # (table_check with no open check: discount applied to base_order_id at billing time
-        # from the ledger — no row to annotate yet.)
-    except Exception:
-        log.exception(
-            "loyalty.redeem_apply_to_target_failed",
-            phone=_obfuscate_phone(phone), target_kind=target_kind,
-            target_id=target_id, points=redeemed,
-        )
-
-    log.info(
-        "loyalty.redeem_success",
-        phone=_obfuscate_phone(phone),
-        bot_number=bot_number,
-        points=redeemed,
-        cop_discount=cop_discount,
-        new_balance=new_balance,
-        target_kind=target_kind,
-    )
-    return (
-        f"Listo, canjeaste {redeemed} puntos = ${cop_discount:,} de descuento. "
-        f"Tu saldo queda en {new_balance} puntos."
-    )
 
 
 # ── Action dispatcher (delegates to salon/external handlers) ─────────────────
@@ -1869,12 +1620,6 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                                   reservation_id=_res_id,
                                   phone=_obfuscate_phone(phone))
                     reply = "Hubo un problema al cancelar tu reserva. Por favor contacta al restaurante directamente."
-
-        # ── Loyalty redemption (shared, both flows) ───────────────────────
-        elif action == "redeem_loyalty":
-            return await _execute_redeem_loyalty(
-                parsed, phone, bot_number, table_context, restaurant_obj,
-            )
 
         # ── End session (shared, both flows) ──────────────────────────────
         elif action == "end_session":
@@ -2236,24 +1981,6 @@ async def _build_enriched_user_message(
         except Exception:
             log.exception("branches_context_failed", bot_number=bot_number)
 
-    # Loyalty points — ultra-light injection. Provides BOTH legacy [PUNTOS:]
-    # and new [LOYALTY:] formats so the LLM has redundant cues. Skipped when
-    # balance is 0 / customer has no record (no point telling Claude "0
-    # puntos" — it just clutters context).
-    loyalty_note = ""
-    try:
-        balance = await db.db_get_loyalty_balance(restaurant_obj.get("id"), user_phone)
-    except Exception:
-        log.exception("loyalty.balance_lookup_failed", phone=_obfuscate_phone(user_phone))
-        balance = None
-    if balance and (balance.get("puntos_actuales") or 0) > 0:
-        pts = balance["puntos_actuales"]
-        equiv = balance["equivalencia_cop"]
-        loyalty_note = (
-            f"\n[PUNTOS: {pts} pts | equiv. ${equiv:,} COP]"
-            f"\n[LOYALTY: balance={pts} puntos · valor_cop_aprox=${equiv:,}]"
-        )
-
     empty_menu_alert = ""
     if not compact_menu or compact_menu.strip() == "Sin menú.":
         empty_menu_alert = "\n[ALERTA: El restaurante aún no ha configurado su menú. Informa amablemente al cliente que el menú estará disponible pronto y que puede contactar al restaurante directamente.]"
@@ -2269,7 +1996,6 @@ async def _build_enriched_user_message(
         f"{metodos_bloque}"
         f"{delivery_fee_note}"
         f"{branches_note}"
-        f"{loyalty_note}"
         f"{in_transit_note}"
         f"{session_note}"
     )
@@ -2425,7 +2151,7 @@ async def _call_llm_and_execute(
         )
         _PROGRESS_TOOLS = {
             "place_order", "make_reservation", "add_to_cart", "remove_from_cart",
-            "request_bill", "call_waiter", "redeem_loyalty_points",
+            "request_bill", "call_waiter",
             "send_dish_card",
         }
         if tool_name and tool_name in _PROGRESS_TOOLS:
@@ -2686,7 +2412,7 @@ async def _chat_impl(
             )
             return {"message": REDIRECT_MESSAGE}
 
-    # 7. Build enriched user message (menu, cart, notes, loyalty, transit alert…)
+    # 7. Build enriched user message (menu, cart, notes, transit alert…)
     enriched, menu_url, full_history = await _build_enriched_user_message(
         user_message_clean, user_phone, bot_number,
         restaurant_obj, restaurant_name, feats,

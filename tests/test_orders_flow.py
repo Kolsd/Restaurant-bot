@@ -183,11 +183,6 @@ def test_wompi_valid_approved_transaction(client, monkeypatch):
     sig = _wompi_sig(body_bytes, secret)
     confirmed_order = {**_ORDER, "status": "pagado", "restaurant_id": 1}
     monkeypatch.setattr(db_mod, "db_confirm_payment", AsyncMock(return_value=confirmed_order))
-    # loyalty_svc.accrue_on_order was replaced by loyalty_repo.db_accrue_loyalty_points
-    monkeypatch.setattr(
-        "app.repositories.loyalty_repo.db_accrue_loyalty_points",
-        AsyncMock(return_value=None),
-    )
     r = client.post("/api/payment/wompi-webhook", content=body_bytes,
                     headers={"x-event-checksum": sig, "Content-Type": "application/json"})
     assert r.status_code == 200

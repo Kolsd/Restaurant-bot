@@ -53,9 +53,7 @@ from app.routes.staff import router as staff_router
 from app.routes.staff_delivery import router as staff_delivery_router
 from app.routes.staff_webauthn import router as staff_webauthn_router
 from app.routes.staff_comms import router as staff_comms_router
-from app.routes.loyalty import router as loyalty_router
 from app.routes.reservations import router as reservations_router
-from app.routes.discounts import router as discounts_router
 from app.routes.reviews import router as reviews_router
 from app.routes.health import router as health_router
 from app.routes.subscription import router as subscription_router
@@ -299,7 +297,7 @@ app.mount("/static", _CachedStaticFiles(directory=str(STATIC_DIR)), name="static
 # DISABLED_MODULES env var is a comma-separated list of module keys to skip.
 # Default is empty — all revenue-bearing modules are ON. Per-plan enforcement
 # comes from plan_limits (db_check_caps in agent.py), not from this gate.
-# To disable specific modules, set: DISABLED_MODULES="loyalty,staff_webauthn"
+# To disable specific modules, set: DISABLED_MODULES="staff_webauthn"
 _DEFAULT_DISABLED = ""
 _disabled_modules = {
     m.strip()
@@ -342,8 +340,6 @@ _maybe_include("staff", staff_router)
 _maybe_include("staff_delivery", staff_delivery_router)
 _maybe_include("staff_webauthn", staff_webauthn_router)
 _maybe_include("staff_comms", staff_comms_router)
-_maybe_include("loyalty", loyalty_router)
-_maybe_include("discounts", discounts_router)
 _maybe_include("reviews", reviews_router)
 # ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
 app.include_router(internal_crm_router)

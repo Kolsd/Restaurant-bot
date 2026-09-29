@@ -1276,7 +1276,7 @@ async def db_finalize_check_payment(
 
     Returns True if the finalize succeeded, False if the check was not in
     'paying' state (e.g. already finalized by a concurrent call). The caller
-    should treat False as a 409 — DO NOT proceed with loyalty accrual or
+    should treat False as a 409 — DO NOT proceed with
     customer-facing side effects on False.
 
     Pre-condition: caller has previously called db_claim_check_for_payment

@@ -248,16 +248,6 @@ async def nps_page():
     p = STATIC / "html" / "nps.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>NPS no disponible</h1>", status_code=404)
 
-@router.get("/loyalty", response_class=HTMLResponse)
-async def loyalty_page():
-    p = STATIC / "html" / "loyalty.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Fidelización no disponible</h1>", status_code=404)
-
-@router.get("/customers-at-risk", response_class=HTMLResponse)
-async def customers_at_risk_page():
-    p = STATIC / "html" / "customers-at-risk.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Clientes en riesgo no disponible</h1>", status_code=404)
-
 @router.get("/payroll", response_class=HTMLResponse)
 async def payroll_page():
     p = STATIC / "html" / "payroll.html"

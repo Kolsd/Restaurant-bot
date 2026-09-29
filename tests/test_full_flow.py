@@ -539,8 +539,6 @@ class TestWaiterFlows:
         monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
-        import app.services.loyalty as loyalty_mod
-        monkeypatch.setattr(loyalty_mod, "accrue_on_check", AsyncMock(), raising=False)
 
         resp = client.post(
             "/api/table-orders/order-abc/checks/check-1/pay",
@@ -685,10 +683,7 @@ class TestCashierFlows:
         monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
-        # Stub out loyalty to avoid side-effects
         import app.routes.tables as tables_mod
-        import app.services.loyalty as loyalty_mod
-        monkeypatch.setattr(loyalty_mod, "accrue_on_check", AsyncMock(), raising=False)
 
         resp = client.post(
             "/api/table-orders/order-abc/checks/check-1/pay",
@@ -752,8 +747,6 @@ class TestCashierFlows:
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         mock_billing = AsyncMock(return_value=None)
         monkeypatch.setattr("app.services.billing.get_billing_config", mock_billing)
-        import app.services.loyalty as loyalty_mod
-        monkeypatch.setattr(loyalty_mod, "accrue_on_check", AsyncMock(), raising=False)
 
         adapter_mock = MagicMock()
         adapter_mock.create_invoice = AsyncMock(return_value={"id": "inv-1"})
@@ -785,8 +778,6 @@ class TestCashierFlows:
         monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=first_order))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
-        import app.services.loyalty as loyalty_mod
-        monkeypatch.setattr(loyalty_mod, "accrue_on_check", AsyncMock(), raising=False)
 
         resp = client.post(
             "/api/table-orders/order-abc/checks/check-1/pay",
@@ -1009,8 +1000,6 @@ class TestEndToEndTableFlow:
         monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
-        import app.services.loyalty as loyalty_mod
-        monkeypatch.setattr(loyalty_mod, "accrue_on_check", AsyncMock(), raising=False)
 
         resp = client.post(
             "/api/table-orders/o-new/checks/chk-1/pay",

@@ -1056,25 +1056,16 @@ function _renderCheckModal(baseOrderId, tableName) {
       ? `<span style="font-size:10px;background:rgba(29,158,117,0.15);color:#4ADE9E;padding:2px 7px;border-radius:4px;font-weight:600;">Cobrado</span>`
       : `<span style="font-size:10px;background:rgba(245,158,11,0.15);color:#F59E0B;padding:2px 7px;border-radius:4px;font-weight:600;">Pendiente</span>`;
     const items = Array.isArray(chk.items) ? chk.items : (chk.items ? JSON.parse(chk.items) : []);
-    const loyaltyDiscount = Number(chk.loyalty_discount_cop || 0);
-    const loyaltyPoints = Number(chk.loyalty_redeemed_points || 0);
     const grossTotal = Number(chk.total || 0);
-    const netTotal = Math.max(0, grossTotal - loyaltyDiscount);
-    const totalDisplay = loyaltyDiscount > 0
-      ? `<div style="text-align:right;"><div style="font-size:11px;color:#6B7280;text-decoration:line-through;">${fmt(grossTotal)}</div><div style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--brand);">${fmt(netTotal)}</div></div>`
-      : `<div style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--brand);">${fmt(grossTotal)}</div>`;
-    const loyaltyLine = loyaltyDiscount > 0
-      ? `<div style="font-size:11.5px;color:#4ADE9E;margin-bottom:8px;font-weight:600;">Descuento puntos: -${fmt(loyaltyDiscount)} (${_esc(String(loyaltyPoints))} puntos)</div>`
-      : '';
+    const totalDisplay = `<div style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--brand);">${fmt(grossTotal)}</div>`;
     html += `
       <div style="background:#12161f;border:1px solid #252836;border-radius:10px;padding:14px;margin-bottom:10px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <div style="font-size:13px;font-weight:600;color:#E8EAEE;">Cuenta #${_esc(String(chk.check_number || chk.id))}</div>
           <div style="display:flex;align-items:center;gap:8px;">${statusLabel}${totalDisplay}</div>
         </div>
-        <div style="font-size:11.5px;color:#6B7280;margin-bottom:${loyaltyLine ? '4px' : '10px'};">${items.map(it => `${_esc(String(it.qty || 1))}× ${_esc(it.name)}`).join(' · ')}</div>
-        ${loyaltyLine}
-        ${!isPaid ? `<button class="cm-pay-check" data-check-id="${_esc(chk.id)}" data-total="${netTotal}" style="width:100%;padding:9px;background:var(--brand);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">Cobrar este check</button>` : ''}
+        <div style="font-size:11.5px;color:#6B7280;margin-bottom:10px;">${items.map(it => `${_esc(String(it.qty || 1))}× ${_esc(it.name)}`).join(' · ')}</div>
+        ${!isPaid ? `<button class="cm-pay-check" data-check-id="${_esc(chk.id)}" data-total="${grossTotal}" style="width:100%;padding:9px;background:var(--brand);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">Cobrar este check</button>` : ''}
       </div>`;
   });
 

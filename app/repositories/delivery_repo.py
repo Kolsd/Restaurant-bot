@@ -11,7 +11,7 @@ Scope notes (mirrors diner_sessions_repo.py / qr_claims_repo.py):
     pattern as diner_sessions_repo.get_by_token().
   - Every other function assumes the CALLER has already entered
     tenant_scope(org_id) (the standard repo convention in this codebase —
-    see diner_sessions_repo.touch_last_seen / loyalty_repo.* — the org_id
+    see diner_sessions_repo.touch_last_seen — the org_id
     parameter is used to build/filter the query, not to open the scope).
   - `orders` has RLS ENABLE + FORCE (migration 0076). `locations` and
     `organizations` do NOT (they are not in _RLS_TABLES — see

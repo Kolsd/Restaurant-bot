@@ -143,19 +143,15 @@ class TestBuildSystemPromptHistoryBlock:
             {"name": "Limonada de Coco", "count": 2, "last_ordered": "2026-04-08T12:00:00"},
         ]
 
-        with patch(
-            "app.repositories.discounts_repo.db_get_active_discount",
-            new=AsyncMock(return_value=None),
-        ):
-            prompt = _run(
-                build_system_prompt(
-                    features={},
-                    table_context=None,
-                    restaurant_id=None,
-                    customer_context="",
-                    order_history=order_history,
-                )
+        prompt = _run(
+            build_system_prompt(
+                features={},
+                table_context=None,
+                restaurant_id=None,
+                customer_context="",
+                order_history=order_history,
             )
+        )
 
         full_text = " ".join(
             block["text"] for block in prompt if isinstance(block, dict) and block.get("type") == "text"
@@ -172,19 +168,15 @@ class TestBuildSystemPromptHistoryBlock:
     def test_history_block_absent_for_no_history(self):
         from app.services.agent import build_system_prompt
 
-        with patch(
-            "app.repositories.discounts_repo.db_get_active_discount",
-            new=AsyncMock(return_value=None),
-        ):
-            prompt = _run(
-                build_system_prompt(
-                    features={},
-                    table_context=None,
-                    restaurant_id=None,
-                    customer_context="",
-                    order_history=[],
-                )
+        prompt = _run(
+            build_system_prompt(
+                features={},
+                table_context=None,
+                restaurant_id=None,
+                customer_context="",
+                order_history=[],
             )
+        )
 
         full_text = " ".join(
             block["text"] for block in prompt if isinstance(block, dict) and block.get("type") == "text"
@@ -200,19 +192,15 @@ class TestBuildSystemPromptHistoryBlock:
             {"name": "Solo un Plato", "count": 1, "last_ordered": "2026-04-10T14:00:00"},
         ]
 
-        with patch(
-            "app.repositories.discounts_repo.db_get_active_discount",
-            new=AsyncMock(return_value=None),
-        ):
-            prompt = _run(
-                build_system_prompt(
-                    features={},
-                    table_context=None,
-                    restaurant_id=None,
-                    customer_context="",
-                    order_history=order_history,
-                )
+        prompt = _run(
+            build_system_prompt(
+                features={},
+                table_context=None,
+                restaurant_id=None,
+                customer_context="",
+                order_history=order_history,
             )
+        )
 
         full_text = " ".join(
             block["text"] for block in prompt if isinstance(block, dict) and block.get("type") == "text"
@@ -224,19 +212,15 @@ class TestBuildSystemPromptHistoryBlock:
     def test_history_block_absent_when_none(self):
         from app.services.agent import build_system_prompt
 
-        with patch(
-            "app.repositories.discounts_repo.db_get_active_discount",
-            new=AsyncMock(return_value=None),
-        ):
-            prompt = _run(
-                build_system_prompt(
-                    features={},
-                    table_context=None,
-                    restaurant_id=None,
-                    customer_context="",
-                    order_history=None,
-                )
+        prompt = _run(
+            build_system_prompt(
+                features={},
+                table_context=None,
+                restaurant_id=None,
+                customer_context="",
+                order_history=None,
             )
+        )
 
         full_text = " ".join(
             block["text"] for block in prompt if isinstance(block, dict) and block.get("type") == "text"

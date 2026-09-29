@@ -19,7 +19,6 @@ from app.routes.deps import (
 )
 from app.services.tenant_context import tenant_scope, bypass_tenant_scope
 from app.services.tenant_db import tenant_connection
-from app.services import loyalty as loyalty_svc
 from app.services.money import to_decimal, money_mul, quantize_money, money_sum
 from app.services.logging import get_logger
 from app.repositories import delivery_repo
@@ -1420,7 +1419,7 @@ async def pay_check_single(request: Request, base_order_id: str, body: PayCheckB
     Charges the whole table in a single check (no prior split).
 
     Atomically creates a single check with ALL the ticket's items and charges it
-    reusing the pay_check flow (fiscal, loyalty, NPS, change, tip).
+    reusing the pay_check flow (fiscal, NPS, change, tip).
 
     The cashier calls this when the user selects "Pagar mesa completa" without
     having split the bill. The real check_id is returned in the response so
@@ -1503,7 +1502,7 @@ async def pay_check_single(request: Request, base_order_id: str, body: PayCheckB
         raise HTTPException(status_code=500, detail="Check creado sin id — estado inconsistente")
 
     # Delegate to the existing pay_check — it handles rate-limit, tenant_scope,
-    # fiscal invoice (gated by dian_active flag; currently OFF), loyalty accrual,
+    # fiscal invoice (gated by dian_active flag; currently OFF),
     # NPS farewell, and change calculation in one coherent path.
     return await pay_check(request, base_order_id, check_id, body)
 
@@ -1645,40 +1644,12 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             if not finalized:
                 # The claim was lost between db_claim_check_for_payment and here
                 # (extremely unlikely — would require external state mutation).
-                # Treat as 409 and DO NOT proceed to loyalty accrual / NPS.
+                # Treat as 409 and DO NOT proceed to NPS.
                 _claimed = False  # don't release a claim that's no longer ours
                 log.warning("tables.pay_check.finalize_no_op", check_id=check_id, base_order_id=base_order_id)
                 raise HTTPException(status_code=409, detail="El check fue modificado por otra operación. Refresca la pantalla.")
             # From here on, the check is invoiced. No release on subsequent errors.
             _claimed = False
-
-            if hasattr(loyalty_svc, "accrue_on_check"):
-                _loyalty_org_id = restaurant["id"]
-                _loyalty_bot    = restaurant.get("whatsapp_number", "")
-                _loyalty_boid   = base_order_id
-                _loyalty_cid    = check_id
-                _loyalty_total  = float(to_decimal(check["total"]) + to_decimal(body.service_charge))
-
-                async def _accrue_with_scope(
-                    rid=_loyalty_org_id, bn=_loyalty_bot,
-                    boid=_loyalty_boid, cid=_loyalty_cid, total=_loyalty_total,
-                ):
-                    # Explicit re-pin: this runs as a detached asyncio.Task which may
-                    # outlive this request's ambient scope above (context is copied
-                    # at task-creation time, but being explicit here is defensive and
-                    # keeps this coroutine correct if ever awaited directly instead).
-                    with tenant_scope(rid):
-                        await loyalty_svc.accrue_on_check(
-                            restaurant_id=rid,
-                            bot_number=bn,
-                            base_order_id=boid,
-                            check_id=cid,
-                            total_cop=total,
-                        )
-
-                asyncio.create_task(_accrue_with_scope())
-            else:
-                log.warning("tables.loyalty_accrue_not_implemented", check_id=check_id)
 
             order_row = await db.db_get_first_table_order(base_order_id)
             farewell_targets = []
@@ -2043,7 +2014,7 @@ async def get_cashier_customer(
     phone: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ) -> dict:
-    """Return customer profile + loyalty balance + recent orders for the caja UI.
+    """Return customer profile + recent orders for the caja UI.
 
     Auth: Bearer token of admin/owner/gerente (get_current_restaurant_scoped).
     Tenant-scoped: all repo calls run under tenant_scope(org_id) set by the dep.
@@ -2054,15 +2025,12 @@ async def get_cashier_customer(
             "name": str | None,
             "is_known": bool,
             "stats": {"total_orders", "total_spent", "last_seen", "first_seen"} | {},
-            "loyalty": {"points": int, "tier": null} | null,
             "recent_orders": [{"id", "total", "created_at", "items_summary"}]
         }
 
     If the phone is unknown, is_known=false with empty stats and empty recent_orders.
-    If the loyalty module is disabled or has no record, loyalty=null.
     """
     from app.repositories import customer_profiles_repo as cp_repo  # noqa: PLC0415
-    from app.repositories import loyalty_repo  # noqa: PLC0415
     from app.services.money import quantize_money, to_decimal  # noqa: PLC0415
 
     # Normalise phone: strip leading +, spaces, and URL-encode artifacts.
@@ -2081,7 +2049,7 @@ async def get_cashier_customer(
         org_id_resolved = await db_resolve_org_id_from_location(int(restaurant["id"]))
         if org_id_resolved is None:
             return {"phone": clean_phone, "name": None, "is_known": False,
-                    "stats": {}, "loyalty": None, "recent_orders": []}
+                    "stats": {}, "recent_orders": []}
         org_id = org_id_resolved  # explicit org_id resolved from location — DO NOT use restaurant["id"]
 
     # ── Customer profile ──────────────────────────────────────────────────────
@@ -2093,21 +2061,8 @@ async def get_cashier_customer(
             "name": None,
             "is_known": False,
             "stats": {},
-            "loyalty": None,
             "recent_orders": [],
         }
-
-    # ── Loyalty balance (best-effort — module may be disabled) ───────────────
-    loyalty_data: dict | None = None
-    try:
-        lb = await loyalty_repo.db_get_loyalty_balance(org_id, clean_phone)
-        if lb is not None:
-            loyalty_data = {
-                "points": lb.get("puntos_actuales", 0),
-                "tier": None,
-            }
-    except Exception:
-        log.exception("cashier_customer.loyalty_lookup_failed", phone=clean_phone, org_id=org_id)
 
     # ── Recent orders (last 5 from orders + table_orders, by phone) ──────────
     recent_orders: list[dict] = await _get_recent_orders_for_phone(org_id, clean_phone, limit=5)
@@ -2122,7 +2077,6 @@ async def get_cashier_customer(
             "last_seen": profile.get("last_seen").isoformat() if profile.get("last_seen") else None,
             "first_seen": profile.get("first_seen").isoformat() if profile.get("first_seen") else None,
         },
-        "loyalty": loyalty_data,
         "recent_orders": recent_orders,
     }
 

@@ -198,25 +198,6 @@ _CANCEL_RESERVATION = {
     }
 }
 
-_REDEEM_LOYALTY_POINTS = {
-    "name": "redeem_loyalty_points",
-    "description": (
-        "Apply customer's loyalty points as a discount on their current order or "
-        "table check. Use only after the customer confirms they want to redeem. "
-        "Validate balance first via context."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "points": {
-                "type": "integer",
-                "description": "Number of points to redeem (must be > 0 and <= customer balance)",
-            }
-        },
-        "required": ["points"],
-    },
-}
-
 _REMEMBER_CUSTOMER_PREFERENCE = {
     "name": "remember_customer_preference",
     "description": (
@@ -258,11 +239,10 @@ TOOLS_SALON: list[dict] = [
     _CANCEL_RESERVATION,
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
-    _SEND_DISH_CARD,
     # cache_control on the LAST tool caches all tools in this list.
     # Anthropic prompt caching for tools: the cache breakpoint is set on
     # the last tool entry, so all preceding tools are included in the cache.
-    {**_REDEEM_LOYALTY_POINTS, "cache_control": {"type": "ephemeral"}},
+    {**_SEND_DISH_CARD, "cache_control": {"type": "ephemeral"}},
 ]
 """Tools available in dine-in (salon/table) mode. Since chunk 9 of the web
 delivery wave, this is also the only tool list the agent ever uses — the old
@@ -283,7 +263,6 @@ ALL_TOOLS: dict[str, dict] = {
         _END_SESSION,
         _REMEMBER_CUSTOMER_PREFERENCE,
         _SEND_DISH_CARD,
-        _REDEEM_LOYALTY_POINTS,
     ]
 }
 """Maps every tool name to its definition dict for O(1) lookup."""

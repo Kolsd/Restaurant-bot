@@ -494,31 +494,6 @@ def test_waiter_call_is_rate_limited(client, seed_org):
 # ── Safety net 1: web:<uuid4> identity survives phone-mangling paths ────────
 
 
-def test_loyalty_balance_rejects_web_diner_identity(client):
-    """The loyalty endpoint must 422 a 'web:<uuid4>' identity outright instead
-    of silently digit-stripping it into a garbage phone that could collide
-    with a real customer's loyalty record."""
-    from app.routes.deps import get_current_restaurant, get_current_restaurant_scoped
-    from app.main import app
-
-    async def _override_restaurant():
-        return {"id": 999999, "whatsapp_number": "+57300", "name": "Rest", "features": {"loyalty": True}}
-
-    async def _override_restaurant_scoped():
-        yield {"id": 999999, "whatsapp_number": "+57300", "name": "Rest", "features": {"loyalty": True}}
-
-    app.dependency_overrides[get_current_restaurant] = _override_restaurant
-    app.dependency_overrides[get_current_restaurant_scoped] = _override_restaurant_scoped
-    try:
-        token = f"web:{uuid.uuid4()}"
-        resp = _get(client, "/api/loyalty/balance", params={"phone": token})
-        assert resp.status_code == 422
-        assert "inv" in resp.json()["detail"].lower()  # "inválido"
-    finally:
-        app.dependency_overrides.pop(get_current_restaurant, None)
-        app.dependency_overrides.pop(get_current_restaurant_scoped, None)
-
-
 # ── Safety net 2: injection payload is wrapped before it reaches the LLM ────
 
 @pytest.mark.asyncio

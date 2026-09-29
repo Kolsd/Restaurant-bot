@@ -206,7 +206,7 @@ def resolve_sede_filter(
     newer surfaces use, `X-Branch-ID` the older one `mesioHeaders()` still
     sends — so callers do not have to care which one the frontend attached.
 
-    `allow_all_sentinel` is for the stats/NPS/loyalty family, whose repos
+    `allow_all_sentinel` is for the stats/NPS family, whose repos
     distinguish "every sede of the org rolled up" (the string "all") from
     "no sede filter" (None). Only an admin can ever get the sentinel.
     """
@@ -318,12 +318,12 @@ async def get_current_restaurant(request: Request) -> dict:
 # from many route files (inventory, stats, tables, nps, etc.), not only via
 # Depends().  Mutating it to a yield-based generator would break all those
 # call sites.  Instead we provide this sibling that wraps the resolved
-# restaurant in tenant_scope() and is used ONLY by loyalty routes (the RLS
-# pilot).  Other routes continue to use the original get_current_restaurant.
+# restaurant in tenant_scope(). Most routes still use the original
+# get_current_restaurant.
 async def get_current_restaurant_scoped(request: Request):
     """Yield-based variant of get_current_restaurant that activates tenant_scope.
 
-    Used by loyalty routes as the RLS pilot.  Entering tenant_scope() pins
+    Entering tenant_scope() pins
     app.restaurant_id for every DB call made within the request lifetime.
     The scope is guaranteed to exit via the finally clause in the `with` block.
 

@@ -621,22 +621,6 @@ async def get_payment_status(
     }
 
 
-@router.get("/api/stats/customers-at-risk")
-async def get_customers_at_risk(
-    request: Request,
-    limit: int = Query(50, ge=1, le=200),
-):
-    """Frequent customers who haven't ordered in >= 21 days.
-
-    Returns count + customer list with last_seen, days_since, total_spent.
-    """
-    restaurant = await get_current_restaurant(request)
-    org_id = restaurant["id"]
-
-    with tenant_scope(org_id):
-        return await stats_repo.db_customers_at_risk(org_id=org_id, limit=limit)
-
-
 @router.get("/api/stats/staff-performance")
 async def get_staff_performance(
     request: Request,
@@ -709,65 +693,7 @@ async def get_tips_pool(
     return result
 
 
-# ── DASHBOARD ANALYTICS — TIER 4a ────────────────────────────────────────────
-
-
-@router.get("/api/stats/daily-insight")
-async def get_daily_insight(request: Request):
-    """LLM-generated daily commentary for the dashboard banner.
-
-    Feature-flagged via restaurants.features.ai_daily_insight (JSONB).
-    If disabled, returns {"enabled": false, "reason": "feature_disabled"} (200 OK).
-    If enabled, checks Redis cache (key: mesio:ai_insight:{org_id}:{YYYY-MM-DD}).
-      Cache hit  → cached JSON (24h TTL).
-      Cache miss → gather signals, call Haiku, cache 24h, return.
-    Missing ANTHROPIC_API_KEY or Anthropic error → signals-only payload (no crash).
-    """
-    from app.services.ai_insights import generate_daily_insight  # noqa: PLC0415
-
-    restaurant = await get_current_restaurant(request)
-    org_id = restaurant["id"]
-    location_id = restaurant.get("location_id") or org_id
-
-    # Feature gate: read ai_daily_insight from features JSONB
-    features = restaurant.get("features", {})
-    if isinstance(features, str):
-        try:
-            features = json.loads(features)
-        except Exception:
-            features = {}
-
-    if not features.get("ai_daily_insight"):
-        return {"enabled": False, "reason": "feature_disabled"}
-
-    with tenant_scope(org_id):
-        return await generate_daily_insight(org_id=org_id, location_id=location_id)
-
-
 # ── DASHBOARD ANALYTICS — TIER 5 (Churn + Branches) ─────────────────────────
-
-
-@router.get("/api/stats/churn-summary")
-async def get_churn_summary(
-    restaurant: dict = Depends(get_current_restaurant_scoped),
-):
-    """Churn risk aggregate for the clientes-riesgo page.
-
-    Bins customer_profiles by recency-based churn_score:
-      high   (score >= 0.80): dormant >= 56 days, ≥3 orders
-      medium (0.50–0.79):     dormant 35–55 days, ≥3 orders
-      watch  (0.30–0.49):     dormant 14–34 days, ≥2 orders
-
-    Returns:
-      high_count, medium_count, watch_count   — integer bin sizes
-      ltv_sum                                 — float, total_spent sum for high+medium
-      reactivated_count                       — int (0 until schema supports it)
-      medium_risk                             — list[dict], top 6 medium-bin customers,
-                                               each with: name, phone, churn_score,
-                                               days_since, total_visits
-    """
-    org_id = restaurant["id"]
-    return await stats_repo.db_churn_summary(org_id=org_id)
 
 
 @router.get("/api/stats/branches-consolidated")
