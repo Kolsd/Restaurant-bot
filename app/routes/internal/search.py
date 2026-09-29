@@ -38,8 +38,8 @@ _QUICK_ACTIONS = [
         "type": "action",
         "title": "Ver MRR",
         "subtitle": "Ingresos recurrentes mensuales",
-        "url": "/internal/analytics#mrr",
-        "keywords": ["mrr", "analytics", "ingresos", "revenue", "facturación", "billing"],
+        "url": "/internal",
+        "keywords": ["mrr", "ingresos", "revenue", "facturación", "billing"],
     },
     {
         "type": "action",

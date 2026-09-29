@@ -337,11 +337,6 @@ async def geocode_reverse_endpoint(request: Request, lat: float, lon: float):
     raise HTTPException(status_code=404, detail="No se encontró información para estas coordenadas.")
 
 
-# ── Catalog v2: analytics tracking (fire-and-forget, real DB insert — Fase 5b) ─
-
-_VALID_TRACK_EVENTS = frozenset({"view", "modal_open", "add_to_cart", "ordered"})
-
-
 # ── SEO / Growth routes (Catálogo v2 Fase 6) ─────────────────────────────────
 
 _APP_DOMAIN = os.getenv("APP_DOMAIN", "mesioai.com")

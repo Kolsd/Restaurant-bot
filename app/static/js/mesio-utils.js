@@ -600,7 +600,7 @@ function mesioDateTime(isoStr) { return mesioDate(isoStr, { format: 'short' }); 
       '/dashboard', '/orders', '/reservations', '/menu-admin',
       '/nps', '/locations',
       '/floorplan', '/team', '/settings', '/billing', '/stats',
-      '/internal/analytics', '/internal/monitoring', '/internal/superadmin', '/internal/crm',
+      '/internal/monitoring', '/internal/superadmin', '/internal/crm',
     ];
     for (var j = 0; j < ADMIN_PATHS.length; j++) {
       if (p === ADMIN_PATHS[j] || p.startsWith(ADMIN_PATHS[j] + '/')) return true;

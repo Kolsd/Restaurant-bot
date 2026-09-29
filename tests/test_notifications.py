@@ -221,7 +221,7 @@ class TestAggregatorSorting:
             "severity": "medium",
             "title": "Churn risk",
             "detail": "detail",
-            "url": "/internal/analytics",
+            "url": "/internal/superadmin",
             "created_at": "2026-05-07T10:00:00Z",
             "count": 1,
             "tenant_id": 2,

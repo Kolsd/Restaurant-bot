@@ -169,7 +169,7 @@ async def _fetch_churn_risk() -> list[dict]:
                         f"últimos 7d = {recent:.1f} conv/día. "
                         f"Caída del {drop_pct}%."
                     ),
-                    "url": "/internal/analytics",
+                    "url": "/internal/superadmin",
                     "created_at": _now_iso(),
                     "count": 1,
                     "tenant_id": org_id,
