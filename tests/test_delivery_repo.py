@@ -117,9 +117,8 @@ async def db_conn(raw_pool, monkeypatch):
         # Match the real pool's jsonb codec (app/services/database.py) so
         # delivery_repo's raw-dict `$n::jsonb` params encode exactly once,
         # the same way they will in production.
-        await conn.set_type_codec(
-            "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
-        )
+        from app.services.database import init_connection  # same jsonb codec as the app pool
+        await init_connection(conn)
 
         proxy = _ConnProxy(conn)
         shim = _PoolShim(proxy)

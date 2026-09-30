@@ -146,15 +146,26 @@ _pool = None
 
 SESSION_TTL_HOURS = 72  # V-06: tokens expire in 72 hours
 
+def _encode_jsonb(value) -> str:
+    """A `str` is JSON text the caller already serialized; anything else is
+    a Python value to serialize.
+
+    With a plain `json.dumps` encoder, the many writers that pass
+    `json.dumps(x)` to a `$n::jsonb` parameter had it serialized a second
+    time: carts, conversation history, table checks, org menus and features
+    were stored as JSON *strings* (repaired by migration 0100). No jsonb
+    column here holds a bare string scalar, so a str is always JSON text.
+    """
+    return value if isinstance(value, str) else json.dumps(value)
+
+
 async def init_connection(conn) -> None:
     """Per-connection setup for the app pool: jsonb in and out as Python objects.
 
-    Public so test pools can use the very same codec. A test pool without it
-    made `json.dumps(x)` passed to a jsonb parameter look right, while in
-    production the codec serialized it a second time and stored a JSON string.
+    Public so test pools can use the very same codec.
     """
     await conn.set_type_codec(
-        'jsonb', encoder=json.dumps, decoder=json.loads, schema='pg_catalog'
+        'jsonb', encoder=_encode_jsonb, decoder=json.loads, schema='pg_catalog'
     )
 
 

@@ -68,7 +68,8 @@ async def _register_prod_jsonb_codec(conn) -> None:
     write above it (which correctly used a pre-dumped string for the
     then-bare connection) is unaffected; only what runs after sees the
     codec."""
-    await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
+    from app.services.database import init_connection  # same jsonb codec as the app pool
+    await init_connection(conn)
 
 
 # ── Tiny helpers ──────────────────────────────────────────────────────────────

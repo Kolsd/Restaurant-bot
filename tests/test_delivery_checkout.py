@@ -253,9 +253,8 @@ async def db_conn(raw_pool, monkeypatch):
     from app.services import database as db_module
 
     async with raw_pool.acquire() as conn:
-        await conn.set_type_codec(
-            "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
-        )
+        from app.services.database import init_connection  # same jsonb codec as the app pool
+        await init_connection(conn)
         proxy = _ConnProxy(conn)
         shim = _PoolShim(proxy)
 

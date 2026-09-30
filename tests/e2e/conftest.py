@@ -193,12 +193,8 @@ async def test_pool():
 
     async def _jsonb_init(conn):
         """Register jsonb codec so dicts are passed/returned natively (matches app pool)."""
-        await conn.set_type_codec(
-            "jsonb",
-            encoder=_json.dumps,
-            decoder=_json.loads,
-            schema="pg_catalog",
-        )
+        from app.services.database import init_connection  # same jsonb codec as the app pool
+        await init_connection(conn)
 
     pool = await asyncpg.create_pool(
         url,

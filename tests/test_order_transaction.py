@@ -160,7 +160,8 @@ async def _register_prod_jsonb_codec(conn) -> None:
     for the then-bare connection) is unaffected, and only the
     commit_order_transaction call after it sees the codec.
     """
-    await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
+    from app.services.database import init_connection  # same jsonb codec as the app pool
+    await init_connection(conn)
 
 
 def _make_pool_for_conn(conn):
