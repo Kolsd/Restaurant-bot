@@ -12,9 +12,6 @@ Test matrix
   test_get_plans_shape                  — response includes 'plans' and 'addons' keys
   test_get_plan_requires_auth           — GET /api/billing/plan returns 401 without token
   test_get_usage_requires_auth          — GET /api/billing/usage returns 401 without token
-  test_auto_recharge_rejects_max_6      — POST /api/billing/auto-recharge 422 for max_packs=6
-  test_auto_recharge_accepts_valid      — POST /api/billing/auto-recharge 200 for valid payload
-  test_buy_pack_creates_row             — POST /api/billing/buy-pack creates a pack row
   test_cap_status_shape                 — GET /api/billing/usage returns required shape keys
 """
 
@@ -149,87 +146,6 @@ def test_get_usage_requires_auth(client, monkeypatch):
 
 
 # ── Validation tests ──────────────────────────────────────────────────────────
-
-
-def test_auto_recharge_rejects_max_6(client, monkeypatch):
-    """POST /api/billing/auto-recharge returns 422 when max_packs=6."""
-    _patch_auth(monkeypatch, org_id=99)
-
-    with patch(
-        "app.services.tenant_context.tenant_scope",
-    ) as mock_scope:
-        mock_scope.return_value.__enter__ = lambda s: s
-        mock_scope.return_value.__exit__ = lambda s, *a: None
-
-        response = client.post(
-            "/api/billing/auto-recharge",
-            json={"enabled": True, "max_packs": 6},
-            headers={"Authorization": "Bearer test-token"},
-        )
-
-    assert response.status_code == 422, f"Expected 422, got {response.status_code}: {response.text}"
-    detail = response.json().get("detail", "")
-    assert "max_packs" in detail.lower() or "5" in detail
-
-
-def test_auto_recharge_accepts_valid(client, monkeypatch):
-    """POST /api/billing/auto-recharge returns 200 for a valid payload (max_packs=3)."""
-    _patch_auth(monkeypatch, org_id=99)
-
-    with patch(
-        "app.repositories.plan_limits_repo.db_set_auto_recharge",
-        AsyncMock(return_value=None),
-    ):
-        response = client.post(
-            "/api/billing/auto-recharge",
-            json={"enabled": True, "max_packs": 3},
-            headers={"Authorization": "Bearer test-token"},
-        )
-
-    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-    data = response.json()
-    assert data["success"] is True
-    assert data["auto_recharge"]["enabled"] is True
-    assert data["auto_recharge"]["max_packs"] == 3
-
-
-# ── Buy-pack test ─────────────────────────────────────────────────────────────
-
-
-def test_buy_pack_creates_row(client, monkeypatch):
-    """POST /api/billing/buy-pack creates a pack row and returns success + pack_id."""
-    _patch_auth(monkeypatch, org_id=77)
-
-    mock_sub = {
-        "auto_recharge_max_packs_per_month": 5,
-        "plan_code": "restaurante",
-    }
-
-    with patch(
-        "app.repositories.plan_limits_repo.db_get_org_subscription",
-        AsyncMock(return_value=mock_sub),
-    ), patch(
-        "app.repositories.plan_limits_repo.db_count_packs_this_period",
-        AsyncMock(return_value=0),
-    ), patch(
-        "app.repositories.plan_limits_repo.db_create_pack",
-        AsyncMock(return_value=1001),
-    ):
-        response = client.post(
-            "/api/billing/buy-pack",
-            json={},
-            headers={"Authorization": "Bearer test-token"},
-        )
-
-    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-    data = response.json()
-    assert data["success"] is True
-    assert data["pack_id"] == 1001
-    assert data["credits"] == 100
-    assert data["amount_paid_cop"] == 50_000
-
-
-# ── Cap status shape test ─────────────────────────────────────────────────────
 
 
 def test_cap_status_shape(client, monkeypatch):

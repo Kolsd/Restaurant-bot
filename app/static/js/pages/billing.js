@@ -414,10 +414,8 @@
    Mi Plan — Subscription dashboard module
    Endpoints consumed:
      GET  /api/billing/plans           (public plan catalog)
-     GET  /api/billing/plan            (current plan + addons + auto-recharge)
+     GET  /api/billing/plan            (current plan + addons)
      GET  /api/billing/usage           (per-dimension cap status)
-     POST /api/billing/auto-recharge   (body: {enabled, max_packs})
-     POST /api/billing/buy-pack        (manual pack purchase)
 
    Fallback: if these endpoints 404 (not yet in router), section hides
    gracefully. All fetches are lint-allow'd below because the backend
@@ -446,8 +444,6 @@
   ];
 
   var _currentPlan   = null; // plan id string from backend
-  var _autoRecharge  = false;
-  var _maxPacks      = 5;
   var _planModalTrap = null; // focus trap reference
 
   // ── Helpers ────────────────────────────────────────────────────
@@ -544,13 +540,13 @@
     if (status === 'exceeded') {
       var sub = document.createElement('div');
       sub.className = 'm-gauge-subtext exceeded';
-      sub.textContent = 'Excedido — el bot esta redirigiendo a un humano.';
+      sub.textContent = 'Superaste lo previsto en tu plan. El bot sigue atendiendo con normalidad.';
       el.appendChild(sub);
     } else if (status === 'warn90' || status === 'warn80') {
       var remaining = cap - used;
       var sub2 = document.createElement('div');
       sub2.className = 'm-gauge-subtext';
-      sub2.textContent = 'Te quedan ' + Number(remaining).toLocaleString() + (meta.unit ? ' ' + meta.unit : '') + '. Activa la auto-recarga para evitar interrupciones.';
+      sub2.textContent = 'Te quedan ' + Number(remaining).toLocaleString() + (meta.unit ? ' ' + meta.unit : '') + ' este período.';
       el.appendChild(sub2);
     } else if (status === 'unlimited') {
       var unlimEl = document.createElement('div');
@@ -605,29 +601,6 @@
         });
       }
     }
-
-    // Auto-recharge state
-    var ar = planData.auto_recharge || {};
-    _autoRecharge = !!ar.enabled;
-    _maxPacks     = ar.max_packs || 5;
-    _syncAutoRechargeUI();
-  }
-
-  // ── Auto-recharge UI sync ──────────────────────────────────────
-
-  function _syncAutoRechargeUI() {
-    var toggle = document.getElementById('toggle-autorecharge');
-    if (toggle) {
-      toggle.checked = _autoRecharge;
-      toggle.setAttribute('aria-checked', _autoRecharge ? 'true' : 'false');
-    }
-    var maxInput = document.getElementById('input-max-packs');
-    if (maxInput) maxInput.value = _maxPacks;
-
-    var maxRow   = document.getElementById('autorecharge-maxpacks-row');
-    var warning  = document.getElementById('autorecharge-off-warning');
-    if (maxRow)  maxRow.style.display   = _autoRecharge ? '' : 'none';
-    if (warning) warning.style.display  = _autoRecharge ? 'none' : '';
   }
 
   // ── Render usage gauges ────────────────────────────────────────
@@ -720,81 +693,6 @@
 
   // ── API calls ──────────────────────────────────────────────────
 
-  async function saveAutoRecharge() {
-    var toggle = document.getElementById('toggle-autorecharge');
-    var maxInput = document.getElementById('input-max-packs');
-    var enabled  = toggle ? toggle.checked : false;
-    var maxPacks = maxInput ? Math.max(1, Math.min(5, parseInt(maxInput.value, 10) || 5)) : 5;
-
-    var btn = document.getElementById('btn-save-autorecharge');
-    if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
-
-    try {
-      var r = await fetch('/api/billing/auto-recharge', { // lint-allow: subscription billing endpoint — wired in billing_subscription.py
-        method: 'POST',
-        headers: mesioHeaders(),
-        body: JSON.stringify({ enabled: enabled, max_packs: maxPacks }),
-      });
-      mesioTrackFetch(r.ok);
-      if (!r.ok) {
-        var err = await r.json().catch(function () { return {}; });
-        throw new Error(err.detail || 'Error al guardar');
-      }
-      _autoRecharge = enabled;
-      _maxPacks     = maxPacks;
-      _syncAutoRechargeUI();
-      mesioToast('Auto-recarga actualizada', 'success');
-    } catch (e) {
-      mesioToast(e.message || 'Error al guardar', 'error');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; }
-    }
-  }
-
-  async function buyPack() {
-    var confirmed = await mesioConfirm(
-      'Comprar 1 pack de 100 conversaciones extra por $50.000 COP (+IVA). Se cobrará a tu método de pago configurado.',
-      { confirmText: 'Comprar', danger: false }
-    );
-    if (!confirmed) return;
-
-    var btn = document.getElementById('btn-buy-pack');
-    if (btn) { btn.disabled = true; btn.textContent = 'Procesando...'; }
-
-    try {
-      // Real payment via Wompi pending — backend stub creates the pack without charging // lint-allow: subscription billing endpoint — wired in billing_subscription.py
-      var r = await fetch('/api/billing/buy-pack', { // lint-allow: subscription billing endpoint — wired in billing_subscription.py
-        method: 'POST',
-        headers: mesioHeaders(),
-        body: JSON.stringify({}),
-      });
-      mesioTrackFetch(r.ok);
-      if (!r.ok) {
-        var err2 = await r.json().catch(function () { return {}; });
-        throw new Error(err2.detail || 'Error al comprar pack');
-      }
-      var d = await r.json();
-      mesioToast('Pack comprado: +100 conversaciones. Total packs este mes: ' + (d.packs_this_period || '—'), 'success');
-      // Reload usage to reflect new cap
-      await loadUsage();
-      _updatePacksDisplay(d.packs_this_period);
-    } catch (e) {
-      mesioToast(e.message || 'Error al comprar pack', 'error');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Comprar 100 conversaciones extra ($50.000 +IVA)'; }
-    }
-  }
-
-  function _updatePacksDisplay(count) {
-    var el = document.getElementById('packs-count-display');
-    if (!el) return;
-    if (count != null && count > 0) {
-      el.textContent = 'Packs comprados este periodo: ' + count;
-    } else {
-      el.textContent = '';
-    }
-  }
-
   // ── Data fetchers ──────────────────────────────────────────────
 
   async function loadPlan() {
@@ -835,9 +733,6 @@
       if (planData) {
         renderPlanCard(planData);
         document.getElementById('plan-current-card').style.display = '';
-        document.getElementById('plan-autorecharge-card').style.display = '';
-        document.getElementById('plan-buypack-card').style.display = '';
-        _updatePacksDisplay(planData.packs_this_period);
       }
 
       if (usageData) {
@@ -864,21 +759,6 @@
       if (e.target === overlay) closePlanModal();
     });
   }
-
-  var toggleAR = document.getElementById('toggle-autorecharge');
-  if (toggleAR) {
-    toggleAR.addEventListener('change', function () {
-      _autoRecharge = toggleAR.checked;
-      toggleAR.setAttribute('aria-checked', _autoRecharge ? 'true' : 'false');
-      _syncAutoRechargeUI();
-    });
-  }
-
-  var btnSaveAR = document.getElementById('btn-save-autorecharge');
-  if (btnSaveAR) btnSaveAR.addEventListener('click', saveAutoRecharge);
-
-  var btnBuyPack = document.getElementById('btn-buy-pack');
-  if (btnBuyPack) btnBuyPack.addEventListener('click', buyPack);
 
   // Bootstrap
   loadMyPlan();

@@ -359,62 +359,6 @@ async def test_check_caps_comp_overrides(db_conn, org_ids):
     assert caps["audio"]["status"] == "comp"
 
 
-# ── Pack consumption tests ────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_consume_pack_credit_fifo(db_conn, org_ids):
-    """db_consume_pack_credit drains FIFO across multiple packs."""
-    from app.services.tenant_context import tenant_scope
-    from app.repositories.plan_limits_repo import db_create_pack, db_consume_pack_credit
-
-    org_a, _ = org_ids
-    await _set_scope(db_conn, org_a)
-
-    with tenant_scope(org_a):
-        # Create two packs of 10 credits each
-        await db_create_pack(org_id=org_a, credits=10, amount_paid_cop=5_000)
-        await db_create_pack(org_id=org_a, credits=10, amount_paid_cop=5_000)
-
-        # Consume 15 → should drain first pack (10) + 5 from second
-        consumed = await db_consume_pack_credit(org_a, count=15)
-        assert consumed == 15, f"Expected 15 consumed, got {consumed}"
-
-        # Remaining across packs should be 5
-        remaining = await db_conn.fetchval(
-            "SELECT COALESCE(SUM(credits_remaining), 0) FROM usage_packs WHERE org_id = $1 AND credits_remaining > 0",
-            org_a,
-        )
-        assert int(remaining) == 5, f"Expected 5 remaining, got {remaining}"
-
-
-@pytest.mark.asyncio
-async def test_consume_pack_credit_skips_expired(db_conn, org_ids):
-    """db_consume_pack_credit skips packs whose expires_at has passed."""
-    from app.services.tenant_context import tenant_scope
-    from app.repositories.plan_limits_repo import db_consume_pack_credit
-
-    org_a, _ = org_ids
-    await _set_scope(db_conn, org_a)
-
-    # Manually insert an expired pack
-    past = datetime.now(tz=timezone.utc) - timedelta(days=1)
-    await db_conn.execute(
-        """
-        INSERT INTO usage_packs
-            (org_id, credits_total, credits_remaining, amount_paid_cop, expires_at)
-        VALUES ($1, 50, 50, 25000, $2)
-        """,
-        org_a, past,
-    )
-
-    with tenant_scope(org_a):
-        # Try to consume from the expired pack — should return 0 consumed
-        consumed = await db_consume_pack_credit(org_a, count=10)
-
-    assert consumed == 0, f"Expected 0 consumed (expired pack), got {consumed}"
-
-
 # ── Period reset test ─────────────────────────────────────────────────────────
 
 
@@ -451,14 +395,15 @@ async def test_reset_period(db_conn, org_ids):
 async def test_tenant_isolation(db_conn, org_ids):
     """usage_packs created for org A are invisible to org B via RLS."""
     from app.services.tenant_context import tenant_scope
-    from app.repositories.plan_limits_repo import db_create_pack
-
     org_a, org_b = org_ids
 
-    # Create pack for org A
+    # A pack row for org A (packs are no longer sold, the table stays)
     await _set_scope(db_conn, org_a)
-    with tenant_scope(org_a):
-        await db_create_pack(org_id=org_a, credits=100, amount_paid_cop=50_000)
+    await db_conn.execute(
+        "INSERT INTO usage_packs (org_id, credits_total, credits_remaining, amount_paid_cop, expires_at) "
+        "VALUES ($1, 100, 100, 50000, NOW() + INTERVAL '30 days')",
+        org_a,
+    )
 
     # Query from org B — should see 0 packs
     await _set_scope(db_conn, org_b)
@@ -470,20 +415,3 @@ async def test_tenant_isolation(db_conn, org_ids):
 
     # RLS should filter it out — count must be 0
     assert int(count) == 0, f"RLS breach: org B can see {count} packs belonging to org A"
-
-
-# ── Validation guard test ─────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_set_auto_recharge_rejects_over_5(db_conn, org_ids):
-    """db_set_auto_recharge raises ValueError when max_packs > 5."""
-    from app.services.tenant_context import tenant_scope
-    from app.repositories.plan_limits_repo import db_set_auto_recharge
-
-    org_a, _ = org_ids
-    await _set_scope(db_conn, org_a)
-
-    with tenant_scope(org_a):
-        with pytest.raises(ValueError, match="max_packs cannot exceed 5"):
-            await db_set_auto_recharge(org_id=org_a, enabled=True, max_packs=6)

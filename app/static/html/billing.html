@@ -30,7 +30,7 @@
         <div class="page-head" style="margin-bottom:0;">
           <div>
             <h1 class="page-title">Mi Plan</h1>
-            <p class="page-sub">Gestiona tu suscripción a Mesio, revisa el consumo del período y configura la recarga automática.</p>
+            <p class="page-sub">Gestiona tu suscripción a Mesio y revisa el consumo del período.</p>
           </div>
         </div>
 
@@ -64,59 +64,6 @@
           </div>
           <div class="card-body col" id="mi-plan-gauges" aria-label="Barras de consumo por dimensión">
             <!-- Gauges rendered by JS -->
-          </div>
-        </div>
-
-        <!-- C) Auto-recharge -->
-        <div class="card" id="plan-autorecharge-card" style="display:none;">
-          <div class="card-head">
-            <span class="card-title">Auto-recarga de conversaciones</span>
-          </div>
-          <div class="card-body">
-            <div class="toggle-row" style="margin-bottom:16px;">
-              <div>
-                <div class="toggle-label">Activar auto-recarga</div>
-                <div class="toggle-sub" id="autorecharge-desc">Cuando se agoten las conversaciones del plan, Mesio compra automáticamente packs de 100 conversaciones extra a $50.000 COP cada uno. Cobramos a tu método de pago configurado.</div>
-              </div>
-              <label class="switch" aria-label="Auto-recarga de conversaciones">
-                <input type="checkbox" id="toggle-autorecharge" role="switch" aria-checked="false">
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <!-- Max packs input — shown when toggle is ON -->
-            <div id="autorecharge-maxpacks-row" style="display:none;">
-              <div class="form-group" style="max-width:280px;">
-                <label class="form-label" for="input-max-packs">Máximo de packs por mes (1–5)</label>
-                <input class="form-input" type="number" id="input-max-packs" min="1" max="5" value="5" aria-describedby="maxpacks-hint">
-                <div class="form-hint" id="maxpacks-hint">Esto limita el cobro extra a máximo $250.000 COP por mes.</div>
-              </div>
-            </div>
-
-            <!-- Warning — shown when toggle is OFF -->
-            <div id="autorecharge-off-warning" class="mi-plan-warning" role="status">
-              Sin auto-recarga, cuando llegues al 100% del plan el bot redirigira a un humano hasta el siguiente periodo de cobro.
-            </div>
-
-            <div style="margin-top:16px;">
-              <button class="m-btn m-btn--primary" id="btn-save-autorecharge" type="button">Guardar</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- D) Manual pack purchase -->
-        <div class="card" id="plan-buypack-card" style="display:none;">
-          <div class="card-head">
-            <span class="card-title">Recarga manual</span>
-          </div>
-          <div class="card-body">
-            <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;line-height:1.6;">
-              Compra un pack de 100 conversaciones extra de inmediato, independientemente de la auto-recarga.
-            </p>
-            <div class="plan-packs-count" id="packs-count-display"></div>
-            <button class="m-btn m-btn--secondary" id="btn-buy-pack" type="button">
-              Comprar 100 conversaciones extra ($50.000 +IVA)
-            </button>
           </div>
         </div>
 

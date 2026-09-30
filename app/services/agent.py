@@ -28,9 +28,7 @@ from app.services.agent_salon import (
 )
 from app.services.agent_tools import TOOLS_SALON
 from app.services.plan_enforcement import (
-    CapDecision,
-    REDIRECT_MESSAGE,
-    check_and_consume_conv_slot,
+    record_conversation,
 )
 
 log = get_logger(__name__)
@@ -2394,21 +2392,11 @@ async def _chat_impl(
     # guards) prices dishes for THIS sede — migration 0093.
     sede_context.set_sede(restaurant_obj.get("location_id"))
 
-    # 6b. Subscription cap enforcement — 1 inbound message = 1 conversation slot.
-    # Must run AFTER restaurant_obj is resolved (we need org_id = restaurant_obj["id"]).
-    # The diner chat route calls agent.chat() inside tenant_scope(org_id), so the
-    # repo calls inside check_and_consume_conv_slot are correctly scoped (Rule 14).
-    # Errors in cap infrastructure NEVER silence the bot — fail-open (see plan_enforcement.py).
-    _org_id_for_cap = restaurant_obj.get("id") or restaurant_obj.get("org_id")
-    if _org_id_for_cap:
-        _cap_decision = await check_and_consume_conv_slot(_org_id_for_cap)
-        if _cap_decision == CapDecision.REDIRECT_TO_HUMAN:
-            log.warning(
-                "plan_enforcement.redirect_to_human",
-                org_id=_org_id_for_cap,
-                user_phone=_obfuscate_phone(user_phone),
-            )
-            return {"message": REDIRECT_MESSAGE}
+    # 6b. Count the conversation (1 inbound message = 1). The plan allowance is
+    # an internal soft ceiling that alerts Mesio — it never stops the bot
+    # (flat price per sede, PM 2026-09-23). Runs inside the route's
+    # tenant_scope(org_id) (Rule 14) and never raises.
+    await record_conversation(org_id)
 
     # 7. Build enriched user message (menu, cart, notes, transit alert…)
     enriched, menu_url, full_history = await _build_enriched_user_message(
