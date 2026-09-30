@@ -118,17 +118,21 @@ async def db_conn(raw_pool, monkeypatch):
 
 @pytest.fixture
 async def orgs(db_conn):
-    """Create three test orgs with different subscription plans. Returns list of ids."""
+    """Create three test orgs on different plans. Returns list of ids.
+
+    The variable names (free/basic/pro) predate the 2026-09-30 price list;
+    they are now the three cheapest real plans, cheapest first.
+    """
     rows = []
     for name, slug, plan in [
-        ("CostTestOrgFree",       "cost-test-org-free",   "free"),
-        ("CostTestOrgBasic",      "cost-test-org-basic",  "basic"),
+        ("CostTestOrgFree",       "cost-test-org-free",   "esencial"),
+        ("CostTestOrgBasic",      "cost-test-org-basic",  "restaurante"),
         ("CostTestOrgPro",        "cost-test-org-pro",    "pro"),
     ]:
         row = await db_conn.fetchrow(
             """
-            INSERT INTO organizations (name, slug, subscription_plan)
-            VALUES ($1, $2, $3) RETURNING id
+            INSERT INTO organizations (name, slug, plan_code, subscription_plan)
+            VALUES ($1, $2, $3, $3) RETURNING id
             """,
             name, slug, plan,
         )
@@ -242,13 +246,13 @@ async def test_outlier_detection(db_conn, orgs):
     free_id, basic_id, pro_id = orgs
     today = date.today()
 
-    # Free plan limit = 5,000 tokens/day. Seed 25,000 → 500% of limit.
+    # Esencial limit = 50,000 tokens/day. Seed 250,000 → 500% of limit.
     await _set_org_scope(db_conn, free_id)
-    await _seed_tokens(db_conn, free_id, today, 25_000)
+    await _seed_tokens(db_conn, free_id, today, 250_000)
 
-    # Basic plan limit = 50,000 tokens/day. Seed 10,000 → 20% → NOT an outlier.
+    # Restaurante limit = 200,000 tokens/day. Seed 40,000 → 20% → NOT an outlier.
     await _set_org_scope(db_conn, basic_id)
-    await _seed_tokens(db_conn, basic_id, today, 10_000)
+    await _seed_tokens(db_conn, basic_id, today, 40_000)
 
     with bypass_tenant_scope("internal_cost_dashboard"):
         outliers = await db_cost_outliers(today, today, threshold_pct=200)

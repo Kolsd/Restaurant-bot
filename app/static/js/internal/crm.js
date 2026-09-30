@@ -941,12 +941,10 @@ async function openConvertModal(pid) {
       <div style="margin-bottom:10px;">
         <label style="font-size:11px;color:#888;font-weight:600;display:block;margin-bottom:4px;">Plan inicial</label>
         <select id="cv-plan" style="width:100%;padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-          <option value="restaurante" selected>Restaurante ($299K/mes)</option>
-          <option value="pulso">Pulso ($149K/mes)</option>
-          <option value="pro">Pro ($549K/mes)</option>
-          <option value="cadena">Cadena ($899K/mes)</option>
-          <option value="comp">Comp (gratis)</option>
-          <option value="free">Free / Demo</option>
+          <option value="restaurante" selected>Restaurante ($249K/sede)</option>
+          <option value="esencial">Esencial ($119K/sede)</option>
+          <option value="pro">Pro ($349K/sede)</option>
+          <option value="cadena">Cadena ($299K/sede)</option>
         </select>
       </div>
       <div style="margin-bottom:1.25rem;">

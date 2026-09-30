@@ -236,7 +236,7 @@ def test_search_results_capped_at_20(client, with_auth):
     async def _fetch_side_effect(query, *args):
         if "organizations" in query:
             return [_make_asyncpg_row({
-                "id": i, "name": f"Restaurante {i}", "plan_code": "pulso",
+                "id": i, "name": f"Restaurante {i}", "plan_code": "esencial",
                 "slug": None, "last_order_at": None,
             }) for i in range(15)]
         return [_make_asyncpg_row({

@@ -51,7 +51,8 @@ from anthropic import Anthropic
 from app.services.auth import create_user, get_users, hash_password
 from app.services import database as db
 from app.routes.deps import verify_superadmin
-from app.repositories import sessions_repo, restaurant_repo
+from app.repositories import plan_limits_repo, sessions_repo, restaurant_repo
+from app.services import plans
 from app.services.logging import get_logger
 from app.services.tenant_context import bypass_tenant_scope
 from app.services.security import compare_secret
@@ -77,7 +78,7 @@ class CreateOrgRequest(BaseModel):
     name: str
     slug: Optional[str] = None
     features: Optional[dict] = None
-    subscription_plan: Optional[str] = "free"
+    plan_code: Optional[str] = "esencial"
 
     @field_validator("name")
     @classmethod
@@ -91,7 +92,7 @@ class PatchOrgRequest(BaseModel):
     name: Optional[str] = None
     slug: Optional[str] = None
     features: Optional[dict] = None
-    subscription_plan: Optional[str] = None
+    plan_code: Optional[str] = None
     subscription_status: Optional[str] = None
 
 
@@ -173,23 +174,23 @@ class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id:
 # org-scoped.
 
 
-_VALID_PLANS = {"pulso", "restaurante", "pro", "cadena", "comp", "free"}
-
-
 class ChangePlanRequest(BaseModel):
     plan_code: str
-    comp_until: Optional[str] = None  # ISO date "YYYY-MM-DD", only meaningful when plan_code == "comp"
 
     @field_validator("plan_code")
     @classmethod
     def plan_valid(cls, v: str) -> str:
-        if v not in _VALID_PLANS:
-            raise ValueError(f"plan_code must be one of {sorted(_VALID_PLANS)}")
+        if v not in plans.PAYING_PLANS:
+            raise ValueError(f"plan_code must be one of {list(plans.PLAN_ORDER)}")
         return v
 
 
 class SetCompRequest(BaseModel):
     comp_until: Optional[str] = None  # ISO date "YYYY-MM-DD" or null to clear
+
+
+class SetFounderRequest(BaseModel):
+    founder: bool
 
 
 class ResetPasswordRequest(BaseModel):
@@ -379,7 +380,7 @@ async def create_organization(
             name=body.name,
             slug=body.slug,
             features=body.features or {},
-            subscription_plan=body.subscription_plan or "free",
+            plan_code=plans.normalize_plan(body.plan_code),
         )
     except asyncpg.UniqueViolationError as exc:
         log.warning("create_organization.conflict", detail=str(exc))
@@ -446,8 +447,11 @@ async def update_organization(
         updates["name"] = name
     if body.slug is not None:
         updates["slug"] = body.slug or None
-    if body.subscription_plan is not None:
-        updates["subscription_plan"] = body.subscription_plan
+    if body.plan_code is not None:
+        if body.plan_code not in plans.PAYING_PLANS:
+            raise HTTPException(status_code=400, detail="plan_code inválido")
+        # db_set_plan also keeps a founder's discount on the new plan.
+        await plan_limits_repo.db_set_plan(org_id, body.plan_code)
     if body.subscription_status is not None:
         updates["subscription_status"] = body.subscription_status
     if body.features is not None:
@@ -456,7 +460,8 @@ async def update_organization(
         updates["features"] = current
 
     if not updates:
-        return _ok({"org": org})
+        # A plan-only change already landed through db_set_plan above.
+        return _ok({"org": await restaurant_repo.db_get_org_by_id(org_id)})
 
     try:
         updated = await restaurant_repo.db_update_organization(org_id, **updates)
@@ -689,10 +694,10 @@ async def change_org_plan(
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
-    """Change an org's plan_code.
+    """Move an org to one of the four paying plans.
 
-    - Switching to 'comp': optionally sets comp_until (default = today + 30 days).
-    - Switching FROM 'comp' to a paying plan: clears comp_until.
+    Free days are separate (PATCH .../comp) and untouched here. A founder
+    keeps 40% off, recomputed on the new plan's list price.
     """
     from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
 
@@ -700,56 +705,24 @@ async def change_org_plan(
     if not org:
         raise HTTPException(status_code=404, detail="Organizacion no encontrada")
 
-    old_plan = org.get("plan_code") or org.get("subscription_plan") or "free"
+    old_plan = org.get("plan_code")
     new_plan = body.plan_code
-
-    # Resolve comp_until
-    comp_until_val: Optional[str] = None
-    if new_plan == "comp":
-        if body.comp_until:
-            comp_until_val = body.comp_until
-        else:
-            comp_until_val = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
-
-    updates: dict = {"plan_code": new_plan}
-    if new_plan == "comp":
-        updates["comp_until"] = comp_until_val
-    else:
-        # Switching away from comp — clear comp_until
-        updates["comp_until"] = None
-
-    # Execute the update via raw SQL (plan_code and comp_until are not in the
-    # whitelisted _ALLOWED_ORG_FIELDS of db_update_organization — keep it direct here)
-    from app.services.database import get_pool  # noqa: PLC0415
-    pool = await get_pool()
-    with bypass_tenant_scope("change_org_plan_superadmin"):
-        async with pool.acquire() as conn:
-            if new_plan == "comp":
-                await conn.execute(
-                    "UPDATE organizations SET plan_code=$1, comp_until=$2::timestamptz, updated_at=NOW() WHERE id=$3",
-                    new_plan, comp_until_val, org_id,
-                )
-            else:
-                await conn.execute(
-                    "UPDATE organizations SET plan_code=$1, comp_until=NULL, updated_at=NOW() WHERE id=$2",
-                    new_plan, org_id,
-                )
+    await plan_limits_repo.db_set_plan(org_id, new_plan)
 
     actor = request.headers.get("X-Superadmin-User", "superadmin")
     ip = request.client.host if request.client else None
-    with bypass_tenant_scope("change_org_plan_audit"):
-        await db_log_audit_event(
-            actor=actor,
-            action="org.plan_changed",
-            target_type="organization",
-            target_id=str(org_id),
-            org_id=org_id,
-            payload={"old_plan": old_plan, "new_plan": new_plan, "comp_until": comp_until_val},
-            request_ip=ip,
-        )
+    await db_log_audit_event(
+        actor=actor,
+        action="org.plan_changed",
+        target_type="organization",
+        target_id=str(org_id),
+        org_id=org_id,
+        payload={"old_plan": old_plan, "new_plan": new_plan},
+        request_ip=ip,
+    )
 
-    log.info("change_org_plan", org_id=org_id, old=old_plan, new=new_plan, comp_until=comp_until_val)
-    return _ok({"org_id": org_id, "old_plan": old_plan, "new_plan": new_plan, "comp_until": comp_until_val})
+    log.info("change_org_plan", org_id=org_id, old=old_plan, new=new_plan)
+    return _ok({"org_id": org_id, "old_plan": old_plan, "new_plan": new_plan})
 
 
 @router.patch("/organizations/{org_id}/comp")
@@ -760,10 +733,11 @@ async def set_org_comp(
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
-    """Set or clear comp_until for an org.
+    """Set or clear an org's free days (comp_until) on top of its plan.
 
-    Body: {"comp_until": "YYYY-MM-DD"} → sets plan_code='comp' + comp_until.
-    Body: {"comp_until": null}         → clears comp_until + reverts plan_code to 'free'.
+    Body: {"comp_until": "YYYY-MM-DD"} → free until that date (trial, friends & family).
+    Body: {"comp_until": null}         → billed from now on.
+    The plan itself never changes here.
     """
     from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
 
@@ -771,44 +745,70 @@ async def set_org_comp(
     if not org:
         raise HTTPException(status_code=404, detail="Organizacion no encontrada")
 
-    old_plan = org.get("plan_code") or "free"
-    from app.services.database import get_pool  # noqa: PLC0415
-    pool = await get_pool()
-
+    comp_until = None
     if body.comp_until is not None:
-        new_plan = "comp"
-        with bypass_tenant_scope("set_org_comp_superadmin"):
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    "UPDATE organizations SET plan_code='comp', comp_until=$1::timestamptz, updated_at=NOW() WHERE id=$2",
-                    body.comp_until, org_id,
-                )
-    else:
-        # Clearing comp — revert to free unless they had a paid plan before
-        revert_plan = old_plan if old_plan != "comp" else "free"
-        new_plan = revert_plan
-        with bypass_tenant_scope("clear_org_comp_superadmin"):
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    "UPDATE organizations SET plan_code=$1, comp_until=NULL, updated_at=NOW() WHERE id=$2",
-                    revert_plan, org_id,
-                )
+        try:
+            comp_until = datetime.fromisoformat(body.comp_until).replace(tzinfo=timezone.utc)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="comp_until debe ser YYYY-MM-DD") from exc
+    await plan_limits_repo.db_set_comp_until(org_id, comp_until)
 
     actor = request.headers.get("X-Superadmin-User", "superadmin")
     ip = request.client.host if request.client else None
-    with bypass_tenant_scope("set_org_comp_audit"):
-        await db_log_audit_event(
-            actor=actor,
-            action="org.comp_changed",
-            target_type="organization",
-            target_id=str(org_id),
-            org_id=org_id,
-            payload={"old_plan": old_plan, "new_plan": new_plan, "comp_until": body.comp_until},
-            request_ip=ip,
-        )
+    await db_log_audit_event(
+        actor=actor,
+        action="org.comp_changed",
+        target_type="organization",
+        target_id=str(org_id),
+        org_id=org_id,
+        payload={"plan": org.get("plan_code"), "comp_until": body.comp_until},
+        request_ip=ip,
+    )
 
-    log.info("set_org_comp", org_id=org_id, comp_until=body.comp_until, new_plan=new_plan)
-    return _ok({"org_id": org_id, "new_plan": new_plan, "comp_until": body.comp_until})
+    log.info("set_org_comp", org_id=org_id, comp_until=body.comp_until)
+    return _ok({"org_id": org_id, "plan": org.get("plan_code"), "comp_until": body.comp_until})
+
+
+@router.patch("/organizations/{org_id}/founder")
+async def set_org_founder(
+    org_id: int,
+    body: SetFounderRequest,
+    request: Request,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
+    """Put an org in or out of the founder program (40% off, frozen for life).
+
+    409 when all plans.FOUNDER_SPOTS spots are taken.
+    """
+    from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
+
+    org = await restaurant_repo.db_get_org_by_id(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organizacion no encontrada")
+
+    try:
+        price = await plan_limits_repo.db_set_founder(org_id, body.founder)
+    except plan_limits_repo.FounderSpotsTaken as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Los {plans.FOUNDER_SPOTS} cupos del programa fundador ya están asignados",
+        ) from exc
+
+    actor = request.headers.get("X-Superadmin-User", "superadmin")
+    ip = request.client.host if request.client else None
+    await db_log_audit_event(
+        actor=actor,
+        action="org.founder_changed",
+        target_type="organization",
+        target_id=str(org_id),
+        org_id=org_id,
+        payload={"founder": body.founder, "founder_price_cop": price},
+        request_ip=ip,
+    )
+
+    log.info("set_org_founder", org_id=org_id, founder=body.founder, founder_price_cop=price)
+    return _ok({"org_id": org_id, "founder": body.founder, "founder_price_cop": price})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

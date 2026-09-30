@@ -191,7 +191,7 @@ async def create_tenant(
         org = await restaurant_repo.db_create_organization(
             name=restaurant_name,
             features=features or {},
-            subscription_plan=plan_code,
+            plan_code=plan_code,
         )
     except asyncpg.UniqueViolationError as exc:
         log.warning("provisioning.org_unique_violation", detail=str(exc)[:200])

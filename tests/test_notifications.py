@@ -65,13 +65,13 @@ class TestCostRunaway:
             {
                 "org_id": 42,
                 "org_name": "Burger Mesio",
-                "plan_code": "pulso",
+                "plan_code": "esencial",
                 "tokens_today": 150_000,  # pulso limit=50_000; 2x=100_000 → over
             }
         ]
         pool = _make_fetch_pool(rows)
 
-        _LIMITS = {"pulso": 50_000, "restaurante": 200_000, "pro": 400_000}
+        _LIMITS = {"esencial": 50_000, "restaurante": 200_000, "pro": 400_000}
 
         with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
             with patch(
@@ -111,7 +111,7 @@ class TestCostRunaway:
             }
         ]
         pool = _make_fetch_pool(rows)
-        _LIMITS = {"pulso": 50_000, "cadena": -1}
+        _LIMITS = {"esencial": 50_000, "cadena": -1}
         original = getattr(cmr_stub, "_PLAN_DAILY_TOKEN_LIMITS", None)
         cmr_stub._PLAN_DAILY_TOKEN_LIMITS = _LIMITS
         try:
@@ -170,7 +170,7 @@ class TestPlanCapWarnings:
             {
                 "org_id": 8,
                 "org_name": "El Asador",
-                "plan_code": "pulso",
+                "plan_code": "esencial",
                 "conversations_used": 90,
                 "conversations_per_month": 100,
             }

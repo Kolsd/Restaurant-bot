@@ -36,7 +36,7 @@ router = APIRouter()
 
 STATIC = Path(__file__).parent.parent / "static"
 
-_VALID_PLANS = {"Pulso", "Restaurante", "Pro", "Cadena"}
+_VALID_PLANS = {"Esencial", "Restaurante", "Pro", "Cadena"}
 _PHONE_RE = re.compile(r"^\+?[\d\s\-]{7,20}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 

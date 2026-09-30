@@ -7,6 +7,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends
 from pydantic import BaseModel, Field
 from app.services import database as db
+from app.services import plans
 from app.repositories.internal import crm_repo
 from app.services.logging import get_logger, mask_phone
 from app.routes.deps import verify_superadmin
@@ -266,7 +267,7 @@ async def convert_prospect_to_restaurant(
             detail="Faltan datos: el prospecto debe tener restaurant_name (o pasarlo en el body).",
         )
 
-    plan = body.plan_code or body.subscription_plan or "restaurante"
+    plan = plans.normalize_plan(body.plan_code or body.subscription_plan or "restaurante")
 
     # Steps 1-4 (org → sede → trial → owner → welcome email) are the same
     # sequence the public self-serve signup runs, and they live in

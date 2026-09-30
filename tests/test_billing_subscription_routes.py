@@ -70,10 +70,10 @@ def test_get_plans_no_auth_required(client):
     """GET /api/billing/plans must succeed without authentication."""
     # Mock the repo calls so we don't need a real DB for this test
     mock_plans = [
-        {"plan_code": "pulso",       "monthly_price_cop": 149000, "sort_order": 1},
-        {"plan_code": "restaurante", "monthly_price_cop": 299000, "sort_order": 2},
-        {"plan_code": "pro",         "monthly_price_cop": 549000, "sort_order": 3},
-        {"plan_code": "cadena",      "monthly_price_cop": 899000, "sort_order": 4},
+        {"plan_code": "esencial",       "monthly_price_cop": 119000, "sort_order": 1},
+        {"plan_code": "restaurante", "monthly_price_cop": 249000, "sort_order": 2},
+        {"plan_code": "pro",         "monthly_price_cop": 349000, "sort_order": 3},
+        {"plan_code": "cadena",      "monthly_price_cop": 299000, "sort_order": 4},
     ]
     mock_addons = [
         {"module_code": "extra_location",      "monthly_price_cop": 199000, "sort_order": 1},
@@ -102,7 +102,7 @@ def test_get_plans_no_auth_required(client):
     assert len(data["addons"]) == 7
 
     plan_codes = {p["plan_code"] for p in data["plans"]}
-    assert plan_codes == {"pulso", "restaurante", "pro", "cadena"}
+    assert plan_codes == {"esencial", "restaurante", "pro", "cadena"}
 
     addon_codes = {a["module_code"] for a in data["addons"]}
     assert "extra_location" in addon_codes
@@ -200,7 +200,7 @@ def test_get_plans_real_db(client):
 
     # At minimum the seeded plans must be present
     plan_codes = {p["plan_code"] for p in data.get("plans", [])}
-    assert "pulso" in plan_codes, f"'pulso' plan missing from real DB response: {plan_codes}"
+    assert "esencial" in plan_codes, f"'esencial' plan missing from real DB response: {plan_codes}"
     assert "cadena" in plan_codes, f"'cadena' plan missing from real DB response: {plan_codes}"
     assert len(data["plans"]) >= 4
 

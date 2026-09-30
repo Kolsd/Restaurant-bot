@@ -138,7 +138,7 @@ input:checked+.slider:before{transform:translateX(18px);}
 /* ── PLAN BADGES ── */
 .plan-free{background:#f0f0e8;color:#555;}
 .plan-basic{background:#f0f0e8;color:#555;}
-.plan-pulso{background:#E6F1FB;color:#185FA5;}
+.plan-esencial{background:#E6F1FB;color:#185FA5;}
 .plan-restaurante{background:#E1F5EE;color:#0F6E56;}
 .plan-pro{background:#EEE8FD;color:#5B21B6;}
 .plan-cadena{background:#FEF3C7;color:#92400E;}
@@ -329,8 +329,12 @@ input:checked+.slider:before{transform:translateX(18px);}
                 <span id="dp-plan-badge" class="badge badge-chip">—</span>
               </div>
               <div>
-                <div style="font-size:12px;color:#888;margin-bottom:4px;">Comp hasta</div>
+                <div style="font-size:12px;color:#888;margin-bottom:4px;">Gratis hasta</div>
                 <span id="dp-comp-until-display" style="font-size:13px;">—</span>
+              </div>
+              <div>
+                <div style="font-size:12px;color:#888;margin-bottom:4px;">Precio fundador (por sede)</div>
+                <span id="dp-founder-display" style="font-size:13px;">—</span>
               </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:10px;">
@@ -339,20 +343,21 @@ input:checked+.slider:before{transform:translateX(18px);}
                 <div class="form-grid" style="margin-bottom:10px;">
                   <div>
                     <label class="field-label">Nuevo plan</label>
-                    <select id="dp-new-plan" class="field-input" onchange="onPlanSelectChange()">
-                      <option value="free">Free / Demo</option>
-                      <option value="pulso">Pulso ($149K/mes)</option>
-                      <option value="restaurante">Restaurante ($299K/mes)</option>
-                      <option value="pro">Pro ($549K/mes)</option>
-                      <option value="cadena">Cadena ($899K/mes)</option>
-                      <option value="comp">Comp (gratis)</option>
+                    <select id="dp-new-plan" class="field-input">
+                      <option value="esencial">Esencial ($119K/sede)</option>
+                      <option value="restaurante">Restaurante ($249K/sede)</option>
+                      <option value="pro">Pro ($349K/sede)</option>
+                      <option value="cadena">Cadena ($299K/sede)</option>
                     </select>
                   </div>
-                  <div id="dp-comp-until-wrap" style="display:none;">
-                    <label class="field-label">Comp hasta (fecha)</label>
+                  <div>
+                    <label class="field-label">Gratis hasta (vacío = se cobra)</label>
                     <input type="date" id="dp-comp-until-input" class="field-input">
                   </div>
                 </div>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px;">
+                  <input type="checkbox" id="dp-founder-input"> Programa fundador (40% menos, congelado de por vida)
+                </label>
                 <div style="display:flex;gap:8px;align-items:center;">
                   <button class="btn btn-primary btn-sm" onclick="savePlanChange()">Guardar plan</button>
                   <div class="feedback-msg" id="plan-feedback"></div>
@@ -614,12 +619,10 @@ input:checked+.slider:before{transform:translateX(18px);}
       <div>
         <label class="field-label">Plan</label>
         <select id="om-plan" class="field-input">
-          <option value="free">Free / Demo</option>
-          <option value="pulso">Pulso ($149K/mes)</option>
-          <option value="restaurante" selected>Restaurante ($299K/mes)</option>
-          <option value="pro">Pro ($549K/mes)</option>
-          <option value="cadena">Cadena ($899K/mes)</option>
-          <option value="comp">Comp (gratis)</option>
+          <option value="esencial">Esencial ($119K/sede)</option>
+          <option value="restaurante" selected>Restaurante ($249K/sede)</option>
+          <option value="pro">Pro ($349K/sede)</option>
+          <option value="cadena">Cadena ($299K/sede)</option>
         </select>
       </div>
     </div>
@@ -1317,19 +1320,6 @@ function renderDIAN(stats) {
 }
 
 // ── Plan change ───────────────────────────────────────────────────
-function onPlanSelectChange() {
-  const plan = $('dp-new-plan').value;
-  const wrap = $('dp-comp-until-wrap');
-  if(wrap) wrap.style.display = plan === 'comp' ? 'block' : 'none';
-  if(plan === 'comp') {
-    const inp = $('dp-comp-until-input');
-    if(inp && !inp.value) {
-      const d = new Date(); d.setDate(d.getDate()+30);
-      inp.value = d.toISOString().slice(0,10);
-    }
-  }
-}
-
 // Called from "Cambiar plan" quick-action button
 function openPlanModal() {
   switchDetailTab('plan', null);
@@ -1338,33 +1328,38 @@ function openPlanModal() {
   tabs.forEach(t => { if(t.textContent.trim() === 'Plan') t.click(); });
 }
 
+// Plan, free days and founder program are three endpoints; each one only
+// runs when its value actually changed.
+let _currentPlanRow = null;
 async function savePlanChange() {
   if(!_currentDetailId) return;
+  const r = _currentPlanRow || {};
   const plan = $('dp-new-plan').value;
-  if(!plan) return;
-  const body = { plan_code: plan };
-  if(plan === 'comp') {
-    const compUntil = $('dp-comp-until-input').value;
-    if(compUntil) body.comp_until = compUntil;
-  }
+  const compUntil = $('dp-comp-until-input').value || null;
+  const founder = $('dp-founder-input').checked;
+  const base = `/api/internal/admin/organizations/${_currentDetailId}`;
+  const calls = [];
+  if(plan && plan !== r.plan_code) calls.push([base + '/plan', { plan_code: plan }]);
+  if(compUntil !== (r.comp_until ? r.comp_until.slice(0,10) : null)) calls.push([base + '/comp', { comp_until: compUntil }]);
+  if(founder !== (r.founder_price_cop != null)) calls.push([base + '/founder', { founder: founder }]);
+  if(!calls.length) { showFeedback('plan-feedback', 'Sin cambios', true); return; }
   try {
-    const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}/plan`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if(r.ok) {
-      const d = await r.json();
-      showFeedback('plan-feedback', '✅ Plan actualizado a ' + plan, true);
-      // Refresh plan display
-      $('dp-plan-badge').textContent = plan;
-      $('dp-plan-badge').className = 'badge badge-chip plan-' + plan;
-      $('dp-comp-until-display').textContent = d.data && d.data.comp_until ? d.data.comp_until : '—';
-      await loadRestaurants();
-    } else {
-      const e = await r.json().catch(()=>({}));
-      showFeedback('plan-feedback', '❌ ' + (e.detail || 'Error'), false);
+    for(const [url, body] of calls) {
+      const res = await _hqFetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if(!res.ok) {
+        const e = await res.json().catch(()=>({}));
+        showFeedback('plan-feedback', '❌ ' + (e.detail || 'Error'), false);
+        return;
+      }
     }
+    showFeedback('plan-feedback', '✅ Plan actualizado', true);
+    await loadRestaurants();
+    const fresh = ALL_RESTAURANTS.find(x => x.id === _currentDetailId);
+    if(fresh) _populatePlanTab(fresh);
   } catch(e) {
     showFeedback('plan-feedback', '❌ Error de conexión', false);
   }
@@ -1372,7 +1367,8 @@ async function savePlanChange() {
 
 // Populate plan tab when opening detail
 function _populatePlanTab(r) {
-  const plan = r.plan_code || r.subscription_plan || 'free';
+  _currentPlanRow = r;
+  const plan = r.plan_code || 'esencial';
   const badge = $('dp-plan-badge');
   if(badge) {
     badge.textContent = plan;
@@ -1380,9 +1376,14 @@ function _populatePlanTab(r) {
   }
   const compDisplay = $('dp-comp-until-display');
   if(compDisplay) compDisplay.textContent = r.comp_until ? r.comp_until.slice(0,10) : '—';
+  const founderDisplay = $('dp-founder-display');
+  if(founderDisplay) founderDisplay.textContent = r.founder_price_cop != null ? fmtCOP(r.founder_price_cop) : '—';
   const sel = $('dp-new-plan');
   if(sel) sel.value = plan;
-  onPlanSelectChange();
+  const comp = $('dp-comp-until-input');
+  if(comp) comp.value = r.comp_until ? r.comp_until.slice(0,10) : '';
+  const founder = $('dp-founder-input');
+  if(founder) founder.checked = r.founder_price_cop != null;
 }
 
 // ── Deep-link wiring ──────────────────────────────────────────────

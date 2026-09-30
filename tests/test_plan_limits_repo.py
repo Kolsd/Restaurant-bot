@@ -158,15 +158,15 @@ async def test_list_plans_seeded(db_conn):
     assert len(plans) >= 4, f"Expected at least 4 plans, got {len(plans)}"
 
     plan_map = {p["plan_code"]: p for p in plans}
-    assert "pulso" in plan_map
+    assert "esencial" in plan_map
     assert "restaurante" in plan_map
     assert "pro" in plan_map
     assert "cadena" in plan_map
 
-    assert plan_map["pulso"]["monthly_price_cop"] == 149_000
-    assert plan_map["restaurante"]["monthly_price_cop"] == 299_000
-    assert plan_map["pro"]["monthly_price_cop"] == 549_000
-    assert plan_map["cadena"]["monthly_price_cop"] == 899_000
+    assert plan_map["esencial"]["monthly_price_cop"] == 119_000
+    assert plan_map["restaurante"]["monthly_price_cop"] == 249_000
+    assert plan_map["pro"]["monthly_price_cop"] == 349_000
+    assert plan_map["cadena"]["monthly_price_cop"] == 299_000
 
 
 @pytest.mark.asyncio
@@ -193,9 +193,9 @@ async def test_get_plan_returns_correct(db_conn):
     plan = await db_get_plan("restaurante")
     assert plan is not None
     assert plan["plan_code"] == "restaurante"
-    assert plan["conv_cap"] == 700
-    assert plan["staff_cap"] == 10
-    assert plan["monthly_price_cop"] == 299_000
+    assert plan["conv_cap"] == 500
+    assert plan["staff_cap"] == 999999  # unlimited users (pricing 2026-09-30)
+    assert plan["monthly_price_cop"] == 249_000
 
 
 @pytest.mark.asyncio
@@ -286,9 +286,9 @@ async def test_check_caps_thresholds(db_conn, org_ids):
     org_a, _ = org_ids
     await _set_scope(db_conn, org_a)
 
-    # Set org to 'pulso' plan: conv_cap=250
+    # Restaurante's soft ceiling is 500 conversations (Esencial has no AI chat)
     await db_conn.execute(
-        "UPDATE organizations SET plan_code = 'pulso' WHERE id = $1", org_a
+        "UPDATE organizations SET plan_code = 'restaurante' WHERE id = $1", org_a
     )
 
     with tenant_scope(org_a):
@@ -299,35 +299,35 @@ async def test_check_caps_thresholds(db_conn, org_ids):
         caps = await db_check_caps(org_a)
         assert caps["conv"]["status"] == "ok", f"Expected ok at 0%, got {caps['conv']['status']}"
 
-        # 125/250 = 50% → warn50
-        await db_conn.execute(
-            "UPDATE organizations SET current_period_convs_used = 125 WHERE id = $1", org_a
-        )
-        caps = await db_check_caps(org_a)
-        assert caps["conv"]["status"] == "warn50", f"Expected warn50 at 50%, got {caps['conv']['status']}"
-
-        # 200/250 = 80% → warn80
-        await db_conn.execute(
-            "UPDATE organizations SET current_period_convs_used = 200 WHERE id = $1", org_a
-        )
-        caps = await db_check_caps(org_a)
-        assert caps["conv"]["status"] == "warn80", f"Expected warn80 at 80%, got {caps['conv']['status']}"
-
-        # 225/250 = 90% → warn90
-        await db_conn.execute(
-            "UPDATE organizations SET current_period_convs_used = 225 WHERE id = $1", org_a
-        )
-        caps = await db_check_caps(org_a)
-        assert caps["conv"]["status"] == "warn90", f"Expected warn90 at 90%, got {caps['conv']['status']}"
-
-        # 250/250 = 100% → exceeded
+        # 250/500 = 50% → warn50
         await db_conn.execute(
             "UPDATE organizations SET current_period_convs_used = 250 WHERE id = $1", org_a
         )
         caps = await db_check_caps(org_a)
+        assert caps["conv"]["status"] == "warn50", f"Expected warn50 at 50%, got {caps['conv']['status']}"
+
+        # 400/500 = 80% → warn80
+        await db_conn.execute(
+            "UPDATE organizations SET current_period_convs_used = 400 WHERE id = $1", org_a
+        )
+        caps = await db_check_caps(org_a)
+        assert caps["conv"]["status"] == "warn80", f"Expected warn80 at 80%, got {caps['conv']['status']}"
+
+        # 450/500 = 90% → warn90
+        await db_conn.execute(
+            "UPDATE organizations SET current_period_convs_used = 450 WHERE id = $1", org_a
+        )
+        caps = await db_check_caps(org_a)
+        assert caps["conv"]["status"] == "warn90", f"Expected warn90 at 90%, got {caps['conv']['status']}"
+
+        # 500/500 = 100% → exceeded
+        await db_conn.execute(
+            "UPDATE organizations SET current_period_convs_used = 500 WHERE id = $1", org_a
+        )
+        caps = await db_check_caps(org_a)
         assert caps["conv"]["status"] == "exceeded", f"Expected exceeded at 100%, got {caps['conv']['status']}"
-        assert caps["conv"]["used"] == 250
-        assert caps["conv"]["cap"] == 250
+        assert caps["conv"]["used"] == 500
+        assert caps["conv"]["cap"] == 500
 
 
 @pytest.mark.asyncio
@@ -339,9 +339,9 @@ async def test_check_caps_comp_overrides(db_conn, org_ids):
     org_a, _ = org_ids
     await _set_scope(db_conn, org_a)
 
-    # Set org to 'pulso' plan (low cap) and spike usage to exceeded level
+    # Restaurante plan with usage spiked past its 500 ceiling
     await db_conn.execute(
-        "UPDATE organizations SET plan_code = 'pulso', current_period_convs_used = 300 WHERE id = $1",
+        "UPDATE organizations SET plan_code = 'restaurante', current_period_convs_used = 600 WHERE id = $1",
         org_a,
     )
     # Set comp_until to 1 hour from now

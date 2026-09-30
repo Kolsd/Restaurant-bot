@@ -254,4 +254,4 @@ class TestConvertProspect:
         assert kwargs["name"] == "Override Name"
         # The prospect's phone is a sales contact, never the org's key.
         assert "whatsapp_number" not in kwargs
-        assert kwargs["subscription_plan"] == "pro"
+        assert kwargs["plan_code"] == "pro"

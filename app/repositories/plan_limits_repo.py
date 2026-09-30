@@ -28,6 +28,7 @@ from datetime import datetime, timezone, date
 from decimal import Decimal
 from typing import Any
 
+from app.services import plans
 from app.services.logging import get_logger
 from app.services.money import to_decimal, quantize_money
 from app.services.tenant_context import bypass_tenant_scope, bypass_tenant_scope_if_unset
@@ -144,7 +145,7 @@ async def db_get_org_subscription(org_id: int) -> dict:
                    o.auto_recharge_max_packs_per_month,
                    o.current_period_start, o.current_period_convs_used,
                    o.current_period_audio_min_used, o.comp_until,
-                   o.annual_billing,
+                   o.annual_billing, o.founder_price_cop,
                    pl.display_name AS plan_display_name,
                    pl.monthly_price_cop, pl.conv_cap, pl.audio_min_cap,
                    pl.storage_mb_cap, pl.locations_included, pl.staff_cap,
@@ -306,26 +307,78 @@ async def db_set_plan(
     if plan is None:
         raise ValueError(f"Unknown plan_code: {plan_code!r}")
 
+    # A founder keeps 40% off on whatever plan they move to, frozen at the
+    # list price of the moment (the CASE leaves non-founders at NULL).
+    founder = plans.founder_price(plan_code)
     async with tenant_connection() as conn:
         if active_addons is not None:
             await conn.execute(
                 """
                 UPDATE organizations
-                   SET plan_code = $2, active_addons = $3
+                   SET plan_code = $2, subscription_plan = $2, active_addons = $3,
+                       founder_price_cop = CASE WHEN founder_price_cop IS NULL
+                                                THEN NULL ELSE $4::int END
                  WHERE id = $1
                 """,
-                org_id, plan_code, active_addons,
+                org_id, plan_code, active_addons, founder,
             )
         else:
             await conn.execute(
-                "UPDATE organizations SET plan_code = $2 WHERE id = $1",
-                org_id, plan_code,
+                """
+                UPDATE organizations
+                   SET plan_code = $2, subscription_plan = $2,
+                       founder_price_cop = CASE WHEN founder_price_cop IS NULL
+                                                THEN NULL ELSE $3::int END
+                 WHERE id = $1
+                """,
+                org_id, plan_code, founder,
             )
     log.info(
         "plan_limits.plan_changed",
         org_id=org_id, plan_code=plan_code,
         addons=active_addons,
     )
+
+
+class FounderSpotsTaken(Exception):
+    """All founder-program spots are already given out."""
+
+
+async def db_set_founder(org_id: int, founder: bool) -> int | None:
+    """Put an org in or out of the founder program; returns its founder price.
+
+    Joining freezes 40% off the org's current plan (plans.founder_price) and
+    is refused once plans.FOUNDER_SPOTS orgs hold it. Leaving clears the
+    price for good — the landing says a founder who cancels loses it.
+    # Requires active tenant_scope(org_id) or bypass for internal admin routes.
+    """
+    async with tenant_connection() as conn:
+        if not founder:
+            await conn.execute(
+                "UPDATE organizations SET founder_price_cop = NULL WHERE id = $1", org_id,
+            )
+            log.info("plan_limits.founder_cleared", org_id=org_id)
+            return None
+        # Serialize concurrent grants so two admins cannot hand out spot 11.
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtext('mesio_founder_spots'))")
+        row = await conn.fetchrow(
+            "SELECT plan_code, founder_price_cop FROM organizations WHERE id = $1", org_id,
+        )
+        if row is None:
+            raise ValueError(f"org_id {org_id} not found")
+        if row["founder_price_cop"] is not None:
+            return int(row["founder_price_cop"])
+        taken = await conn.fetchval(
+            "SELECT COUNT(*) FROM organizations WHERE founder_price_cop IS NOT NULL"
+        )
+        if taken >= plans.FOUNDER_SPOTS:
+            raise FounderSpotsTaken()
+        price = plans.founder_price(row["plan_code"])
+        await conn.execute(
+            "UPDATE organizations SET founder_price_cop = $2 WHERE id = $1", org_id, price,
+        )
+    log.info("plan_limits.founder_set", org_id=org_id, founder_price_cop=price)
+    return price
 
 
 async def db_set_comp_until(
@@ -348,15 +401,9 @@ async def db_set_comp_until(
 # ── Pending plan downgrade ────────────────────────────────────────────────────
 
 # Plan sort order for downgrade validation (lower index = smaller plan).
-_PLAN_ORDER = ["pulso", "restaurante", "pro", "cadena"]
-
-
 def _plan_rank(plan_code: str) -> int:
-    """Return numeric rank of a plan (lower = smaller). Unknown plans get rank 999."""
-    try:
-        return _PLAN_ORDER.index(plan_code.lower())
-    except ValueError:
-        return 999
+    """Return numeric rank of a plan (lower = smaller). Unknown plans rank last."""
+    return plans.plan_rank(plan_code)
 
 
 async def db_request_downgrade(
@@ -389,7 +436,7 @@ async def db_request_downgrade(
         )
         if current_row is None:
             raise ValueError(f"org_id {org_id} not found")
-        current_plan = current_row["plan_code"] or "pulso"
+        current_plan = current_row["plan_code"] or "esencial"
 
         if _plan_rank(new_plan_code) >= _plan_rank(current_plan):
             raise ValueError(
@@ -496,6 +543,12 @@ async def db_apply_due_downgrades() -> list[dict]:
                 """
                 UPDATE organizations
                    SET plan_code                 = pending_plan_code,
+                       subscription_plan         = pending_plan_code,
+                       founder_price_cop         = CASE
+                           WHEN founder_price_cop IS NULL THEN NULL
+                           ELSE (SELECT t.price FROM unnest($1::text[], $2::int[]) AS t(code, price)
+                                  WHERE t.code = pending_plan_code)
+                       END,
                        pending_plan_code         = NULL,
                        pending_plan_effective_at = NULL,
                        pending_kept_location_id  = NULL
@@ -503,6 +556,8 @@ async def db_apply_due_downgrades() -> list[dict]:
                    AND pending_plan_effective_at <= NOW()
                 RETURNING id, plan_code, pending_kept_location_id
                 """,
+                list(plans.PLAN_ORDER),
+                [plans.founder_price(code) for code in plans.PLAN_ORDER],
             )
     results = [_row_to_dict(r) for r in rows]
     if results:

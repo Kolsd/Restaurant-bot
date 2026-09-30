@@ -47,12 +47,12 @@ async def _fetch_cost_runaway() -> list[dict]:
                 SELECT
                     su.org_id,
                     o.name                                AS org_name,
-                    COALESCE(o.subscription_plan, 'free') AS plan_code,
+                    COALESCE(o.plan_code, 'esencial') AS plan_code,
                     COALESCE(SUM(su.total_tokens), 0)::BIGINT AS tokens_today
                 FROM subscription_usage su
                 LEFT JOIN organizations o ON o.id = su.org_id
                 WHERE su.usage_date = $1
-                GROUP BY su.org_id, o.name, o.subscription_plan
+                GROUP BY su.org_id, o.name, o.plan_code
                 HAVING COALESCE(SUM(su.total_tokens), 0) > 0
                 """,
                 today,
@@ -61,7 +61,7 @@ async def _fetch_cost_runaway() -> list[dict]:
         results = []
         for row in rows:
             plan = (row["plan_code"] or "free").lower()
-            daily_limit = _PLAN_DAILY_TOKEN_LIMITS.get(plan, _PLAN_DAILY_TOKEN_LIMITS.get("pulso", 50_000))
+            daily_limit = _PLAN_DAILY_TOKEN_LIMITS.get(plan, _PLAN_DAILY_TOKEN_LIMITS.get("esencial", 50_000))
             if daily_limit <= 0:
                 continue  # unlimited plan
             tokens_today = int(row["tokens_today"] or 0)
@@ -236,26 +236,29 @@ async def _fetch_suspended_tenants() -> list[dict]:
 
 
 async def _fetch_plan_cap_warnings() -> list[dict]:
-    """Tenants using >= 90% of their monthly conversation allowance."""
+    """Tenants at >= 90% of their plan's conversation soft ceiling.
+
+    The ceiling only alerts Mesio (LLM cost vs. price); it never stops the bot.
+    It used to read columns that do not exist (su.conversations_used,
+    pl.conversations_per_month), so it always failed into [] and never alerted.
+    """
     try:
         pool = await _get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
                 SELECT
-                    su.org_id,
+                    o.id AS org_id,
                     o.name AS org_name,
                     o.plan_code,
-                    su.conversations_used,
-                    pl.conversations_per_month
-                FROM subscription_usage su
-                JOIN organizations o ON o.id = su.org_id
+                    o.current_period_convs_used AS conversations_used,
+                    pl.conv_cap AS conversations_per_month
+                FROM organizations o
                 JOIN plan_limits pl ON pl.plan_code = o.plan_code
-                WHERE su.conversations_used >= pl.conversations_per_month * 0.9
-                  AND o.plan_code IN ('pulso', 'restaurante', 'pro')
-                  AND pl.conversations_per_month > 0
+                WHERE pl.conv_cap > 0
+                  AND o.current_period_convs_used >= pl.conv_cap * 0.9
                 ORDER BY
-                    (su.conversations_used::float / NULLIF(pl.conversations_per_month, 0)) DESC
+                    (o.current_period_convs_used::float / pl.conv_cap) DESC
                 """
             )
 

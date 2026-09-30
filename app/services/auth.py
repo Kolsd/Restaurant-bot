@@ -32,7 +32,8 @@ async def _build_org_shape(org: dict) -> dict:
         "id":                 org.get("id"),
         "name":               org.get("name"),
         "features":           feats,
-        "subscription_plan":  org.get("subscription_plan"),
+        "subscription_plan":  org.get("plan_code") or org.get("subscription_plan"),
+        "plan_code":          org.get("plan_code"),
         "locale":             feats.get("locale",   "es-CO"),
         "currency":           feats.get("currency", "COP"),
     }

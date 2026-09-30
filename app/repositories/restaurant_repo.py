@@ -1507,7 +1507,7 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
                 """
                 SELECT id, name, slug,
                        menu, features, subscription_plan, subscription_status,
-                       plan_code, comp_until,
+                       plan_code, comp_until, founder_price_cop,
                        created_at, updated_at
                 FROM organizations
                 WHERE id = $1
@@ -1561,6 +1561,7 @@ async def db_get_all_orgs(active_only: bool = True) -> list[dict]:
                 f"""
                 SELECT id, name, slug,
                        menu, features, subscription_plan, subscription_status,
+                       plan_code, comp_until, founder_price_cop,
                        created_at, updated_at
                 FROM organizations
                 {where}
@@ -1841,8 +1842,9 @@ async def db_resolve_location_by_gps(
 async def db_update_organization(org_id: int, **fields) -> dict | None:
     """Update Org fields.  Returns the updated row or None if not found.
 
-    Accepted fields: name, slug, menu, features, subscription_plan,
-    subscription_status.
+    Accepted fields: name, slug, menu, features, plan_code,
+    subscription_status, founder_price_cop. A legacy `subscription_plan`
+    is taken as `plan_code`; both columns are always written together.
 
     Called from authenticated admin routes; uses bypass_tenant_scope since
     organizations has no RLS and we need to update the container itself.
@@ -1854,11 +1856,16 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     _ALLOWED_ORG_FIELDS = {
-        "name", "slug", "menu", "features", "subscription_plan", "subscription_status",
+        "name", "slug", "menu", "features", "plan_code", "subscription_status",
+        "founder_price_cop",
     }
     _JSONB_FIELDS = {"menu", "features"}
 
+    if "subscription_plan" in fields and "plan_code" not in fields:
+        fields["plan_code"] = fields["subscription_plan"]
     updates = {k: v for k, v in fields.items() if k in _ALLOWED_ORG_FIELDS}
+    if "plan_code" in updates:
+        updates["subscription_plan"] = updates["plan_code"]
     if not updates:
         log.warning("db_update_organization.no_valid_fields", org_id=org_id)
         return await db_get_org_by_id(org_id)
@@ -1888,8 +1895,8 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
     sql = (
         f"UPDATE organizations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted above
         f"WHERE id = ${idx} RETURNING id, name, slug, "
-        f"menu, features, subscription_plan, subscription_status, "
-        f"created_at, updated_at"
+        f"menu, features, plan_code, subscription_plan, subscription_status, "
+        f"comp_until, founder_price_cop, created_at, updated_at"
     )
 
     pool = await _get_pool()
@@ -2067,9 +2074,12 @@ async def db_create_organization(
     name: str,
     slug: str | None = None,
     features: dict | None = None,
-    subscription_plan: str = "free",
+    plan_code: str = "esencial",
 ) -> dict:
     """Insert a new Organization row and return the created record.
+
+    `plan_code` is the plan code reads; `subscription_plan` is written with
+    the same value until that legacy column is dropped (migration 0101).
 
     Called from internal superadmin routes (cross-tenant, bypass needed).
     Slug uniqueness is enforced by DB UNIQUE constraint; duplicate slug raises
@@ -2090,18 +2100,18 @@ async def db_create_organization(
                 slug = await _unique_org_slug(conn, name)
             row = await conn.fetchrow(
                 """
-                INSERT INTO organizations (name, slug, features, subscription_plan)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO organizations (name, slug, features, plan_code, subscription_plan)
+                VALUES ($1, $2, $3, $4, $4)
                 RETURNING id, name, slug,
-                          menu, features, subscription_plan, subscription_status,
-                          created_at, updated_at
+                          menu, features, plan_code, subscription_plan, subscription_status,
+                          comp_until, founder_price_cop, created_at, updated_at
                 """,
                 name,
                 slug or None,
                 # The pool's jsonb codec serializes; json.dumps here stored
                 # every new org's features as a JSON string (2026-09-25).
                 features,
-                subscription_plan,
+                plan_code,
             )
     d = _serialize(dict(row))
     for field in ("menu", "features"):

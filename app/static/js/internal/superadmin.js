@@ -135,9 +135,9 @@
         : '<span class="badge badge-suspended">' + escHtml(o.subscription_status || "—") + "</span>";
       const planBadge =
         '<span class="badge badge-chip plan-' +
-        escHtml(o.subscription_plan || "free") +
+        escHtml(o.plan_code || "esencial") +
         '">' +
-        escHtml(o.subscription_plan || "free") +
+        escHtml(o.plan_code || "esencial") +
         "</span>";
       const tr = document.createElement("tr");
       // ID
@@ -356,12 +356,12 @@
       if (org) {
         $("om-name").value = org.name || "";
         $("om-slug").value = org.slug || "";
-        $("om-plan").value = org.subscription_plan || "free";
+        $("om-plan").value = org.plan_code || "esencial";
       }
     } else {
       ["om-name", "om-slug"].forEach((id) => { const el = $(id); if (el) el.value = ""; });
       const planSel = $("om-plan");
-      if (planSel) planSel.value = "free";
+      if (planSel) planSel.value = "restaurante";
     }
     $("org-modal-error").textContent = "";
     modal.style.display = "flex";
@@ -383,7 +383,7 @@
 
     const body = { name };
     if (slug) body.slug = slug;
-    if (plan) body.subscription_plan = plan;
+    if (plan) body.plan_code = plan;
 
     try {
       let r;

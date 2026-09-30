@@ -20,6 +20,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.routes.deps import get_current_restaurant_scoped
 from app.repositories import plan_limits_repo
+from app.services import database as db
+from app.services import plans
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
@@ -46,11 +48,25 @@ async def get_current_plan(
         log.exception("billing_subscription.get_plan_error", org_id=org_id)
         raise HTTPException(status_code=500, detail="Error al cargar información del plan") from exc
 
+    # Pricing is per sede (docs/claude/status.md #15): what the owner pays is
+    # the plan's price — or their frozen founder price — times active sedes.
+    sedes = max(1, len(await db.db_get_org_locations(org_id, active_only=True)))
+    plan_code = plans.normalize_plan(sub.get("plan_code"))
+    founder_price_cop = sub.get("founder_price_cop")
+    price_per_sede = plans.monthly_price_per_sede(plan_code, founder_price_cop)
+    comp_until = sub.get("comp_until")
+
     # JSON boundary: Decimal audio_min_used already converted by _row_to_dict
     return {
-        "plan_code":      sub.get("plan_code"),
-        "plan_name":      sub.get("plan_display_name"),
-        "monthly_price_cop": sub.get("monthly_price_cop"),  # integer COP
+        "plan_code":      plan_code,
+        "plan_name":      plans.PLAN_NAMES[plan_code],
+        "effective_plan": plans.effective_plan(plan_code, comp_until),
+        "monthly_price_cop": price_per_sede,  # integer COP, per sede
+        "list_price_cop": plans.PRICES_COP[plan_code],
+        "founder":        founder_price_cop is not None,
+        "sedes":          sedes,
+        "monthly_total_cop": price_per_sede * sedes,
+        "in_trial":       plans.in_trial(comp_until),
         "active_addons":  sub.get("active_addons") or [],
         "annual_billing": sub.get("annual_billing", False),
         "current_period": {

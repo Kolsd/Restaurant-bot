@@ -27,7 +27,7 @@ VALID_PAYLOAD = {
     "telefono": "+57 310 000 0000",
     "restaurante": "El Rancho",
     "ciudad": "Medellín",
-    "plan": "Pulso",
+    "plan": "Esencial",
     "password": "claveSegura123",
 }
 
@@ -140,7 +140,7 @@ class TestSignupEndpoint:
         assert r.json()["detail"] == "Falló la creación de la sede."
 
     def test_all_valid_plans_accepted(self, client):
-        for plan in ("Pulso", "Restaurante", "Pro", "Cadena"):
+        for plan in ("Esencial", "Restaurante", "Pro", "Cadena"):
             payload = {**VALID_PAYLOAD, "plan": plan}
             with _mock_rate_ok(), _mock_provisioning() as mock, _mock_crm():
                 r = client.post("/api/signup", json=payload)

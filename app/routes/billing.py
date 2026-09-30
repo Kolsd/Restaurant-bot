@@ -190,22 +190,6 @@ class DowngradeRequestPayload(BaseModel):
     kept_location_id: int
 
 
-# Plan sort order (smaller index = smaller plan) — mirrors plan_limits_repo
-_PLAN_ORDER = ["pulso", "restaurante", "pro", "cadena"]
-_PLAN_LOCATIONS = {
-    "pulso": 1,
-    "restaurante": 3,
-    "pro": 10,
-    "cadena": None,  # unlimited
-}
-_PLAN_PRICES = {
-    "pulso": 149_000,
-    "restaurante": 299_000,
-    "pro": 549_000,
-    "cadena": 899_000,
-}
-
-
 @router.get("/plan-options")
 async def plan_options(
     restaurant: dict = Depends(get_current_restaurant_scoped),
@@ -219,7 +203,8 @@ async def plan_options(
         result.append({
             "plan_code": code,
             "display_name": p.get("display_name", code.capitalize()),
-            "sucursales_max": p.get("locations_included"),  # None = unlimited
+            # Every plan is priced per sede, so none limits how many sedes stay.
+            "sucursales_max": None,
             "monthly_price_cop": p.get("monthly_price_cop"),
         })
     return {"plans": result}

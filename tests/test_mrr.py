@@ -6,8 +6,8 @@ Tests for MRR (Monthly Recurring Revenue) tracking.
 Test matrix
 -----------
   test_zero_paying_orgs             — fresh DB / only free orgs → mrr_total_cop = 0
-  test_single_pulso_paying          — 1 paying Pulso → mrr = 149000
-  test_paying_plus_comp             — 1 paying + 1 comp → mrr = 149000, counts correct
+  test_single_esencial_paying          — 1 paying Esencial → mrr = 119000
+  test_paying_plus_comp             — 1 paying + 1 comp → mrr = 119000, counts correct
   test_multiple_plans               — mix of plans aggregates correctly
   test_comp_org_not_in_mrr          — comp org (comp_until in future) excluded from mrr
   test_delta_shape                  — db_compute_mrr_delta returns expected keys
@@ -145,7 +145,7 @@ async def test_zero_paying_orgs(db_conn):
 
     PRODUCT GAP (verified 2026-09-10, do not silently paper over):
     plan_code='free' as originally written here CANNOT be constructed on the
-    current schema. organizations.plan_code is `NOT NULL DEFAULT 'pulso'` and
+    current schema. organizations.plan_code is `NOT NULL DEFAULT 'esencial'` and
     carries `fk_orgs_plan_code -> plan_limits(plan_code)` (migration 0070),
     whose only seeded rows are pulso/restaurante/pro/cadena — inserting
     plan_code='free' raises ForeignKeyViolationError. NULL is also impossible
@@ -186,31 +186,31 @@ async def test_zero_paying_orgs(db_conn):
 
 @_db_mark
 @pytest.mark.asyncio
-async def test_single_pulso_paying(db_conn):
+async def test_single_esencial_paying(db_conn):
     """
-    Insert 1 Pulso paying org (no comp_until).
-    MRR contribution from that org = 149000.
-    We verify the by_plan entry for 'pulso' increases by exactly 149000.
+    Insert 1 Esencial paying org (no comp_until).
+    MRR contribution from that org = 119000.
+    We verify the by_plan entry for 'esencial' increases by exactly 119000.
     """
     from app.services.tenant_context import bypass_tenant_scope
     from app.repositories.internal import mrr_repo
 
     # Baseline before inserting
-    with bypass_tenant_scope("test_mrr_pulso_before"):
+    with bypass_tenant_scope("test_mrr_esencial_before"):
         before = await mrr_repo.db_compute_mrr()
-    pulso_before = next(p for p in before["by_plan"] if p["plan_code"] == "pulso")
+    esencial_before = next(p for p in before["by_plan"] if p["plan_code"] == "esencial")
 
-    # Insert a paying Pulso org
-    await _create_org(db_conn, plan_code="pulso", comp_until=None)
+    # Insert a paying Esencial org
+    await _create_org(db_conn, plan_code="esencial", comp_until=None)
 
-    with bypass_tenant_scope("test_mrr_pulso_after"):
+    with bypass_tenant_scope("test_mrr_esencial_after"):
         after = await mrr_repo.db_compute_mrr()
-    pulso_after = next(p for p in after["by_plan"] if p["plan_code"] == "pulso")
+    esencial_after = next(p for p in after["by_plan"] if p["plan_code"] == "esencial")
 
-    # Exactly one more paying Pulso org
-    assert pulso_after["paying_count"] == pulso_before["paying_count"] + 1
-    assert pulso_after["mrr_cop"] == pulso_before["mrr_cop"] + 149_000
-    assert after["mrr_total_cop"] == before["mrr_total_cop"] + 149_000
+    # Exactly one more paying Esencial org
+    assert esencial_after["paying_count"] == esencial_before["paying_count"] + 1
+    assert esencial_after["mrr_cop"] == esencial_before["mrr_cop"] + 119_000
+    assert after["mrr_total_cop"] == before["mrr_total_cop"] + 119_000
     assert after["paying_count"] == before["paying_count"] + 1
 
 
@@ -218,8 +218,8 @@ async def test_single_pulso_paying(db_conn):
 @pytest.mark.asyncio
 async def test_paying_plus_comp(db_conn):
     """
-    Insert 1 paying Pulso + 1 comp org.
-    MRR increases by 149000, paying_count +1, comp_count +1, comp org does NOT add to MRR.
+    Insert 1 paying Esencial + 1 comp org.
+    MRR increases by 119000, paying_count +1, comp_count +1, comp org does NOT add to MRR.
     """
     from app.services.tenant_context import bypass_tenant_scope
     from app.repositories.internal import mrr_repo
@@ -228,14 +228,14 @@ async def test_paying_plus_comp(db_conn):
         before = await mrr_repo.db_compute_mrr()
 
     future = datetime.now(timezone.utc) + timedelta(days=30)
-    await _create_org(db_conn, plan_code="pulso", comp_until=None)
+    await _create_org(db_conn, plan_code="esencial", comp_until=None)
     await _create_org(db_conn, plan_code="restaurante", comp_until=future)
 
     with bypass_tenant_scope("test_mrr_pay_comp_after"):
         after = await mrr_repo.db_compute_mrr()
 
     # Only the pulso org contributes MRR
-    assert after["mrr_total_cop"] == before["mrr_total_cop"] + 149_000
+    assert after["mrr_total_cop"] == before["mrr_total_cop"] + 119_000
     assert after["paying_count"] == before["paying_count"] + 1
     assert after["comp_count"] == before["comp_count"] + 1
 
@@ -265,7 +265,7 @@ async def test_comp_org_not_in_mrr(db_conn):
 @pytest.mark.asyncio
 async def test_multiple_plans(db_conn):
     """
-    2 Pulso + 1 Restaurante paying → MRR = 2*149000 + 299000 = 597000 above baseline.
+    2 Esencial + 1 Restaurante paying → MRR = 2*119000 + 249000 = 487000 above baseline.
     """
     from app.services.tenant_context import bypass_tenant_scope
     from app.repositories.internal import mrr_repo
@@ -273,14 +273,14 @@ async def test_multiple_plans(db_conn):
     with bypass_tenant_scope("test_mrr_multi_before"):
         before = await mrr_repo.db_compute_mrr()
 
-    await _create_org(db_conn, plan_code="pulso")
-    await _create_org(db_conn, plan_code="pulso")
+    await _create_org(db_conn, plan_code="esencial")
+    await _create_org(db_conn, plan_code="esencial")
     await _create_org(db_conn, plan_code="restaurante")
 
     with bypass_tenant_scope("test_mrr_multi_after"):
         after = await mrr_repo.db_compute_mrr()
 
-    expected_delta = 2 * 149_000 + 299_000  # 597000
+    expected_delta = 2 * 119_000 + 249_000  # 487000
     assert after["mrr_total_cop"] == before["mrr_total_cop"] + expected_delta
     assert after["paying_count"] == before["paying_count"] + 3
 
@@ -313,12 +313,12 @@ async def test_endpoint_shape():
     Uses mocked repo so no DB is needed.
     """
     mock_current = {
-        "mrr_total_cop": 298_000,
+        "mrr_total_cop": 238_000,
         "by_plan": [
-            {"plan_code": "pulso", "monthly_price_cop": 149_000, "paying_count": 2, "mrr_cop": 298_000},
-            {"plan_code": "restaurante", "monthly_price_cop": 299_000, "paying_count": 0, "mrr_cop": 0},
-            {"plan_code": "pro", "monthly_price_cop": 549_000, "paying_count": 0, "mrr_cop": 0},
-            {"plan_code": "cadena", "monthly_price_cop": 899_000, "paying_count": 0, "mrr_cop": 0},
+            {"plan_code": "esencial", "monthly_price_cop": 119_000, "paying_count": 2, "mrr_cop": 238_000},
+            {"plan_code": "restaurante", "monthly_price_cop": 249_000, "paying_count": 0, "mrr_cop": 0},
+            {"plan_code": "pro", "monthly_price_cop": 349_000, "paying_count": 0, "mrr_cop": 0},
+            {"plan_code": "cadena", "monthly_price_cop": 299_000, "paying_count": 0, "mrr_cop": 0},
         ],
         "paying_count": 2,
         "comp_count": 1,
@@ -326,8 +326,8 @@ async def test_endpoint_shape():
         "total_orgs": 6,
     }
     mock_delta = {
-        "mrr_last_month_cop": 149_000,
-        "delta_cop": 149_000,
+        "mrr_last_month_cop": 119_000,
+        "delta_cop": 119_000,
         "delta_pct": 100.0,
     }
 
@@ -347,16 +347,16 @@ async def test_endpoint_shape():
         response = {**current, **delta}
 
     # Shape assertions
-    assert response["mrr_total_cop"] == 298_000
+    assert response["mrr_total_cop"] == 238_000
     assert response["paying_count"] == 2
     assert response["comp_count"] == 1
     assert response["free_count"] == 3
     assert response["total_orgs"] == 6
     assert len(response["by_plan"]) == 4
     assert response["delta_pct"] == 100.0
-    assert response["delta_cop"] == 149_000
+    assert response["delta_cop"] == 119_000
 
     # by_plan correctness
-    pulso = next(p for p in response["by_plan"] if p["plan_code"] == "pulso")
-    assert pulso["mrr_cop"] == 298_000
+    pulso = next(p for p in response["by_plan"] if p["plan_code"] == "esencial")
+    assert pulso["mrr_cop"] == 238_000
     assert pulso["paying_count"] == 2

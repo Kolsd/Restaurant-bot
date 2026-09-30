@@ -140,7 +140,7 @@ class TestConvertWithOnboarding:
         # db_create_organization should have been called with plan="restaurante"
         restaurant_repo.db_create_organization.assert_awaited_once()
         call_kwargs = restaurant_repo.db_create_organization.await_args.kwargs
-        assert call_kwargs.get("subscription_plan") == "restaurante"
+        assert call_kwargs.get("plan_code") == "restaurante"
 
     def test_convert_starts_the_advertised_free_trial(self, super_client, monkeypatch):
         """Closed product decision (docs/claude/status.md #12, revised

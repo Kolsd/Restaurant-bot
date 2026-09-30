@@ -319,7 +319,7 @@ async def db_restaurant_cost_detail(
     try:
         async with tenant_connection() as conn:
             org_row = await conn.fetchrow(
-                "SELECT name, COALESCE(subscription_plan, 'free') AS plan FROM organizations WHERE id = $1",
+                "SELECT name, COALESCE(plan_code, 'esencial') AS plan FROM organizations WHERE id = $1",
                 org_id,
             )
             rows = await conn.fetch(
@@ -387,11 +387,11 @@ async def db_restaurant_cost_detail(
 _TOKENS_PER_CONV_ESTIMATE = 2_000
 
 # Plan conv caps (daily limit analogue — we use daily_tokens / tokens_per_conv).
-# Plan codes mirror migration 0070 (Pricing v1): pulso/restaurante/pro/cadena/comp.
-# "free" kept as fallback for pre-pricing orgs; "basic"/"enterprise" removed (not real plans).
+# Plan codes mirror app/services/plans.py (pricing 2026-09-30, migration 0101).
+# Esencial has no AI chat; its budget covers the carta import and the like.
 _PLAN_DAILY_TOKEN_LIMITS = {
     "free":        5_000,
-    "pulso":       50_000,
+    "esencial":    50_000,
     "restaurante": 200_000,
     "pro":         600_000,
     "cadena":      -1,    # unlimited — excluded from outlier detection
@@ -431,7 +431,7 @@ async def db_cost_outliers(
                 SELECT
                     su.org_id,
                     o.name                              AS org_name,
-                    COALESCE(o.subscription_plan, 'free') AS plan_code,
+                    COALESCE(o.plan_code, 'esencial') AS plan_code,
                     SUM(su.total_tokens)::BIGINT        AS total_tokens,
                     SUM(su.input_tokens)::BIGINT        AS input_tokens,
                     SUM(su.output_tokens)::BIGINT       AS output_tokens,
@@ -440,7 +440,7 @@ async def db_cost_outliers(
                 FROM subscription_usage su
                 LEFT JOIN organizations o ON o.id = su.org_id
                 WHERE su.usage_date BETWEEN $1 AND $2
-                GROUP BY su.org_id, o.name, o.subscription_plan
+                GROUP BY su.org_id, o.name, o.plan_code
                 HAVING SUM(su.total_tokens) > 0
                 ORDER BY total_tokens DESC
                 """,
@@ -455,7 +455,7 @@ async def db_cost_outliers(
     for row in rows:
         plan = (row["plan_code"] or "free").lower()
         # -1 means unlimited (cadena, comp) — exclude from outlier detection.
-        plan_limit = _PLAN_DAILY_TOKEN_LIMITS.get(plan, _PLAN_DAILY_TOKEN_LIMITS["pulso"])
+        plan_limit = _PLAN_DAILY_TOKEN_LIMITS.get(plan, _PLAN_DAILY_TOKEN_LIMITS["esencial"])
         if plan_limit <= 0:
             continue
 

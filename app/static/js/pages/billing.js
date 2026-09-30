@@ -434,14 +434,15 @@
     marketing:     { label: 'Mensajes marketing/mes',   unit: 'msgs'  },
   };
 
-  // Plan catalog used for the "Cambiar plan" modal.
-  // Prices in COP, formatted with mesioFmt when available.
+  // Plan catalog used for the "Cambiar plan" modal — mirrors
+  // app/services/plans.py and the landing's #precios. Prices per sede.
   var PLAN_CATALOG = [
-    { id: 'pulso',      name: 'Pulso',      price: 149000,  desc: 'Para restaurantes que arrancan. 300 conversaciones/mes, 1 sede.' },
-    { id: 'restaurante',name: 'Restaurante',price: 299000,  desc: 'El plan más popular. 1.000 conversaciones, staff y nómina.' },
-    { id: 'pro',        name: 'Pro',        price: 599000,  desc: 'Multi-sede, analytics avanzados, catálogo visual, 3.000 conversaciones.' },
-    { id: 'cadena',     name: 'Cadena',     price: null,    desc: 'Para grupos con 5+ sedes. Precio a medida. Habla con nosotros.' },
+    { id: 'esencial',    name: 'Esencial',    price: 119000, desc: 'Carta QR y pedidos desde la mesa, cocina, caja y panel de ventas. Hasta 5 usuarios.' },
+    { id: 'restaurante', name: 'Restaurante', price: 249000, desc: 'Todo lo de Esencial + asistente con IA, domicilios y recogida por tu link, usuarios ilimitados.' },
+    { id: 'pro',         name: 'Pro',         price: 349000, desc: 'Todo lo de Restaurante + reservas, inventario por pedido y facturación DIAN (folios aparte).' },
+    { id: 'cadena',      name: 'Cadena',      price: 299000, desc: 'Desde 3 sedes: todo lo de Pro + panel de todas tus sedes y traslados de inventario.' },
   ];
+  var PLAN_NAMES = { esencial: 'Esencial', restaurante: 'Restaurante', pro: 'Pro', cadena: 'Cadena' };
 
   var _currentPlan   = null; // plan id string from backend
   var _planModalTrap = null; // focus trap reference
@@ -468,15 +469,19 @@
     if (el) el.textContent = text;
   }
 
+  var MONTHS = ['enero','febrero','marzo','abril','mayo','junio',
+                'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+  function _longDate(d) {
+    return d.getDate() + ' de ' + MONTHS[d.getMonth()] + ' de ' + d.getFullYear();
+  }
+
   function _formatNextRenewal(periodStartIso) {
     if (!periodStartIso) return '';
     try {
-      var start = new Date(periodStartIso);
-      var next  = new Date(start);
+      var next = new Date(periodStartIso);
       next.setDate(next.getDate() + 30);
-      var months = ['enero','febrero','marzo','abril','mayo','junio',
-                    'julio','agosto','septiembre','octubre','noviembre','diciembre'];
-      return 'Proximo cobro: ' + next.getDate() + ' de ' + months[next.getMonth()] + ' de ' + next.getFullYear();
+      return 'Próximo cobro: ' + _longDate(next);
     } catch (e) { return ''; }
   }
 
@@ -568,22 +573,32 @@
   // ── Render plan card ───────────────────────────────────────────
 
   function renderPlanCard(planData) {
-    _currentPlan = planData.plan_id || planData.plan || null;
+    _currentPlan = planData.plan_code || null;
+    _setText('plan-name-display', planData.plan_name || PLAN_NAMES[_currentPlan] || 'Plan activo');
 
-    // Plan name
-    var nameMap = { pulso: 'Pulso', restaurante: 'Restaurante', pro: 'Pro', cadena: 'Cadena' };
-    var displayName = nameMap[_currentPlan] || (_currentPlan ? _currentPlan.charAt(0).toUpperCase() + _currentPlan.slice(1) : 'Plan activo');
-    _setText('plan-name-display', displayName);
-
-    // Price
-    var price = planData.price_monthly;
-    var priceEl = document.getElementById('plan-price-display');
-    if (priceEl) {
-      priceEl.textContent = (price != null && price !== 0) ? _fmt(price) + '/mes' : 'Precio a medida';
+    // Price is per sede; the total multiplies by the active sedes.
+    var perSede = planData.monthly_price_cop;
+    var sedes = planData.sedes || 1;
+    var priceTxt = perSede != null ? _fmt(perSede) + ' por sede al mes' : '';
+    if (sedes > 1 && planData.monthly_total_cop != null) {
+      priceTxt += ' · ' + sedes + ' sedes = ' + _fmt(planData.monthly_total_cop) + ' al mes';
     }
+    _setText('plan-price-display', priceTxt);
+    _setText('plan-founder-display', planData.founder
+      ? 'Precio fundador: congelado de por vida mientras mantengas tu suscripción (lista: ' + _fmt(planData.list_price_cop) + ').'
+      : '');
 
-    // Renewal date
-    _setText('plan-renewal-display', _formatNextRenewal(planData.current_period_start));
+    // Free days first; otherwise the next charge.
+    var renewal = '';
+    if (planData.in_trial && planData.comp_until) {
+      renewal = 'Prueba gratis hasta el ' + _longDate(new Date(planData.comp_until)) + '.';
+      if (planData.effective_plan && planData.effective_plan !== _currentPlan) {
+        renewal += ' Mientras tanto tienes todo el plan ' + (PLAN_NAMES[planData.effective_plan] || '') + '.';
+      }
+    } else {
+      renewal = _formatNextRenewal((planData.current_period || {}).start);
+    }
+    _setText('plan-renewal-display', renewal);
 
     // Add-ons
     var addonsEl = document.getElementById('plan-addons-display');
@@ -611,7 +626,9 @@
     container.textContent = '';
 
     var dims = usageData.dimensions || {};
-    var order = ['conversations', 'audio', 'storage', 'staff', 'sku', 'marketing'];
+    // Only staff users are a limit the owner has (Esencial: 5). The
+    // conversation allowance is an internal ceiling that alerts Mesio.
+    var order = ['staff'];
 
     order.forEach(function (dim) {
       var d = dims[dim];
@@ -646,7 +663,7 @@
 
         var priceEl2 = document.createElement('div');
         priceEl2.className = 'plan-option-price';
-        priceEl2.textContent = plan.price ? _fmt(plan.price) + '/mes +IVA' : 'Precio a medida';
+        priceEl2.textContent = _fmt(plan.price) + ' por sede al mes';
 
         var descEl = document.createElement('div');
         descEl.className = 'plan-option-desc';
@@ -780,7 +797,7 @@
   var _selectedLocId  = null;   // currently selected kept_location_id
 
   // ── Plan order for "is this a downgrade?" check ────────────────
-  var PLAN_ORDER = ['pulso', 'restaurante', 'pro', 'cadena'];
+  var PLAN_ORDER = ['esencial', 'restaurante', 'pro', 'cadena'];
 
   function _planRank(code) {
     var idx = PLAN_ORDER.indexOf((code || '').toLowerCase());
@@ -806,7 +823,7 @@
       banner.style.display = 'none';
       return;
     }
-    var nameMap = { pulso: 'Pulso', restaurante: 'Restaurante', pro: 'Pro', cadena: 'Cadena' };
+    var nameMap = { esencial: 'Esencial', restaurante: 'Restaurante', pro: 'Pro', cadena: 'Cadena' };
     var planName = nameMap[status.pending_plan] || status.pending_plan;
     var keptName = '';
     if (status.kept_location_id && status.current_sucursales) {
@@ -881,9 +898,8 @@
       return;
     }
 
-    // Determine how many branches the new plan allows
-    var planLocLimits = { pulso: 1, restaurante: 3, pro: 10, cadena: null };
-    var newLimit = planLocLimits[newPlan];
+    // Every plan is priced per sede, so no plan limits how many sedes stay.
+    var newLimit = null;
     var branches = status.current_sucursales || [];
 
     if (newLimit !== null && branches.length > newLimit) {
