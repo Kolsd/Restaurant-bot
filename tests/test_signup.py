@@ -48,7 +48,7 @@ def _tenant(org_id: int = 99, username: str = "juan@restaurante.com") -> Provisi
         username=username,
         user_created=True,
         temp_password=None,
-        comp_until=datetime.now(tz=timezone.utc) + timedelta(days=14),
+        comp_until=datetime.now(tz=timezone.utc) + timedelta(days=15),
         welcome_email_sent=False,
     )
 
@@ -81,7 +81,7 @@ class TestSignupEndpoint:
         # waiting for an email that may never be configured.
         assert body["username"] == "juan@restaurante.com"
         assert body["login_url"] == "/login"
-        assert body["trial_days"] == 14
+        assert body["trial_days"] == 15
         assert body["trial_until"]
 
     def test_the_owner_password_is_passed_through_untouched(self, client):

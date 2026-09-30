@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Registro — Mesio</title>
-<meta name="description" content="Regístrate en Mesio y empieza tu prueba gratis de 14 días. Sin tarjeta de crédito.">
+<meta name="description" content="Regístrate en Mesio y empieza tu prueba gratis de 15 días. Sin tarjeta de crédito.">
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -159,7 +159,7 @@
 
     <div id="signup-form-section">
       <h1>Prueba Mesio gratis</h1>
-      <p class="sub">14 días sin costo ni tarjeta de crédito. Te contactamos en menos de 24 h.</p>
+      <p class="sub">15 días sin costo ni tarjeta de crédito. Entras y configuras tu restaurante de inmediato.</p>
 
       <form id="signup-form" novalidate>
         <div class="form-row">
@@ -211,13 +211,14 @@
           <label for="sg-plan">Plan de interés</label>
           <select id="sg-plan" name="plan" required>
             <option value="">Selecciona un plan...</option>
-            <option value="Pulso">Pulso — $149.000/mes · 1 sede, hasta 500 conv/mes</option>
-            <option value="Restaurante">Restaurante — $299.000/mes · 1 sede, hasta 1.500 conv/mes</option>
-            <option value="Pro">Pro — $549.000/mes · hasta 3 sedes, conv ilimitadas</option>
-            <option value="Cadena">Cadena — $899.000/mes · sedes ilimitadas, todos los módulos</option>
+            <!-- Esencial still posts the internal code "Pulso" until plan_code is renamed. -->
+            <option value="Pulso">Esencial — $119.000/mes por sede</option>
+            <option value="Restaurante">Restaurante — $249.000/mes por sede</option>
+            <option value="Pro">Pro — $349.000/mes por sede</option>
+            <option value="Cadena">Cadena — $299.000/mes por sede, desde 3 sedes</option>
           </select>
           <div class="field-error" id="err-plan"></div>
-          <div class="field-hint">Todos los precios + IVA. Puedes cambiar de plan en cualquier momento.</div>
+          <div class="field-hint">La prueba es del plan Restaurante completo. Puedes cambiar de plan cuando quieras.</div>
         </div>
 
         <button type="submit" class="signup-submit" id="signup-btn">Crear mi cuenta gratis</button>

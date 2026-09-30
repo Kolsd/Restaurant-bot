@@ -51,7 +51,7 @@ _SAFE_CHARS = "".join(c for c in (string.ascii_letters + string.digits) if c not
 
 # The trial the landing page advertises. It is the promise, so it is the
 # default; a caller may shorten it but should not have to know the number.
-DEFAULT_TRIAL_DAYS = 14
+DEFAULT_TRIAL_DAYS = 15
 
 # The sede every org is born with. Renaming it is the restaurant's business.
 DEFAULT_LOCATION_NAME = "Principal"
