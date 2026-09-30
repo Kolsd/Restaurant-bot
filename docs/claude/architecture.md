@@ -298,21 +298,21 @@ All the logic that used to live in `agent.py` module-level dicts now goes throug
 
 ```python
 # NPS
-await state_store.nps_get(phone, bot_number)             # TTL 24h
-await state_store.nps_set(phone, bot_number, state)
-await state_store.nps_delete(phone, bot_number)
+await state_store.nps_get(phone, org_id)             # TTL 24h
+await state_store.nps_set(phone, org_id, state)
+await state_store.nps_delete(phone, org_id)
 
 # Checkout (pending proposals with proof-of-payment photo)
-await state_store.checkout_get(phone, bot_number)        # TTL 30min
-await state_store.checkout_set(phone, bot_number, state)
-await state_store.checkout_delete(phone, bot_number)
+await state_store.checkout_get(phone, org_id)        # TTL 30min
+await state_store.checkout_set(phone, org_id, state)
+await state_store.checkout_delete(phone, org_id)
 
 # Atomic cooldown to prevent double-confirming a table
-ok = await state_store.table_cooldown_acquire(table_id, bot_number, ttl_seconds=300)
+ok = await state_store.table_cooldown_acquire(table_id, org_id, ttl_seconds=300)
 
 # Distributed cart lock with an ownership token (UUID)
-token = await state_store.cart_lock_acquire(phone, bot_number, ttl_seconds=30)  # returns a UUID or None
-await state_store.cart_lock_release(phone, bot_number, token=token)  # MUST pass the token
+token = await state_store.cart_lock_acquire(phone, org_id, ttl_seconds=30)  # returns a UUID or None
+await state_store.cart_lock_release(phone, org_id, token=token)  # MUST pass the token
 # Internally: SET key uuid NX EX ttl. Release verifies ownership before DELETE.
 ```
 

@@ -1732,7 +1732,7 @@ async function loadChatsTab() {
   }
 }
 function _chatProposalCardHtml(p) {
-  // proof_url is already stored as /api/media/{id}?bot={bot_number} — use directly.
+  // proof_url is already a /api/media/{id} URL — use directly.
   return `
     <div style="font-weight:700;font-size:13px;color:#E8EAEE;">${_esc(p.table_name || p.base_order_id || '')}</div>
     <div style="font-size:12px;color:#71717A;margin:2px 0;">${_esc(p.customer_phone || '')}</div>

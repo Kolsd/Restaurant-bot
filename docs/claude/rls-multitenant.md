@@ -85,9 +85,9 @@ async def my_timecard(user: dict = Depends(get_current_user_scoped)):
     return await db.db_get_staff_timecard_rows(user["restaurant_id"])
 ```
 
-**In the bot runtime (Meta webhook):**
+**In the bot runtime (historical — the Meta webhook was deleted 2026-09-25):**
 ```python
-# inbox_worker._handle_meta_whatsapp — after resolving the restaurant from bot_number
+# inbox_worker._handle_meta_whatsapp — after resolving the restaurant
 if _tenant_id is not None:
     with tenant_scope(_tenant_id):
         await _process_message(...)
@@ -245,9 +245,8 @@ automatically, whenever one sede's inventory hit its minimum.
 - `db_upsert_dish_recipe` is org-level but re-evaluates the dish once PER SEDE
   (`_resync_dish_for_every_sede_conn`), each against that sede's own stock.
 
-Every caller must have a sede: diner sessions carry `location_id`, the
-WhatsApp/table lookups get it from `db_get_restaurant_by_phone` (which returns
-`location_id` alongside the org in `id`), and the owner's sold-out toggle
+Every caller must have a sede: diner sessions carry `location_id`, table
+lookups get it from the table's own `location_id`, and the owner's sold-out toggle
 (`/api/menu/availability`) refuses with 400 until a sede is picked.
 
 ### The carta is the org's, with per-sede changes (PM 2026-09-21, migration 0093)
@@ -265,9 +264,9 @@ Matched by dish NAME, case-insensitive (unique on `lower(dish_name)`), like
 `locations` ON DELETE CASCADE.
 
 - **Reading a sede's carta = `services/sede_menu.get_sede_menu(org_id, location_id)`.**
-  Never `db_get_menu(bot_number)` for anything that shows or prices a dish at a
-  sede: it returns the base and, for a chain sharing one number, can't tell
-  sedes apart. `location_id=None` returns the base (brand pages only).
+  Never `db_get_menu(org_id)` for anything that shows or prices a dish at a
+  sede: it returns the base carta. `location_id=None` returns the base
+  (brand pages only).
 - **The bot** reads the carta deep in its call chain. `agent.chat` opens a
   `sede_context` turn and names the sede once the restaurant resolves
   (`set_sede`); `orders._turn_menu` / `find_dish` read it. A read with no sede
@@ -291,8 +290,8 @@ Matched by dish NAME, case-insensitive (unique on `lower(dish_name)`), like
 
 - Matriz (head office): `parent_restaurant_id IS NULL`.
 - Branch: `parent_restaurant_id` points to the Matriz.
-- **The bot key** (`restaurants.whatsapp_number` in the view, `bot_number` in code) is `web<org_id>` for any org without a WhatsApp number (0096): one key per org, shared by its sedes; the sede is told apart by `location_id`. Since 2026-09-26 no code path can set a WhatsApp number or a Meta credential (signup, CRM convert, superadmin, sede creation), and the `_b<timestamp>` branch suffix is gone. Clearing the numbers/tokens already stored in prod and rewriting their rows' keys (draft migration 0097) awaits the PM's approval — it is irreversible.
-- **Tests seed production shape:** the diner (`test_diner_*`) and delivery (`test_delivery_*`, `test_pickup_gps_routing`) suites seed sedes with NO number and `bot_number = f"web{org_id}"`; `tests/test_self_serve_no_whatsapp.py` provisions like `/api/signup`. Do not reintroduce `whatsapp_number` in new seeds.
+- **The bot key is `org_id`** (0098 moved every `(phone, bot_number)` key to `(phone, org_id)`; 0099 dropped `bot_number`, the WhatsApp numbers and the Meta tokens from the schema, and the `restaurants` view no longer has `whatsapp_number` / `wa_*`). The sede is told apart by `location_id`. Tests seed orgs by slug, never by phone number.
+- **`reservations` has RLS** since 0099 (it was the one tenant table without it) and stores its sede in `location_id`; the sede filters on the reservation screens use it.
 - **jsonb writes:** the app pool's codec (`database.init_connection`) serializes jsonb parameters, so never pass `json.dumps(x)` — that stores a JSON string. Test pools must use `init=init_connection`; ~29 older test files still don't (sweep pending).
 
 ## Wave 2 (Org/Location) — Post-deploy summary

@@ -425,7 +425,6 @@
         <div class="tel-ph">${_esc(order.phone || '')}</div>
       </div>
       <div class="tel-actions">
-        <a class="tel-btn wa" href="https://wa.me/${_esc(cleanPhone)}" target="_blank" rel="noopener" aria-label="WhatsApp">💬</a>
         <a class="tel-btn" href="tel:+${_esc(cleanPhone)}" aria-label="Llamar">📞</a>
       </div>
     </div>`;

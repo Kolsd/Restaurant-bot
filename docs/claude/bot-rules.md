@@ -32,7 +32,6 @@ These rules protect the bot's critical flows. Any change to `agent.py`, `agent_s
 - `cart_lock_acquire` returns a UUID token. `cart_lock_release` MUST receive that token.
 - A release without a token (`token=None`) MUST be rejected (early return + error log).
 - ALL functions that use `_cart_lock` MUST handle `RuntimeError("cart_lock_contention")`.
-- `migrate_cart` MUST lock BOTH bot_numbers (source AND destination) in a deterministic order to avoid deadlock.
 - Fallback cart lock timeout: 5 seconds max (not 30s, it blocks the event loop).
 
 ### 6. (retired) — was the Meta webhook contract.
@@ -63,7 +62,7 @@ These rules protect the bot's critical flows. Any change to `agent.py`, `agent_s
 
 ### 11. GPS and Branch Routing
 - Coordinates 0,0 are valid (Gulf of Guinea). Use `if lat is None` instead of `if not lat`.
-- `restaurants.whatsapp_number` is the bot key (`bot_number`): a sede with none falls back to the org's, and an org with none gets `web<org_id>` (0096).
+- The bot's tenant key is `org_id` (0098/0099 removed `bot_number` and every WhatsApp column): `agent.chat(user_phone, user_message, org_id, location_id)`; carts, conversations and NPS state are keyed `(phone, org_id)`; the sede is `location_id` / `sede_context`.
 - `restaurant_obj` MUST be updated when a branch override happens (don't keep the Matriz/head-office ID).
 - `_try_checkout_flow` and `db_save_history` MUST propagate `branch_id` from the table_context.
 

@@ -223,7 +223,6 @@
   font-size: 16px; cursor: pointer; text-decoration: none;
   background: var(--brand); color: #fff;
 }
-.tel-btn.wa { background: #25D366; }
 
 /* ── Up-next ── */
 .dom-upnext { margin: 0 14px 14px; }

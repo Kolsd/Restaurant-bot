@@ -792,12 +792,10 @@ function _showAllAlerts(alerts) {
 // ── Request help alert for a table ───────────────────
 async function _callAlert(tableId, tableName) {
   try {
-    const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-    const botNumber = restaurant.whatsapp_number || '';
     const res = await fetch('/api/waiter-alerts/admin-call', {
       method: 'POST',
       headers: _hdr(),
-      body: JSON.stringify({ table_name: tableName, bot_number: botNumber, alert_type: 'help' })
+      body: JSON.stringify({ table_name: tableName, alert_type: 'help' })
     });
     if (res.ok) {
       mesioToast('Alerta enviada', 'success', 2000);
