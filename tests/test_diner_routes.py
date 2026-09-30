@@ -541,3 +541,48 @@ async def test_diner_message_is_wrapped_before_llm(seed_org):
     assert injection_payload not in enriched
     assert "<user_message" not in enriched
     assert "[RESTAURANTE:" in enriched  # the rest of the enriched context still builds normally
+
+
+# ── Plan gating: Esencial has no AI assistant (pricing 2026-09-30) ──────────
+
+async def _set_plan_async(org_id: int, plan_code: str) -> None:
+    conn = await asyncpg.connect(TEST_DB_URL)
+    try:
+        await conn.execute(
+            "UPDATE organizations SET plan_code = $2, subscription_plan = $2, comp_until = NULL "
+            "WHERE id = $1",
+            org_id, plan_code,
+        )
+    finally:
+        await conn.close()
+
+
+def test_session_tells_the_ui_whether_the_plan_has_the_assistant(client, seed_org, seed_org_2):
+    # Orgs created without naming a plan are on Restaurante (migration 0101).
+    assert _open_session(client, seed_org["table_id"])["assistant"] is True
+
+    _run(_set_plan_async(seed_org_2["org_id"], "esencial"))
+    assert _open_session(client, seed_org_2["table_id"])["assistant"] is False
+
+
+def test_esencial_free_text_gets_the_carta_and_never_reaches_the_llm(client, seed_org, monkeypatch):
+    from app.services import agent as agent_mod
+
+    async def _no_llm(*_a, **_kw):
+        raise AssertionError("an Esencial restaurant must never call the LLM")
+
+    monkeypatch.setattr(agent_mod, "call_claude", _no_llm)
+    _run(_set_plan_async(seed_org["org_id"], "esencial"))
+    token = _open_session(client, seed_org["table_id"])["token"]
+
+    resp = _post(client, "/api/diner/chat", json={"token": token, "message": "¿qué me recomiendas?"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "toca una categoría" in data["message"]
+    assert data["blocks"][0]["type"] == "category_chips"
+    assert {c["value"] for c in data["blocks"][0]["chips"]} == {"cat:Pastas", "cat:Bebidas"}
+
+    # Tapping a category still works — it never needed the assistant.
+    resp = _post(client, "/api/diner/chat", json={"token": token, "message": "cat:Pastas"})
+    assert resp.status_code == 200
+    assert "Pastas" in resp.json()["message"]

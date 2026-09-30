@@ -5,6 +5,8 @@ Covers: db_upsert_dish_recipe, db_get_dish_recipe, db_get_food_costs,
 Does not require a database or real credentials.
 """
 import pytest
+
+from tests.conftest import stub_plan
 import json
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
@@ -370,6 +372,7 @@ def test_recipe_routes_upsert_and_delete(client, monkeypatch):
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
     monkeypatch.setattr(db_mod, "db_upsert_dish_recipe", mock_upsert)
+    stub_plan(monkeypatch, "pro")
     monkeypatch.setattr(db_mod, "db_delete_dish_recipe", mock_delete)
     app.dependency_overrides[get_current_restaurant_scoped] = mock_scoped_override
 
@@ -419,6 +422,7 @@ def test_recipe_routes_food_costs(client, monkeypatch):
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
     monkeypatch.setattr(db_mod, "db_get_food_costs", mock_food_costs)
+    stub_plan(monkeypatch, "pro")
     app.dependency_overrides[get_current_restaurant_scoped] = mock_scoped_override
 
     resp = client.get("/api/inventory/food-costs", headers={"Authorization": "Bearer fake-token"})

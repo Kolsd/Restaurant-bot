@@ -58,6 +58,7 @@ from app.services import blocks
 from app.services import database as db
 from app.services import delivery as delivery_service
 from app.services import orders
+from app.services import plan_access, plans
 from app.services import realtime
 from app.services import sede_menu
 from app.services import state_store
@@ -463,6 +464,8 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
         "min_order": float(cfg["min_order"]),         # JSON boundary
         "currency": currency,
         "order_mode": body.order_mode,
+        # False on a plan without the AI assistant: the UI hides the free-text box.
+        "assistant": await plan_access.org_has_feature(org_id, plans.AI_ASSISTANT),
         "requires_join_code": False,
         "join_code": None,
         "message": turn["message"],
@@ -594,6 +597,7 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         "restaurant_name": restaurant_name,
         "currency": currency,
         "order_mode": "dine_in",
+        "assistant": await plan_access.org_has_feature(org_id, plans.AI_ASSISTANT),
         "requires_join_code": False,
         "join_code": join_code,
         "message": turn["message"],
@@ -645,7 +649,8 @@ async def diner_join(request: Request, body: DinerJoinRequest):
             restaurant_name = (restaurant or {}).get("name") or "nuestro restaurante"
             currency = _features_dict((restaurant or {}).get("features")).get("currency", "COP")
             turn = await _opening_turn(org_id, location_id, restaurant_name, table_name)
-            return {**turn, "restaurant_name": restaurant_name, "currency": currency, "table_name": table_name}
+            return {**turn, "restaurant_name": restaurant_name, "currency": currency, "table_name": table_name,
+                    "assistant": await plan_access.org_has_feature(org_id, plans.AI_ASSISTANT)}
 
         new_session = await tables_repo.db_link_participant_session(
             phone=token,
@@ -684,7 +689,8 @@ async def diner_join(request: Request, body: DinerJoinRequest):
 
     log.info("diner_join.success", org_id=org_id, table_id=table_id, session_id=new_session.get("id"))
 
-    return {**turn, "restaurant_name": restaurant_name, "currency": currency, "table_name": table_name}
+    return {**turn, "restaurant_name": restaurant_name, "currency": currency, "table_name": table_name,
+            "assistant": await plan_access.org_has_feature(org_id, plans.AI_ASSISTANT)}
 
 
 @router.post("/chat")

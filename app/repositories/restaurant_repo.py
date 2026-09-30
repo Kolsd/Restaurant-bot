@@ -2074,7 +2074,7 @@ async def db_create_organization(
     name: str,
     slug: str | None = None,
     features: dict | None = None,
-    plan_code: str = "esencial",
+    plan_code: str = "restaurante",
 ) -> dict:
     """Insert a new Organization row and return the created record.
 

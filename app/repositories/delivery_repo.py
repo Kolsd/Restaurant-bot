@@ -185,7 +185,7 @@ async def db_get_org_by_slug(slug: str) -> Optional[dict]:
     with bypass_tenant_scope("delivery_org_slug_lookup"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
-                "SELECT id, name, slug, features FROM organizations WHERE slug = $1",
+                "SELECT id, name, slug, features, plan_code, comp_until FROM organizations WHERE slug = $1",
                 slug,
             )
     return dict(row) if row else None

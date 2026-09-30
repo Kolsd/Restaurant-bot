@@ -10,6 +10,7 @@ from typing import Optional
 
 from app.services import database as db
 from app.routes.deps import get_current_user, get_current_restaurant_scoped
+from app.services import plan_access, plans
 from app.services.billing import (
     get_billing_config,
     save_billing_config,
@@ -112,6 +113,7 @@ async def get_config(request: Request):
 async def set_config(request: Request, payload: BillingConfigPayload):
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
+    await plan_access.require_feature(restaurant_id, plans.DIAN)
 
     allowed = {"siigo", "alegra", "loggro", "mesio_native"}
     if payload.provider.lower() not in allowed:
@@ -130,6 +132,8 @@ async def emit(request: Request, payload: EmitInvoicePayload):
 
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
+    # Electronic invoicing starts at Pro (pricing 2026-09-30).
+    await plan_access.require_feature(restaurant_id, plans.DIAN)
 
     # DIAN feature gate — must be explicitly enabled in /settings
     restaurant = await db.db_get_restaurant_by_org_id(restaurant_id)
@@ -165,6 +169,7 @@ async def test_connection(request: Request):
     """Prueba las credenciales sin emitir factura real."""
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
+    await plan_access.require_feature(restaurant_id, plans.DIAN)
     with tenant_scope(restaurant_id):
         config = await get_billing_config(restaurant_id)
 

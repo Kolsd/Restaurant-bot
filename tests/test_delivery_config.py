@@ -54,6 +54,7 @@ def test_legacy_org_features_override_defaults():
 def test_location_config_overrides_legacy_org_features():
     """Precedence: locations.delivery_config wins over organizations.features."""
     org = {
+        "plan_code": "restaurante",
         "features": {
             "delivery_fee": 5000,
             "min_order": 20000,
@@ -148,3 +149,18 @@ def test_delivery_config_to_json_converts_decimal_at_json_boundary():
     # The original resolved config is untouched (still Decimal) — to_json
     # returns a copy, it doesn't mutate the input.
     assert isinstance(config["delivery_fee"], Decimal)
+
+
+def test_a_plan_without_delivery_turns_both_channels_off():
+    """Esencial has no delivery (pricing 2026-09-30): whatever the sede saved,
+    the resolved config is off — /pedir, the entry ladder and checkout all
+    read this resolver."""
+    location = {"delivery_config": {"delivery_enabled": True, "pickup_enabled": True}}
+    config = get_delivery_config(org={"plan_code": "esencial", "features": {}}, location=location)
+    assert config["delivery_enabled"] is False
+    assert config["pickup_enabled"] is False
+
+    trial = {"plan_code": "esencial", "features": {},
+             "comp_until": "2999-01-01T00:00:00+00:00"}
+    config = get_delivery_config(org=trial, location=location)
+    assert config["delivery_enabled"] is True, "the trial gives Restaurante, delivery included"

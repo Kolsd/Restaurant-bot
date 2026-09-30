@@ -366,6 +366,17 @@ async def get_current_user_scoped(request: Request):
         yield user
 
 
+def require_plan_feature(feature: str) -> Callable:
+    """FastAPI dependency: 403 with the upgrade copy when the caller's plan
+    (trial included) does not include `feature` — see app/services/plans.py."""
+    from app.services import plan_access  # noqa: PLC0415
+
+    async def _check_plan(restaurant: dict = Depends(get_current_restaurant_scoped)) -> None:
+        await plan_access.require_feature(int(restaurant["id"]), feature)
+
+    return _check_plan
+
+
 def require_module(module_name: str) -> Callable:
     """
     FastAPI dependency factory for module-level access control.
@@ -484,7 +495,7 @@ async def get_current_org(request: Request) -> dict:
             "id":              r.get("id"),
             "name":            r.get("name"),
             "features":        feats,
-            "subscription_plan": r.get("subscription_plan", "esencial"),
+            "subscription_plan": r.get("subscription_plan", "restaurante"),
             "plan_code":       r.get("plan_code"),
             "comp_until":      r.get("comp_until"),
             "subscription_status": r.get("subscription_status", "active"),

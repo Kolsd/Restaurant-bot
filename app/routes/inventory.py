@@ -13,18 +13,19 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from app.services import database as db
-from app.services import sede_menu
+from app.services import plans, sede_menu
 from app.repositories import inventory_repo
 from app.repositories.orders_repo import InsufficientStockError
 from app.routes.deps import (
     require_auth, get_current_restaurant_scoped, get_current_user,
-    may_span_locations, resolve_sede_filter,
+    may_span_locations, resolve_sede_filter, require_plan_feature,
 )
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
 
-router = APIRouter()
+# Inventory starts at Pro (pricing 2026-09-30, app/services/plans.py).
+router = APIRouter(dependencies=[Depends(require_plan_feature(plans.INVENTORY))])
 
 
 async def _sede_for_read(request: Request) -> int | None:

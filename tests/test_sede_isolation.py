@@ -63,8 +63,8 @@ async def _seed_two_sede_org() -> dict:
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         org_id = await conn.fetchval(
-            "INSERT INTO organizations (name, slug, menu, features) "
-            "VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id",
+            "INSERT INTO organizations (name, slug, menu, features, plan_code) "
+            "VALUES ($1, $2, $3::jsonb, $4::jsonb, 'pro') RETURNING id",
             f"Sede Iso {suffix}", f"sede-iso-{suffix}", "{}", "{}",
         )
         # Both sedes share the org's tenant key: only the sede filter can

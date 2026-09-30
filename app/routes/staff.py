@@ -18,7 +18,7 @@ from app.routes.deps import (
     get_current_restaurant_scoped, get_current_user, resolve_sede_filter,
 )
 from app.services import database as db
-from app.services import state_store
+from app.services import plan_access, state_store
 from app.repositories import sessions_repo
 from app.services.logging import get_logger
 from app.services.tenant_context import tenant_scope
@@ -127,6 +127,27 @@ async def _resolve_new_staff_location(org_id: int, requested: int | None) -> int
     return None
 
 
+async def _enforce_staff_cap(org_id: int) -> None:
+    """Esencial allows 5 active staff users per sede (pricing 2026-09-30);
+    the other plans, and every trial, have no cap."""
+    from app.repositories import restaurant_repo  # noqa: PLC0415
+    cap = await plan_access.org_staff_cap(org_id)
+    if cap is None:
+        return
+    sedes = max(1, len(await restaurant_repo.db_get_org_locations(org_id)))
+    with tenant_scope(org_id):
+        roster = await db.db_get_staff(org_id)
+    active = sum(1 for m in roster if m.get("active"))
+    if active >= cap * sedes:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Tu plan incluye hasta {cap} usuarios por sede. "
+                "Para agregar más, cambia al plan Restaurante."
+            ),
+        )
+
+
 @router.post("", status_code=201)
 async def create_staff(
     request: Request,
@@ -151,6 +172,7 @@ async def create_staff(
     full_name = f"{body.name.strip()} {body.last_name.strip()}".strip() if body.last_name else body.name.strip()
 
     location_id = await _resolve_new_staff_location(org_id, body.location_id)
+    await _enforce_staff_cap(org_id)
 
     member = await db.db_create_staff(
         restaurant_id=org_id,

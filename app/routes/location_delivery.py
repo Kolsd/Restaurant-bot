@@ -41,6 +41,7 @@ from app.repositories import delivery_repo, restaurant_repo
 from app.routes.deps import get_current_user
 from app.services import database as db
 from app.services import delivery as delivery_svc
+from app.services import plan_access, plans
 from app.services.logging import get_logger
 from app.services.staff_sections import ADMIN_ROLES
 from app.services.money import to_decimal
@@ -157,6 +158,9 @@ async def _build_response(org_id: int, location_id: int, location: dict) -> dict
     view["location_id"] = location_id
     view["phone"] = location.get("phone") or ""
     view["public_link"] = f"/pedir/{(org or {}).get('slug') or ''}"
+    # The effective values above are already off on a plan without delivery;
+    # this tells the UI why.
+    view["plan_allows_delivery"] = bool(org) and plans.has_feature(org, plans.DELIVERY)
     return view
 
 
@@ -227,6 +231,9 @@ async def set_location_delivery_config(
 
     location = await _owned_location_or_404(org_id, location_id)
     config = _validate_patch(body)
+    if config.get("delivery_enabled") or config.get("pickup_enabled"):
+        with tenant_scope(org_id):
+            await plan_access.require_feature(org_id, plans.DELIVERY)
 
     phone = body.phone.strip()
     with tenant_scope(org_id):

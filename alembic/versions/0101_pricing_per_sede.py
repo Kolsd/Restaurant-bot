@@ -10,7 +10,9 @@ Also repairs the plan every self-serve org was actually on: signup wrote the
 chosen plan to `subscription_plan` while `plan_code` stayed at its 'pulso'
 default, so a restaurant that picked Restaurante was billed as Pulso.
 `plan_code` is the one column code reads from now on; `subscription_plan`
-is kept equal to it until a later drop.
+is kept equal to it until a later drop. Orgs that never chose a plan (demo,
+legacy 'free') land on Restaurante — the plan the trial gives — and so does
+the column default: signup, CRM and superadmin always name one.
 
 `founder_price_cop` is the frozen per-sede price of a founder-program org
 (40% off list); NULL for everyone else.
@@ -49,14 +51,15 @@ def upgrade() -> None:
            SET plan_code = CASE
                    WHEN subscription_plan IN ('restaurante', 'pro', 'cadena')
                        THEN subscription_plan
-                   ELSE 'esencial'
+                   WHEN subscription_plan = 'pulso' THEN 'esencial'
+                   ELSE 'restaurante'
                END
          WHERE plan_code = 'pulso'
     """)
     op.execute("UPDATE organizations SET pending_plan_code = 'esencial' WHERE pending_plan_code = 'pulso'")
     op.execute("UPDATE organizations SET subscription_plan = plan_code")
-    op.execute("ALTER TABLE organizations ALTER COLUMN plan_code SET DEFAULT 'esencial'")
-    op.execute("ALTER TABLE organizations ALTER COLUMN subscription_plan SET DEFAULT 'esencial'")
+    op.execute("ALTER TABLE organizations ALTER COLUMN plan_code SET DEFAULT 'restaurante'")
+    op.execute("ALTER TABLE organizations ALTER COLUMN subscription_plan SET DEFAULT 'restaurante'")
     op.execute("DELETE FROM plan_limits WHERE plan_code = 'pulso'")
 
     op.execute(f"""

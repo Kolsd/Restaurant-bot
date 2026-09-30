@@ -70,6 +70,8 @@ def _patch_db_for_chat(monkeypatch, org_id: int = 4242):
     monkeypatch.setattr(db, "db_get_history",
                         AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "db_save_history", AsyncMock())
+    monkeypatch.setattr(db, "db_get_org_by_id", AsyncMock(return_value={
+        "id": 1, "plan_code": "restaurante", "comp_until": None, "features": {}}))
     monkeypatch.setattr(db, "db_check_usage_limits", AsyncMock())
     monkeypatch.setattr(db, "db_increment_token_usage", AsyncMock())
     monkeypatch.setattr(db, "db_get_menu", AsyncMock(return_value={}))

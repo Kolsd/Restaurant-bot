@@ -291,7 +291,7 @@ async def test_ladder_nearest_open_covering_sede_wins(db_conn):
             delivery_config={"delivery_enabled": True, "pickup_enabled": True, "radius_km": 5},
         )
 
-        org_row = {"id": org_id, "features": {}}
+        org_row = {"id": org_id, "features": {}, "plan_code": "restaurante"}
         locations = await db_get_org_locations_for_entry(org_id)
 
         result = resolve_order_mode(
@@ -329,7 +329,7 @@ async def test_ladder_falls_through_a_closed_covering_sede_to_the_next(db_conn):
             delivery_config={"delivery_enabled": True, "pickup_enabled": True, "radius_km": 20},
         )
 
-        org_row = {"id": org_id, "features": {}}
+        org_row = {"id": org_id, "features": {}, "plan_code": "restaurante"}
         locations = await db_get_org_locations_for_entry(org_id)
         result = resolve_order_mode(
             org=org_row, locations=locations, lat=4.6097, lon=-74.0817, requested_mode="delivery",
@@ -355,7 +355,7 @@ async def test_ladder_point_outside_every_radius_falls_back_to_pickup_ordered(db
             delivery_config={"delivery_enabled": True, "pickup_enabled": True, "radius_km": 2},
         )
 
-        org_row = {"id": org_id, "features": {}}
+        org_row = {"id": org_id, "features": {}, "plan_code": "restaurante"}
         locations = await db_get_org_locations_for_entry(org_id)
         # Point far from BOTH sedes' radius_km (2km) -> nobody covers it.
         result = resolve_order_mode(
@@ -385,7 +385,7 @@ async def test_ladder_no_gps_returns_pickup_with_no_fabricated_distances(db_conn
             delivery_config={"delivery_enabled": True, "pickup_enabled": True, "radius_km": 5},
         )
 
-        org_row = {"id": org_id, "features": {}}
+        org_row = {"id": org_id, "features": {}, "plan_code": "restaurante"}
         locations = await db_get_org_locations_for_entry(org_id)
         result = resolve_order_mode(
             org=org_row, locations=locations, lat=None, lon=None, requested_mode="delivery",
@@ -412,7 +412,7 @@ async def test_ladder_delivery_disabled_org_wide_is_a_distinct_reason(db_conn):
             delivery_config={"delivery_enabled": False, "pickup_enabled": True, "radius_km": 50},
         )
 
-        org_row = {"id": org_id, "features": {}}
+        org_row = {"id": org_id, "features": {}, "plan_code": "restaurante"}
         locations = await db_get_org_locations_for_entry(org_id)
         result = resolve_order_mode(
             org=org_row, locations=locations, lat=4.6097, lon=-74.0817, requested_mode="delivery",

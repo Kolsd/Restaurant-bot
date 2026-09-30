@@ -1,4 +1,6 @@
 import pytest
+
+from tests.conftest import stub_plan
 from unittest.mock import AsyncMock
 import app.routes.billing as billing_routes
 
@@ -57,6 +59,8 @@ def test_emit_manual_invoice_endpoint(client, monkeypatch):
     # Mock the function that issues the invoice to Alegra/Siigo
     mock_emit = AsyncMock(return_value={"success": True, "provider": "alegra", "external_id": "999"})
     monkeypatch.setattr(billing_routes, "emit_invoice", mock_emit)
+    # DIAN starts at Pro (app/services/plans.py).
+    stub_plan(monkeypatch, "pro")
 
     headers = {"Authorization": "Bearer fake_token_123"}
     payload = {

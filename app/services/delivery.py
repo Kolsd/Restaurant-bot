@@ -24,6 +24,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.repositories.restaurant_repo import haversine_km
+from app.services import plans
 from app.services.money import to_decimal
 
 # Bottom of the precedence chain.
@@ -123,6 +124,12 @@ def get_delivery_config(org: Optional[dict], location: Optional[dict]) -> dict:
 
     resolved["delivery_enabled"] = bool(resolved.get("delivery_enabled"))
     resolved["pickup_enabled"] = bool(resolved.get("pickup_enabled"))
+
+    # A plan without delivery (Esencial) turns both channels off whatever the
+    # sede saved — pricing 2026-09-30. `org` must carry plan_code/comp_until.
+    if org is not None and not plans.has_feature(org, plans.DELIVERY):
+        resolved["delivery_enabled"] = False
+        resolved["pickup_enabled"] = False
 
     methods = resolved.get("payment_methods")
     resolved["payment_methods"] = list(methods) if isinstance(methods, (list, tuple)) else []

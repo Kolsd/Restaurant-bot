@@ -9,10 +9,11 @@ from pydantic import BaseModel, field_validator
 from typing import Optional
 
 from app.routes.deps import (
-    require_auth, get_current_restaurant_scoped, require_module,
+    require_auth, get_current_restaurant_scoped, require_module, require_plan_feature,
     get_current_user, may_span_locations, resolve_sede_filter,
 )
 from app.services import database as db
+from app.services import plans
 from app.services.logging import get_logger
 from app.repositories import reservations_repo
 
@@ -69,6 +70,8 @@ router = APIRouter(
     tags=["reservations"],
     dependencies=[
         Depends(require_auth),
+        # The plan first: "your plan does not include it" beats "module off".
+        Depends(require_plan_feature(plans.RESERVATIONS)),
         Depends(require_module("module_reservations")),
     ],
 )

@@ -13,6 +13,7 @@ from app.services.logging import get_logger
 from app.services import state_store
 from app.services import blocks
 from app.services import sede_context
+from app.services import plan_access, plans, sede_menu
 from app.services.money import to_decimal, money_mul, money_sum, ZERO
 from app.services.tenant_context import bypass_tenant_scope_if_unset as _bypass_tenant, tenant_scope
 from app.services.tenant_db import tenant_connection as _tenant_conn
@@ -2341,6 +2342,20 @@ async def chat(
         blocks.end_turn(_blocks_token)
 
 
+async def _no_assistant_reply(org_id: int, location_id: int | None) -> dict:
+    """What a diner gets for free text at a restaurant on a plan without the
+    AI assistant: how to order by tapping, plus the sede's category chips."""
+    menu = await sede_menu.get_sede_menu(org_id, location_id)
+    categories = [c for c, dishes in menu.items() if isinstance(dishes, list) and dishes]
+    return {
+        "message": (
+            "Para pedir, toca una categoría de la carta y agrega los platos. "
+            "Si necesitas algo más, toca el botón del mesero."
+        ),
+        "blocks": [blocks.build_category_chips_block(categories)] if categories else [],
+    }
+
+
 async def _chat_impl(
     user_phone: str,
     user_message: str,
@@ -2391,6 +2406,20 @@ async def _chat_impl(
     # Every carta read from here on (find_dish, add_to_cart, the tool
     # guards) prices dishes for THIS sede — migration 0093.
     sede_context.set_sede(restaurant_obj.get("location_id"))
+
+    # 6a. What the plan includes (pricing 2026-09-30). Esencial has no AI
+    # assistant: NPS and an open checkout were already handled above, and the
+    # carta, cart buttons and waiter button never come through here — only
+    # free text stops, before any LLM call or conversation count.
+    org_plan = await plan_access.org_plan_row(org_id)
+    if not plans.has_feature(org_plan, plans.AI_ASSISTANT):
+        return await _no_assistant_reply(org_id, restaurant_obj.get("location_id"))
+    if not plans.has_feature(org_plan, plans.RESERVATIONS):
+        # Reservations start at Pro. The prompt's module rules read `feats`
+        # and the reserve action reads restaurant_obj["features"]; both see
+        # the module as off.
+        feats = {**feats, "module_reservations": False}
+        restaurant_obj = {**restaurant_obj, "features": feats}
 
     # 6b. Count the conversation (1 inbound message = 1). The plan allowance is
     # an internal soft ceiling that alerts Mesio — it never stops the bot

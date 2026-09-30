@@ -67,8 +67,8 @@ async def _seed() -> dict:
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         org_id = await conn.fetchval(
-            "INSERT INTO organizations (name, slug, menu, features) "
-            "VALUES ($1,$2,$3::jsonb,$4::jsonb) RETURNING id",
+            "INSERT INTO organizations (name, slug, menu, features, plan_code) "
+            "VALUES ($1,$2,$3::jsonb,$4::jsonb,'pro') RETURNING id",
             f"Inv Sede {suffix}", f"inv-sede-{suffix}", "{}", "{}",
         )
         loc_a = await conn.fetchval(

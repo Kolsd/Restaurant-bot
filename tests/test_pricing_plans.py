@@ -207,12 +207,14 @@ async def test_plan_limits_mirrors_the_catalog(db_conn):
 
 @needs_db
 @pytest.mark.asyncio
-async def test_new_orgs_default_to_esencial(db_conn):
+async def test_orgs_created_without_a_plan_get_the_trial_plan(db_conn):
+    """Signup, CRM and superadmin always name a plan; anything else (demo
+    seeds, fixtures) lands on Restaurante, the plan the trial gives."""
     default = await db_conn.fetchval(
         "SELECT column_default FROM information_schema.columns "
         "WHERE table_name = 'organizations' AND column_name = 'plan_code'"
     )
-    assert "esencial" in default
+    assert plans.TRIAL_PLAN in default
 
 
 @needs_db
@@ -326,3 +328,52 @@ async def test_admin_endpoints_change_plan_free_days_and_founder(db_conn):
     row = await _org(db_conn, org_id)
     assert row["comp_until"] is None
     assert row["plan_code"] == "restaurante", "clearing free days never touches the plan"
+
+
+# ── What each plan unlocks, at the routes ────────────────────────────────────
+
+
+def test_reservations_inventory_and_dian_start_at_pro(client, monkeypatch):
+    from tests.conftest import patch_auth
+
+    patch_auth(monkeypatch, plan_code="restaurante")
+    headers = {"Authorization": "Bearer t"}
+    for method, url, body in (
+        ("get", "/api/reservations", None),
+        ("get", "/api/inventory", None),
+        ("post", "/api/billing/emit", {"order_id": "o-1"}),
+        ("post", "/api/billing/test-connection", None),
+    ):
+        resp = getattr(client, method)(url, headers=headers, **({"json": body} if body else {}))
+        assert resp.status_code == 403, (url, resp.status_code, resp.text)
+        assert "desde el plan Pro" in resp.json()["detail"], url
+
+
+def test_esencial_caps_active_staff_at_five_per_sede(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.repositories import restaurant_repo
+    from app.services import database as db
+    from tests.conftest import patch_auth
+
+    patch_auth(monkeypatch, plan_code="esencial")
+    monkeypatch.setattr(restaurant_repo, "db_get_org_locations",
+                        AsyncMock(return_value=[{"id": 1, "name": "Única"}]))
+    created = AsyncMock(return_value={"id": "s-6", "name": "Sexto"})
+    monkeypatch.setattr(db, "db_create_staff", created)
+    body = {"name": "Sexto", "password": "1234", "role": "mesero"}
+    headers = {"Authorization": "Bearer t"}
+
+    five = [{"id": str(i), "active": True} for i in range(5)]
+    monkeypatch.setattr(db, "db_get_staff", AsyncMock(return_value=five))
+    resp = client.post("/api/staff", json=body, headers=headers)
+    assert resp.status_code == 403
+    assert "hasta 5 usuarios por sede" in resp.json()["detail"]
+    created.assert_not_awaited()
+
+    # An inactive member does not count against the cap.
+    four_and_one_off = five[:4] + [{"id": "4", "active": False}]
+    monkeypatch.setattr(db, "db_get_staff", AsyncMock(return_value=four_and_one_off))
+    resp = client.post("/api/staff", json=body, headers=headers)
+    assert resp.status_code == 201, resp.text
+    created.assert_awaited_once()

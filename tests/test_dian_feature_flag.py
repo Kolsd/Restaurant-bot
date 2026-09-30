@@ -152,6 +152,7 @@ class TestBillingEmitGate:
 
         with (
             patch("app.routes.billing.get_current_user", new=AsyncMock(return_value=mock_user)),
+            patch("app.services.plan_access.org_has_feature", new=AsyncMock(return_value=True)),
             patch("app.routes.billing.db.db_get_restaurant_by_org_id", new=AsyncMock(return_value=mock_restaurant)),
         ):
             client = TestClient(app, raise_server_exceptions=False)
@@ -176,6 +177,7 @@ class TestBillingEmitGate:
 
         with (
             patch("app.routes.billing.get_current_user", new=AsyncMock(return_value=mock_user)),
+            patch("app.services.plan_access.org_has_feature", new=AsyncMock(return_value=True)),
             patch("app.routes.billing.db.db_get_restaurant_by_org_id", new=AsyncMock(return_value=mock_restaurant)),
             patch("app.routes.billing.emit_invoice", new=AsyncMock(return_value={"success": True, "id": "inv-1"})),
             patch("app.services.tenant_context.tenant_scope"),

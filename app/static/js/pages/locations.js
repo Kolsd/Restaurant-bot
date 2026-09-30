@@ -269,6 +269,16 @@
 
     document.getElementById('dcDeliveryEnabled').checked = !!eff.delivery_enabled;
     document.getElementById('dcPickupEnabled').checked = !!eff.pickup_enabled;
+    // A plan without delivery (Esencial) keeps both off; say why instead of
+    // letting the toggles look broken.
+    const planAllows = data.plan_allows_delivery !== false;
+    document.getElementById('dcDeliveryEnabled').disabled = !planAllows;
+    document.getElementById('dcPickupEnabled').disabled = !planAllows;
+    const planNote = document.getElementById('dcError');
+    if (planNote && !planAllows) {
+      planNote.textContent = 'Tu plan no incluye domicilios ni recogida. Están disponibles desde el plan Restaurante.';
+      planNote.style.display = '';
+    }
     document.getElementById('dcDeliveryFee').value = eff.delivery_fee != null ? eff.delivery_fee : 0;
     document.getElementById('dcMinOrder').value = eff.min_order != null ? eff.min_order : 0;
     document.getElementById('dcRadiusKm').value = eff.radius_km != null ? eff.radius_km : 5;

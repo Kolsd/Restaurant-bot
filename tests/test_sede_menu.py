@@ -196,7 +196,7 @@ async def _pin(conn, org_id: int) -> None:
 
 async def _seed_org(conn, name: str, menu: dict | None = None) -> int:
     return await conn.fetchval(
-        "INSERT INTO organizations (name, slug, menu) VALUES ($1, $2, $3::jsonb) RETURNING id",
+        "INSERT INTO organizations (name, slug, menu, plan_code) VALUES ($1, $2, $3::jsonb, 'pro') RETURNING id",
         name, f"sm-{uuid.uuid4().hex[:10]}", menu if menu is not None else BASE,
     )
 

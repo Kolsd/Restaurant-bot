@@ -20,6 +20,8 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
+
+from tests.conftest import stub_plan
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -94,6 +96,8 @@ def _auth_patches(monkeypatch, org_id: int = ORG_A_ID):
                         AsyncMock(return_value=restaurant))
     monkeypatch.setattr(db, "db_get_restaurant_by_location_id",
                         AsyncMock(return_value=restaurant))
+    # Reservations start at Pro (app/services/plans.py).
+    stub_plan(monkeypatch, "pro")
     monkeypatch.setattr(db, "db_check_module",
                         AsyncMock(return_value=True))
     return restaurant

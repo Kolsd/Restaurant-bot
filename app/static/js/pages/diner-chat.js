@@ -46,6 +46,7 @@ var WAITER_REASONS = [
 
 var state = {
   token: null,
+  assistant: true,
   restaurantName: '',
   tableLabel: '',
   currency: 'COP',
@@ -161,6 +162,16 @@ function showTyping() {
 function hideTyping() {
   var existing = dinerEl('diner-typing-indicator');
   if (existing) existing.remove();
+}
+
+/* Plans without the AI assistant (Esencial) have no free-text box: the
+ * diner orders from the carta chips and cards, and the waiter button stays.
+ * `enabled` comes from the session response; anything but false keeps the
+ * box (older saved sessions carry no flag). */
+function applyAssistant(enabled) {
+  state.assistant = enabled !== false;
+  var composer = dinerEl('diner-composer');
+  if (composer) composer.style.display = state.assistant ? '' : 'none';
 }
 
 function setBusy(busy) {
@@ -696,8 +707,10 @@ function enterJoinRequiredState() {
 function onJoinedSuccessfully(turn) {
   state.joined = true;
   state.joinCode = '';
+  applyAssistant(turn && turn.assistant);
   var saved = DinerSession.load() || {};
   saved.needsJoin = false;
+  saved.assistant = state.assistant;
   DinerSession.save(saved);
   showJoinBanner(false);
   setBusy(false);
@@ -720,6 +733,7 @@ async function restoreSavedSession(tableId) {
   state.currency = saved.currency || 'COP';
   state.locale = saved.locale || 'es-CO';
   state.joinCode = saved.joinCode || '';
+  applyAssistant(saved.assistant);
   connectDinerRealtime();
 
   if (saved.needsJoin) {
@@ -833,6 +847,7 @@ async function startDineInSession(tableId) {
     state.tableLabel = data.table_name || '';
     state.currency = data.currency || 'COP';
     state.locale = data.locale || 'es-CO';
+    applyAssistant(data.assistant);
     if (!state.token) throw new Error('missing session token');
     connectDinerRealtime();
 
@@ -847,6 +862,7 @@ async function startDineInSession(tableId) {
         tableLabel: state.tableLabel,
         currency: state.currency,
         locale: state.locale,
+        assistant: state.assistant,
         needsJoin: true,
       });
       setBusy(false);
@@ -863,6 +879,7 @@ async function startDineInSession(tableId) {
       tableLabel: state.tableLabel,
       currency: state.currency,
       locale: state.locale,
+      assistant: state.assistant,
       joinCode: state.joinCode,
       needsJoin: false,
     });
@@ -1152,6 +1169,7 @@ async function startDeliveryEntry(slug) {
     state.currency = saved.currency || 'COP';
     state.locale = saved.locale || 'es-CO';
     state.orderMode = saved.orderMode || 'delivery';
+    applyAssistant(saved.assistant);
     state.deliveryConfig = saved.deliveryConfig || { payment_methods: [], delivery_fee: 0, min_order: 0 };
     state.lastPos = saved.lastPos || null;
     connectDinerRealtime();
@@ -1219,6 +1237,7 @@ async function openDeliverySession(slug, locationId, orderMode) {
     state.sedePhone = data.sede_phone || '';
     state.currency = data.currency || state.currency;
     state.locale = data.locale || 'es-CO';
+    applyAssistant(data.assistant);
     state.deliveryConfig = {
       payment_methods: Array.isArray(data.payment_methods) ? data.payment_methods : [],
       delivery_fee: Number(data.delivery_fee) || 0,
@@ -1235,6 +1254,7 @@ async function openDeliverySession(slug, locationId, orderMode) {
       sedePhone: state.sedePhone,
       currency: state.currency,
       locale: state.locale,
+      assistant: state.assistant,
       deliveryConfig: state.deliveryConfig,
       // The checkout re-validates coverage on this pin server-side; without
       // it a reloaded delivery session could never be checked out.

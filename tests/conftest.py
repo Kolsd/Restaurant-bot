@@ -158,11 +158,24 @@ def make_pool(conn):
 
 # ── Auth helpers (monkeypatch shortcuts) ─────────────────────────────────────
 
+def stub_plan(monkeypatch, plan_code: str = "pro"):
+    """Make every org the plan checks look at sit on `plan_code` (no trial)."""
+    from app.services import plan_access, plans
+
+    row = {"plan_code": plan_code, "comp_until": None}
+    monkeypatch.setattr(plan_access, "org_plan_row", AsyncMock(return_value=row))
+    monkeypatch.setattr(plan_access, "org_has_feature",
+                        AsyncMock(side_effect=lambda _org, feature: plans.has_feature(row, feature)))
+    monkeypatch.setattr(plan_access, "org_staff_cap",
+                        AsyncMock(return_value=plans.staff_cap(row)))
+
+
 def patch_auth(monkeypatch, *, restaurant_id: int = 1,
                whatsapp_number: str = "+573001234567",
                features: dict = None,
                username: str = "owner_test",
-               role: str = "owner"):
+               role: str = "owner",
+               plan_code: str = "pro"):
     """
     Shortcut: patch verify_token + db_get_user + db_get_restaurant_by_id so that
     any Bearer token is accepted and the given restaurant dict is returned.
@@ -211,6 +224,9 @@ def patch_auth(monkeypatch, *, restaurant_id: int = 1,
                         AsyncMock(return_value=restaurant))
     monkeypatch.setattr(db, "db_check_module",
                         AsyncMock(return_value=False))
+    # The plan checks (app/services/plan_access.py): by default the mocked
+    # owner is on Pro, which unlocks every feature.
+    stub_plan(monkeypatch, plan_code)
 
     return restaurant
 

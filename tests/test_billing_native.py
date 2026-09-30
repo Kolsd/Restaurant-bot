@@ -5,6 +5,8 @@ test_connection, mock mode without provider_api_url.
 Does not require a database or real credentials.
 """
 import pytest
+
+from tests.conftest import stub_plan
 from unittest.mock import AsyncMock, patch
 from datetime import date
 
@@ -338,6 +340,8 @@ def test_set_config_accepts_mesio_native(client, monkeypatch):
         AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1}),
     )
     monkeypatch.setattr("app.routes.billing.save_billing_config", AsyncMock())
+    # DIAN starts at Pro (app/services/plans.py).
+    stub_plan(monkeypatch, "pro")
 
     headers  = {"Authorization": "Bearer token"}
     payload  = {

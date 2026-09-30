@@ -78,7 +78,7 @@ class CreateOrgRequest(BaseModel):
     name: str
     slug: Optional[str] = None
     features: Optional[dict] = None
-    plan_code: Optional[str] = "esencial"
+    plan_code: Optional[str] = "restaurante"
 
     @field_validator("name")
     @classmethod
