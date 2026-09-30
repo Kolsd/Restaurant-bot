@@ -145,7 +145,7 @@ async def db_get_org_subscription(org_id: int) -> dict:
                    o.auto_recharge_max_packs_per_month,
                    o.current_period_start, o.current_period_convs_used,
                    o.current_period_audio_min_used, o.comp_until,
-                   o.annual_billing, o.founder_price_cop,
+                   o.annual_billing, o.founder_price_cop, o.paid_until,
                    pl.display_name AS plan_display_name,
                    pl.monthly_price_cop, pl.conv_cap, pl.audio_min_cap,
                    pl.storage_mb_cap, pl.locations_included, pl.staff_cap,
@@ -338,6 +338,33 @@ async def db_set_plan(
         org_id=org_id, plan_code=plan_code,
         addons=active_addons,
     )
+
+
+async def db_record_payment(org_id: int, months: int) -> datetime:
+    """Record a payment of `months` months; returns the new paid_until.
+
+    The paid period starts where the org's current coverage ends — the paid
+    period or the free days, whichever is later — or now if both are past,
+    so paying early never loses days.
+    # Requires active tenant_scope(org_id) or bypass for internal admin routes.
+    """
+    async with tenant_connection() as conn:
+        paid_until = await conn.fetchval(
+            """
+            UPDATE organizations
+               SET paid_until = GREATEST(NOW(), COALESCE(paid_until, NOW()),
+                                         COALESCE(comp_until, NOW()))
+                                + make_interval(months => $2)
+             WHERE id = $1
+            RETURNING paid_until
+            """,
+            org_id, months,
+        )
+    if paid_until is None:
+        raise ValueError(f"org_id {org_id} not found")
+    log.info("plan_limits.payment_recorded", org_id=org_id, months=months,
+             paid_until=paid_until.isoformat())
+    return paid_until
 
 
 class FounderSpotsTaken(Exception):

@@ -1507,7 +1507,7 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
                 """
                 SELECT id, name, slug,
                        menu, features, subscription_plan, subscription_status,
-                       plan_code, comp_until, founder_price_cop,
+                       plan_code, comp_until, paid_until, founder_price_cop,
                        created_at, updated_at
                 FROM organizations
                 WHERE id = $1
@@ -1561,7 +1561,7 @@ async def db_get_all_orgs(active_only: bool = True) -> list[dict]:
                 f"""
                 SELECT id, name, slug,
                        menu, features, subscription_plan, subscription_status,
-                       plan_code, comp_until, founder_price_cop,
+                       plan_code, comp_until, paid_until, founder_price_cop,
                        created_at, updated_at
                 FROM organizations
                 {where}
@@ -1896,7 +1896,7 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
         f"UPDATE organizations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted above
         f"WHERE id = ${idx} RETURNING id, name, slug, "
         f"menu, features, plan_code, subscription_plan, subscription_status, "
-        f"comp_until, founder_price_cop, created_at, updated_at"
+        f"comp_until, paid_until, founder_price_cop, created_at, updated_at"
     )
 
     pool = await _get_pool()

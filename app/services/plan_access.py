@@ -31,6 +31,12 @@ async def org_staff_cap(org_id: int) -> int | None:
     return plans.staff_cap(await org_plan_row(org_id))
 
 
+async def org_is_open(org_id: int) -> bool:
+    """Whether diners can order from the org — false once it is suspendido
+    (trial over with no payment, or a payment more than the grace late)."""
+    return plans.is_open(await org_plan_row(org_id))
+
+
 async def require_feature(org_id: int, feature: str) -> None:
     """403 with the upgrade copy when the org's plan lacks `feature`."""
     if not await org_has_feature(org_id, feature):

@@ -51,7 +51,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.repositories import delivery_repo, diner_sessions_repo
 from app.repositories.orders_repo import InsufficientStockError
-from app.routes.diner import _checkout_amount_label, _client_ip, _features_dict
+from app.routes.diner import _checkout_amount_label, _client_ip, _features_dict, _require_open
 from app.services import database as db
 from app.services import delivery
 from app.services import orders
@@ -390,6 +390,7 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
     if session is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada o expirada")
     org_id = int(session["org_id"])
+    await _require_open(org_id)
     order_mode = session.get("order_mode")
     location_id = session.get("location_id")
     if order_mode not in _VALID_MODES or not location_id:

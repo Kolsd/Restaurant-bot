@@ -7,7 +7,7 @@ them; everything else — order, what each plan unlocks, the trial, the founder
 discount — is read from here.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 PLAN_ORDER: tuple[str, ...] = ("esencial", "restaurante", "pro", "cadena")
 PAYING_PLANS: frozenset[str] = frozenset(PLAN_ORDER)
@@ -63,6 +63,15 @@ FEATURE_MIN_PLAN: dict[str, str] = {
 }
 
 
+def _as_utc(value: datetime | str | None) -> datetime | None:
+    """Repos hand timestamps back as datetimes or ISO strings; naive ones are UTC."""
+    if not value:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
 def normalize_plan(plan_code: str | None) -> str:
     """Map a stored plan_code onto the price list; anything unknown is the base plan."""
     code = (plan_code or "").strip().lower()
@@ -87,14 +96,48 @@ def founder_price(plan_code: str) -> int:
 def in_trial(comp_until: datetime | str | None, now: datetime | None = None) -> bool:
     """Whether the org is inside its free days. Repos hand datetimes back as
     ISO strings as often as not, so both are accepted."""
-    if not comp_until:
-        return False
-    if isinstance(comp_until, str):
-        comp_until = datetime.fromisoformat(comp_until)
-    if comp_until.tzinfo is None:
-        # Naive timestamps from the DB are UTC by project convention.
-        comp_until = comp_until.replace(tzinfo=timezone.utc)
-    return comp_until > (now or datetime.now(tz=timezone.utc))
+    # Naive timestamps from the DB are UTC by project convention.
+    comp = _as_utc(comp_until)
+    return comp is not None and comp > (now or datetime.now(tz=timezone.utc))
+
+
+# Subscription state (GTM decision 2026-09-23: billing manual, state inside
+# the product). A paid period that ends keeps working this many days while
+# the payment arrives; a trial that ends without any payment pauses at once
+# — what the landing and the terms promise.
+PAYMENT_GRACE_DAYS = 7
+TRIAL, ACTIVE, OVERDUE, SUSPENDED = "trial", "activo", "vencido", "suspendido"
+
+
+def billing_status(comp_until: datetime | str | None, paid_until: datetime | str | None,
+                   now: datetime | None = None) -> str:
+    """trial | activo | vencido | suspendido, from the free days and the paid period.
+
+    An org with neither date is one Mesio manages by hand (demo, created in
+    superadmin) and is always activo.
+    """
+    now = now or datetime.now(tz=timezone.utc)
+    comp, paid = _as_utc(comp_until), _as_utc(paid_until)
+    if paid and paid > now:
+        return ACTIVE
+    if comp and comp > now:
+        return TRIAL
+    if paid is None:
+        return ACTIVE if comp is None else SUSPENDED
+    if now - paid <= timedelta(days=PAYMENT_GRACE_DAYS):
+        return OVERDUE
+    return SUSPENDED
+
+
+def pauses_on(paid_until: datetime | str | None) -> datetime | None:
+    """When an overdue paid period stops being served (end of the grace days)."""
+    paid = _as_utc(paid_until)
+    return paid + timedelta(days=PAYMENT_GRACE_DAYS) if paid else None
+
+
+def is_open(org: dict, now: datetime | None = None) -> bool:
+    """Whether diners can order from the org (anything but suspendido)."""
+    return billing_status(org.get("comp_until"), org.get("paid_until"), now) != SUSPENDED
 
 
 def effective_plan(plan_code: str | None, comp_until: datetime | str | None,

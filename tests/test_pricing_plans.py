@@ -153,16 +153,17 @@ async def db_conn(monkeypatch):
         await conn.close()
 
 
-async def _new_org(conn, plan="restaurante", *, sedes=1, founder=None, comp_until=None):
+async def _new_org(conn, plan="restaurante", *, sedes=1, founder=None, comp_until=None,
+                   paid_until=None):
     from app.services.tenant_context import bypass_tenant_scope
 
     with bypass_tenant_scope("test_pricing_setup"):
         await conn.execute("SET LOCAL ROLE mesio_superadmin")
         org_id = await conn.fetchval(
             """INSERT INTO organizations (name, plan_code, subscription_plan,
-                                          founder_price_cop, comp_until)
-               VALUES ('Pricing test', $1, $1, $2, $3) RETURNING id""",
-            plan, founder, comp_until,
+                                          founder_price_cop, comp_until, paid_until)
+               VALUES ('Pricing test', $1, $1, $2, $3, $4) RETURNING id""",
+            plan, founder, comp_until, paid_until,
         )
         for i in range(sedes):
             await conn.execute(
@@ -377,3 +378,98 @@ def test_esencial_caps_active_staff_at_five_per_sede(client, monkeypatch):
     resp = client.post("/api/staff", json=body, headers=headers)
     assert resp.status_code == 201, resp.text
     created.assert_awaited_once()
+
+
+# ── Subscription state: trial → activo → vencido → suspendido ───────────────
+
+
+def test_billing_status_follows_the_free_days_and_the_paid_period():
+    day = timedelta(days=1)
+    status = plans.billing_status
+    assert status(None, None, NOW) == plans.ACTIVE, "no dates = managed by hand"
+    assert status(NOW + day, None, NOW) == plans.TRIAL
+    assert status(NOW - day, None, NOW) == plans.SUSPENDED, "a trial that ends unpaid pauses at once"
+    assert status(NOW + day, NOW + 40 * day, NOW) == plans.ACTIVE, "paid during the trial"
+    assert status(None, NOW + day, NOW) == plans.ACTIVE
+    assert status(None, NOW - 3 * day, NOW) == plans.OVERDUE
+    assert status(None, NOW - 8 * day, NOW) == plans.SUSPENDED
+    assert status(None, (NOW - 3 * day).isoformat(), NOW) == plans.OVERDUE
+    assert plans.pauses_on(NOW) == NOW + timedelta(days=plans.PAYMENT_GRACE_DAYS)
+    assert plans.is_open({"comp_until": None, "paid_until": NOW - 8 * day}, NOW) is False
+    assert plans.is_open({"comp_until": None, "paid_until": NOW - 3 * day}, NOW) is True
+
+
+@needs_db
+@pytest.mark.asyncio
+async def test_a_payment_extends_from_where_coverage_ends(db_conn):
+    from app.repositories import plan_limits_repo
+    from app.services.tenant_context import bypass_tenant_scope
+
+    now = datetime.now(timezone.utc)
+    trial_end = now + timedelta(days=10)
+    in_trial = await _new_org(db_conn, comp_until=trial_end)
+    lapsed = await _new_org(db_conn, comp_until=now - timedelta(days=20))
+
+    with bypass_tenant_scope("test_record_payment"):
+        paid = await plan_limits_repo.db_record_payment(in_trial, 1)
+        # Paying during the trial never loses the free days left.
+        assert trial_end + timedelta(days=27) < paid < trial_end + timedelta(days=32)
+        paid_twice = await plan_limits_repo.db_record_payment(in_trial, 12)
+        assert paid + timedelta(days=360) < paid_twice < paid + timedelta(days=367)
+
+        paid = await plan_limits_repo.db_record_payment(lapsed, 1)
+        assert now + timedelta(days=27) < paid < now + timedelta(days=32), "a lapsed org pays from today"
+    assert plans.billing_status(now - timedelta(days=20), paid) == plans.ACTIVE
+
+
+@needs_db
+@pytest.mark.asyncio
+async def test_mrr_bills_paid_and_overdue_orgs_not_trials_or_paused_ones(db_conn):
+    from app.repositories.internal import mrr_repo
+    from app.services.tenant_context import bypass_tenant_scope
+
+    now = datetime.now(timezone.utc)
+    with bypass_tenant_scope("test_mrr_status_before"):
+        before = await mrr_repo.db_compute_mrr()
+
+    await _new_org(db_conn, "esencial", paid_until=now + timedelta(days=20))     # activo
+    await _new_org(db_conn, "esencial", paid_until=now - timedelta(days=2))      # vencido
+    await _new_org(db_conn, "esencial", paid_until=now - timedelta(days=30))     # suspendido
+    await _new_org(db_conn, "esencial", comp_until=now - timedelta(days=1))      # trial over, unpaid
+
+    with bypass_tenant_scope("test_mrr_status_after"):
+        after = await mrr_repo.db_compute_mrr()
+    assert after["mrr_total_cop"] - before["mrr_total_cop"] == 2 * 119_000
+    assert after["free_count"] - before["free_count"] == 2
+
+
+@needs_db
+@pytest.mark.asyncio
+async def test_mesio_hears_about_ending_trials_and_paused_accounts(db_conn):
+    from app.repositories.internal import notifications_repo
+
+    now = datetime.now(timezone.utc)
+    ending = await _new_org(db_conn, comp_until=now + timedelta(days=1, hours=2))
+    far = await _new_org(db_conn, comp_until=now + timedelta(days=10))
+    paused = await _new_org(db_conn, comp_until=now - timedelta(days=1))
+
+    notes = {n["tenant_id"]: n["type"] for n in await notifications_repo._fetch_billing_attention()}
+    assert notes.get(ending) == "trial_ending"
+    assert far not in notes
+    assert notes.get(paused) == "account_paused"
+
+
+@needs_db
+@pytest.mark.asyncio
+async def test_admin_records_a_payment(db_conn):
+    from app.routes.internal.admin import RecordPaymentRequest, record_org_payment
+    from app.services.tenant_context import bypass_tenant_scope
+    from pydantic import ValidationError
+
+    org_id = await _new_org(db_conn, comp_until=datetime.now(timezone.utc) - timedelta(days=2))
+    with bypass_tenant_scope("test_admin_payment"):
+        res = await record_org_payment(org_id=org_id, body=RecordPaymentRequest(months=12),
+                                       request=_request())
+    assert res["data"]["billing_status"] == plans.ACTIVE
+    with pytest.raises(ValidationError):
+        RecordPaymentRequest(months=3)

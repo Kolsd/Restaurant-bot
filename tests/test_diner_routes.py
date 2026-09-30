@@ -586,3 +586,38 @@ def test_esencial_free_text_gets_the_carta_and_never_reaches_the_llm(client, see
     resp = _post(client, "/api/diner/chat", json={"token": token, "message": "cat:Pastas"})
     assert resp.status_code == 200
     assert "Pastas" in resp.json()["message"]
+
+
+# ── A paused account takes no new diner orders (plans.billing_status) ───────
+
+async def _set_dates_async(org_id: int, *, comp_until=None, paid_until=None) -> None:
+    conn = await asyncpg.connect(TEST_DB_URL)
+    try:
+        await conn.execute(
+            "UPDATE organizations SET comp_until = $2, paid_until = $3 WHERE id = $1",
+            org_id, comp_until, paid_until,
+        )
+    finally:
+        await conn.close()
+
+
+def test_a_trial_that_ended_unpaid_pauses_the_qr_and_the_chat(client, seed_org, seed_org_2):
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    token = _open_session(client, seed_org["table_id"])["token"]
+
+    _run(_set_dates_async(seed_org["org_id"], comp_until=now - timedelta(hours=1)))
+    resp = _post(client, "/api/diner/chat", json={"token": token, "message": "cat:Pastas"})
+    assert resp.status_code == 200
+    assert "no está recibiendo pedidos" in resp.json()["message"]
+
+    _run(_set_dates_async(seed_org_2["org_id"], comp_until=now - timedelta(hours=1)))
+    resp = _post(client, "/api/diner/session", json={"table_id": seed_org_2["table_id"]})
+    assert resp.status_code == 403
+    assert "no está recibiendo pedidos" in resp.json()["detail"]
+
+    # A recorded payment re-opens it.
+    _run(_set_dates_async(seed_org_2["org_id"], comp_until=now - timedelta(hours=1),
+                          paid_until=now + timedelta(days=30)))
+    assert _open_session(client, seed_org_2["table_id"])["token"]

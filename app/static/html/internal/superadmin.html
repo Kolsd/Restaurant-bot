@@ -336,6 +336,19 @@ input:checked+.slider:before{transform:translateX(18px);}
                 <div style="font-size:12px;color:#888;margin-bottom:4px;">Precio fundador (por sede)</div>
                 <span id="dp-founder-display" style="font-size:13px;">—</span>
               </div>
+              <div>
+                <div style="font-size:12px;color:#888;margin-bottom:4px;">Estado</div>
+                <span id="dp-billing-status" style="font-size:13px;">—</span>
+              </div>
+              <div>
+                <div style="font-size:12px;color:#888;margin-bottom:4px;">Pagado hasta</div>
+                <span id="dp-paid-until-display" style="font-size:13px;">—</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:1.25rem;">
+              <button class="btn btn-secondary btn-sm" onclick="recordPayment(1)">Registrar pago mensual</button>
+              <button class="btn btn-secondary btn-sm" onclick="recordPayment(12)">Registrar pago anual</button>
+              <div class="feedback-msg" id="payment-feedback"></div>
             </div>
             <div style="display:flex;flex-direction:column;gap:10px;">
               <div style="padding:12px;background:#f5f5f0;border-radius:10px;">
@@ -1365,6 +1378,35 @@ async function savePlanChange() {
   }
 }
 
+// A payment received outside the product moves paid_until 1 or 12 months
+// forward from where the org's coverage ends (and re-opens a paused account).
+async function recordPayment(months) {
+  if(!_currentDetailId) return;
+  const label = months === 12 ? 'anual' : 'mensual';
+  if(!confirm('¿Registrar un pago ' + label + ' para esta organización?')) return;
+  try {
+    const res = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}/payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ months: months }),
+    });
+    if(!res.ok) {
+      const e = await res.json().catch(()=>({}));
+      showFeedback('payment-feedback', '❌ ' + (e.detail || 'Error'), false);
+      return;
+    }
+    const d = await res.json();
+    showFeedback('payment-feedback', '✅ Pagado hasta ' + d.data.paid_until.slice(0,10), true);
+    await loadRestaurants();
+    const fresh = ALL_RESTAURANTS.find(x => x.id === _currentDetailId);
+    if(fresh) _populatePlanTab(fresh);
+  } catch(e) {
+    showFeedback('payment-feedback', '❌ Error de conexión', false);
+  }
+}
+
+const BILLING_STATUS_LABELS = { trial: 'En prueba', activo: 'Activo', vencido: 'Pago vencido', suspendido: 'Pausada' };
+
 // Populate plan tab when opening detail
 function _populatePlanTab(r) {
   _currentPlanRow = r;
@@ -1376,6 +1418,10 @@ function _populatePlanTab(r) {
   }
   const compDisplay = $('dp-comp-until-display');
   if(compDisplay) compDisplay.textContent = r.comp_until ? r.comp_until.slice(0,10) : '—';
+  const statusDisplay = $('dp-billing-status');
+  if(statusDisplay) statusDisplay.textContent = BILLING_STATUS_LABELS[r.billing_status] || '—';
+  const paidDisplay = $('dp-paid-until-display');
+  if(paidDisplay) paidDisplay.textContent = r.paid_until ? r.paid_until.slice(0,10) : '—';
   const founderDisplay = $('dp-founder-display');
   if(founderDisplay) founderDisplay.textContent = r.founder_price_cop != null ? fmtCOP(r.founder_price_cop) : '—';
   const sel = $('dp-new-plan');

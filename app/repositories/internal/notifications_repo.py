@@ -235,6 +235,70 @@ async def _fetch_suspended_tenants() -> list[dict]:
         return []
 
 
+_TRIAL_WARNING_DAYS = 3
+
+
+async def _fetch_billing_attention() -> list[dict]:
+    """Orgs whose subscription needs Mesio this week (billing is manual):
+    a trial ending within _TRIAL_WARNING_DAYS (call them before it pauses),
+    a payment overdue in its grace days, and paused accounts."""
+    from app.services import plans  # noqa: PLC0415
+
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, name, comp_until, paid_until
+                FROM organizations
+                WHERE comp_until IS NOT NULL OR paid_until IS NOT NULL
+                ORDER BY id
+                """
+            )
+
+        now = datetime.now(tz=timezone.utc)
+        results = []
+        for row in rows:
+            org_id = row["id"]
+            org_name = row["name"] or f"Org #{org_id}"
+            status = plans.billing_status(row["comp_until"], row["paid_until"], now)
+            if status == plans.TRIAL:
+                days = (row["comp_until"] - now).days
+                if days >= _TRIAL_WARNING_DAYS:
+                    continue
+                kind, severity = "trial_ending", "medium"
+                title = f"La prueba de {org_name} termina en {days + 1} día(s)"
+                detail = "Escríbele para elegir plan: al terminar la prueba sin pago, la cuenta se pausa."
+            elif status == plans.OVERDUE:
+                kind, severity = "payment_overdue", "high"
+                title = f"{org_name} tiene el pago vencido"
+                detail = (f"Pagado hasta {row['paid_until'].date().isoformat()}. "
+                          f"Se pausa {plans.PAYMENT_GRACE_DAYS} días después.")
+            elif status == plans.SUSPENDED:
+                kind, severity = "account_paused", "high"
+                title = f"{org_name} está pausada"
+                detail = "Sus clientes no pueden pedir por QR ni por su link hasta registrar un pago."
+            else:
+                continue
+            results.append(
+                {
+                    "id": f"{kind}:{org_id}",
+                    "type": kind,
+                    "severity": severity,
+                    "title": title,
+                    "detail": detail,
+                    "url": "/internal/superadmin",
+                    "created_at": _now_iso(),
+                    "count": 1,
+                    "tenant_id": org_id,
+                }
+            )
+        return results
+    except Exception:
+        log.exception("notifications_repo.billing_attention_error")
+        return []
+
+
 async def _fetch_plan_cap_warnings() -> list[dict]:
     """Tenants at >= 90% of their plan's conversation soft ceiling.
 
@@ -314,6 +378,7 @@ async def db_get_notifications() -> list[dict]:
         _fetch_new_prospects(),
         _fetch_suspended_tenants(),
         _fetch_plan_cap_warnings(),
+        _fetch_billing_attention(),
         return_exceptions=False,  # each source already catches its own exceptions
     )
 

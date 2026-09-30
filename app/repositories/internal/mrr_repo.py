@@ -24,7 +24,7 @@ async def _get_pool():
 # primary one, so an org with no location row still counts one sede).
 _ORG_BILLING_SQL = """
     SELECT o.id, o.plan_code, o.founder_price_cop, o.created_at,
-           (o.comp_until IS NOT NULL AND o.comp_until > NOW()) AS comp,
+           o.comp_until, o.paid_until,
            GREATEST(1, (SELECT COUNT(*) FROM locations l
                          WHERE l.org_id = o.id AND l.active))::int AS sedes
     FROM organizations o
@@ -35,13 +35,23 @@ def _org_mrr(row) -> int:
     return plans.monthly_price_per_sede(row["plan_code"], row["founder_price_cop"]) * row["sedes"]
 
 
+def _status(row) -> str:
+    return plans.billing_status(row["comp_until"], row["paid_until"])
+
+
+def _billed(row) -> bool:
+    """Counts toward MRR: on a known plan and paying — activo, or vencido
+    while the payment is in its grace days. Trial and suspendido do not."""
+    return row["plan_code"] in plans.PAYING_PLANS and _status(row) in (plans.ACTIVE, plans.OVERDUE)
+
+
 async def db_compute_mrr() -> dict:
     """
     Compute current MRR + breakdown. GLOBAL — must be called under bypass_tenant_scope.
 
     Pricing is per sede (docs/claude/status.md #15): an org pays its plan's
     price — or its frozen founder price — times its active sedes. Orgs in
-    their free days (comp_until in the future) are not billed.
+    their free days or suspended are not billed (plans.billing_status).
 
     Returns:
         {
@@ -52,8 +62,8 @@ async def db_compute_mrr() -> dict:
                 ...
             ],
             "paying_count": int,   # orgs currently billed
-            "comp_count": int,     # orgs in trial / comp (not billed)
-            "free_count": int,     # orgs on no known plan
+            "comp_count": int,     # orgs in their free days (not billed)
+            "free_count": int,     # suspended orgs and orgs on no known plan
             "total_orgs": int,
         }
     """
@@ -68,9 +78,9 @@ async def db_compute_mrr() -> dict:
     }
     comp_count = free_count = 0
     for row in rows:
-        if row["comp"]:
+        if _status(row) == plans.TRIAL:
             comp_count += 1
-        elif row["plan_code"] in plans.PAYING_PLANS:
+        elif _billed(row):
             item = by_plan[row["plan_code"]]
             item["paying_count"] += 1
             item["sedes"] += row["sedes"]
@@ -110,10 +120,7 @@ async def db_compute_mrr_delta() -> dict:
         rows = await conn.fetch(
             _ORG_BILLING_SQL + " WHERE o.created_at < date_trunc('month', NOW())"
         )
-    mrr_last_month_cop = sum(
-        _org_mrr(r) for r in rows
-        if not r["comp"] and r["plan_code"] in plans.PAYING_PLANS
-    )
+    mrr_last_month_cop = sum(_org_mrr(r) for r in rows if _billed(r))
 
     current = await db_compute_mrr()
     current_mrr = current["mrr_total_cop"]

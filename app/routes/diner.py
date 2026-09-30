@@ -365,6 +365,19 @@ async def _opening_turn(
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
+_PAUSED_MESSAGE = (
+    "Este restaurante no está recibiendo pedidos por aquí en este momento. "
+    "Si estás en el local, pídele ayuda al mesero."
+)
+
+
+async def _require_open(org_id: int) -> None:
+    """A paused account (trial over without payment, or a payment long
+    overdue — plans.billing_status) takes no new diner sessions."""
+    if not await plan_access.org_is_open(org_id):
+        raise HTTPException(status_code=403, detail=_PAUSED_MESSAGE)
+
+
 async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) -> dict:
     """order_mode=delivery|pickup entry (docs/claude/delivery-web.md chunk 2).
 
@@ -390,6 +403,7 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
     org_id = int(org["id"])
     location_id = int(body.location_id)
+    await _require_open(org_id)
 
     with tenant_scope(org_id):
         # org_id and location_id are DISTINCT integers — never trust the
@@ -521,6 +535,7 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
     org_id = int(raw_org_id)
     location_id = table.get("branch_id")
     table_name = table.get("name") or table_id
+    await _require_open(org_id)
 
     with tenant_scope(org_id):
         restaurant = await _resolve_diner_restaurant(org_id, location_id)
@@ -710,6 +725,8 @@ async def diner_chat(request: Request, body: DinerChatRequest):
     user_message = body.message.strip()
     if not user_message:
         raise HTTPException(status_code=422, detail="Mensaje vacío")
+    if not await plan_access.org_is_open(org_id):
+        return {"message": _PAUSED_MESSAGE, "blocks": []}
 
     with tenant_scope(org_id):
         await diner_sessions_repo.touch_last_seen(token, org_id)
@@ -991,6 +1008,7 @@ async def diner_order_send(request: Request, body: DinerOrderSendRequest):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
+    await _require_open(org_id)
     location_id = session.get("location_id")
     table_id = session.get("table_id")
     table_name = session.get("table_name") or table_id

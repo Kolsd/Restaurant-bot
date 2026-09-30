@@ -55,6 +55,7 @@ async def get_current_plan(
     founder_price_cop = sub.get("founder_price_cop")
     price_per_sede = plans.monthly_price_per_sede(plan_code, founder_price_cop)
     comp_until = sub.get("comp_until")
+    pauses_on = plans.pauses_on(sub.get("paid_until"))
 
     # JSON boundary: Decimal audio_min_used already converted by _row_to_dict
     return {
@@ -67,6 +68,10 @@ async def get_current_plan(
         "sedes":          sedes,
         "monthly_total_cop": price_per_sede * sedes,
         "in_trial":       plans.in_trial(comp_until),
+        # trial | activo | vencido | suspendido (plans.billing_status)
+        "billing_status": plans.billing_status(comp_until, sub.get("paid_until")),
+        "paid_until":     sub.get("paid_until"),
+        "pauses_on":      pauses_on.isoformat() if pauses_on else None,
         "active_addons":  sub.get("active_addons") or [],
         "annual_billing": sub.get("annual_billing", False),
         "current_period": {

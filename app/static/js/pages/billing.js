@@ -476,14 +476,6 @@
     return d.getDate() + ' de ' + MONTHS[d.getMonth()] + ' de ' + d.getFullYear();
   }
 
-  function _formatNextRenewal(periodStartIso) {
-    if (!periodStartIso) return '';
-    try {
-      var next = new Date(periodStartIso);
-      next.setDate(next.getDate() + 30);
-      return 'Próximo cobro: ' + _longDate(next);
-    } catch (e) { return ''; }
-  }
 
   // ── Gauge renderer ─────────────────────────────────────────────
 
@@ -588,15 +580,23 @@
       ? 'Precio fundador: congelado de por vida mientras mantengas tu suscripción (lista: ' + _fmt(planData.list_price_cop) + ').'
       : '');
 
-    // Free days first; otherwise the next charge.
+    // Subscription state (app/services/plans.billing_status): free days,
+    // paid period, overdue in its grace days, or paused.
+    var status = planData.billing_status;
     var renewal = '';
-    if (planData.in_trial && planData.comp_until) {
+    if (status === 'trial' && planData.comp_until) {
       renewal = 'Prueba gratis hasta el ' + _longDate(new Date(planData.comp_until)) + '.';
       if (planData.effective_plan && planData.effective_plan !== _currentPlan) {
         renewal += ' Mientras tanto tienes todo el plan ' + (PLAN_NAMES[planData.effective_plan] || '') + '.';
       }
-    } else {
-      renewal = _formatNextRenewal((planData.current_period || {}).start);
+    } else if (status === 'suspendido') {
+      renewal = 'Tu cuenta está pausada: tus clientes no pueden pedir por QR ni por tu link. ' +
+        'Escríbenos a soporte para activar tu plan.';
+    } else if (status === 'vencido' && planData.pauses_on) {
+      renewal = 'Tu pago está pendiente. Si no lo recibimos, la cuenta se pausa el ' +
+        _longDate(new Date(planData.pauses_on)) + '.';
+    } else if (planData.paid_until) {
+      renewal = 'Pagado hasta el ' + _longDate(new Date(planData.paid_until)) + '.';
     }
     _setText('plan-renewal-display', renewal);
 

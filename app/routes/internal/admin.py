@@ -193,6 +193,17 @@ class SetFounderRequest(BaseModel):
     founder: bool
 
 
+class RecordPaymentRequest(BaseModel):
+    months: int  # 1 = monthly invoice, 12 = annual (pays 10, gets 12)
+
+    @field_validator("months")
+    @classmethod
+    def months_valid(cls, v: int) -> int:
+        if v not in (1, 12):
+            raise ValueError("months must be 1 or 12")
+        return v
+
+
 class ResetPasswordRequest(BaseModel):
     new_password: str
 
@@ -247,7 +258,10 @@ async def admin_get_restaurants(
     # frontend backwards compat — the shape is org-level data which is what
     # the admin actually wants (one entry per tenant). Active orgs only;
     # use active_only=False if you also need cancelled tenants.
-    return {"restaurants": await db.db_get_all_orgs(active_only=False)}
+    orgs = await db.db_get_all_orgs(active_only=False)
+    for org in orgs:
+        org["billing_status"] = plans.billing_status(org.get("comp_until"), org.get("paid_until"))
+    return {"restaurants": orgs}
 
 
 @router.post("/create-user")
@@ -767,6 +781,42 @@ async def set_org_comp(
 
     log.info("set_org_comp", org_id=org_id, comp_until=body.comp_until)
     return _ok({"org_id": org_id, "plan": org.get("plan_code"), "comp_until": body.comp_until})
+
+
+@router.post("/organizations/{org_id}/payment")
+async def record_org_payment(
+    org_id: int,
+    body: RecordPaymentRequest,
+    request: Request,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
+    """Record a payment Mesio received outside the product (billing manual,
+    docs/claude/status.md #14c): paid_until moves forward 1 or 12 months
+    from where the org's coverage ends. Re-opens a paused account."""
+    from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
+
+    org = await restaurant_repo.db_get_org_by_id(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organizacion no encontrada")
+
+    paid_until = await plan_limits_repo.db_record_payment(org_id, body.months)
+    status = plans.billing_status(org.get("comp_until"), paid_until)
+
+    actor = request.headers.get("X-Superadmin-User", "superadmin")
+    ip = request.client.host if request.client else None
+    await db_log_audit_event(
+        actor=actor,
+        action="org.payment_recorded",
+        target_type="organization",
+        target_id=str(org_id),
+        org_id=org_id,
+        payload={"months": body.months, "paid_until": paid_until.isoformat()},
+        request_ip=ip,
+    )
+
+    log.info("record_org_payment", org_id=org_id, months=body.months, paid_until=paid_until.isoformat())
+    return _ok({"org_id": org_id, "paid_until": paid_until.isoformat(), "billing_status": status})
 
 
 @router.patch("/organizations/{org_id}/founder")
