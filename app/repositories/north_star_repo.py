@@ -36,9 +36,12 @@ _CHANNELS = ("whatsapp_bot", "web_chat")
 async def db_count_rescued_orders(
     period_start: date,
     period_end: date,
+    tz: str = "UTC",
 ) -> dict:
     """
     Count bot-originated orders for the current tenant in [period_start, period_end].
+
+    The days are the restaurant's local days (`tz`); created_at is naive UTC.
 
     Returns: {"count": int, "delivery": int, "table": int}
 
@@ -52,20 +55,20 @@ async def db_count_rescued_orders(
             SELECT COUNT(*)
             FROM orders
             WHERE channel = ANY($1)
-              AND created_at::date >= $2
-              AND created_at::date <= $3
+              AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE $4)::date >= $2
+              AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE $4)::date <= $3
             """,
-            list(_CHANNELS), period_start, period_end,
+            list(_CHANNELS), period_start, period_end, tz,
         )
         table = await conn.fetchval(
             """
             SELECT COUNT(*)
             FROM table_orders
             WHERE channel = ANY($1)
-              AND created_at::date >= $2
-              AND created_at::date <= $3
+              AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE $4)::date >= $2
+              AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE $4)::date <= $3
             """,
-            list(_CHANNELS), period_start, period_end,
+            list(_CHANNELS), period_start, period_end, tz,
         )
 
     delivery = int(delivery or 0)

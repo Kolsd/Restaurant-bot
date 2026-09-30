@@ -40,7 +40,8 @@ def get_tz(restaurant: dict) -> str:
     if isinstance(feats, str):
         try: feats = json.loads(feats)
         except: feats = {}
-    return feats.get("timezone", "UTC")
+    # Same default the settings screen shows; a sede row carries its own.
+    return feats.get("timezone") or restaurant.get("timezone") or "America/Bogota"
 
 def get_date_range(period: str, tz_str: str):
     tz = ZoneInfo(tz_str)
@@ -87,7 +88,9 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
     with tenant_scope(restaurant["id"]):
         # Revenue/orders/chart: table rounds + paid delivery, same rules as the
         # channel card. `orders` alone (below) never saw a single table sale.
-        sales_by_day  = await stats_repo.db_sales_daily(date_from, date_to, location_id=sede_id)
+        sales_by_day  = await stats_repo.db_sales_daily(
+            date_from, date_to, location_id=sede_id, tz=get_tz(restaurant),
+        )
         orders        = await db.db_get_orders_range(date_from, date_to, org_id=org_id)
         reservations  = await db.db_get_reservations_range(date_from, date_to, org_id=org_id)
         all_convs     = await db.db_get_all_conversations(
@@ -149,28 +152,6 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
         "reservations": reservations,
         "conversations": conversations
     }
-
-@router.get("/api/dashboard/conversations")
-async def get_conversations(request: Request):
-    await require_auth(request)
-    user = await get_current_user(request)
-    restaurant = await get_current_restaurant(request)
-
-    # X-Branch-ID semantics for /dashboard/conversations:
-    # - digit value (= location_id from sidebar dropdown) → filter to that sede
-    # - 'matriz', 'all', missing → no sede filter; RLS (org_isolation on
-    #   conversations) returns every conversation of the current org
-    # Pre-2026-04-29 the default fallback was restaurant["id"] (= org_id post-
-    # Wave-2 normalization in db_get_restaurant_by_id), but conversations
-    # carry branch_id == location_id post-migration 0057 — filtering
-    # branch_id = org_id matched zero rows. Same bug family as floor_plan.
-    # Non-admins used to fall through to branch_id = None here, i.e. every
-    # conversation of the org regardless of which sede they work at.
-    branch_id = resolve_sede_filter(request, user)
-
-    with tenant_scope(restaurant["id"]):
-        conversations = await db.db_get_all_conversations(org_id=int(restaurant["id"]), branch_id=branch_id)
-    return {"conversations": conversations}
 
 @router.get("/api/menu/availability")
 async def get_menu_availability(request: Request):
@@ -315,7 +296,6 @@ async def get_sales_by_channel(
     request: Request,
     period_start: str | None = Query(None),
     period_end:   str | None = Query(None),
-    branch_id:    str | None = Query(None),
     compare:      bool       = Query(False),
 ):
     """Sales breakdown by channel (WhatsApp Bot, POS, QR, Delivery, etc.).
@@ -325,20 +305,22 @@ async def get_sales_by_channel(
 
     If compare=true, also returns `previous` period data and `deltas` dict.
     """
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     ps, pe = stats_repo._default_period(period_start, period_end)
-    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
     org_id = restaurant["id"]
-    loc_id = bid if bid is not None else (
-        restaurant.get("location_id") if branch_id and branch_id not in ("all", "matriz") else None
-    )
+    # Sede: owner/admin may pick one (header) or see every sede; anyone else
+    # only their own. This read a `branch_id` query param the frontend never
+    # sent, so every caller — a waiter included — got the whole org.
+    loc_id = resolve_sede_filter(request, user)
 
     with tenant_scope(org_id):
         current = await stats_repo.db_sales_by_channel(
             org_id=org_id,
             period_start=ps,
             period_end=pe,
-            location_id=loc_id if branch_id else None,
+            location_id=loc_id,
+            tz=get_tz(restaurant),
         )
         if not compare:
             return current
@@ -348,7 +330,8 @@ async def get_sales_by_channel(
             org_id=org_id,
             period_start=prev_ps,
             period_end=prev_pe,
-            location_id=loc_id if branch_id else None,
+            location_id=loc_id,
+            tz=get_tz(restaurant),
         )
 
     # compute deltas
@@ -377,7 +360,6 @@ async def get_top_dishes(
     request: Request,
     period_start: str | None = Query(None),
     period_end:   str | None = Query(None),
-    branch_id:    str | None = Query(None),
     limit:        int        = Query(10, ge=1, le=50),
     compare:      bool       = Query(False),
 ):
@@ -388,10 +370,14 @@ async def get_top_dishes(
 
     If compare=true, also returns `previous` period data and `deltas` dict.
     """
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     ps, pe = stats_repo._default_period(period_start, period_end)
-    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
     org_id = restaurant["id"]
+    # Sede: owner/admin may pick one (header) or see every sede; anyone else
+    # only their own. This read a `branch_id` query param the frontend never
+    # sent, so every caller — a waiter included — got the whole org.
+    loc_id = resolve_sede_filter(request, user)
 
     with tenant_scope(org_id):
         current = await stats_repo.db_top_dishes(
@@ -399,7 +385,7 @@ async def get_top_dishes(
             period_start=ps,
             period_end=pe,
             limit=limit,
-            location_id=bid,
+            location_id=loc_id,
         )
         if not compare:
             return current
@@ -410,7 +396,7 @@ async def get_top_dishes(
             period_start=prev_ps,
             period_end=prev_pe,
             limit=limit,
-            location_id=bid,
+            location_id=loc_id,
         )
 
     # deltas: compare top-1 revenue if available
@@ -463,13 +449,16 @@ async def get_live_orders(
 
     Intended for dashboard polling (lightweight — does not include full item lists).
     """
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     org_id = restaurant["id"]
+    sede = resolve_sede_filter(request, user)
 
     with tenant_scope(org_id):
         return await stats_repo.db_live_orders(
             org_id=org_id,
             limit=limit,
+            location_id=sede,
         )
 
 
@@ -481,7 +470,6 @@ async def get_payment_status(
     request: Request,
     period_start: str | None = Query(None),
     period_end:   str | None = Query(None),
-    branch_id:    str | None = Query(None),
     compare:      bool       = Query(False),
 ):
     """Payment status donut: paid / pending / disputed / courtesy buckets.
@@ -491,20 +479,21 @@ async def get_payment_status(
 
     If compare=true, also returns `previous` period data and `deltas` dict.
     """
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     ps, pe = stats_repo._default_period(period_start, period_end)
-    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
     org_id = restaurant["id"]
-    loc_id = bid if bid is not None else (
-        restaurant.get("location_id") if branch_id and branch_id not in ("all", "matriz") else None
-    )
+    # Sede: owner/admin may pick one (header) or see every sede; anyone else
+    # only their own. This read a `branch_id` query param the frontend never
+    # sent, so every caller — a waiter included — got the whole org.
+    loc_id = resolve_sede_filter(request, user)
 
     with tenant_scope(org_id):
         current = await stats_repo.db_payment_status(
             org_id=org_id,
             period_start=ps,
             period_end=pe,
-            location_id=loc_id if branch_id else None,
+            location_id=loc_id,
         )
         if not compare:
             return current
@@ -514,7 +503,7 @@ async def get_payment_status(
             org_id=org_id,
             period_start=prev_ps,
             period_end=prev_pe,
-            location_id=loc_id if branch_id else None,
+            location_id=loc_id,
         )
 
     curr_total = current.get("total_count", 0)

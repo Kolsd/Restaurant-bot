@@ -136,7 +136,7 @@ class TestByChannelCompare:
         """compare=true returns previous + deltas with correct shape."""
         call_count = {"n": 0}
 
-        async def _mock_channel(org_id, period_start, period_end, location_id=None):
+        async def _mock_channel(org_id, period_start, period_end, location_id=None, tz="UTC"):
             call_count["n"] += 1
             return _MOCK_CHANNEL if call_count["n"] == 1 else _MOCK_PREV_CHANNEL
 
@@ -174,7 +174,7 @@ class TestByChannelCompare:
                       "total": 0, "total_count": 0, "channels": []}
         call_count = {"n": 0}
 
-        async def _mock(org_id, period_start, period_end, location_id=None):
+        async def _mock(org_id, period_start, period_end, location_id=None, tz="UTC"):
             call_count["n"] += 1
             return _MOCK_CHANNEL if call_count["n"] == 1 else empty_prev
 
@@ -200,7 +200,7 @@ class TestPaymentStatusCompare:
         """compare=true returns previous + deltas with correct shape."""
         call_count = {"n": 0}
 
-        async def _mock(org_id, period_start, period_end, location_id=None):
+        async def _mock(org_id, period_start, period_end, location_id=None, tz="UTC"):
             call_count["n"] += 1
             return _MOCK_PAYMENT if call_count["n"] == 1 else _MOCK_PREV_PAYMENT
 
@@ -228,7 +228,7 @@ class TestPaymentStatusCompare:
                       "buckets": [], "total_count": 0}
         call_count = {"n": 0}
 
-        async def _mock(org_id, period_start, period_end, location_id=None):
+        async def _mock(org_id, period_start, period_end, location_id=None, tz="UTC"):
             call_count["n"] += 1
             return _MOCK_PAYMENT if call_count["n"] == 1 else empty_prev
 

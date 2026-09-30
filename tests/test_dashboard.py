@@ -150,12 +150,16 @@ def test_get_tz_returns_configured_timezone():
     assert get_tz(restaurant) == "America/Bogota"
 
 
-def test_get_tz_defaults_to_utc_when_absent():
-    """No timezone key in features → 'UTC'."""
-    assert get_tz({"features": {}}) == "UTC"
-    assert get_tz({}) == "UTC"
-    # features key present but empty string → JSON parse fails → UTC
-    assert get_tz({"features": "{}"}) == "UTC"
+def test_get_tz_defaults_to_bogota_when_absent():
+    """No timezone anywhere → 'America/Bogota', the default the settings
+    screen shows (UTC put every evening sale on the next day)."""
+    assert get_tz({"features": {}}) == "America/Bogota"
+    assert get_tz({}) == "America/Bogota"
+    assert get_tz({"features": "{}"}) == "America/Bogota"
+
+
+def test_get_tz_falls_back_to_the_sede_timezone():
+    assert get_tz({"features": {}, "timezone": "America/Lima"}) == "America/Lima"
 
 
 def test_get_tz_parses_json_string_features():
@@ -167,12 +171,10 @@ def test_get_tz_parses_json_string_features():
     assert get_tz(restaurant) == "America/Mexico_City"
 
 
-def test_get_tz_invalid_json_string_defaults_to_utc():
-    """Corrupted features string → safe fallback to UTC."""
+def test_get_tz_invalid_json_string_defaults_to_bogota():
+    """Corrupted features string → safe fallback, no exception."""
     restaurant = {"features": "{not valid json!!!"}
-    # Should not raise; should return UTC
-    result = get_tz(restaurant)
-    assert result == "UTC"
+    assert get_tz(restaurant) == "America/Bogota"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -207,8 +209,9 @@ def test_dashboard_sync_uses_restaurant_timezone(client, monkeypatch):
 
     bogota_today = str(datetime.now(ZoneInfo("America/Bogota")).date())
 
-    async def mock_sales_daily(date_from, date_to, location_id=None):
+    async def mock_sales_daily(date_from, date_to, location_id=None, tz="UTC"):
         captured_calls["sales_range"] = (date_from, date_to)
+        captured_calls["sales_tz"] = tz
         # One table round of 41.000 today — the headline must show it.
         return {bogota_today: {"total": Decimal("41000"), "count": 1}}
 
@@ -228,6 +231,8 @@ def test_dashboard_sync_uses_restaurant_timezone(client, monkeypatch):
     assert captured_calls.get("date_from") == bogota_today
     assert captured_calls.get("date_to")   == bogota_today
     assert captured_calls.get("sales_range") == (bogota_today, bogota_today)
+    # ...and the sales are bucketed on Bogota days too.
+    assert captured_calls.get("sales_tz") == "America/Bogota"
 
     # Revenue/orders come from sales (table rounds included), not `orders` only.
     body = r.json()

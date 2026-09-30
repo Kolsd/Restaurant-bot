@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v13.0 (head `0100_repair_double_encoded_jsonb`; 1682 passed / 2 skipped with DB, run as `postgres` — the 11 LLM e2e tests fail until there is Anthropic credit)
+# Mesio Restaurant Bot — v13.0 (head `0100_repair_double_encoded_jsonb`; 1685 passed / 2 skipped with DB, run as `postgres` — the 11 LLM e2e tests fail until there is Anthropic credit)
 
 Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_use). Product: the diner's own web channel (QR → `/chat/{table_id}`); WhatsApp was removed on 2026-09-25.
 
@@ -30,7 +30,7 @@ Multi-tenant SaaS for restaurants (FastAPI + Postgres RLS + Redis + Claude tool_
 ## Next session (order)
 1. ~~Validate bot with real LLM~~ (2026-09-12: e2e 55/59, sim 12/20 → 15/20 after fixes, commit fefa800). Pending when there is Anthropic credit: one sim run + `test_reservation_lifecycle.py`; the sim doesn't reset the test org's conversation cap. Key in local `.env`.
 1b. ~~English codebase~~ (2026-09-13/14: files+URLs 78a2aee, identifiers+comments 5f81d3a, docs). User-facing text stays Spanish; DB columns/values and DOM ids/classes still Spanish (later wave).
-1c. ~~Unified staff app `/staff`~~ (2026-09-17, d18118b: admin-dashboard shell, sections per role; old role pages removed; demo seed `scripts/dev/seed_staff_app_demo.py`). Static caching fixed 2026-09-24 (da8c00d: JS/CSS `no-cache`; `sw.js` is DORMANT, CACHE_VERSION has no runtime effect). Open: orders-rescued metric must bucket days in the restaurant's timezone.
+1c. ~~Unified staff app `/staff`~~ (2026-09-17, d18118b: admin-dashboard shell, sections per role; old role pages removed; demo seed `scripts/dev/seed_staff_app_demo.py`). Static caching fixed 2026-09-24 (da8c00d: JS/CSS `no-cache`; `sw.js` is DORMANT, CACHE_VERSION has no runtime effect). Orders-rescued and dashboard sales count restaurant-local days since 2026-09-29.
 2. ~~Real-time SSE + Redis pub/sub~~ (2026-09-17, bce415a: `app/services/realtime.py`, `/api/staff/stream`, `/api/diner/stream`, `mesio-realtime.js`; polling stays as a 60s net). Prod needs `REDIS_URL` (4 workers).
 2b. ~~POS quick-invoice P1~~ (2026-09-17: no org_id + NULL table_id → 500; branch_id fell back to the org id; the check was never claimed so it stayed unpaid).
 3. ~~Web delivery wave Phase A~~ (2026-09-19, chunks 1-9: data model, `/pedir/{slug}`, checkout, `/pedido/{code}`, cashier + courier UI, per-sede config, WhatsApp delivery/pickup switched off — spec `docs/claude/delivery-web.md`). Phase B (Mapbox map, live chat) later.

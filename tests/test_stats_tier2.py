@@ -82,7 +82,7 @@ def test_by_channel_default_period(client, patched_auth, monkeypatch):
     """Without period params, endpoint must still call repo (uses last-7-days default)."""
     captured = {}
 
-    async def _mock_channel(org_id, period_start, period_end, location_id=None):
+    async def _mock_channel(org_id, period_start, period_end, location_id=None, tz="UTC"):
         captured["period_start"] = period_start
         captured["period_end"] = period_end
         return MOCK_CHANNEL_RESPONSE

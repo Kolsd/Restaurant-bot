@@ -717,12 +717,16 @@ async def get_rescued_orders(
 
     Requires: active restaurant Bearer token.
     """
-    from datetime import date, timedelta
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
     from app.repositories.north_star_repo import db_count_rescued_orders
+    from app.routes.stats import get_tz
     from app.services.tenant_context import tenant_scope
 
     restaurant = await get_current_restaurant(request)
-    today = date.today()
+    # The restaurant's own days: date.today() is the server's (UTC) date.
+    tz = get_tz(restaurant)
+    today = datetime.now(ZoneInfo(tz)).date()
     if period == "mtd":
         period_start = today.replace(day=1)
         period_end   = today
@@ -742,8 +746,8 @@ async def get_rescued_orders(
     org_id = restaurant["id"]
     try:
         with tenant_scope(org_id):
-            current = await db_count_rescued_orders(period_start, period_end)
-            prev    = await db_count_rescued_orders(prev_start, prev_end)
+            current = await db_count_rescued_orders(period_start, period_end, tz)
+            prev    = await db_count_rescued_orders(prev_start, prev_end, tz)
     except Exception as exc:
         log.exception("dashboard.rescued_orders_failed", org_id=org_id)
         raise HTTPException(status_code=500, detail="Error al calcular pedidos rescatados")

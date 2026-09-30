@@ -13,7 +13,8 @@ All functions require an active tenant_scope() at the call site.
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from app.services.logging import get_logger
@@ -25,6 +26,18 @@ log = get_logger(__name__)
 def _to_date(s: str) -> date:
     """Parse YYYY-MM-DD string to datetime.date (required by asyncpg TIMESTAMPTZ params)."""
     return date.fromisoformat(s)
+
+
+def _local_midnight_utc(day: date, tz: str) -> datetime:
+    """The UTC instant (naive, like the created_at columns) at which `day`
+    starts in the restaurant's timezone."""
+    local = datetime.combine(day, time.min, tzinfo=ZoneInfo(tz))
+    return local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _local_day(created_at: datetime, tz: str) -> date:
+    """The restaurant-local calendar day of a naive-UTC `created_at`."""
+    return created_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz)).date()
 
 
 def _tenant_connection():
@@ -99,14 +112,18 @@ def _classify_channel(channel: str | None, order_type: str | None) -> str:
 
 
 async def _fetch_sales_rows(
-    period_start: str, period_end: str, location_id: int | None,
+    period_start: str, period_end: str, location_id: int | None, tz: str = "UTC",
 ) -> tuple[list, list]:
     """What counts as a sale, in one place: PAID delivery/pickup `orders`
     plus every non-cancelled salon `table_orders` round. Both the channel
-    card and the dashboard headline read this, so they always agree."""
-    ps = _to_date(period_start)
+    card and the dashboard headline read this, so they always agree.
+
+    The period's days are the restaurant's local days (`tz`): created_at is
+    stored in UTC, and in Colombia a sale at 20:00 is 01:00 UTC the next
+    day."""
+    ps = _local_midnight_utc(_to_date(period_start), tz)
     # Make end date inclusive by querying < (end + 1 day)
-    d_to_inclusive = _to_date(period_end) + timedelta(days=1)
+    d_to_inclusive = _local_midnight_utc(_to_date(period_end) + timedelta(days=1), tz)
 
     async with _tenant_connection() as conn:
         # ── delivery/pickup orders ──────────────────────────────────────────
@@ -154,15 +171,17 @@ async def db_sales_daily(
     period_start: str,
     period_end: str,
     location_id: int | None = None,
+    tz: str = "UTC",
 ) -> dict[str, dict]:
-    """Sales per day ({"YYYY-MM-DD": {"total": Decimal, "count": int}}) with
-    the same rules as db_sales_by_channel. Days without sales are absent.
+    """Sales per restaurant-local day ({"YYYY-MM-DD": {"total": Decimal,
+    "count": int}}) with the same rules as db_sales_by_channel. Days without
+    sales are absent.
 
     Requires an active tenant_scope(org_id)."""
-    order_rows, table_rows = await _fetch_sales_rows(period_start, period_end, location_id)
+    order_rows, table_rows = await _fetch_sales_rows(period_start, period_end, location_id, tz)
     days: dict[str, dict] = {}
     for row in [*order_rows, *table_rows]:
-        day = row["created_at"].date().isoformat()
+        day = _local_day(row["created_at"], tz).isoformat()
         d = days.setdefault(day, {"total": Decimal("0"), "count": 0})
         d["total"] += to_decimal(row["total"])
         d["count"] += 1
@@ -174,15 +193,17 @@ async def db_sales_by_channel(
     period_start: str,
     period_end: str,
     location_id: int | None = None,
+    tz: str = "UTC",
 ) -> dict:
     """
-    Aggregate sales by channel for the given org and period.
+    Aggregate sales by channel for the given org and period (restaurant-local
+    days, see _fetch_sales_rows).
 
     Combines `orders` (delivery/pickup) and `table_orders` (salon) into one
     channel breakdown.  Both tables are RLS-protected via org_id; the caller
     must be inside tenant_scope(org_id).
     """
-    order_rows, table_rows = await _fetch_sales_rows(period_start, period_end, location_id)
+    order_rows, table_rows = await _fetch_sales_rows(period_start, period_end, location_id, tz)
 
     # ── aggregate ──────────────────────────────────────────────────────────
     buckets: dict[str, dict] = {}
@@ -480,9 +501,11 @@ async def db_inventory_critical(
 async def db_live_orders(
     org_id: int,
     limit: int = 20,
+    location_id: int | None = None,
 ) -> dict:
     """
-    Returns a unified live feed of active delivery + table orders.
+    Returns a unified live feed of active delivery + table orders of one
+    sede (`location_id`), or of every sede when None.
 
     Delivery/pickup orders: status NOT IN ('entregado', 'cancelado')
     Table orders: status NOT IN ('cancelado', 'factura_entregada')
@@ -498,9 +521,11 @@ async def db_live_orders(
                       total, created_at, channel, notes
                FROM orders
                WHERE status NOT IN ('entregado', 'cancelado')
+                 AND org_id = $2
+                 AND ($3::bigint IS NULL OR location_id = $3)
                ORDER BY created_at DESC
                LIMIT $1""",
-            limit,
+            limit, org_id, location_id,
         )
 
         # ── salon table orders ──────────────────────────────────────────────
@@ -512,9 +537,11 @@ async def db_live_orders(
                FROM table_orders to2
                LEFT JOIN restaurant_tables rt ON rt.id = to2.table_id
                WHERE to2.status NOT IN ('cancelado', 'factura_entregada')
+                 AND to2.org_id = $2
+                 AND ($3::bigint IS NULL OR to2.location_id = $3)
                ORDER BY to2.created_at DESC
                LIMIT $1""",
-            limit,
+            limit, org_id, location_id,
         )
 
     from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
