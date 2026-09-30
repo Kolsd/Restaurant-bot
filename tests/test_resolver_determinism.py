@@ -4,9 +4,6 @@ tests/test_resolver_determinism.py
 Locks down the SQL shape of the restaurant resolver functions after the
 Wave-2 determinism fixes (Paso 8) and the P0 ambiguous-lookup fix (2026-09):
 
-  db_get_restaurant_by_phone     — must have ORDER BY + LIMIT 1 and prefer
-  the location with an explicit whatsapp_number match.
-
   db_get_restaurant_by_location_id / db_get_restaurant_by_org_id — replace
   the deleted db_get_restaurant_by_id. Each filters on EXACTLY ONE id kind
   (l.id for the former, l.org_id for the latter) — neither may accept both,
@@ -32,41 +29,6 @@ def _make_pool(conn):
     pool = MagicMock()
     pool.acquire = MagicMock(return_value=acquire_cm)
     return pool
-
-
-# ── db_get_restaurant_by_phone ────────────────────────────────────────────────
-
-async def test_by_phone_has_order_by_and_limit():
-    """SQL must include ORDER BY ... LIMIT 1 so Postgres returns a single,
-    deterministic row even when multiple locations share a whatsapp_number."""
-    from app.repositories.restaurant_repo import db_get_restaurant_by_phone
-
-    conn = _make_conn(row=None)
-    pool = _make_pool(conn)
-    with patch("app.repositories.restaurant_repo._get_pool", AsyncMock(return_value=pool)):
-        await db_get_restaurant_by_phone("+573001234567")
-
-    sql = str(conn.fetchrow.call_args.args[0]).lower()
-    assert "order by" in sql, "Must have ORDER BY for deterministic resolution"
-    assert "limit 1" in sql, "Must have LIMIT 1 to return exactly one row"
-
-
-async def test_by_phone_prefers_explicit_location_override():
-    """ORDER BY clause must rank the location with an explicit
-    l.whatsapp_number match first (DESC NULLS LAST), then break ties by
-    l.id ASC for full determinism."""
-    from app.repositories.restaurant_repo import db_get_restaurant_by_phone
-
-    conn = _make_conn(row=None)
-    pool = _make_pool(conn)
-    with patch("app.repositories.restaurant_repo._get_pool", AsyncMock(return_value=pool)):
-        await db_get_restaurant_by_phone("+573001234567")
-
-    sql = str(conn.fetchrow.call_args.args[0])
-    assert "(l.whatsapp_number = $1) DESC NULLS LAST" in sql, (
-        "Must prefer location with explicit whatsapp_number match"
-    )
-    assert "l.id ASC" in sql, "Must break remaining ties by l.id ASC"
 
 
 # ── db_get_restaurant_by_location_id / db_get_restaurant_by_org_id ───────────

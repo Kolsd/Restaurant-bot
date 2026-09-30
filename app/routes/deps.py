@@ -49,23 +49,29 @@ async def require_auth(request: Request) -> str:
 async def get_current_user(request: Request) -> dict:
     """Returns the authenticated user dict or raises 401.
 
-    Resolved once per request and kept on `request.state`. A route behind
-    `get_current_restaurant_scoped` runs pinned to its tenant, and resolving
-    a staff login a second time from inside it (e.g. to decide the sede)
-    opened a `bypass_tenant_scope` there — TenantContextConflict, a 500 on
-    every inventory call made by a PIN-login employee.
+    Resolved once per request and kept in the request's ASGI `scope`. A route
+    behind `get_current_restaurant_scoped` runs pinned to its tenant, and
+    resolving a staff login a second time from inside it (e.g. to decide the
+    sede) opened a `bypass_tenant_scope` there — TenantContextConflict, a 500
+    on every inventory call made by a PIN-login employee.
+
+    Not `request.state`: that is backed by `scope["state"]`, which the ASGI
+    server may share between requests (asgi-lifespan hands every request the
+    SAME dict) — the e2e harness then served the first caller's user to
+    every later one.
     """
-    state = getattr(request, "state", None)
-    cached = getattr(state, "mesio_user", None)
+    scope = getattr(request, "scope", None)
+    cached = scope.get(_USER_SCOPE_KEY) if isinstance(scope, dict) else None
     if isinstance(cached, dict):
         return cached
     user = await _resolve_current_user(request)
-    if state is not None:
-        try:
-            state.mesio_user = user
-        except AttributeError:
-            pass  # a stub request without a writable state: resolve every time
+    if isinstance(scope, dict):
+        scope[_USER_SCOPE_KEY] = user
     return user
+
+
+_USER_SCOPE_KEY = "mesio.user"
+_ORG_SCOPE_KEY = "mesio.org"
 
 
 async def _resolve_current_user(request: Request) -> dict:
@@ -448,11 +454,12 @@ async def get_current_org(request: Request) -> dict:
     whose restaurant_id is a Sucursal, the mapping table translates to the
     correct parent Org id.
 
-    The result is cached on request.state.mesio_org to avoid duplicate DB
-    lookups when both get_current_org and get_current_location are used as
-    dependencies in the same request.
+    The result is cached in the request's scope (see get_current_user for
+    why not request.state) to avoid duplicate DB lookups when both
+    get_current_org and get_current_location are used as dependencies in
+    the same request.
     """
-    cached = getattr(request.state, "mesio_org", None)
+    cached = request.scope.get(_ORG_SCOPE_KEY)
     if cached is not None:
         return cached
 
@@ -476,13 +483,12 @@ async def get_current_org(request: Request) -> dict:
         org = {
             "id":              r.get("id"),
             "name":            r.get("name"),
-            "whatsapp_number": r.get("whatsapp_number"),
             "features":        feats,
             "subscription_plan": r.get("subscription_plan", "free"),
             "subscription_status": r.get("subscription_status", "active"),
         }
 
-    request.state.mesio_org = org
+    request.scope[_ORG_SCOPE_KEY] = org
     return org
 
 

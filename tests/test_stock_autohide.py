@@ -225,12 +225,12 @@ async def test_deduct_recipe_path_triggers_ingredient_sync():
 
     with (
         patch.object(db, "get_pool", AsyncMock(return_value=_pool(mock_conn))),
-        patch.object(db, "db_get_restaurant_by_phone", AsyncMock(return_value=restaurant)),
+        patch.object(db, "db_get_restaurant_by_org_id", AsyncMock(return_value=restaurant)),
         patch.object(inv, "_sync_ingredient_dishes_conn", fake_sync_ingredient),
     ):
         with tenant_scope(1):
             await db.db_deduct_inventory_for_order(
-                bot_number="+57300",
+                org_id=4242,
                 items=[{"name": "Bandeja Paisa", "quantity": 1}],
             )
 

@@ -91,7 +91,6 @@ async def _make_org(conn) -> dict:
         json.dumps(menu), json.dumps({"currency": "COP"}),
     )
     # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
-    bot_number = f"web{org_id}"
     location_id = await conn.fetchval(
         "INSERT INTO locations (org_id, name) VALUES ($1, $2) RETURNING id",
         org_id, f"Sede {suffix}",
@@ -106,7 +105,6 @@ async def _make_org(conn) -> dict:
         "org_id": org_id,
         "location_id": location_id,
         "table_id": table_id,
-        "bot_number": bot_number,
     }
 
 
@@ -217,25 +215,25 @@ def _proposals(org_id: int) -> list:
     return _run(_proposals_async(org_id))
 
 
-async def _alerts_async(org_id: int, bot_number: str) -> list:
+async def _alerts_async(org_id: int) -> list:
     from app.repositories import tables_repo
     from app.services.tenant_context import tenant_scope
     with tenant_scope(org_id):
-        return await tables_repo.db_get_waiter_alerts(bot_number)
+        return await tables_repo.db_get_waiter_alerts(org_id)
 
 
-def _alerts(org_id: int, bot_number: str) -> list:
+def _alerts(org_id: int) -> list:
     _reset_pool()
-    return _run(_alerts_async(org_id, bot_number))
+    return _run(_alerts_async(org_id))
 
 
-def _mock_pay_auth(monkeypatch, org_id: int, bot_number: str):
+def _mock_pay_auth(monkeypatch, org_id: int):
     """Mirrors tests/test_split_checks.py::_mock_auth — mocks ONLY the
     caja/admin auth resolution (get_current_restaurant) so pay_check runs
     its REAL DB logic (real claim/finalize/tenant_scope) against the seeded
     org. features={} skips the DIAN path (no fiscal invoice required)."""
     async def mock_get_restaurant(request):
-        return {"id": org_id, "whatsapp_number": bot_number, "name": "Test Org", "features": {}}
+        return {"id": org_id, "name": "Test Org", "features": {}}
     monkeypatch.setattr("app.routes.tables.get_current_restaurant", mock_get_restaurant)
 
 
@@ -339,16 +337,16 @@ async def _add_alert_async(org_id: int, info: dict, alert_type: str) -> dict:
     from app.services.tenant_context import tenant_scope
     with tenant_scope(org_id):
         return await tables_repo.db_create_waiter_alert(
-            "kitchen", info["bot_number"], alert_type, "Pedido listo en pase",
+            "kitchen", info["org_id"], alert_type, "Pedido listo en pase",
             table_id=info["table_id"], location_id=info["location_id"],
         )
 
 
-async def _dismiss_all_async(org_id: int, bot_number: str) -> None:
+async def _dismiss_all_async(org_id: int) -> None:
     from app.repositories import tables_repo
     from app.services.tenant_context import tenant_scope
     with tenant_scope(org_id):
-        for alert in await tables_repo.db_get_waiter_alerts(bot_number):
+        for alert in await tables_repo.db_get_waiter_alerts(org_id):
             await tables_repo.db_dismiss_waiter_alert(alert["id"])
 
 
@@ -363,7 +361,7 @@ def test_waiter_tile_total_is_not_multiplied_by_alerts(client, org_a):
     assert _checkout(client, token, scope="table", method="cash").status_code == 200
     _reset_pool()
     _run(_add_alert_async(org_a["org_id"], org_a, "ready"))
-    assert len(_alerts(org_a["org_id"], org_a["bot_number"])) >= 2
+    assert len(_alerts(org_a["org_id"])) >= 2
 
     tile = _enrichment(org_a["org_id"], org_a["location_id"])[table_id]
     assert tile["has_open_check"] is True
@@ -372,7 +370,7 @@ def test_waiter_tile_total_is_not_multiplied_by_alerts(client, org_a):
 
     # A dismissed alert no longer flags the table.
     _reset_pool()
-    _run(_dismiss_all_async(org_a["org_id"], org_a["bot_number"]))
+    _run(_dismiss_all_async(org_a["org_id"]))
     tile = _enrichment(org_a["org_id"], org_a["location_id"])[table_id]
     assert tile["has_waiter_alert"] is False
     assert tile["current_total"] == 28000
@@ -398,7 +396,7 @@ def test_double_checkout_same_diner_is_idempotent_no_second_check(client, org_a)
     checks = _checks(org_a["org_id"], base_order_id)
     assert len(checks) == 1
 
-    alerts = _alerts(org_a["org_id"], org_a["bot_number"])
+    alerts = _alerts(org_a["org_id"])
     bill_alerts = [a for a in alerts if a["alert_type"] == "bill"]
     assert len(bill_alerts) == 1  # never a second waiter alert either
 
@@ -493,7 +491,7 @@ def test_diner_checkout_endpoint_rejects_while_table_lock_held_by_another_reques
     checks = _checks(org_a["org_id"], base_order_id)
     assert len(checks) == 1  # the blocked attempt created nothing
 
-    alerts = _alerts(org_a["org_id"], org_a["bot_number"])
+    alerts = _alerts(org_a["org_id"])
     bill_alerts = [a for a in alerts if a["alert_type"] == "bill"]
     assert len(bill_alerts) == 1
 
@@ -585,7 +583,7 @@ def test_pay_check_marks_invoiced_and_diner_status_flips_to_paid(client, org_a, 
     assert status_before.status_code == 200
     assert status_before.json()["checkout"]["status"] == "pending_waiter"
 
-    _mock_pay_auth(monkeypatch, org_a["org_id"], org_a["bot_number"])
+    _mock_pay_auth(monkeypatch, org_a["org_id"])
     pay_resp = _pay_check(client, base_order_id, check_id, amount=28000)
     assert pay_resp.status_code == 200, pay_resp.text
 
@@ -630,7 +628,7 @@ def test_pay_check_surfaces_nps_to_the_web_diner(client, org_a, monkeypatch):
     base_order_id = resp.json()["base_order_id"]
     check_id = resp.json()["check_id"]
 
-    _mock_pay_auth(monkeypatch, org_a["org_id"], org_a["bot_number"])
+    _mock_pay_auth(monkeypatch, org_a["org_id"])
 
     pay_resp = _pay_check(client, base_order_id, check_id, amount=28000)
     assert pay_resp.status_code == 200, pay_resp.text
@@ -653,7 +651,7 @@ def test_nps_score_5_stores_without_comment(client, org_a, monkeypatch):
     base_order_id = resp.json()["base_order_id"]
     check_id = resp.json()["check_id"]
 
-    _mock_pay_auth(monkeypatch, org_a["org_id"], org_a["bot_number"])
+    _mock_pay_auth(monkeypatch, org_a["org_id"])
     _pay_check(client, base_order_id, check_id, amount=28000)
 
     chat_resp = _post(client, "/api/diner/chat", json={"token": token, "message": "5"})
@@ -688,7 +686,7 @@ def test_nps_score_2_asks_for_comment_then_stores_it(client, org_a, monkeypatch)
     base_order_id = resp.json()["base_order_id"]
     check_id = resp.json()["check_id"]
 
-    _mock_pay_auth(monkeypatch, org_a["org_id"], org_a["bot_number"])
+    _mock_pay_auth(monkeypatch, org_a["org_id"])
     _pay_check(client, base_order_id, check_id, amount=28000)
 
     score_resp = _post(client, "/api/diner/chat", json={"token": token, "message": "2"})
@@ -729,7 +727,7 @@ def test_nps_skip_closes_cleanly(client, org_a, monkeypatch):
     base_order_id = resp.json()["base_order_id"]
     check_id = resp.json()["check_id"]
 
-    _mock_pay_auth(monkeypatch, org_a["org_id"], org_a["bot_number"])
+    _mock_pay_auth(monkeypatch, org_a["org_id"])
     _pay_check(client, base_order_id, check_id, amount=28000)
 
     skip_resp = _post(client, "/api/diner/chat", json={"token": token, "message": "no calificar"})
@@ -739,6 +737,6 @@ def test_nps_skip_closes_cleanly(client, org_a, monkeypatch):
 
     async def _is_done():
         from app.services import state_store
-        return await state_store.nps_is_done(token, org_a["bot_number"])
+        return await state_store.nps_is_done(token, org_a["org_id"])
 
     assert _run(_is_done()) is True

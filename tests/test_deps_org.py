@@ -23,11 +23,11 @@ def _make_request(headers: dict | None = None, state_attrs: dict | None = None):
     """Build a minimal Request-like object for dep testing."""
     req = MagicMock()
     req.headers = {**(headers or {})}
-    state = MagicMock()
     state_attrs = state_attrs or {}
-    # getattr(req.state, "mesio_org", None) should return None unless preset
-    state.mesio_org = state_attrs.get("mesio_org", None)
-    req.state = state
+    # The per-request caches live in the ASGI scope (see deps.get_current_user).
+    req.scope = {}
+    if state_attrs.get("mesio_org") is not None:
+        req.scope["mesio.org"] = state_attrs["mesio_org"]
     return req
 
 
@@ -133,8 +133,8 @@ async def test_get_current_org_resolves_org_for_matriz_user():
 
     assert org["id"] == 1
     assert org["name"] == "Test Org"
-    # Result should be cached on request.state
-    assert request.state.mesio_org is not None
+    # Result should be cached for the rest of the request
+    assert request.scope["mesio.org"] is not None
 
 
 # ── test_get_current_org_resolves_org_for_branch_user ──────────────────────

@@ -59,7 +59,7 @@ async def test_reserve_empty_reply_still_confirms_pending_reservation():
         result = await agent.execute_action(
             parsed=_reservation_parsed(""),  # Claude's tool-only, textless response
             phone="573001234567",
-            bot_number="+573009999999",
+            org_id=4242,
             table_context=None,
             session_state={},
             restaurant_obj=_restaurant_obj(),  # no reservation_auto_confirm/deposits flags
@@ -88,7 +88,7 @@ async def test_reserve_empty_reply_still_confirms_auto_confirmed_reservation():
         result = await agent.execute_action(
             parsed=_reservation_parsed(""),
             phone="573001234567",
-            bot_number="+573009999999",
+            org_id=4242,
             table_context=None,
             session_state={},
             restaurant_obj=_restaurant_obj(reservation_auto_confirm=True),
@@ -115,7 +115,7 @@ async def test_reserve_non_empty_reply_from_llm_is_preserved():
         result = await agent.execute_action(
             parsed=_reservation_parsed("¡Reserva lista, Carlos! Te esperamos el 20 de diciembre a las 19:00."),
             phone="573001234567",
-            bot_number="+573009999999",
+            org_id=4242,
             table_context=None,
             session_state={},
             restaurant_obj=_restaurant_obj(),

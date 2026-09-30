@@ -41,10 +41,6 @@ _STATUS_ROLE_MAP: dict[str, set[str]] = {
     'cancelado':        {'caja', 'mesero', 'admin', 'owner', 'gerente'},
 }
 
-# WA notification rate-limiting moved to Redis via state_store (multi-worker safe).
-# Keys: notif_wa:{bot_number}:{phone}:{kind}  max 1 per 5 min per worker pool.
-
-
 async def _get_restaurant_for_table(table_id: str | None, session_data: dict | None) -> dict:
     """Resuelve el restaurante/sucursal a partir de la mesa o la sesión activa."""
     if table_id:
@@ -56,8 +52,8 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
                 r = await db.db_get_restaurant_by_location_id(bid)
                 if r:
                     return r
-    if session_data and session_data.get("bot_number"):
-        r = await db.db_get_restaurant_by_bot_number(session_data["bot_number"])
+    if session_data and session_data.get("org_id"):
+        r = await db.db_get_restaurant_by_org_id(int(session_data["org_id"]))
         if r:
             return r
     # Wave-2: NO cross-tenant fallback. Returning "any restaurant globally"
@@ -65,24 +61,25 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
     # in single-tenant dev that worked; in production it would return another
     # customer's restaurant dict for a phone we cannot identify. Fail open
     # with an empty dict; callers (e.g. _farewell_and_nps) already short-circuit
-    # on missing whatsapp_number so this degrades gracefully without leaking.
+    # on a missing org so this degrades gracefully without leaking.
     return {}
 
 async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict | None, username: str) -> None:
     rest = await _get_restaurant_for_table(table_id, session_data)
-    final_bot_num = (
-        (session_data.get("bot_number") if session_data else None)
-        or rest.get("whatsapp_number") or ""  # the org's bot key
+    final_org_id = (
+        (session_data.get("org_id") if session_data else None)
+        or rest.get("org_id")
     )
 
     rest_name = rest.get("name", "nuestro restaurante")
     # The diner answers the survey in their own chat: GET /api/diner/status
     # renders the nps_prompt block (blocks.py) once trigger_nps sets the state.
     # Trigger the NPS survey directly
-    if final_bot_num:
-        asyncio.create_task(trigger_nps(phone, final_bot_num, rest_name))
+    if final_org_id:
+        final_org_id = int(final_org_id)
+        asyncio.create_task(trigger_nps(phone, final_org_id, rest_name))
         with bypass_tenant_scope("farewell_and_nps: mark session nps_pending by phone"):
-            await db.db_mark_session_nps_pending(phone, final_bot_num)
+            await db.db_mark_session_nps_pending(phone, final_org_id)
 
     with bypass_tenant_scope("farewell_and_nps: cleanup checkout data by phone"):
         await db.db_cleanup_after_checkout(phone)
@@ -494,7 +491,6 @@ async def get_qr_sheet(request: Request, table_id: str):
 async def get_waiter_alerts(request: Request):
     await require_auth(request)
     restaurant = await get_current_restaurant(request)
-    bot_number = restaurant.get("whatsapp_number", "")
 
     # A waiter sees THEIR OWN sede's alerts and nobody else's — the filter is
     # their staff row, not a header they control (memory: mesero-location-gap).
@@ -515,7 +511,7 @@ async def get_waiter_alerts(request: Request):
 
     try:
         with tenant_scope(restaurant["id"]):
-            alerts = await tr.db_get_waiter_alerts(bot_number, location_id=location_id)
+            alerts = await tr.db_get_waiter_alerts(int(restaurant["id"]), location_id=location_id)
     except Exception as e:
         log.exception("tables.alerts_read_failed", restaurant_id=restaurant.get("id"), error=str(e))
         alerts = []
@@ -525,28 +521,23 @@ class AdminCallRequest(BaseModel):
     phone: str = ""
     table_id: str = ""
     table_name: str = ""
-    bot_number: str = ""
 
 @router.post("/api/waiter-alerts/admin-call")
 async def admin_call_waiter(request: Request, body: AdminCallRequest):
     """El administrador convoca a un mesero/empleado a caja o dashboard.
 
-    SECURITY (2026-09 audit): `bot_number` used to come straight from the
+    SECURITY (2026-09 audit): the tenant key used to come straight from the
     request BODY and the alert was written under bypass_tenant_scope — any
     authenticated user (of ANY restaurant) could push an alert onto another
-    restaurant's waiter screen, and the row landed with org_id NULL (the
-    bypass has no tenant to stamp). We now resolve the caller's OWN
-    restaurant server-side and ignore whatever bot_number the body carries,
-    writing inside tenant_scope() so RLS stamps the correct org_id and a
-    cross-tenant bot_number in the body simply can't reach another org.
+    restaurant's waiter screen. The caller's OWN restaurant is resolved
+    server-side and the alert is written inside tenant_scope().
     """
     await require_auth(request)
     restaurant = await get_current_restaurant(request)
-    bot_number = restaurant.get("whatsapp_number", "")
     with tenant_scope(restaurant["id"]):
         alert = await db.db_create_waiter_alert(
             phone=body.phone or "admin",
-            bot_number=bot_number,
+            org_id=int(restaurant["id"]),
             alert_type="admin_call",
             message="El Administrador requiere verte en caja/dashboard",
             table_id=body.table_id,
@@ -638,7 +629,7 @@ async def get_delivery_orders(request: Request):
     org_id = restaurant["id"]
     location_filter = _kitchen_delivery_location_filter(request, user)
     with tenant_scope(org_id):
-        rows = await tr.db_get_delivery_orders_for_cashier(location_filter)
+        rows = await tr.db_get_delivery_orders_for_cashier(int(org_id), location_filter)
     orders = []
     for r in rows:
         items = r["items"]
@@ -958,7 +949,6 @@ async def update_order_status(request: Request, order_id: str):
         with bypass_tenant_scope("update_order_status: normal status update by order ID"):
             await db.db_update_table_order_status(order_id, status)
         # The diner sees "listo"/"entregado" in their chat (SSE table_order_updated).
-        _bot_number = (session_data.get("bot_number") if session_data else None) or order.get("bot_number", "")
         if status == "listo" and phone and phone != "manual":
             # Notify the assigned mesero that food is ready at the pass.
             # Best-effort: failure to create the alert MUST NOT block the
@@ -975,7 +965,7 @@ async def update_order_status(request: Request, order_id: str):
                     with tenant_scope(int(_order_org_id)):
                         await db.db_create_waiter_alert(
                             phone=phone,
-                            bot_number=_bot_number,
+                            org_id=int(_order_org_id),
                             alert_type="ready",
                             message=f"Pedido listo en pase — Mesa {table_name}",
                             table_id=order.get("table_id", ""),
@@ -1007,11 +997,9 @@ class ManualOrderRequest(BaseModel):
 async def get_pos_menu(request: Request):
     """Returns the restaurant's menu for rendering in the waiter's POS.
 
-    Wave-2: the menu lives at the org level (organizations.menu). The wa_number
-    used for the menu lookup must come from the staff's actual sede (resolved
-    via user.branch_id → location.whatsapp_number); we no longer fall back
-    to "any restaurant globally" — that would render another customer's menu
-    in this customer's POS (cross-tenant leak).
+    The carta is the staff's own sede's; we never fall back to "any
+    restaurant globally" — that would render another customer's menu in
+    this customer's POS (cross-tenant leak).
     """
     user = await get_current_user(request)
 

@@ -114,14 +114,13 @@ async def test_86d_dish_rejected_by_bot(
     restaurant = await seed_restaurant(
         pool,
         name="E2E 86 Dish Restaurant",
-        bot_number_raw="+570E2E86DISH1",
+        key="+570E2E86DISH1",
         menu=MENU,
         payment_methods=PAYMENT_METHODS,
         num_branches=1,
         branch_latlons=[(4.710989, -74.072092)],
     )
     org_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
 
     await truncate_e2e_data(pool, org_id)
 
@@ -155,7 +154,7 @@ async def test_86d_dish_rejected_by_bot(
         client, pool,
         phone=PHONE_RAW,
         text="Hola, quiero pedir a domicilio 2 empanaditas de carne",
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     all_replies = bot_replies.texts_to(PHONE_RAW)
@@ -187,7 +186,7 @@ async def test_86d_dish_rejected_by_bot(
     # ── ASSERTION 2: Bot mentioned unavailability ─────────────────────────────
     assert len(all_replies) >= 1, (
         f"Bot sent no reply to the customer at all. "
-        f"Phone={PHONE_RAW}, bot_number={bot_number}."
+        f"Phone={PHONE_RAW}, org_id={org_id}."
     )
 
     matched = next((kw for kw in _UNAVAIL_KEYWORDS if kw in combined), None)

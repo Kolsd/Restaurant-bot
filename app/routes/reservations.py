@@ -94,6 +94,7 @@ async def _sede_param(request: Request) -> str | int | None:
 
 @router.post("", status_code=201)
 async def create_reservation(
+    request: Request,
     body: CreateReservationBody,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
@@ -116,7 +117,8 @@ async def create_reservation(
             detail="Reservation date/time must be in the future",
         )
 
-    bot_number = restaurant.get("whatsapp_number") or restaurant.get("bot_number") or ""
+    sede = await _sede_param(request)
+    location_id = int(sede) if sede and str(sede).isdigit() else restaurant.get("location_id")
 
     try:
         reservation = await reservations_repo.db_create_reservation(
@@ -128,7 +130,7 @@ async def create_reservation(
             notes=body.notes,
             table_id=body.table_id,
             source=body.source,
-            bot_number=bot_number,
+            location_id=location_id,
         )
     except Exception:
         log.exception(
@@ -175,14 +177,12 @@ async def check_availability(
     except ValueError:
         raise HTTPException(status_code=422, detail="'guests' must be an integer")
 
-    bot_number = restaurant.get("whatsapp_number") or restaurant.get("bot_number")
-
     try:
         tables = await db.db_get_available_tables(
             date_str=date,
             time_str=time,
             guests=guests,
-            bot_number=bot_number,
+            org_id=int(restaurant["id"]),
             branch_id=int(branch_id) if branch_id and str(branch_id).isdigit() else None,
         )
     except Exception:
@@ -211,11 +211,9 @@ async def reservation_stats(
             detail="Query params 'period_start' and 'period_end' are required",
         )
 
-    bot_number = restaurant.get("whatsapp_number") or restaurant.get("bot_number")
-
     try:
         stats = await db.db_get_reservation_stats(
-            bot_number=bot_number,
+            org_id=int(restaurant["id"]),
             period_start=period_start,
             period_end=period_end,
             branch_id=int(branch_id) if branch_id and str(branch_id).isdigit() else None,
@@ -248,27 +246,29 @@ async def list_reservations(
     # read — or book into — another sede's reservations just by asking.
     branch_id = await _sede_param(request)
 
-    bot_number = restaurant.get("whatsapp_number") or restaurant.get("bot_number")
+    org_id = int(restaurant["id"])
+    location_id = int(branch_id) if branch_id and str(branch_id).isdigit() else None
 
     try:
         if status:
             reservations = await db.db_get_reservations_by_status(
-                bot_number=bot_number,
+                org_id=org_id,
                 status=status,
                 date_from=date_from,
                 date_to=date_to,
-                branch_id=int(branch_id) if branch_id and str(branch_id).isdigit() else None,
+                branch_id=location_id,
             )
         else:
             reservations = await db.db_get_reservations_range(
                 date_from=date_from or "",
                 date_to=date_to or "",
-                bot_number=bot_number,
+                org_id=org_id,
+                location_id=location_id,
             )
     except Exception:
         log.exception(
             "reservations.list_error",
-            bot_number=bot_number,
+            org_id=org_id,
             status=status,
         )
         raise
@@ -282,27 +282,17 @@ async def list_reservations(
 async def _verify_reservation_ownership(reservation_id: int, restaurant: dict) -> dict:
     """Fetch reservation and verify it belongs to this restaurant's org.
 
-    Wave-2: bot_number comparison fails for branch reservations viewed by the
-    matriz admin (different whatsapp_number per sede).  Use org_id instead —
-    all locations of an org share the same org_id so any admin of the org can
-    manage reservations across all its sedes.
+    All locations of an org share the same org_id, so any admin of the org
+    can manage reservations across all its sedes.
     """
     reservation = await db.db_get_reservation_by_id(reservation_id)
     if not reservation:
         raise HTTPException(status_code=404, detail="Reservation not found")
 
-    # Prefer org_id comparison; fall back to bot_number for legacy rows without org_id.
     caller_org_id = restaurant.get("org_id") or restaurant.get("id")
     res_org_id = reservation.get("org_id")
-
-    if res_org_id is not None and caller_org_id is not None:
-        if int(res_org_id) != int(caller_org_id):
-            raise HTTPException(status_code=403, detail="Reservation does not belong to this restaurant")
-    else:
-        # Legacy fallback: bot_number check
-        bot_number = restaurant.get("whatsapp_number") or restaurant.get("bot_number", "")
-        if reservation.get("bot_number") and reservation["bot_number"] != bot_number:
-            raise HTTPException(status_code=403, detail="Reservation does not belong to this restaurant")
+    if res_org_id is None or caller_org_id is None or int(res_org_id) != int(caller_org_id):
+        raise HTTPException(status_code=403, detail="Reservation does not belong to this restaurant")
 
     return reservation
 
@@ -429,22 +419,14 @@ async def seat_reservation(
     if table.get("org_id") and caller_org_id and int(table["org_id"]) != int(caller_org_id):
         raise HTTPException(status_code=403, detail="La mesa no pertenece a este restaurante.")
 
-    bot_number = (restaurant.get("whatsapp_number") or "").strip()
-    if not bot_number:
-        raise HTTPException(
-            status_code=422,
-            detail="Restaurante sin bot_number configurado — no se puede abrir sesión.",
-        )
-
     # Create the table_session. db_create_table_session auto-assigns the
     # least-loaded mesero at the location (DISCONNECT #2 fix).
     try:
         session = await db.db_create_table_session(
             phone=phone,
-            bot_number=bot_number,
+            org_id=int(caller_org_id),
             table_id=body.table_id,
             table_name=table.get("name") or body.table_id,
-            org_id=caller_org_id,
             location_id=table.get("location_id"),
         )
     except Exception:

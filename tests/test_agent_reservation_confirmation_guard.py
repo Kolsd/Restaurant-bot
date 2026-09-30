@@ -53,7 +53,7 @@ async def test_make_reservation_blocked_without_prior_confirmation(monkeypatch):
         tool_input=dict(_FULL_RESERVATION_INPUT),
         reply="Confirmo tu reserva para el 20 de diciembre a las 19:00 para 4 personas.",
         table_context=None,
-        bot_number="+57888",
+        org_id=4242,
         phone="+573001234567",
         full_history=[
             {"role": "user", "content": "quiero reservar para mañana a las 7pm, somos 4, soy Carlos"},
@@ -84,7 +84,7 @@ async def test_make_reservation_allowed_after_confirmation_word(monkeypatch):
         tool_input=dict(_FULL_RESERVATION_INPUT),
         reply="¡Listo! Tu reserva quedó registrada.",
         table_context=None,
-        bot_number="+57888",
+        org_id=4242,
         phone="+573001234567",
         full_history=[
             {"role": "user", "content": "para el 20 de diciembre"},
@@ -113,7 +113,7 @@ async def test_two_calls_without_confirmation_never_both_create_a_reservation(mo
         tool_input={**_FULL_RESERVATION_INPUT, "date": "2026-01-08"},  # wrong/guessed date
         reply="Confirmo tu reserva para el 8 de enero.",
         table_context=None,
-        bot_number="+57888",
+        org_id=4242,
         phone="+573001234567",
         full_history=[{"role": "user", "content": "quiero reservar para mañana, somos 4, soy Carlos"}],
         user_message="para el 20 de diciembre",
@@ -127,7 +127,7 @@ async def test_two_calls_without_confirmation_never_both_create_a_reservation(mo
         tool_input={**_FULL_RESERVATION_INPUT, "date": "2026-12-20"},  # corrected date
         reply="¡Listo! Tu reserva quedó registrada para el 20 de diciembre.",
         table_context=None,
-        bot_number="+57888",
+        org_id=4242,
         phone="+573001234567",
         full_history=[{"role": "user", "content": "para el 20 de diciembre"}],
         user_message="sí confirmo",
@@ -152,7 +152,7 @@ async def test_missing_fields_falls_through_to_field_guard_not_confirmation_guar
         tool_input={"name": "Carlos", "date": "", "time": "19:00", "guests": 4},
         reply="",
         table_context=None,
-        bot_number="+57888",
+        org_id=4242,
         phone="+573001234567",
         full_history=[],
     )
@@ -175,7 +175,7 @@ async def test_reservation_reorder_of_dish_tools_unaffected(monkeypatch):
         tool_input={"notes": "servilletas"},
         reply="Aviso al mesero ahora mismo.",
         table_context={"id": "t1", "name": "Mesa 1"},
-        bot_number="+57888",
+        org_id=4242,
         phone="+573001234567",
         full_history=[],
     )

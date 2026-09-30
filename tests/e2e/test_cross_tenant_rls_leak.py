@@ -69,7 +69,7 @@ async def e2e_app_rls(bot_replies):
 
 # ── Helper: seed one delivery order directly in DB ────────────────────────────
 
-async def _seed_delivery_order(pool: asyncpg.Pool, org_id: int, bot_number: str) -> str:
+async def _seed_delivery_order(pool: asyncpg.Pool, org_id: int, location_id: int) -> str:
     """
     Insert a minimal delivery order for the given org directly in DB.
     Uses bypass_tenant_scope so we can write for both orgs from the same function.
@@ -90,7 +90,7 @@ async def _seed_delivery_order(pool: asyncpg.Pool, org_id: int, bot_number: str)
                 INSERT INTO orders (
                     id, phone, items, order_type, address, notes,
                     subtotal, delivery_fee, total, status, paid,
-                    payment_url, bot_number, payment_method,
+                    payment_url, location_id, payment_method,
                     base_order_id, sub_number, org_id, channel,
                     created_at
                 ) VALUES (
@@ -114,12 +114,12 @@ async def _seed_delivery_order(pool: asyncpg.Pool, org_id: int, bot_number: str)
                 status,                # $10 status
                 False,                 # $11 paid
                 "",                    # $12 payment_url
-                bot_number,            # $13 bot_number
+                location_id,           # $13 location_id
                 "Nequi",               # $14 payment_method
                 None,                  # $15 base_order_id
                 1,                     # $16 sub_number
                 org_id,                # $17 org_id  (tenant key)
-                "whatsapp",            # $18 channel
+                "web",                 # $18 channel
                 created_at,            # $19 created_at
             )
     log.info("e2e.rls.order_seeded", order_id=order_id, org_id=org_id, phone=phone)
@@ -153,14 +153,14 @@ async def test_admin_cannot_see_other_tenant_orders(
     rest_A = await seed_restaurant(
         pool,
         name="E2E RLS Tenant A",
-        bot_number_raw="+570E2ETENANTA",
+        key="+570E2ETENANTA",
         num_branches=1,
         branch_latlons=[(4.710989, -74.072092)],
     )
     rest_B = await seed_restaurant(
         pool,
         name="E2E RLS Tenant B",
-        bot_number_raw="+570E2ETENANTB",
+        key="+570E2ETENANTB",
         num_branches=1,
         branch_latlons=[(4.609710, -74.081741)],
     )
@@ -171,7 +171,7 @@ async def test_admin_cannot_see_other_tenant_orders(
     # Critical: the two orgs MUST be distinct — otherwise the test proves nothing.
     assert org_id_A != org_id_B, (
         f"seed_restaurant returned the same org_id ({org_id_A}) for both tenants. "
-        f"Check that the bot_number is truly unique per call."
+        f"Check that the key is truly unique per call."
     )
     log.info("e2e.rls.orgs_seeded", org_id_A=org_id_A, org_id_B=org_id_B)
 
@@ -195,8 +195,8 @@ async def test_admin_cannot_see_other_tenant_orders(
         pass
 
     # ── Seed one order per org directly in DB ─────────────────────────────────
-    order_id_A = await _seed_delivery_order(pool, org_id_A, rest_A["whatsapp_number"])
-    order_id_B = await _seed_delivery_order(pool, org_id_B, rest_B["whatsapp_number"])
+    order_id_A = await _seed_delivery_order(pool, org_id_A, rest_A["principal_location_id"])
+    order_id_B = await _seed_delivery_order(pool, org_id_B, rest_B["principal_location_id"])
 
     log.info(
         "e2e.rls.orders_seeded",

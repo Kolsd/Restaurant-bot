@@ -143,14 +143,13 @@ async def test_insufficient_stock_raises_and_rolls_back(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Stock Rollback Restaurant",
-        bot_number_raw="+570E2ESTOCK01",
+        key="+570E2ESTOCK01",
         menu=MENU,
         payment_methods=PAYMENT_METHODS,
         num_branches=1,
         branch_latlons=[(4.710989, -74.072092)],
     )
     org_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
 
     await truncate_e2e_data(pool, org_id)
     _clear_state_store()
@@ -192,7 +191,6 @@ async def test_insufficient_stock_raises_and_rolls_back(
     log.info(
         "e2e.stock_test.start",
         org_id=org_id,
-        bot_number=bot_number,
         phone=CUSTOMER_PHONE_A,
         order_qty=ORDER_QUANTITY,
         stock_available=STOCK_AVAILABLE,
@@ -206,7 +204,7 @@ async def test_insufficient_stock_raises_and_rolls_back(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_A,
         text=turn1_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # ── Turn 2: Address ────────────────────────────────────────────────────────
@@ -215,7 +213,7 @@ async def test_insufficient_stock_raises_and_rolls_back(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_A,
         text=CUSTOMER_ADDRESS,
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # ── Turn 3: Payment method (Efectivo — no proof needed) ───────────────────
@@ -224,7 +222,7 @@ async def test_insufficient_stock_raises_and_rolls_back(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_A,
         text="Efectivo",
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # ── Turn 4: Confirm ────────────────────────────────────────────────────────
@@ -233,7 +231,7 @@ async def test_insufficient_stock_raises_and_rolls_back(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_A,
         text="sí confirmo",
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     all_replies = bot_replies.texts_to(CUSTOMER_PHONE_RAW_A)
@@ -339,14 +337,13 @@ async def test_cart_lock_contention_returns_neutral_message(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Cart Lock Restaurant",
-        bot_number_raw="+570E2ELOCK001",
+        key="+570E2ELOCK001",
         menu=MENU,
         payment_methods=PAYMENT_METHODS,
         num_branches=1,
         branch_latlons=[(4.710989, -74.072092)],
     )
     org_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
 
     await truncate_e2e_data(pool, org_id)
     _clear_state_store()
@@ -354,7 +351,6 @@ async def test_cart_lock_contention_returns_neutral_message(
     log.info(
         "e2e.cartlock_test.start",
         org_id=org_id,
-        bot_number=bot_number,
         phone=CUSTOMER_PHONE_B,
     )
 
@@ -369,7 +365,7 @@ async def test_cart_lock_contention_returns_neutral_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_B,
         text=turn1_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # Turn 2: address
@@ -378,7 +374,7 @@ async def test_cart_lock_contention_returns_neutral_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_B,
         text=CUSTOMER_ADDRESS,
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # Turn 3: payment method — bot should now ask for confirmation
@@ -387,7 +383,7 @@ async def test_cart_lock_contention_returns_neutral_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW_B,
         text="Efectivo",
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # Snapshot WA replies after turn 3 (before the contention turn)
@@ -403,7 +399,7 @@ async def test_cart_lock_contention_returns_neutral_message(
     # state_store.cart_lock_acquire works with both Redis and in-process fallback.
     from app.services import state_store
     lock_token = await state_store.cart_lock_acquire(
-        CUSTOMER_PHONE_B, bot_number, ttl_seconds=30
+        CUSTOMER_PHONE_B, org_id, ttl_seconds=30
     )
     assert lock_token is not None, (
         "cart_lock_acquire returned None — could not pre-acquire lock for contention test. "
@@ -419,13 +415,13 @@ async def test_cart_lock_contention_returns_neutral_message(
             client, pool,
             phone=CUSTOMER_PHONE_RAW_B,
             text="sí confirmo",
-            bot_number=bot_number,
+            org_id=org_id,
         )
     finally:
         # Release the lock regardless of test outcome — do NOT leave a stale lock
         # that would break subsequent tests running against the same state_store.
         try:
-            await state_store.cart_lock_release(CUSTOMER_PHONE_B, bot_number, token=lock_token)
+            await state_store.cart_lock_release(CUSTOMER_PHONE_B, org_id, token=lock_token)
             log.info("e2e.cartlock_test.lock_released")
         except Exception as _rel_err:
             log.warning("e2e.cartlock_test.lock_release_failed", error=str(_rel_err))
@@ -492,9 +488,9 @@ async def test_cart_lock_contention_returns_neutral_message(
     async with pool.acquire() as conn:
         with bypass_tenant_scope("e2e_lock_assert"):
             cart_data_raw = await conn.fetchval(
-                "SELECT cart_data FROM carts WHERE phone = $1 AND bot_number = $2",
+                "SELECT cart_data FROM carts WHERE phone = $1 AND org_id = $2",
                 CUSTOMER_PHONE_B,
-                bot_number,
+                org_id,
             )
 
     # cart_data column is JSONB: {"items": [...]}. asyncpg jsonb codec returns dict;

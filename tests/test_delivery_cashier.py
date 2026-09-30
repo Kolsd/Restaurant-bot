@@ -167,7 +167,6 @@ async def _seed_order(*, org_id: int, location_id: int, status: str = "pendiente
             "order_type": "domicilio",
             "subtotal": 20000,
             "total": 20000,
-            "bot_number": "573000000000",
             "org_id": org_id,
             "location_id": location_id,
             "status": status,
@@ -260,7 +259,6 @@ async def _seed_checkout_org(
             f"Cashier Checkout Org {suffix}", f"cashier-checkout-{suffix}", json.dumps({"currency": "COP"}), _TEST_CARTA,
         )
         # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
-        bot_number = f"web{org_id}"
         location_id = await conn.fetchval(
             """
             INSERT INTO locations
@@ -277,34 +275,33 @@ async def _seed_checkout_org(
             }),
             json.dumps({}),
         )
-        return {"org_id": org_id, "location_id": location_id, "bot_number": bot_number, "suffix": suffix}
+        return {"org_id": org_id, "location_id": location_id, "suffix": suffix}
     finally:
         await conn.close()
 
 
-async def _seed_session(org_id: int, location_id: int, bot_number: str) -> str:
+async def _seed_session(org_id: int, location_id: int) -> str:
     token = f"web:{uuid.uuid4()}"
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         await conn.execute(
-            """INSERT INTO diner_sessions (token, org_id, location_id, table_id, table_name, bot_number, order_mode)
-               VALUES ($1, $2, $3, NULL, NULL, $4, 'delivery')""",
-            token, org_id, location_id, bot_number,
+            """INSERT INTO diner_sessions (token, org_id, location_id, table_id, table_name, order_mode)
+               VALUES ($1, $2, $3, NULL, NULL, 'delivery')""",
+            token, org_id, location_id,
         )
     finally:
         await conn.close()
     return token
 
 
-async def _seed_cart(token: str, bot_number: str, org_id: int, items: list) -> None:
+async def _seed_cart(token: str, org_id: int, items: list) -> None:
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         await conn.execute(
-            """INSERT INTO carts (phone, bot_number, cart_data, updated_at, org_id)
-               VALUES ($1, $2, $3::jsonb, NOW(), $4)
-               ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data = EXCLUDED.cart_data""",
-            token, bot_number, json.dumps({"items": items, "order_type": None, "address": None, "notes": ""}),
-            org_id,
+            """INSERT INTO carts (phone, org_id, cart_data, updated_at)
+               VALUES ($1, $2, $3::jsonb, NOW())
+               ON CONFLICT (phone, org_id) DO UPDATE SET cart_data = EXCLUDED.cart_data""",
+            token, org_id, json.dumps({"items": items, "order_type": None, "address": None, "notes": ""}),
         )
     finally:
         await conn.close()
@@ -335,11 +332,11 @@ def _default_checkout_body(token: str, **overrides) -> dict:
 def test_checkout_refused_when_dish_marked_sold_out(client):
     info = _run(_seed_checkout_org())
     try:
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"]))
+        token = _run(_seed_session(info["org_id"], info["location_id"]))
         # Sold out at THIS sede (per-sede since migration 0091).
         _run(_seed_menu_availability(info["org_id"], "Bandeja Paisa", False,
                                      location_id=info["location_id"]))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 40000.0, "line_id": "a1"},
         ]))
 
@@ -371,8 +368,8 @@ def test_checkout_refused_when_the_sede_hid_the_dish_after_it_was_added(client):
     add-to-cart and the checkout: the stale line must not become an order."""
     info = _run(_seed_checkout_org())
     try:
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"]))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"]))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 40000.0, "line_id": "a1"},
         ]))
         _run(_hide_at_sede(info["org_id"], info["location_id"], "bandeja paisa"))
@@ -397,8 +394,8 @@ def test_checkout_refused_when_inventory_insufficient_and_creates_no_order(clien
     info = _run(_seed_checkout_org())
     try:
         _run(_seed_inventory(info["org_id"], "Bandeja Paisa", current_stock=1))
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"]))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"]))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Bandeja Paisa", "quantity": 2, "subtotal": 40000.0, "line_id": "a1"},
         ]))
 
@@ -419,8 +416,8 @@ def test_checkout_success_actually_deducts_inventory(client):
     info = _run(_seed_checkout_org())
     try:
         inv_id = _run(_seed_inventory(info["org_id"], "Bandeja Paisa", current_stock=10))
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"]))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"]))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Bandeja Paisa", "quantity": 3, "subtotal": 60000.0, "line_id": "a1"},
         ]))
 
@@ -483,7 +480,7 @@ def test_cashier_full_happy_path_pending_to_delivered(client):
             # loops raises "Future attached to a different loop".
             _reset_pool()
             with tenant_scope(org_id):
-                return _run(tables_repo.db_get_delivery_orders_for_cashier())
+                return _run(tables_repo.db_get_delivery_orders_for_cashier(org_id))
 
         pre_accept_kitchen = _kitchen_feed()
         assert order_id not in {o["id"] for o in pre_accept_kitchen}, (

@@ -64,7 +64,7 @@ async def test_staff_pin_login_returns_token(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Pin Login Test Restaurant",
-        bot_number_raw="+570E2EPINLOG",
+        key="+570E2EPINLOG",
         num_branches=0,
     )
     org_id = restaurant["id"]
@@ -144,7 +144,7 @@ async def test_staff_pin_login_wrong_pin_returns_401(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Pin Login Wrong Pin Restaurant",
-        bot_number_raw="+570E2EPINBAD",
+        key="+570E2EPINBAD",
         num_branches=0,
     )
     org_id = restaurant["id"]

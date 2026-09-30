@@ -9,10 +9,10 @@ emitted at most once per 60 seconds per key family.
 
 Key schemas
 -----------
-  mesio:nps:{phone}:{bot_number}           → NPS flow state dict
-  mesio:nps_done:{phone}:{bot_number}      → "1" flag (12h TTL) — NPS already completed/skipped
-  mesio:checkout:{phone}:{bot_number}      → checkout state machine dict
-  mesio:cart_lock:{phone}:{bot_number}     → "1" (SET NX EX, distributed mutex for cart ops)
+  mesio:nps:{phone}:{org_id}           → NPS flow state dict
+  mesio:nps_done:{phone}:{org_id}      → "1" flag (12h TTL) — NPS already completed/skipped
+  mesio:checkout:{phone}:{org_id}      → checkout state machine dict
+  mesio:cart_lock:{phone}:{org_id}     → "1" (SET NX EX, distributed mutex for cart ops)
 
 Fallback in-process dict entries are tuples of (expire_at: float, value: Any).
 """
@@ -36,7 +36,7 @@ _fb_nps: dict[str, tuple[float, Any]] = {}
 _fb_nps_done: dict[str, float] = {}  # key → expire_at_monotonic (12h guard)
 _fb_checkout: dict[str, tuple[float, Any]] = {}
 _fb_cooldown: dict[str, float] = {}  # key → expire_at_monotonic
-_fb_cart_locks: dict[str, asyncio.Lock] = {}  # phone:bot_number → asyncio.Lock (fallback only)
+_fb_cart_locks: dict[str, asyncio.Lock] = {}  # phone:org_id → asyncio.Lock (fallback only)
 _fb_cart_lock_tokens: dict[str, str] = {}  # key → owner token (fallback only)
 _fb_checkout_locks: dict[str, asyncio.Lock] = {}  # base_order_id → asyncio.Lock (fallback only)
 _fb_checkout_lock_tokens: dict[str, str] = {}  # key → owner token (fallback only)
@@ -102,12 +102,12 @@ def _fb_delete(store: dict, key: str) -> None:
 
 # ── NPS ───────────────────────────────────────────────────────────────────────
 
-def _nps_redis_key(phone: str, bot_number: str) -> str:
-    return f"mesio:nps:{phone}:{bot_number}"
+def _nps_redis_key(phone: str, org_id: int) -> str:
+    return f"mesio:nps:{phone}:{org_id}"
 
 
-async def nps_get(phone: str, bot_number: str) -> dict | None:
-    key = _nps_redis_key(phone, bot_number)
+async def nps_get(phone: str, org_id: int) -> dict | None:
+    key = _nps_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         raw = await r.get(key)
@@ -118,8 +118,8 @@ async def nps_get(phone: str, bot_number: str) -> dict | None:
     return copy.deepcopy(value) if isinstance(value, dict) else value
 
 
-async def nps_set(phone: str, bot_number: str, state: dict, ttl_seconds: int = 86400) -> None:
-    key = _nps_redis_key(phone, bot_number)
+async def nps_set(phone: str, org_id: int, state: dict, ttl_seconds: int = 86400) -> None:
+    key = _nps_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         await r.set(key, _rc.encode(state), ex=ttl_seconds)
@@ -128,8 +128,8 @@ async def nps_set(phone: str, bot_number: str, state: dict, ttl_seconds: int = 8
     _fb_set(_fb_nps, key, state, ttl_seconds, family="nps")
 
 
-async def nps_delete(phone: str, bot_number: str) -> None:
-    key = _nps_redis_key(phone, bot_number)
+async def nps_delete(phone: str, org_id: int) -> None:
+    key = _nps_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         await r.delete(key)
@@ -143,13 +143,13 @@ async def nps_delete(phone: str, bot_number: str) -> None:
 _NPS_DONE_TTL = 43200  # 12 hours
 
 
-def _nps_done_redis_key(phone: str, bot_number: str) -> str:
-    return f"mesio:nps_done:{phone}:{bot_number}"
+def _nps_done_redis_key(phone: str, org_id: int) -> str:
+    return f"mesio:nps_done:{phone}:{org_id}"
 
 
-async def nps_mark_done(phone: str, bot_number: str) -> None:
+async def nps_mark_done(phone: str, org_id: int) -> None:
     """Mark NPS as completed/skipped for this phone+bot. Blocks re-triggering for 12h."""
-    key = _nps_done_redis_key(phone, bot_number)
+    key = _nps_done_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         await r.set(key, "1", ex=_NPS_DONE_TTL)
@@ -170,9 +170,9 @@ async def nps_mark_done(phone: str, bot_number: str) -> None:
     _fb_nps_done[key] = now + _NPS_DONE_TTL
 
 
-async def nps_is_done(phone: str, bot_number: str) -> bool:
+async def nps_is_done(phone: str, org_id: int) -> bool:
     """Returns True if NPS was already completed/skipped within the last 12h."""
-    key = _nps_done_redis_key(phone, bot_number)
+    key = _nps_done_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         return await r.exists(key) == 1
@@ -182,12 +182,12 @@ async def nps_is_done(phone: str, bot_number: str) -> bool:
 
 # ── Checkout ──────────────────────────────────────────────────────────────────
 
-def _checkout_redis_key(phone: str, bot_number: str) -> str:
-    return f"mesio:checkout:{phone}:{bot_number}"
+def _checkout_redis_key(phone: str, org_id: int) -> str:
+    return f"mesio:checkout:{phone}:{org_id}"
 
 
-async def checkout_get(phone: str, bot_number: str) -> dict | None:
-    key = _checkout_redis_key(phone, bot_number)
+async def checkout_get(phone: str, org_id: int) -> dict | None:
+    key = _checkout_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         raw = await r.get(key)
@@ -198,8 +198,8 @@ async def checkout_get(phone: str, bot_number: str) -> dict | None:
     return copy.deepcopy(value) if isinstance(value, dict) else value
 
 
-async def checkout_set(phone: str, bot_number: str, state: dict, ttl_seconds: int = 1800) -> None:
-    key = _checkout_redis_key(phone, bot_number)
+async def checkout_set(phone: str, org_id: int, state: dict, ttl_seconds: int = 1800) -> None:
+    key = _checkout_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         await r.set(key, _rc.encode(state), ex=ttl_seconds)
@@ -208,8 +208,8 @@ async def checkout_set(phone: str, bot_number: str, state: dict, ttl_seconds: in
     _fb_set(_fb_checkout, key, state, ttl_seconds, family="checkout")
 
 
-async def checkout_delete(phone: str, bot_number: str) -> None:
-    key = _checkout_redis_key(phone, bot_number)
+async def checkout_delete(phone: str, org_id: int) -> None:
+    key = _checkout_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         await r.delete(key)
@@ -328,13 +328,13 @@ async def delivery_proof_get(token: str) -> str | None:
 # Redis path: SET key "1" NX EX ttl (atomic, multi-worker-safe).
 # Fallback path: per-key asyncio.Lock (single-worker only, no cross-worker guarantee).
 
-def _cart_lock_redis_key(phone: str, bot_number: str) -> str:
-    return f"mesio:cart_lock:{phone}:{bot_number}"
+def _cart_lock_redis_key(phone: str, org_id: int) -> str:
+    return f"mesio:cart_lock:{phone}:{org_id}"
 
 
-async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) -> str | None:
+async def cart_lock_acquire(phone: str, org_id: int, ttl_seconds: int = 30) -> str | None:
     """
-    Acquire a distributed lock for cart operations on (phone, bot_number).
+    Acquire a distributed lock for cart operations on (phone, org_id).
 
     Redis path: SET key <token> NX EX ttl — atomic, multi-worker-safe.
     Returns the lock token (str) if acquired, None if already held.
@@ -343,7 +343,7 @@ async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) 
     Fallback (Redis unavailable): acquires an asyncio.Lock instead and returns
     a token for ownership tracking within a single worker.
     """
-    key = _cart_lock_redis_key(phone, bot_number)
+    key = _cart_lock_redis_key(phone, org_id)
     token = str(uuid.uuid4())
     r = await _rc.get_redis()
     if r is not None:
@@ -362,14 +362,14 @@ async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) 
         return None
 
 
-async def cart_lock_release(phone: str, bot_number: str, token: str | None = None) -> None:
+async def cart_lock_release(phone: str, org_id: int, token: str | None = None) -> None:
     """
     Release a previously acquired cart lock.
 
     Redis path: only DEL if the stored token matches (ownership check).
     Fallback path: release the asyncio.Lock only if this token is the holder.
     """
-    key = _cart_lock_redis_key(phone, bot_number)
+    key = _cart_lock_redis_key(phone, org_id)
     if token is None:
         log.error("cart_lock.release_without_token", key=key)
         return
@@ -403,7 +403,7 @@ async def cart_lock_release(phone: str, bot_number: str, token: str | None = Non
 # tapping "pagar" at the same instant (one "mine", one "toda la mesa") must
 # never both read the same "unbilled" snapshot and each create a check that
 # claims the same items. Same Redis SET-NX-EX primitive as cart_lock_*, just
-# keyed by base_order_id instead of (phone, bot_number).
+# keyed by base_order_id instead of (phone, org_id).
 
 def _checkout_lock_redis_key(base_order_id: str) -> str:
     return f"mesio:table_checkout_lock:{base_order_id}"
@@ -463,14 +463,14 @@ async def table_checkout_lock_release(base_order_id: str, token: str | None = No
 # ── NPS transition distributed lock ──────────────────────────────────────────
 
 
-async def nps_transition_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 10) -> str | None:
+async def nps_transition_lock_acquire(phone: str, org_id: int, ttl_seconds: int = 10) -> str | None:
     """Acquire atomic lock for NPS state transition. Returns token or None.
 
     Redis path: SET NX — only one worker acquires; others get None.
     Fallback path: asyncio.Lock per key (same as cart_lock_acquire) — prevents
     double-fire within a single worker. Returns None on timeout (5s cap).
     """
-    key = f"mesio:nps_lock:{phone}:{bot_number}"
+    key = f"mesio:nps_lock:{phone}:{org_id}"
     token = str(uuid.uuid4())
     r = await _rc.get_redis()
     if r is not None:
@@ -494,12 +494,12 @@ async def nps_transition_lock_acquire(phone: str, bot_number: str, ttl_seconds: 
         return None
 
 
-async def nps_transition_lock_release(phone: str, bot_number: str, token: str) -> bool:
+async def nps_transition_lock_release(phone: str, org_id: int, token: str) -> bool:
     """Release a previously acquired NPS transition lock. Ownership-safe via Lua.
 
     Fallback path mirrors cart_lock_release: verifies token before releasing.
     """
-    key = f"mesio:nps_lock:{phone}:{bot_number}"
+    key = f"mesio:nps_lock:{phone}:{org_id}"
     r = await _rc.get_redis()
     if r is not None:
         try:

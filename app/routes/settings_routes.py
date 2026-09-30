@@ -64,7 +64,6 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
     return {
         "restaurant_id":       restaurant["id"],
         "name":                restaurant.get("name", ""),
-        "whatsapp_number":     restaurant.get("whatsapp_number", ""),
         "address":             restaurant.get("address", ""),
         # Fields persisted in features JSONB (no dedicated column)
         "nit":                 features.get("nit", ""),
@@ -449,8 +448,8 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
                 raise HTTPException(status_code=403, detail="Sucursal no pertenece a tu organización")
             branch_id = candidate
         else:
-            # Default for owners/admins: cross-sede view ('all'). bot_number
-            # filter (resolved below) provides tenant scoping.
+            # Default for owners/admins: cross-sede view ('all'). The org_id
+            # filter provides tenant scoping.
             branch_id = "all"
     else:
         # gerente / staff: their OWN sede. This used to be "all" — every
@@ -460,15 +459,11 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
         # to use `location_id`, the id kind that actually means "sede".
         branch_id = resolve_sede_filter(request, user)
 
-    bot_number = None
-    if branch_id and branch_id != "all":
-        r = await db.db_get_restaurant_by_location_id(branch_id)
-        if r:
-            bot_number = r.get("whatsapp_number")
-    elif branch_id == "all" and user_org_id:
-        r = await db.db_get_restaurant_by_org_id(int(user_org_id))
-        if r:
-            bot_number = r.get("whatsapp_number")
+    if not user_org_id:
+        # The dashboard reads run under bypass and filter by org_id — without
+        # one they would read every tenant.
+        raise HTTPException(status_code=403, detail="Sin organización")
+    org_id = int(user_org_id)
 
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     now_local = now_utc - timedelta(minutes=tz_offset)
@@ -492,19 +487,19 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
     start_date = start_local + timedelta(minutes=tz_offset)
     end_date = end_local + timedelta(minutes=tz_offset)
 
-    return branch_id, bot_number, start_date, end_date
+    return branch_id, org_id, start_date, end_date
 
 
 # ── DASHBOARD DATA ENDPOINTS ─────────────────────────────────────────
 
 @router.get("/api/dashboard/orders")
 async def get_dashboard_orders(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
-    branch_id, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
+    branch_id, org_id, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
 
     orders = []
     try:
         rows_wa, rows_mesa = await restaurant_repo.db_get_dashboard_orders(
-            start_date, end_date, branch_id, bot_number
+            start_date, end_date, branch_id, org_id
         )
         for r in rows_wa:
             orders.append({
@@ -604,24 +599,11 @@ async def update_order_status(order_id: str, request: Request):
 @router.get("/api/table-sessions/closed")
 async def get_closed_sessions(request: Request, hours: int = 24):
     hours = max(1, min(hours, 720))  # clamp: 1h – 30 days
-    branch_id, bot_number, _, _ = await get_dashboard_filters(request, "today")
+    _, org_id, _, _ = await get_dashboard_filters(request, "today")
 
     try:
-        # db_get_closed_sessions uses tenant_connection() — must be wrapped in tenant_scope.
-        # branch_id may be an int, "all", or None; fall back to bypass when cross-tenant.
-        # Wave-2: branch_id from get_dashboard_filters is a LOCATION_ID (already
-        # ownership-verified there). tenant_scope() requires an org_id; we
-        # resolve it via db_get_restaurant_by_location_id which normalizes
-        # `id` to org_id.
-        if isinstance(branch_id, int):
-            branch_rest = await db.db_get_restaurant_by_location_id(branch_id)
-            org_id_for_scope = branch_rest["id"] if branch_rest else branch_id
-            with tenant_scope(org_id_for_scope):
-                rows = await tr.db_get_closed_sessions(hours, bot_number)
-        else:
-            from app.services.tenant_context import bypass_tenant_scope as _bypass
-            with _bypass("get_closed_sessions: cross-tenant dashboard view"):
-                rows = await tr.db_get_closed_sessions(hours, bot_number)
+        with tenant_scope(org_id):
+            rows = await tr.db_get_closed_sessions(hours, org_id)
     except Exception as e:
         log.warning("dashboard.table_sessions_query_failed", error=str(e))
         rows = []
@@ -638,11 +620,11 @@ async def get_closed_sessions(request: Request, hours: int = 24):
 
 @router.get("/api/dashboard/reservations")
 async def get_dashboard_reservations(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
-    _, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
+    _, org_id, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
 
     reservations = []
     try:
-        rows = await restaurant_repo.db_get_dashboard_reservations(start_date, end_date, bot_number)
+        rows = await restaurant_repo.db_get_dashboard_reservations(start_date, end_date, org_id)
         for r in rows:
             reservations.append({
                 "id": r["id"], "name": r["name"], "date": str(r["date"]),
@@ -650,16 +632,16 @@ async def get_dashboard_reservations(request: Request, period: str = "today", cu
                 "phone": r["phone"], "notes": r["notes"]
             })
     except Exception:
-        log.exception("dashboard.reservations_load_failed", bot_number=bot_number)
+        log.exception("dashboard.reservations_load_failed", org_id=org_id)
 
     return {"reservations": reservations}
 
 
 @router.get("/api/dashboard/conversations")
 async def get_dashboard_conversations(request: Request):
-    branch_id, bot_number, _, _ = await get_dashboard_filters(request, "today")
+    branch_id, org_id, _, _ = await get_dashboard_filters(request, "today")
 
-    rows = await restaurant_repo.db_get_dashboard_conversations(branch_id, bot_number)
+    rows = await restaurant_repo.db_get_dashboard_conversations(branch_id, org_id)
 
     convs = []
     for r in rows:
@@ -691,13 +673,9 @@ async def get_dashboard_conversations(request: Request):
 async def get_dashboard_menu(request: Request):
     """The organization's BASE carta — what the full carta editor loads.
 
-    Resolved by org_id, not by bot_number. It used to call
-    `db_get_menu(bot_number)`, which meant a restaurant was identified by
-    its WhatsApp number: any org without one — every org created through
-    self-serve signup, where the phone is deliberately not claimed — got an
-    empty carta here, and the editor opened blank with a menu sitting in
-    the database. It also contradicted the standing rule that nothing reads
-    a carta through `db_get_menu(bot_number)` any more.
+    Resolved by org_id. It used to identify the restaurant by its WhatsApp
+    number, so any org without one got an empty carta and the editor opened
+    blank with a menu sitting in the database.
 
     Base and not sede-merged, on purpose: whatever this returns is what the
     editor saves back through `PUT /api/menu/update`, which writes the base
@@ -1031,11 +1009,11 @@ async def get_dishes_missing_photos(
         except Exception:
             raw_menu = {}
 
-    # Fallback: if the dict for some reason doesn't carry the menu, look it
-    # up by whatsapp_number. Mirrors the pattern in dashboard_data().
-    if not raw_menu and restaurant.get("whatsapp_number"):
+    # Fallback: if the dict for some reason doesn't carry the menu, read
+    # the org's base carta.
+    if not raw_menu and restaurant.get("org_id"):
         try:
-            raw_menu = await db.db_get_menu(restaurant["whatsapp_number"]) or {}
+            raw_menu = await db.db_get_menu(int(restaurant["org_id"])) or {}
         except Exception as exc:
             log.warning(
                 "menu.missing_photos.fallback_lookup_failed",

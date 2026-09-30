@@ -194,15 +194,15 @@ def test_dashboard_sync_uses_restaurant_timezone(client, monkeypatch):
 
     captured_calls = {}
 
-    async def mock_get_orders(date_from, date_to, bot_number=None):
+    async def mock_get_orders(date_from, date_to, org_id=None):
         captured_calls["date_from"] = date_from
         captured_calls["date_to"]   = date_to
         return []
 
-    async def mock_get_reservations(date_from, date_to, bot_number=None):
+    async def mock_get_reservations(date_from, date_to, org_id=None):
         return []
 
-    async def mock_get_conversations(bot_number=None, date_from=None, date_to=None):
+    async def mock_get_conversations(org_id=None, date_from=None, date_to=None):
         return []
 
     bogota_today = str(datetime.now(ZoneInfo("America/Bogota")).date())

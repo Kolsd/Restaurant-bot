@@ -210,13 +210,11 @@ async def test_deduct_uses_recipe_when_it_exists():
     with (
         patch.object(db, "get_pool",
                      AsyncMock(return_value=_make_pool(mock_conn))),
-        patch.object(db, "db_get_restaurant_by_phone",
-                     AsyncMock(return_value=restaurant)),
         patch.object(inv_repo, "_sync_ingredient_dishes_conn", _noop_sync),
     ):
         with tenant_scope(1):
             await db.db_deduct_inventory_for_order(
-                bot_number="+57300", items=[{"name": "Pizza", "quantity": 2}]
+                org_id=1, items=[{"name": "Pizza", "quantity": 2}]
             )
 
     # There must be an inventory UPDATE via fetchrow (uses RETURNING)
@@ -267,12 +265,10 @@ async def test_deduct_uses_linked_dishes_fallback_without_recipe():
     with (
         patch.object(db, "get_pool",
                      AsyncMock(return_value=_make_pool(mock_conn))),
-        patch.object(db, "db_get_restaurant_by_phone",
-                     AsyncMock(return_value=restaurant)),
     ):
         with tenant_scope(1):
             await db.db_deduct_inventory_for_order(
-                bot_number="+57300",
+                org_id=1,
                 items=[{"name": "Hamburguesa", "quantity": 3}]
             )
 
@@ -330,14 +326,12 @@ async def test_deduct_deactivates_dish_when_stock_runs_out():
     with (
         patch.object(db, "get_pool",
                      AsyncMock(return_value=_make_pool(mock_conn))),
-        patch.object(db, "db_get_restaurant_by_phone",
-                     AsyncMock(return_value=restaurant)),
         patch.object(inv_repo, "_sync_dish_availability_conn", fake_sync_conn),
         patch.object(inv_repo, "_sync_ingredient_dishes_conn", _noop_ingredient_sync),
     ):
         with tenant_scope(1):
             await db.db_deduct_inventory_for_order(
-                bot_number="+57300",
+                org_id=1,
                 items=[{"name": "Sopa del día", "quantity": 1}]
             )
 
@@ -345,30 +339,6 @@ async def test_deduct_deactivates_dish_when_stock_runs_out():
     assert len(sync_calls) == 1
     assert sync_calls[0][1] is False
     assert "Sopa del día" in sync_calls[0][0]
-
-
-@pytest.mark.asyncio
-async def test_deduct_nonexistent_restaurant_does_nothing():
-    """If the restaurant doesn't exist, the function must return without error."""
-    from app.services import database as db
-
-    mock_conn = AsyncMock()
-    mock_conn.execute = AsyncMock()
-    mock_conn.fetch   = AsyncMock(return_value=[])
-
-    with (
-        patch.object(db, "get_pool",
-                     AsyncMock(return_value=_make_pool(mock_conn))),
-        patch.object(db, "db_get_restaurant_by_phone",
-                     AsyncMock(return_value=None)),
-    ):
-        # Must not raise an exception
-        await db.db_deduct_inventory_for_order(
-            bot_number="+57000",
-            items=[{"name": "Nada", "quantity": 1}]
-        )
-
-    mock_conn.execute.assert_not_called()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -395,7 +365,7 @@ def test_recipe_routes_upsert_and_delete(client, monkeypatch):
         pass
 
     async def mock_scoped_override():
-        yield {"id": 1, "whatsapp_number": "+57300", "name": "Rest"}
+        yield {"id": 1, "name": "Rest"}
 
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
@@ -444,7 +414,7 @@ def test_recipe_routes_food_costs(client, monkeypatch):
                  "breakdown": [{"ingredient": "Queso", "line_cost": 12000}]}]
 
     async def mock_scoped_override():
-        yield {"id": 1, "whatsapp_number": "+57300", "name": "Rest"}
+        yield {"id": 1, "name": "Rest"}
 
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)

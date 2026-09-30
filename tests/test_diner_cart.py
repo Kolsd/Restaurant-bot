@@ -89,7 +89,6 @@ async def _make_org(conn) -> dict:
         json.dumps(menu), json.dumps({"currency": "COP"}),
     )
     # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
-    bot_number = f"web{org_id}"
     location_id = await conn.fetchval(
         "INSERT INTO locations (org_id, name) VALUES ($1, $2) RETURNING id",
         org_id, f"Sede {suffix}",
@@ -112,7 +111,6 @@ async def _make_org(conn) -> dict:
         "org_id": org_id,
         "location_id": location_id,
         "table_id": table_id,
-        "bot_number": bot_number,
     }
 
 
@@ -395,7 +393,7 @@ def test_get_cart_empty_before_any_add_returns_empty_block(client, seed_org):
     assert block["subtotal"] == 0.0
 
 
-async def _seed_legacy_cart_item(token: str, bot_number: str, org_id: int) -> None:
+async def _seed_legacy_cart_item(token: str, org_id: int) -> None:
     """Directly write a cart row shaped like a pre-line_id item (no line_id,
     no note key at all) — the shape LLM-path carts had before this wave."""
     conn = await asyncpg.connect(TEST_DB_URL)
@@ -408,9 +406,9 @@ async def _seed_legacy_cart_item(token: str, bot_number: str, org_id: int) -> No
             "order_type": None, "address": None, "notes": "",
         }
         await conn.execute(
-            "INSERT INTO carts (phone, bot_number, cart_data, updated_at, org_id) "
-            "VALUES ($1, $2, $3::jsonb, NOW(), $4)",
-            token, bot_number, json.dumps(cart_data), org_id,
+            "INSERT INTO carts (phone, org_id, cart_data, updated_at) "
+            "VALUES ($1, $2, $3::jsonb, NOW())",
+            token, org_id, json.dumps(cart_data),
         )
     finally:
         await conn.close()
@@ -419,7 +417,7 @@ async def _seed_legacy_cart_item(token: str, bot_number: str, org_id: int) -> No
 def test_legacy_cart_item_without_line_id_is_backfilled_on_read(client, seed_org):
     session = _open_session(client, seed_org["table_id"])
     token = session["token"]
-    _run(_seed_legacy_cart_item(token, seed_org["bot_number"], seed_org["org_id"]))
+    _run(_seed_legacy_cart_item(token, seed_org["org_id"]))
 
     r1 = _cart(client, token)
     assert r1.status_code == 200
@@ -506,7 +504,7 @@ def test_note_injection_payload_stripped_before_llm_context(client, seed_org):
     # block — see agent._build_enriched_user_message) must NOT contain it.
     async def _summary():
         with tenant_scope(seed_org["org_id"]):
-            return await orders.cart_summary(token, seed_org["bot_number"])
+            return await orders.cart_summary(token, seed_org["org_id"])
 
     _reset_pool()  # see test_diner_routes.py module docstring, event-loop note 2
     summary_text = _run(_summary())

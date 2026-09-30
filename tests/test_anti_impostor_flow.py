@@ -147,13 +147,12 @@ async def location_id(db_conn, org_id):
     row = await db_conn.fetchrow(
         """
         INSERT INTO locations
-            (org_id, name, code, address, whatsapp_number)
-        VALUES ($1, 'TestBranchAI', $2, 'AI St 1', $3)
+            (org_id, name, code, address)
+        VALUES ($1, 'TestBranchAI', $2, 'AI St 1')
         RETURNING id
         """,
         org_id,
         f"ai-branch-{secrets.token_hex(4)}",
-        f"57900{secrets.token_hex(3).lower()}",
     )
     return row["id"]
 
@@ -182,7 +181,6 @@ async def _make_table(db_conn, org_id: int, loc_id: int, suffix: str = "A") -> s
 async def _make_session(
     db_conn,
     phone: str,
-    bot: str,
     table_id: str,
     table_name: str,
     org_id: int,
@@ -192,13 +190,12 @@ async def _make_session(
     row = await db_conn.fetchrow(
         """
         INSERT INTO table_sessions
-            (phone, bot_number, table_id, table_name,
+            (phone, table_id, table_name,
              org_id, location_id, status, verified, last_activity)
-        VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, NOW())
+        VALUES ($1, $2, $3, $4, $5, 'active', $6, NOW())
         RETURNING id, verified
         """,
         phone,
-        bot,
         table_id,
         table_name,
         org_id,
@@ -211,7 +208,6 @@ async def _make_session(
 async def _make_table_order(
     db_conn,
     phone: str,
-    bot: str,
     table_id: str,
     org_id: int,
     loc_id: int,
@@ -225,14 +221,13 @@ async def _make_table_order(
     await db_conn.execute(
         """
         INSERT INTO table_orders
-            (id, phone, bot_number, table_id, table_name, org_id, location_id,
+            (id, phone, table_id, table_name, org_id, location_id,
              station, status, items, total, pending_table_validation, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7,
-                'cocina', $8, '[]'::jsonb, 15000, $9, NOW() - INTERVAL '2 minutes')
+        VALUES ($1, $2, $3, $4, $5, $6,
+                'cocina', $7, '[]'::jsonb, 15000, $8, NOW() - INTERVAL '2 minutes')
         """,
         order_id,
         phone,
-        bot,
         table_id,
         f"Mesa {table_id[-2:]}",   # table_name (NOT NULL)
         org_id,
@@ -258,17 +253,16 @@ async def test_first_order_pending_when_unverified(db_conn, org_id, location_id)
         db_session_has_prior_orders,
     )
 
-    bot = "57999011001"
     phone = "573001210001"
     table_id = await _make_table(db_conn, org_id, location_id, suffix="C3T1")
 
     with tenant_scope(org_id):
         # Unverified session (default).
-        await _make_session(db_conn, phone, bot, table_id, "Mesa C3T1",
+        await _make_session(db_conn, phone, table_id, "Mesa C3T1",
                             org_id, location_id, verified=False)
 
-        is_verified = await db_session_is_verified(phone, bot)
-        has_prior = await db_session_has_prior_orders(phone, bot)
+        is_verified = await db_session_is_verified(phone, org_id)
+        has_prior = await db_session_has_prior_orders(phone, org_id)
 
     assert is_verified is False, (
         "New session must NOT be verified — should trigger pending_table_validation hold"
@@ -290,15 +284,14 @@ async def test_first_order_not_pending_when_verified(db_conn, org_id, location_i
     """
     from app.repositories.tables_repo import db_session_is_verified
 
-    bot = "57999011002"
     phone = "573001210002"
     table_id = await _make_table(db_conn, org_id, location_id, suffix="C3T2")
 
     with tenant_scope(org_id):
-        await _make_session(db_conn, phone, bot, table_id, "Mesa C3T2",
+        await _make_session(db_conn, phone, table_id, "Mesa C3T2",
                             org_id, location_id, verified=True)
 
-        is_verified = await db_session_is_verified(phone, bot)
+        is_verified = await db_session_is_verified(phone, org_id)
 
     assert is_verified is True, (
         "Verified session must return True — first order goes straight to kitchen"
@@ -314,20 +307,19 @@ async def test_second_order_not_pending_in_unverified_session(db_conn, org_id, l
     """
     from app.repositories.tables_repo import db_session_has_prior_orders
 
-    bot = "57999011003"
     phone = "573001210003"
     table_id = await _make_table(db_conn, org_id, location_id, suffix="C3T3")
 
     with tenant_scope(org_id):
-        await _make_session(db_conn, phone, bot, table_id, "Mesa C3T3",
+        await _make_session(db_conn, phone, table_id, "Mesa C3T3",
                             org_id, location_id, verified=False)
         # Insert a first (pending validation) order for this phone.
         await _make_table_order(
-            db_conn, phone, bot, table_id, org_id, location_id,
+            db_conn, phone, table_id, org_id, location_id,
             pending_table_validation=True, status="pendiente",
         )
 
-        has_prior = await db_session_has_prior_orders(phone, bot)
+        has_prior = await db_session_has_prior_orders(phone, org_id)
 
     assert has_prior is True, (
         "With an existing order, db_session_has_prior_orders must return True "
@@ -341,20 +333,19 @@ async def test_confirm_real_releases_pending_orders(db_conn, org_id, location_id
     """db_confirm_table_real sets pending_table_validation=false on all held orders."""
     from app.repositories.tables_repo import db_confirm_table_real
 
-    bot = "57999011004"
     phone = "573001210004"
     table_id = await _make_table(db_conn, org_id, location_id, suffix="C3T4")
 
     with tenant_scope(org_id):
-        await _make_session(db_conn, phone, bot, table_id, "Mesa C3T4",
+        await _make_session(db_conn, phone, table_id, "Mesa C3T4",
                             org_id, location_id, verified=False)
         # Two held orders.
         oid1 = await _make_table_order(
-            db_conn, phone, bot, table_id, org_id, location_id,
+            db_conn, phone, table_id, org_id, location_id,
             pending_table_validation=True,
         )
         oid2 = await _make_table_order(
-            db_conn, phone, bot, table_id, org_id, location_id,
+            db_conn, phone, table_id, org_id, location_id,
             pending_table_validation=True,
         )
 
@@ -382,19 +373,18 @@ async def test_confirm_real_marks_session_verified(db_conn, org_id, location_id)
         db_session_is_verified,
     )
 
-    bot = "57999011005"
     phone = "573001210005"
     table_id = await _make_table(db_conn, org_id, location_id, suffix="C3T5")
 
     with tenant_scope(org_id):
-        await _make_session(db_conn, phone, bot, table_id, "Mesa C3T5",
+        await _make_session(db_conn, phone, table_id, "Mesa C3T5",
                             org_id, location_id, verified=False)
 
         # Confirm the table is real.
         await db_confirm_table_real(table_id, org_id, "mesero_test")
 
         # Session should now be verified.
-        is_verified = await db_session_is_verified(phone, bot)
+        is_verified = await db_session_is_verified(phone, org_id)
 
     assert is_verified is True, (
         "After db_confirm_table_real, db_session_is_verified must return True "
@@ -408,15 +398,14 @@ async def test_mark_ghost_cancels_orders(db_conn, org_id, location_id):
     """db_mark_table_ghost cancels all pending_table_validation orders on the table."""
     from app.repositories.tables_repo import db_mark_table_ghost
 
-    bot = "57999011006"
     phone = "573001210006"
     table_id = await _make_table(db_conn, org_id, location_id, suffix="C3T6")
 
     with tenant_scope(org_id):
-        await _make_session(db_conn, phone, bot, table_id, "Mesa C3T6",
+        await _make_session(db_conn, phone, table_id, "Mesa C3T6",
                             org_id, location_id, verified=False)
         oid = await _make_table_order(
-            db_conn, phone, bot, table_id, org_id, location_id,
+            db_conn, phone, table_id, org_id, location_id,
             pending_table_validation=True, status="pendiente",
         )
 
@@ -442,15 +431,14 @@ async def test_mark_ghost_closes_sessions(db_conn, org_id, location_id):
     """db_mark_table_ghost sets active sessions to 'ghost_blocked' status."""
     from app.repositories.tables_repo import db_mark_table_ghost
 
-    bot = "57999011007"
     phone = "573001210007"
     table_id = await _make_table(db_conn, org_id, location_id, suffix="C3T7")
 
     with tenant_scope(org_id):
-        sess = await _make_session(db_conn, phone, bot, table_id, "Mesa C3T7",
+        sess = await _make_session(db_conn, phone, table_id, "Mesa C3T7",
                                    org_id, location_id, verified=False)
         await _make_table_order(
-            db_conn, phone, bot, table_id, org_id, location_id,
+            db_conn, phone, table_id, org_id, location_id,
             pending_table_validation=True,
         )
 
@@ -479,15 +467,14 @@ async def test_mark_ghost_blocks_phones_24h(db_conn, org_id, location_id):
     from app.repositories.tables_repo import db_mark_table_ghost
     from app.repositories.phone_blocklist_repo import add_to_blocklist, is_phone_blocked
 
-    bot = "57999011008"
     phone = "573001210008"
     table_id = await _make_table(db_conn, org_id, location_id, suffix="C3T8")
 
     with tenant_scope(org_id):
-        await _make_session(db_conn, phone, bot, table_id, "Mesa C3T8",
+        await _make_session(db_conn, phone, table_id, "Mesa C3T8",
                             org_id, location_id, verified=False)
         await _make_table_order(
-            db_conn, phone, bot, table_id, org_id, location_id,
+            db_conn, phone, table_id, org_id, location_id,
             pending_table_validation=True,
         )
 
@@ -525,22 +512,21 @@ async def test_kds_excludes_pending_orders_from_kitchen(db_conn, org_id, locatio
     """
     from app.repositories.tables_repo import db_get_table_orders
 
-    bot = "57999011009"
     phone = "573001210009"
     table_id = await _make_table(db_conn, org_id, location_id, suffix="C3T9")
 
     with tenant_scope(org_id):
-        await _make_session(db_conn, phone, bot, table_id, "Mesa C3T9",
+        await _make_session(db_conn, phone, table_id, "Mesa C3T9",
                             org_id, location_id, verified=False)
 
         # Insert one pending-validation order (should be hidden from KDS).
         await _make_table_order(
-            db_conn, phone, bot, table_id, org_id, location_id,
+            db_conn, phone, table_id, org_id, location_id,
             pending_table_validation=True, status="pendiente",
         )
         # Insert one regular order (should appear in KDS).
         await _make_table_order(
-            db_conn, phone, bot, table_id, org_id, location_id,
+            db_conn, phone, table_id, org_id, location_id,
             pending_table_validation=False, status="pendiente",
         )
 

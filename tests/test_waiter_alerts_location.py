@@ -5,15 +5,15 @@ Coverage for the Part 2 fixes to app/repositories/tables_repo.py and
 app/routes/tables.py:
 
   1. `db_create_waiter_alert` / `db_get_waiter_alerts` now carry/filter by
-     `location_id` — a multi-location restaurant sharing one bot_number must
+     `location_id` — a multi-location restaurant (one org) must
      not leak location-2 alerts onto location-1's waiter screen. Legacy rows
      with location_id IS NULL (created before this column was populated)
      must still show up everywhere (never silently vanish).
   2. POST /api/waiter-alerts/{id}/dismiss is no longer a cross-tenant IDOR:
      an id belonging to another org must 404 and leave the row untouched.
   3. POST /api/waiter-alerts/admin-call no longer trusts the request body's
-     `bot_number` — it resolves the caller's own restaurant server-side, so
-     a body naming another restaurant's bot_number cannot land an alert
+     tenant key — it resolves the caller's own restaurant server-side, so
+     a body naming another restaurant cannot land an alert
      there, and the created row carries the CALLER's org_id.
 
 Mirrors tests/test_diner_routes.py's real-DB seed/teardown + _run/_get/_post
@@ -74,7 +74,6 @@ def _post(client, url, **kwargs):
 
 async def _make_org_with_locations(conn, n_locations: int = 1) -> dict:
     suffix = uuid.uuid4().hex[:10]
-    bot_number = f"573{suffix[:9]}"
     org_id = await conn.fetchval(
         "INSERT INTO organizations (name, slug, menu, features) "
         "VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id",
@@ -82,18 +81,12 @@ async def _make_org_with_locations(conn, n_locations: int = 1) -> dict:
     )
     location_ids = []
     for i in range(n_locations):
-        # First location keeps the bare bot_number (so single-location
-        # fixtures — org_a/org_b — have an exact-match `bot_number`); extra
-        # locations get a distinct suffix purely to satisfy uniqueness (the
-        # two_location_org fixture overwrites both anyway via
-        # _set_location_whatsapp_number before asserting on it).
-        wa_number = bot_number if i == 0 else f"{bot_number}_{i}"
         loc_id = await conn.fetchval(
-            "INSERT INTO locations (org_id, name, whatsapp_number) VALUES ($1, $2, $3) RETURNING id",
-            org_id, f"Sede {suffix}-{i}", wa_number,
+            "INSERT INTO locations (org_id, name) VALUES ($1, $2) RETURNING id",
+            org_id, f"Sede {suffix}-{i}",
         )
         location_ids.append(loc_id)
-    return {"org_id": org_id, "location_ids": location_ids, "bot_number": bot_number}
+    return {"org_id": org_id, "location_ids": location_ids}
 
 
 async def _teardown_org(org_id: int) -> None:
@@ -108,14 +101,12 @@ async def _teardown_org(org_id: int) -> None:
 
 @pytest.fixture
 def two_location_org():
-    """One org, two locations (A, B), sharing ONE synthetic bot_number — the
-    exact scenario the bug report describes."""
+    """One org, two locations (A, B) — the exact scenario the bug report
+    describes."""
     async def _seed():
         conn = await asyncpg.connect(TEST_DB_URL)
         try:
-            info = await _make_org_with_locations(conn, n_locations=2)
-            info["bot_number"] = f"shared-{uuid.uuid4().hex[:8]}"
-            return info
+            return await _make_org_with_locations(conn, n_locations=2)
         finally:
             await conn.close()
 
@@ -198,23 +189,23 @@ _AUTH_HEADERS = {"Authorization": "Bearer test-token"}
 
 # ── Repo-level: location filter + legacy NULL passthrough ───────────────────
 
-async def _seed_three_alerts(org_id: int, bot_number: str, loc_a: int, loc_b: int) -> None:
+async def _seed_three_alerts(org_id: int, loc_a: int, loc_b: int) -> None:
     from app.services.tenant_context import tenant_scope
     from app.repositories import tables_repo as tr
 
     with tenant_scope(org_id):
         await tr.db_create_waiter_alert(
-            phone="web:a", bot_number=bot_number, alert_type="other",
+            phone="web:a", org_id=org_id, alert_type="other",
             message="alert for A", table_id="ta", table_name="Mesa A",
             location_id=loc_a,
         )
         await tr.db_create_waiter_alert(
-            phone="web:b", bot_number=bot_number, alert_type="other",
+            phone="web:b", org_id=org_id, alert_type="other",
             message="alert for B", table_id="tb", table_name="Mesa B",
             location_id=loc_b,
         )
         await tr.db_create_waiter_alert(
-            phone="web:legacy", bot_number=bot_number, alert_type="other",
+            phone="web:legacy", org_id=org_id, alert_type="other",
             message="legacy alert, no location", table_id="tl", table_name="Mesa Legacy",
             location_id=None,
         )
@@ -226,13 +217,12 @@ def test_location_reader_sees_own_alert_and_legacy_not_other_location(two_locati
 
     org_id = two_location_org["org_id"]
     loc_a, loc_b = two_location_org["location_ids"]
-    bot_number = two_location_org["bot_number"]
 
-    _run(_seed_three_alerts(org_id, bot_number, loc_a, loc_b))
+    _run(_seed_three_alerts(org_id, loc_a, loc_b))
 
     async def _read_for(location_id):
         with tenant_scope(org_id):
-            return await tr.db_get_waiter_alerts(bot_number, location_id=location_id)
+            return await tr.db_get_waiter_alerts(org_id, location_id=location_id)
 
     alerts_a = _run(_read_for(loc_a))
     messages_a = {a["message"] for a in alerts_a}
@@ -253,12 +243,11 @@ def test_no_location_filter_returns_every_sede(two_location_org):
 
     org_id = two_location_org["org_id"]
     loc_a, loc_b = two_location_org["location_ids"]
-    bot_number = two_location_org["bot_number"]
-    _run(_seed_three_alerts(org_id, bot_number, loc_a, loc_b))
+    _run(_seed_three_alerts(org_id, loc_a, loc_b))
 
     async def _read_all():
         with tenant_scope(org_id):
-            return await tr.db_get_waiter_alerts(bot_number, location_id=None)
+            return await tr.db_get_waiter_alerts(org_id, location_id=None)
 
     alerts = _run(_read_all())
     assert len(alerts) == 3
@@ -269,19 +258,8 @@ def test_no_location_filter_returns_every_sede(two_location_org):
 def test_get_waiter_alerts_filters_by_branch_header(client, two_location_org, monkeypatch):
     org_id = two_location_org["org_id"]
     loc_a, loc_b = two_location_org["location_ids"]
-    bot_number = two_location_org["bot_number"]
-    _run(_seed_three_alerts(org_id, bot_number, loc_a, loc_b))
+    _run(_seed_three_alerts(org_id, loc_a, loc_b))
 
-    # The route reads bot_number off the RESOLVED restaurant dict
-    # (`restaurant["whatsapp_number"]`), not off our synthetic shared value
-    # directly — so point location A's real whatsapp_number at it. (loc_b's
-    # own whatsapp_number is left untouched — a real `ux_locations_whatsapp`
-    # unique constraint means two locations can never share the literal
-    # column value; production reaches the "shared bot_number" scenario via
-    # the "_b<timestamp>" suffix stripped at read time, see
-    # app/routes/diner.py's `bot_number = ...split("_b")[0]. This test only
-    # authenticates as location A, so only A needs the synthetic value.)
-    _run(_set_location_whatsapp_number(loc_a, bot_number))
 
     _auth_as_location(monkeypatch, loc_a)
     headers = dict(_AUTH_HEADERS)
@@ -294,26 +272,16 @@ def test_get_waiter_alerts_filters_by_branch_header(client, two_location_org, mo
     assert "alert for B" not in messages
 
 
-async def _set_location_whatsapp_number(location_id: int, whatsapp_number: str) -> None:
-    conn = await asyncpg.connect(TEST_DB_URL)
-    try:
-        await conn.execute("UPDATE locations SET whatsapp_number=$1 WHERE id=$2", whatsapp_number, location_id)
-    finally:
-        await conn.close()
-
-
 def test_get_waiter_alerts_without_header_returns_all_locations(client, two_location_org, monkeypatch):
     org_id = two_location_org["org_id"]
     loc_a, loc_b = two_location_org["location_ids"]
-    bot_number = two_location_org["bot_number"]
-    _run(_seed_three_alerts(org_id, bot_number, loc_a, loc_b))
-    _run(_set_location_whatsapp_number(loc_a, bot_number))
+    _run(_seed_three_alerts(org_id, loc_a, loc_b))
 
     _auth_as_location(monkeypatch, loc_a)
     resp = _get(client, "/api/waiter-alerts", headers=_AUTH_HEADERS)
     assert resp.status_code == 200
     # No X-Branch-ID header — today's behaviour is preserved: no location
-    # filter, every sede sharing this bot_number comes back.
+    # filter, every sede of the org comes back.
     assert len(resp.json()["alerts"]) == 3
 
 
@@ -326,7 +294,7 @@ def test_dismiss_foreign_org_alert_returns_404_and_row_untouched(client, org_a, 
     async def _create_alert_for_a():
         with tenant_scope(org_a["org_id"]):
             return await tr.db_create_waiter_alert(
-                phone="web:victim", bot_number=org_a["bot_number"], alert_type="bill",
+                phone="web:victim", org_id=org_a["org_id"], alert_type="bill",
                 message="org A's bill request", table_id="t1", table_name="Mesa 1",
                 location_id=org_a["location_ids"][0],
             )
@@ -357,7 +325,7 @@ def test_dismiss_own_org_alert_succeeds(client, org_a, monkeypatch):
     async def _create_alert_for_a():
         with tenant_scope(org_a["org_id"]):
             return await tr.db_create_waiter_alert(
-                phone="web:owner", bot_number=org_a["bot_number"], alert_type="bill",
+                phone="web:owner", org_id=org_a["org_id"], alert_type="bill",
                 message="org A's own bill request", table_id="t1", table_name="Mesa 1",
                 location_id=org_a["location_ids"][0],
             )
@@ -371,15 +339,15 @@ def test_dismiss_own_org_alert_succeeds(client, org_a, monkeypatch):
     assert resp.json()["success"] is True
 
 
-# ── Security fix 2: admin-call ignores the body's bot_number ────────────────
+# ── Security fix 2: admin-call ignores any tenant key in the body ───────────
 
-def test_admin_call_cannot_target_another_restaurant_via_body_bot_number(client, org_a, org_b, monkeypatch):
+def test_admin_call_cannot_target_another_restaurant_via_body(client, org_a, org_b, monkeypatch):
     _auth_as_location(monkeypatch, org_a["location_ids"][0])
 
     resp = _post(
         client, "/api/waiter-alerts/admin-call",
         headers=_AUTH_HEADERS,
-        json={"bot_number": org_b["bot_number"], "table_name": "Mesa hostil"},
+        json={"org_id": org_b["org_id"], "table_name": "Mesa hostil"},
     )
     assert resp.status_code == 200
 
@@ -393,7 +361,6 @@ def test_admin_call_cannot_target_another_restaurant_via_body_bot_number(client,
             await conn.close()
 
     a_rows, b_rows = _run(_counts())
-    assert len(b_rows) == 0, "the alert must NOT land on org B despite the body naming org B's bot_number"
+    assert len(b_rows) == 0, "the alert must NOT land on org B despite the body naming org B"
     assert len(a_rows) == 1
     assert a_rows[0]["org_id"] == org_a["org_id"]
-    assert a_rows[0]["bot_number"] == org_a["bot_number"]

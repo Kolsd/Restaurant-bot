@@ -27,9 +27,9 @@ SAMPLE_MENU = {
     ],
 }
 
-BOT_NUMBER   = "5571234567"
+ORG_ID   = 4242
 PHONE        = "573001112233"
-RESTAURANT_OBJ = {"id": 42, "name": "Test Rest", "whatsapp_number": BOT_NUMBER}
+RESTAURANT_OBJ = {"id": 42, "name": "Test Rest", "whatsapp_number": ORG_ID}
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ async def _run_validate(tool_name: str, tool_input: dict, menu: dict = SAMPLE_ME
             tool_input=tool_input,
             reply="Tu pedido está listo.",
             table_context=_TABLE_CONTEXT,
-            bot_number=BOT_NUMBER,
+            org_id=ORG_ID,
             phone=PHONE,
             features={},
             session_state={},
@@ -224,7 +224,7 @@ async def test_resolve_items_server_side_returns_decimal_total():
             {"name": "Jugo de Mora", "qty": 3},
             {"name": "Agua",         "qty": 1},
         ]
-        resolved, total, errors = await _resolve_items_server_side(items, BOT_NUMBER)
+        resolved, total, errors = await _resolve_items_server_side(items, ORG_ID)
 
     assert errors == [], f"No errors expected; got {errors}"
     assert len(resolved) == 2
@@ -258,7 +258,7 @@ async def test_empty_item_name_counted_as_error():
         mock_orders_db.db_get_menu = AsyncMock(return_value=SAMPLE_MENU)
 
         items = [{"qty": 1}]  # no name, no sku
-        resolved, total, errors = await _resolve_items_server_side(items, BOT_NUMBER)
+        resolved, total, errors = await _resolve_items_server_side(items, ORG_ID)
 
     assert resolved == [], "No item should resolve without a name"
     assert len(errors) == 1, f"Expected 1 error; got {errors}"

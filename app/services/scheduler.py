@@ -56,7 +56,7 @@ async def _create_inactivity_alert(session: dict):
     try:
         await db.db_create_waiter_alert(
             phone=session["phone"],
-            bot_number=session["bot_number"],
+            org_id=session["org_id"],
             alert_type="waiter",
             message=f"Cliente en {session.get('table_name', 'mesa')} sin actividad — posible cierre por inactividad.",
             table_id=session.get("table_id", ""),
@@ -90,14 +90,14 @@ async def _process_closeable_session(session: dict):
     """Closes an inactive session with a semaphore."""
     async with _scheduler_semaphore:
         phone      = session["phone"]
-        bot_number = session["bot_number"]
+        org_id     = session["org_id"]
         table_name = session.get("table_name", "tu mesa")
 
         # 🛡️ FIX MULTI-WORKER: close in the DB first; None means another
         # worker won the race.
         closed_session = await db.db_close_session(
             phone=phone,
-            bot_number=bot_number,
+            org_id=org_id,
             reason="inactivity_timeout",
             closed_by_username="system"
         )
@@ -109,15 +109,15 @@ async def _process_closeable_session(session: dict):
         # el scheduler cerrara la sesión por inactividad, no tiene sentido mantener el
         # estado NPS activo. La próxima vez que escriba debe poder ordenar sin bloqueos.
         try:
-            await state_store.nps_delete(phone, bot_number)
+            await state_store.nps_delete(phone, org_id)
         except Exception as e:
             log.error("scheduler.nps_state_clear_failed", phone=phone, error=str(e))
 
         pool = await db.get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
-                "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
-                phone, bot_number
+                "DELETE FROM conversations WHERE phone=$1 AND org_id=$2",
+                phone, org_id
             )
 
         log.info("scheduler.session_closed_inactivity", phone=phone, table_name=table_name)

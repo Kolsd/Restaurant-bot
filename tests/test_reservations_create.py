@@ -72,7 +72,6 @@ def _sample_reservation(org_id: int = ORG_A_ID) -> dict:
         "table_id":      None,
         "source":        "manual",
         "status":        "pending",
-        "bot_number":    f"5730012345{org_id:02d}",
         "created_at":    "2026-04-20T12:00:00",
         "confirmed_at":  None,
         "cancelled_at":  None,
@@ -217,7 +216,7 @@ def test_create_returns_full_shape(monkeypatch):
     data = resp.json()
 
     for key in ("id", "status", "name", "date", "time", "guests", "phone",
-                "notes", "table_id", "source", "bot_number"):
+                "notes", "table_id", "source", "org_id"):
         assert key in data, f"Missing key in response: {key}"
 
     assert data["status"] == "pending"
@@ -252,9 +251,9 @@ def test_tenant_isolation(monkeypatch):
     )
     assert resp.status_code == 201
 
-    # Verify create was called with the org A bot_number (not org B's)
+    # Verify create was called with a sede of org A (not org B's)
     assert len(created_calls) == 1
-    assert restaurant_a["whatsapp_number"] in str(created_calls[0].get("bot_number", ""))
+    assert created_calls[0].get("location_id") == restaurant_a["location_id"]
 
 
 def test_create_missing_required_fields_422(monkeypatch):

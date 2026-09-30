@@ -40,13 +40,13 @@ async def two_orgs(test_pool: asyncpg.Pool):
     rest_a = await seed_restaurant(
         test_pool,
         name="E2E Sub Limit Org A",
-        bot_number_raw="+570SUBE2EA1",
+        key="+570SUBE2EA1",
         num_branches=1,
     )
     rest_b = await seed_restaurant(
         test_pool,
         name="E2E Sub Limit Org B",
-        bot_number_raw="+570SUBE2EB1",
+        key="+570SUBE2EB1",
         num_branches=1,
     )
     await truncate_e2e_data(test_pool, rest_a["id"])

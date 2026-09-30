@@ -89,14 +89,14 @@ async def test_salon_add_item_after_confirm_creates_sub_order(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Salon Modify Order Test",
-        bot_number_raw="+570E2ESALONMOD",
+        key="+570E2ESALONMOD",
         menu=MENU,
         payment_methods=["Nequi", "Efectivo"],
         num_branches=1,
         branch_latlons=[(4.710989, -74.072092)],
     )
     parent_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
+    org_id = restaurant["id"]
     branch_1_id = restaurant["branches"][0]["id"]
 
     await truncate_e2e_data(pool, parent_id)
@@ -129,7 +129,7 @@ async def test_salon_add_item_after_confirm_creates_sub_order(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=f"Hola, estoy en la mesa [table_id:{table_id}]",
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # Turn 2 — initial order
@@ -137,7 +137,7 @@ async def test_salon_add_item_after_confirm_creates_sub_order(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text="Quiero pedir 2 empanaditas de carne",
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # Turn 3 — confirm initial order (unambiguous phrasing)
@@ -145,7 +145,7 @@ async def test_salon_add_item_after_confirm_creates_sub_order(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text="Sí, confirmo las 2 empanaditas de carne. Procede con el pedido.",
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # ── Assert base order exists ─────────────────────────────────────────
@@ -181,7 +181,7 @@ async def test_salon_add_item_after_confirm_creates_sub_order(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text="Quiero agregar también 1 ceviche especial, por favor.",
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # Turn 5 — confirm addition (unambiguous)
@@ -189,7 +189,7 @@ async def test_salon_add_item_after_confirm_creates_sub_order(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text="Sí, confirmo el ceviche especial adicional. Procede.",
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
     # ── Assert a NEW sub-order row was created OR base order was updated ──

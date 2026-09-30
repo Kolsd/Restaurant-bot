@@ -287,13 +287,12 @@ async def _seed_org(conn, name: str) -> tuple[int, int]:
     )
     location_id = await conn.fetchval(
         """
-        INSERT INTO locations (org_id, name, address, whatsapp_number)
-        VALUES ($1, $2, 'Calle 1 # 1-1', $3)
+        INSERT INTO locations (org_id, name, address)
+        VALUES ($1, $2, 'Calle 1 # 1-1')
         RETURNING id
         """,
         org_id,
         name + " - Principal",
-        "+5730000" + str(org_id).zfill(4),
     )
     return org_id, location_id
 
@@ -309,7 +308,7 @@ class TestRepoHooksPublishToHub:
         async with realtime.subscribe(org_id) as queue:
             with tenant_scope(org_id):
                 await tables_repo.db_create_waiter_alert(
-                    phone="web:test-token", bot_number="bot:rt-test",
+                    phone="web:test-token", org_id=org_id,
                     alert_type="bill", message="La cuenta por favor",
                     table_id="MESA-RT1", table_name="Mesa RT1",
                     location_id=location_id,
@@ -375,35 +374,6 @@ class TestRepoHooksPublishToHub:
         assert result is not None
         assert event["topic"] == "order.updated"
         assert event["org_id"] == org_id
-        assert event["entity_id"] == order_id
-
-    async def test_db_cancel_pending_order_publishes_order_updated(self, db_conn):
-        from app.repositories import orders_repo
-        from app.services.tenant_context import tenant_scope
-
-        org_id, location_id = await _seed_org(db_conn, "RT Cancel Co")
-        order_id = f"ORD-RT-{uuid.uuid4().hex[:6]}"
-        phone, bot_number = "web:test-token", "bot:rt-cancel-test"
-
-        with tenant_scope(org_id):
-            await db_conn.execute("SELECT set_config('app.org_id', $1, true)", str(org_id))
-            await db_conn.execute(
-                """
-                INSERT INTO orders (id, phone, items, order_type, subtotal, total,
-                                     org_id, location_id, bot_number, status)
-                VALUES ($1, $2, '[]'::jsonb, 'domicilio', 10000, 10000, $3, $4, $5, 'pendiente')
-                """,
-                order_id, phone, org_id, location_id, bot_number,
-            )
-
-            async with realtime.subscribe(org_id) as queue:
-                result = await orders_repo.db_cancel_pending_order(phone, bot_number, reason="cliente se arrepintió")
-                event = await asyncio.wait_for(queue.get(), timeout=2)
-
-        assert result == {"cancelled": True, "order_id": order_id}
-        assert event["topic"] == "order.updated"
-        assert event["org_id"] == org_id
-        assert event["location_id"] == location_id
         assert event["entity_id"] == order_id
 
     async def test_db_insert_check_publishes_check_updated(self, db_conn):

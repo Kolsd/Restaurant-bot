@@ -1,7 +1,7 @@
 """
 tests/e2e/test_bot_adversarial.py — E2E adversarial tests for bot safety rules.
 
-Independent tests, each seeds its own org with a unique bot_number.
+Independent tests, each seeds its own org with a unique key.
 (The WhatsApp wam_id de-duplication test left with the webhook, 2026-09-25.)
 
   Test 2 — test_prompt_injection_role_switch_blocked
@@ -151,13 +151,13 @@ async def test_prompt_injection_role_switch_blocked(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Adversarial Injection",
-        bot_number_raw=_BOT_INJECT,
+        key=_BOT_INJECT,
         menu=_MENU,
         payment_methods=_PAYMENT_METHODS,
         num_branches=0,
     )
     org_id     = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
+    org_id = restaurant["id"]
 
     await truncate_e2e_data(pool, org_id)
     _clear_state_store()
@@ -178,7 +178,7 @@ async def test_prompt_injection_role_switch_blocked(
             pool,
             phone=customer_phone,
             text=adversarial_text,
-            bot_number=bot_number,
+            org_id=org_id,
         )
 
         replies_after = bot_replies.texts_to(customer_phone)
@@ -258,13 +258,13 @@ async def test_null_and_empty_text_no_crash(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Adversarial Null Text",
-        bot_number_raw=_BOT_NULL,
+        key=_BOT_NULL,
         menu=_MENU,
         payment_methods=_PAYMENT_METHODS,
         num_branches=0,
     )
     org_id     = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
+    org_id = restaurant["id"]
 
     await truncate_e2e_data(pool, org_id)
     _clear_state_store()
@@ -289,7 +289,7 @@ async def test_null_and_empty_text_no_crash(
             pool,
             phone=customer_phone_raw,
             text=text,
-            bot_number=bot_number,
+            org_id=org_id,
         )
 
         replies_now = bot_replies.texts_to(customer_phone_raw)

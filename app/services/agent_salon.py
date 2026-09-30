@@ -230,7 +230,7 @@ def _ask_payment_for_check(state: dict, idx: int) -> str:
 
 
 async def _save_checkout_proposal(
-    phone: str, bot_number: str, state: dict, table_context: dict | None
+    phone: str, org_id: int, state: dict, table_context: dict | None
 ) -> list[str]:
     """Persists the payment proposal in the DB using database.py's functions.
 
@@ -422,13 +422,13 @@ def _parse_item_assignments(msg: str, items: list, total: float) -> list[float] 
 # ─── Checkout state machine ──────────────────────────────────────────────────
 
 async def handle_checkout_flow(
-    phone: str, bot_number: str, message: str, table_context: dict | None
+    phone: str, org_id: int, message: str, table_context: dict | None
 ) -> str | None:
     """
     Multi-turn checkout state machine. Returns a reply string if handled,
     or None if the message should fall through to the normal LLM flow.
     """
-    state = await state_store.checkout_get(phone, bot_number)
+    state = await state_store.checkout_get(phone, org_id)
     if state is None:
         return None
 
@@ -475,7 +475,7 @@ async def handle_checkout_flow(
         tip_20 = _resolve_tip("percent", 20, subtotal)
 
         state["step"] = "asking_tip"
-        await state_store.checkout_set(phone, bot_number, state)
+        await state_store.checkout_set(phone, org_id, state)
 
         lines = [
             f"El equipo de cocina y tu mesero estuvieron felices de atenderte hoy 👨‍🍳",
@@ -504,7 +504,7 @@ async def handle_checkout_flow(
             tip = _resolve_tip("percent", 20, subtotal)
         elif msg == "4" or "otro" in msg or "diferente" in msg:
             state["step"] = "asking_tip_custom"
-            await state_store.checkout_set(phone, bot_number, state)
+            await state_store.checkout_set(phone, org_id, state)
             return "¿Cuánto deseas dejar de propina? (escribe el valor, ej: 5000)"
         else:
             clean = re.sub(r'[$\s,.]', '', msg)
@@ -526,11 +526,11 @@ async def handle_checkout_flow(
         state["tip_amount"] = str(quantize_money(tip))  # JSON boundary: Decimal→str, read via to_decimal()
         if state.get("wants_factura") and not state.get("factura_name"):
             state["step"] = "asking_factura_nit"
-            await state_store.checkout_set(phone, bot_number, state)
+            await state_store.checkout_set(phone, org_id, state)
             return "¿A nombre de quién va la factura y cuál es el NIT o cédula? (Ej: 'Juan García, 123456789')\nEscribe \"omitir\" si prefieres factura a Consumidor Final."
         state["step"] = "asking_payment_0"
         state["current_check_idx"] = 0
-        await state_store.checkout_set(phone, bot_number, state)
+        await state_store.checkout_set(phone, org_id, state)
         return _ask_payment_for_check(state, 0)
 
     # ── Estado: propina personalizada ────────────────────────────────────
@@ -547,11 +547,11 @@ async def handle_checkout_flow(
         state["tip_amount"] = str(quantize_money(val_d))  # JSON boundary: Decimal→str, read via to_decimal()
         if state.get("wants_factura") and not state.get("factura_name"):
             state["step"] = "asking_factura_nit"
-            await state_store.checkout_set(phone, bot_number, state)
+            await state_store.checkout_set(phone, org_id, state)
             return "¿A nombre de quién va la factura y cuál es el NIT o cédula? (Ej: 'Juan García, 123456789')\nEscribe \"omitir\" si prefieres factura a Consumidor Final."
         state["step"] = "asking_payment_0"
         state["current_check_idx"] = 0
-        await state_store.checkout_set(phone, bot_number, state)
+        await state_store.checkout_set(phone, org_id, state)
         return _ask_payment_for_check(state, 0)
 
     # ── State: invoice data ──────────────────────────────────────────
@@ -567,7 +567,7 @@ async def handle_checkout_flow(
             state["factura_nit"] = nit_digits or "222222222"
         state["step"] = "asking_payment_0"
         state["current_check_idx"] = 0
-        await state_store.checkout_set(phone, bot_number, state)
+        await state_store.checkout_set(phone, org_id, state)
         name_show = state["factura_name"]
         return f"Perfecto, factura a nombre de {name_show} 🧾\n" + _ask_payment_for_check(state, 0)
 
@@ -593,7 +593,7 @@ async def handle_checkout_flow(
 
         if idx < state["split_count"]:
             state["step"] = f"asking_payment_{idx}"
-            await state_store.checkout_set(phone, bot_number, state)
+            await state_store.checkout_set(phone, org_id, state)
             return _ask_payment_for_check(state, idx)
 
         # Todos los métodos recolectados → confirmar y enviar a caja
@@ -603,7 +603,7 @@ async def handle_checkout_flow(
         )
         state["step"] = "confirming"
         state["requires_proof"] = needs_proof
-        await state_store.checkout_set(phone, bot_number, state)
+        await state_store.checkout_set(phone, org_id, state)
 
         total_with_tip = float(quantize_money(to_decimal(state["subtotal"]) + to_decimal(state["tip_amount"])))  # JSON boundary: display only
         lines = ["✅ ¡Listo! Aquí está el resumen de tu pago:"]
@@ -622,10 +622,10 @@ async def handle_checkout_flow(
             lines.append("He enviado tu propuesta de pago a caja. ¡Gracias! 🙌")
 
         try:
-            created_check_ids = await _save_checkout_proposal(phone, bot_number, state, table_context)
+            created_check_ids = await _save_checkout_proposal(phone, org_id, state, table_context)
         except Exception:
-            log.exception("checkout_proposal_save_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
-            await state_store.checkout_delete(phone, bot_number)
+            log.exception("checkout_proposal_save_failed", phone=_obfuscate_phone(phone), org_id=org_id)
+            await state_store.checkout_delete(phone, org_id)
             return "Hubo un problema al procesar tu pago. Por favor pide ayuda al mesero."
 
         _auto_confirm_ok = True  # assume success unless we attempt and fail
@@ -660,7 +660,7 @@ async def handle_checkout_flow(
                     )
 
         if not needs_proof and _auto_confirm_ok:
-            await state_store.checkout_delete(phone, bot_number)
+            await state_store.checkout_delete(phone, org_id)
 
         return "\n".join(lines)
 
@@ -675,10 +675,10 @@ async def handle_checkout_flow(
         "checkout_unknown_step",
         step=state.get("step"),
         phone=_obfuscate_phone(phone),
-        bot_number=bot_number,
+        org_id=org_id,
         base_order_id=state.get("base_order_id"),
     )
-    await state_store.checkout_delete(phone, bot_number)
+    await state_store.checkout_delete(phone, org_id)
     return "Tuvimos un problema con el flujo de pago. Por favor, avísale al mesero o inicia de nuevo."
 
 
@@ -687,7 +687,7 @@ async def handle_checkout_flow(
 async def execute_salon_action(
     parsed: dict,
     phone: str,
-    bot_number: str,
+    org_id: int,
     table_context: dict,
     session_state: dict,
     full_history: list,
@@ -702,12 +702,12 @@ async def execute_salon_action(
     reply  = parsed.get("reply", "")
 
     if action == "order":
-        cart = await db.db_get_cart(phone, bot_number)
+        cart = await db.db_get_cart(phone, org_id)
         if not cart or not cart.get("items"):
             log.warning("order_empty_cart", phone=_obfuscate_phone(phone), items=parsed.get("items"), action=action)
             return reply
 
-        cart_total    = await orders.get_cart_total(phone, bot_number)
+        cart_total    = await orders.get_cart_total(phone, org_id)
         cart_items    = cart["items"]
         extra_notes   = parsed.get("notes", "")
         separate_bill = parsed.get("separate_bill", False)
@@ -720,13 +720,13 @@ async def execute_salon_action(
         # committed (Layer 3 below may filter cart_items before the actual save).
         features: dict = {}
         try:
-            restaurant = await db.db_get_restaurant_by_bot_number(bot_number)
+            restaurant = await db.db_get_restaurant_by_org_id(org_id)
             if restaurant:
                 features = restaurant.get("features") or {}
                 if isinstance(features, str):
                     features = json.loads(features)
         except Exception:
-            log.exception("bar_routing_features_failed", phone=_obfuscate_phone(phone), bot_number=bot_number)
+            log.exception("bar_routing_features_failed", phone=_obfuscate_phone(phone), org_id=org_id)
 
         base_order_id = await db.db_get_base_order_id(table_context["id"])
         sub_number    = 1
@@ -737,22 +737,22 @@ async def execute_salon_action(
         # straight to the kitchen.
         _needs_validation = False
         try:
-            _session_verified = await db.db_session_is_verified(phone, bot_number)
+            _session_verified = await db.db_session_is_verified(phone, org_id)
             if not _session_verified:
-                _has_prior = await db.db_session_has_prior_orders(phone, bot_number)
+                _has_prior = await db.db_session_has_prior_orders(phone, org_id)
                 if not _has_prior:
                     _needs_validation = True
                     log.info(
                         "table_order.pending_validation",
                         phone=_obfuscate_phone(phone),
-                        bot_number=bot_number,
+                        org_id=org_id,
                         table_id=table_context.get("id"),
                     )
         except Exception:
             log.exception(
                 "capa3_verification_check_failed",
                 phone=_obfuscate_phone(phone),
-                bot_number=bot_number,
+                org_id=org_id,
             )
             # Fail-open: if the check errors, don't block the customer.
             _needs_validation = False
@@ -841,10 +841,10 @@ async def execute_salon_action(
                             )
                             if not _filtered_items:
                                 # All items were already ordered — nothing new to commit
-                                await orders.clear_cart(phone, bot_number)
+                                await orders.clear_cart(phone, org_id)
                                 return "Esos ítems ya están en tu pedido. ¿Quieres pedir algo distinto o más cantidad?"
                             # Rebuild cart with only the genuinely new items
-                            await orders.clear_cart(phone, bot_number)
+                            await orders.clear_cart(phone, org_id)
                             for _new_itm in _filtered_items:
                                 _n2 = _new_itm.get("name", "")
                                 try:
@@ -852,13 +852,13 @@ async def execute_salon_action(
                                 except (ValueError, TypeError):
                                     _q2 = 1
                                 if _n2:
-                                    await orders.add_to_cart(phone, _n2, _q2, bot_number)
+                                    await orders.add_to_cart(phone, _n2, _q2, org_id)
                             # Refresh cart_items, cart, and totals from the updated cart.
                             # Station split (kitchen vs bar) is recomputed fresh inside
                             # save_table_order_round() below from these final cart_items.
-                            cart = await db.db_get_cart(phone, bot_number)
+                            cart = await db.db_get_cart(phone, org_id)
                             cart_items = cart["items"] if cart and cart.get("items") else []
-                            cart_total = await orders.get_cart_total(phone, bot_number)
+                            cart_total = await orders.get_cart_total(phone, org_id)
                             items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
             except Exception:
                 log.exception("duplicate_order_check_failed", base_order_id=base_order_id)
@@ -893,21 +893,21 @@ async def execute_salon_action(
         _skip_inventory = _is_duplicate_order
         if not _skip_inventory:
             from app.services.table_order_commit import deduct_inventory_or_cancel  # noqa: PLC0415
-            _inv = await deduct_inventory_or_cancel(bot_number, cart_items, order_id)
+            _inv = await deduct_inventory_or_cancel(org_id, cart_items, order_id)
             if not _inv["success"]:
                 log.info("table_order_cancelled_insufficient_stock", order_id=order_id)
                 try:
-                    await orders.clear_cart(phone, bot_number)
+                    await orders.clear_cart(phone, org_id)
                 except Exception:
-                    log.exception("cart_clear_failed_table_order", phone=_obfuscate_phone(phone), bot_number=bot_number)
+                    log.exception("cart_clear_failed_table_order", phone=_obfuscate_phone(phone), org_id=org_id)
                 return f"{_inv['message']} ¿Te gustaría ordenar algo diferente?"
 
         try:
-            await orders.clear_cart(phone, bot_number)
+            await orders.clear_cart(phone, org_id)
         except Exception:
-            log.exception("cart_clear_failed_table_order", phone=_obfuscate_phone(phone), bot_number=bot_number)
+            log.exception("cart_clear_failed_table_order", phone=_obfuscate_phone(phone), org_id=org_id)
 
-        await db.db_session_mark_order(phone, bot_number)
+        await db.db_session_mark_order(phone, org_id)
         if not _skip_inventory:
             tag = f"adicional #{sub_number}" if sub_number > 1 else "orden inicial"
             log.info("table_order_created", order_id=locals().get("order_id", base_order_id), tag=tag, summary=items_summary)
@@ -994,7 +994,7 @@ async def execute_salon_action(
             log.exception(
                 "bill_alert_total_lookup_failed",
                 phone=_obfuscate_phone(phone),
-                bot_number=bot_number,
+                org_id=org_id,
             )
 
         _bill_alert_fired = False
@@ -1005,7 +1005,7 @@ async def execute_salon_action(
         )
         try:
             await db.db_create_waiter_alert(
-                phone=phone, bot_number=bot_number, alert_type="bill",
+                phone=phone, org_id=org_id, alert_type="bill",
                 message=_immediate_bill_msg, table_id=table_id, table_name=table_name,
                 location_id=(table_context or {}).get("location_id"),
             )
@@ -1015,7 +1015,7 @@ async def execute_salon_action(
             log.exception(
                 "bill_alert_immediate_failed",
                 phone=_obfuscate_phone(phone),
-                bot_number=bot_number,
+                org_id=org_id,
             )
 
         # Guard: don't start checkout if the order hasn't been delivered yet.
@@ -1081,7 +1081,7 @@ async def execute_salon_action(
                     _checkout_state["step"] = "asking_tip"
                     _checkout_state["current_check_idx"] = 0
 
-                await state_store.checkout_set(phone, bot_number, _checkout_state)
+                await state_store.checkout_set(phone, org_id, _checkout_state)
                 log.info(
                     "checkout_started",
                     table=table_name,
@@ -1122,7 +1122,7 @@ async def execute_salon_action(
 
                 return "¡Claro! ¿Cómo van a pagar hoy? ¿Todo junto o lo dividimos en varias partes?"
         except Exception:
-            log.exception("checkout_start_failed_fallback_waiter", phone=_obfuscate_phone(phone), bot_number=bot_number)
+            log.exception("checkout_start_failed_fallback_waiter", phone=_obfuscate_phone(phone), org_id=org_id)
 
         # Fallback: waiter_alert — best-effort, must not crash checkout.
         # Rule #17 alert already fired above in the common case; only send
@@ -1133,7 +1133,7 @@ async def execute_salon_action(
             alert_message = f"La mesa {table_name} necesita la cuenta.{payment_str}"
             try:
                 await db.db_create_waiter_alert(
-                    phone=phone, bot_number=bot_number, alert_type="bill",
+                    phone=phone, org_id=org_id, alert_type="bill",
                     message=alert_message, table_id=table_id, table_name=table_name,
                     location_id=(table_context or {}).get("location_id"),
                 )
@@ -1152,7 +1152,7 @@ async def execute_salon_action(
         table_name = table_context["name"] if table_context else ""
         alert_message = parsed.get("notes", "Asistencia requerida.")
         await db.db_create_waiter_alert(
-            phone=phone, bot_number=bot_number, alert_type="waiter",
+            phone=phone, org_id=org_id, alert_type="waiter",
             message=alert_message, table_id=table_id, table_name=table_name,
             location_id=(table_context or {}).get("location_id"),
         )

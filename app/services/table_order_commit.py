@@ -248,7 +248,7 @@ async def save_table_order_round(
     }
 
 
-async def deduct_inventory_or_cancel(bot_number: str, cart_items: list, saved_order_id: str | None,
+async def deduct_inventory_or_cancel(org_id: int, cart_items: list, saved_order_id: str | None,
                                      location_id: int | None = None) -> dict:
     """Attempt inventory deduction for a just-saved table order round.
 
@@ -267,13 +267,13 @@ async def deduct_inventory_or_cancel(bot_number: str, cart_items: list, saved_or
     """
     try:
         # Stock is per sede — deduct from the sede this table belongs to.
-        await db.db_deduct_inventory_for_order(bot_number, cart_items, location_id=location_id)
+        await db.db_deduct_inventory_for_order(org_id, cart_items, location_id=location_id)
         return {"success": True}
     except InsufficientStockError as exc:
         log.warning(
             "table_order_commit.insufficient_stock",
             sku=exc.sku, requested=exc.requested, available=exc.available,
-            bot_number=bot_number,
+            org_id=org_id,
         )
         if saved_order_id:
             try:
@@ -303,5 +303,5 @@ async def deduct_inventory_or_cancel(bot_number: str, cart_items: list, saved_or
             "message": f"Lo siento, '{exc.sku}' no está disponible en este momento.",
         }
     except Exception:
-        log.exception("table_order_commit.inventory_deduction_failed", bot_number=bot_number)
+        log.exception("table_order_commit.inventory_deduction_failed", org_id=org_id)
         return {"success": True}

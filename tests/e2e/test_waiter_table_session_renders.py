@@ -86,11 +86,10 @@ async def test_waiter_table_session_renders(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Mesero Test Restaurant",
-        bot_number_raw="+570E2EMESERO",
+        key="+570E2EMESERO",
         num_branches=0,
     )
     org_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
     owner_email = restaurant["owner_email"]
 
     await truncate_e2e_data(pool, org_id)
@@ -126,7 +125,6 @@ async def test_waiter_table_session_renders(
         org_id=org_id,
         location_id=location_id,
         table_id=table_id,
-        bot_number=bot_number,
     )
 
     # ── Admin auth ───────────────────────────────────────────────────────────────
@@ -181,13 +179,12 @@ async def test_waiter_table_session_renders(
             await conn.execute(
                 """INSERT INTO table_orders
                      (id, org_id, location_id, table_id, table_name, phone, status,
-                      items, total, bot_number, channel)
+                      items, total, channel)
                    VALUES ($1::uuid, $2, $3, $4::uuid, 'Mesa E2E-01', $5, 'recibido',
-                           $6::jsonb, $7, $8, 'whatsapp')""",
+                           $6::jsonb, $7, 'web')""",
                 order_id, org_id, location_id, table_id,
                 CUSTOMER_PHONE, items_json,
                 float(EXPECTED_TOTAL),
-                bot_number,
             )
 
     log.info("e2e.mesero.order_seeded", order_id=order_id, total=float(EXPECTED_TOTAL))

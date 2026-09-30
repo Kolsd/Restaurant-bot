@@ -267,7 +267,7 @@ async def _resolve_diner_restaurant(org_id: int, location_id: int | None) -> dic
     and separately fetches the location row by PK — explicitly checking
     `location.org_id == org_id` before trusting anything from it, so a
     location id colliding with an unrelated org's id can never leak that
-    org's name/whatsapp_number into this session.
+    org's name into this session.
     """
     org_restaurant = await db.db_get_restaurant_by_org_id(org_id)
     if not org_restaurant:
@@ -281,16 +281,10 @@ async def _resolve_diner_restaurant(org_id: int, location_id: int | None) -> dic
         )
         location = None
 
-    # Mirror the `restaurants` VIEW's own precedence exactly (see migration
-    # 0037's `CREATE VIEW restaurants`): org name wins over location name
-    # (COALESCE(o.name, l.name)), but location's own WhatsApp number wins
-    # over the org's (COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id)) — the
-    # two fields intentionally fall back in OPPOSITE directions.
+    # Mirror the `restaurants` VIEW: org name wins over location name
+    # (COALESCE(o.name, l.name)).
     merged = dict(org_restaurant)
     merged["name"] = org_restaurant.get("name") or (location.get("name") if location else None)
-    merged["whatsapp_number"] = (
-        (location.get("whatsapp_number") if location else None) or org_restaurant.get("whatsapp_number")
-    )
     merged["location_id"] = location_id
 
     # What the diner is told they are ordering from. The `restaurants` view
@@ -418,9 +412,8 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
             raise HTTPException(status_code=422, detail="Esta sede no tiene recogida en tienda activa")
 
         restaurant = await _resolve_diner_restaurant(org_id, location_id)
-        if not restaurant or not restaurant.get("whatsapp_number"):
+        if not restaurant:
             raise HTTPException(status_code=404, detail="Restaurante no configurado para esta sede")
-        bot_number = str(restaurant["whatsapp_number"])  # the org's bot key
         # display_name says WHICH sede when the org has several (0092).
         restaurant_name = (
             restaurant.get("display_name") or restaurant.get("name") or "nuestro restaurante"
@@ -434,7 +427,6 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
         await diner_sessions_repo.create_session(
             token=token,
             org_id=org_id,
-            bot_number=bot_number,
             location_id=location_id,
             table_id=None,
             table_name=None,
@@ -529,10 +521,9 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
 
     with tenant_scope(org_id):
         restaurant = await _resolve_diner_restaurant(org_id, location_id)
-        if not restaurant or not restaurant.get("whatsapp_number"):
+        if not restaurant:
             raise HTTPException(status_code=404, detail="Restaurante no configurado para esta mesa")
 
-        bot_number = str(restaurant["whatsapp_number"])  # the org's bot key
         # display_name says WHICH sede when the org has several (0092).
         restaurant_name = (
             restaurant.get("display_name") or restaurant.get("name") or "nuestro restaurante"
@@ -545,7 +536,6 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         await diner_sessions_repo.create_session(
             token=token,
             org_id=org_id,
-            bot_number=bot_number,
             location_id=location_id_int,
             table_id=table_id,
             table_name=table_name,
@@ -579,8 +569,8 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         # web diners scanned the real physical QR, which is at least as
         # trustworthy as the WhatsApp geo-claim flow — no waiter hold.
         new_session = await tables_repo.db_create_table_session(
-            token, bot_number, table_id, table_name,
-            org_id=org_id, location_id=location_id_int,
+            token, org_id, table_id, table_name,
+            location_id=location_id_int,
         )
         join_code = _generate_join_code()
         await tables_repo.db_set_session_join_code(new_session["id"], join_code)
@@ -632,7 +622,6 @@ async def diner_join(request: Request, body: DinerJoinRequest):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
     location_id = session.get("location_id")
     table_id = session.get("table_id")
     table_name = session.get("table_name") or table_id
@@ -650,7 +639,7 @@ async def diner_join(request: Request, body: DinerJoinRequest):
         # Idempotent re-join: already linked (e.g. a retried request after a
         # success the client didn't see) — just return the greeting again,
         # never a second table_sessions row.
-        already = await db.db_get_active_session(token, bot_number)
+        already = await db.db_get_active_session(token, org_id)
         if already:
             restaurant = await db.db_get_restaurant_by_org_id(org_id)
             restaurant_name = (restaurant or {}).get("name") or "nuestro restaurante"
@@ -660,11 +649,10 @@ async def diner_join(request: Request, body: DinerJoinRequest):
 
         new_session = await tables_repo.db_link_participant_session(
             phone=token,
-            bot_number=bot_number,
+            org_id=org_id,
             table_id=table_id,
             table_name=table_name,
             join_code=code,
-            org_id=org_id,
             location_id=location_id,
         )
 
@@ -712,7 +700,6 @@ async def diner_chat(request: Request, body: DinerChatRequest):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
     location_id = session.get("location_id")
     user_message = body.message.strip()
     if not user_message:
@@ -749,7 +736,7 @@ async def diner_chat(request: Request, body: DinerChatRequest):
         # not while another customer holds the table.
         table_id = session.get("table_id")
         if session.get("order_mode") == "dine_in" and table_id:
-            active = await db.db_get_active_session(token, bot_number)
+            active = await db.db_get_active_session(token, org_id)
             if not active:
                 holder = await db.db_get_active_session_on_table_by_other_phone(table_id, token)
                 table = await db.db_get_table_by_id(table_id)
@@ -762,14 +749,14 @@ async def diner_chat(request: Request, body: DinerChatRequest):
                         "blocks": [],
                     }
                 await db.db_create_table_session(
-                    token, bot_number, table["id"], table["name"],
-                    org_id=table.get("org_id"), location_id=table.get("location_id"),
+                    token, org_id, table["id"], table["name"],
+                    location_id=table.get("location_id"),
                 )
 
         result = await agent_chat(
             user_phone=token,
             user_message=user_message,
-            bot_number=bot_number,
+            org_id=org_id,
             location_id=location_id,
         )
 
@@ -789,7 +776,6 @@ async def diner_menu(token: str = Query(..., min_length=1, max_length=200)):
     """Full menu for the diner UI's 'Ver carta completa' panel."""
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
     location_id = session.get("location_id")
 
     with tenant_scope(org_id):
@@ -832,7 +818,6 @@ async def diner_waiter_call(body: DinerWaiterCallRequest):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
     reason = body.reason
 
     message_text = _WAITER_MESSAGES.get(reason, _WAITER_MESSAGES["other"])
@@ -844,7 +829,7 @@ async def diner_waiter_call(body: DinerWaiterCallRequest):
         await diner_sessions_repo.touch_last_seen(token, org_id)
         await db.db_create_waiter_alert(
             phone=token,
-            bot_number=bot_number,
+            org_id=org_id,
             alert_type=reason,
             message=message_text,
             table_id=session.get("table_id") or "",
@@ -884,13 +869,12 @@ async def diner_cart_add(request: Request, body: DinerCartAddRequest):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
 
     with tenant_scope(org_id):
         await diner_sessions_repo.touch_last_seen(token, org_id)
 
         dish = await orders.resolve_dish_for_cart(
-            bot_number, org_id, sku=sku, name=name,
+            org_id, sku=sku, name=name,
             location_id=session.get("location_id"),
         )
         if dish is None:
@@ -899,7 +883,7 @@ async def diner_cart_add(request: Request, body: DinerCartAddRequest):
                 detail="No encontramos ese plato o no está disponible en este momento",
             )
 
-        result = await orders.add_cart_line(token, bot_number, dish, body.qty, body.note)
+        result = await orders.add_cart_line(token, org_id, dish, body.qty, body.note)
         if not result.get("success"):
             raise _cart_error_to_http(result.get("error", ""))
 
@@ -917,12 +901,11 @@ async def diner_cart_update(request: Request, body: DinerCartUpdateRequest):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
 
     with tenant_scope(org_id):
         await diner_sessions_repo.touch_last_seen(token, org_id)
 
-        result = await orders.update_cart_line(token, bot_number, body.line_id, qty=body.qty, note=body.note)
+        result = await orders.update_cart_line(token, org_id, body.line_id, qty=body.qty, note=body.note)
         if not result.get("success"):
             raise _cart_error_to_http(result.get("error", ""))
 
@@ -941,12 +924,11 @@ async def diner_cart_remove(request: Request, body: DinerCartRemoveRequest):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
 
     with tenant_scope(org_id):
         await diner_sessions_repo.touch_last_seen(token, org_id)
 
-        result = await orders.remove_cart_line(token, bot_number, body.line_id)
+        result = await orders.remove_cart_line(token, org_id, body.line_id)
         if not result.get("success"):
             raise _cart_error_to_http(result.get("error", ""))
 
@@ -963,11 +945,10 @@ async def diner_cart_get(token: str = Query(..., min_length=1, max_length=200)):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
 
     with tenant_scope(org_id):
         await diner_sessions_repo.touch_last_seen(token, org_id)
-        cart = await orders.get_cart_with_line_ids(token, bot_number)
+        cart = await orders.get_cart_with_line_ids(token, org_id)
         currency = await _currency_for_org(org_id)
 
     return _cart_blocks_response(cart, currency, "")
@@ -1004,7 +985,6 @@ async def diner_order_send(request: Request, body: DinerOrderSendRequest):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
     location_id = session.get("location_id")
     table_id = session.get("table_id")
     table_name = session.get("table_name") or table_id
@@ -1017,7 +997,7 @@ async def diner_order_send(request: Request, body: DinerOrderSendRequest):
         # Must have actually joined the table (scanned a free table, or
         # supplied the right join_code) — browsing/adding to cart before
         # joining is allowed, sending the order to the kitchen is not.
-        active = await db.db_get_active_session(token, bot_number)
+        active = await db.db_get_active_session(token, org_id)
         if not active:
             raise HTTPException(
                 status_code=422,
@@ -1025,19 +1005,19 @@ async def diner_order_send(request: Request, body: DinerOrderSendRequest):
             )
 
         try:
-            async with orders._cart_lock(token, bot_number):
+            async with orders._cart_lock(token, org_id):
                 # Re-check the cache inside the lock — a concurrent duplicate
                 # request may have just finished and populated it.
                 cached = await state_store.order_send_result_get(cache_key)
                 if cached:
                     return cached
 
-                cart = await db.db_get_cart(token, bot_number)
+                cart = await db.db_get_cart(token, org_id)
                 cart_items = cart.get("items") or []
                 if not cart_items:
                     raise HTTPException(status_code=422, detail="Tu pedido está vacío")
 
-                cart_total = await orders.get_cart_total(token, bot_number)
+                cart_total = await orders.get_cart_total(token, org_id)
                 currency = await _currency_for_org(org_id)
 
                 restaurant = await _resolve_diner_restaurant(org_id, location_id)
@@ -1073,7 +1053,7 @@ async def diner_order_send(request: Request, body: DinerOrderSendRequest):
                     )
 
                 inv = await deduct_inventory_or_cancel(
-                    bot_number, cart_items, commit["order_id"], location_id=location_id,
+                    org_id, cart_items, commit["order_id"], location_id=location_id,
                 )
                 if not inv["success"]:
                     # Deliberately does NOT clear the cart here (unlike the
@@ -1096,8 +1076,8 @@ async def diner_order_send(request: Request, body: DinerOrderSendRequest):
                 # same items instead of hitting "carrito vacío"). We already
                 # hold the lock for this whole critical section, so clear
                 # the cart directly.
-                await db.db_clear_cart(token, bot_number)
-                await tables_repo.db_session_mark_order(token, bot_number)
+                await db.db_clear_cart(token, org_id)
+                await tables_repo.db_session_mark_order(token, org_id)
         except RuntimeError as exc:
             if "cart_lock_contention" in str(exc):
                 raise HTTPException(
@@ -1144,12 +1124,11 @@ async def diner_table_view(token: str = Query(..., min_length=1, max_length=200)
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
     location_id = session.get("location_id")
     table_id = session.get("table_id")
 
     with tenant_scope(org_id):
-        active = await db.db_get_active_session(token, bot_number)
+        active = await db.db_get_active_session(token, org_id)
         if not active or not table_id:
             raise HTTPException(status_code=404, detail="No estás en una mesa")
 
@@ -1251,7 +1230,6 @@ async def diner_checkout(request: Request, body: DinerCheckoutRequest):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
     location_id = session.get("location_id")
     table_id = session.get("table_id")
     table_name = session.get("table_name") or table_id
@@ -1261,7 +1239,7 @@ async def diner_checkout(request: Request, body: DinerCheckoutRequest):
     with tenant_scope(org_id):
         await diner_sessions_repo.touch_last_seen(token, org_id)
 
-        active = await db.db_get_active_session(token, bot_number)
+        active = await db.db_get_active_session(token, org_id)
         if not active:
             raise HTTPException(
                 status_code=422,
@@ -1408,7 +1386,7 @@ async def diner_checkout(request: Request, body: DinerCheckoutRequest):
             )
             try:
                 await tables_repo.db_create_waiter_alert(
-                    phone=token, bot_number=bot_number, alert_type="bill",
+                    phone=token, org_id=org_id, alert_type="bill",
                     message=alert_message, table_id=table_id, table_name=table_name,
                     location_id=location_id,
                 )
@@ -1454,7 +1432,6 @@ async def diner_status(token: str = Query(..., min_length=1, max_length=200)):
 
     session = await _resolve_session_or_404(token)
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
     location_id = session.get("location_id")
     table_id = session.get("table_id")
 
@@ -1501,7 +1478,7 @@ async def diner_status(token: str = Query(..., min_length=1, max_length=200)):
                         "currency": currency,
                     }
 
-        nps_state = await state_store.nps_get(token, bot_number)
+        nps_state = await state_store.nps_get(token, org_id)
         nps_block = None
         if nps_state and nps_state.get("state") in ("waiting_score", "waiting_comment"):
             stage = "comment" if nps_state.get("state") == "waiting_comment" else "score"

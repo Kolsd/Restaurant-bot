@@ -174,10 +174,10 @@ async def test_reservation_deposit_wompi_lifecycle(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Deposit Test Restaurant",
-        bot_number_raw="+570E2EDEPOSIT",
+        key="+570E2EDEPOSIT",
         menu=MENU,
         payment_methods=["Efectivo"],
-        num_branches=0,  # single sede — availability resolves from principal bot_number
+        num_branches=0,  # single sede — availability resolves from the principal sede
         features_override={
             "module_reservations": True,
             "reservation_deposits": True,
@@ -185,7 +185,7 @@ async def test_reservation_deposit_wompi_lifecycle(
         },
     )
     parent_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
+    org_id = restaurant["id"]
     owner_email = restaurant["owner_email"]
 
     await truncate_e2e_data(pool, parent_id)
@@ -211,7 +211,7 @@ async def test_reservation_deposit_wompi_lifecycle(
     except Exception:
         pass
 
-    log.info("e2e.deposit_test_start", parent_id=parent_id, bot_number=bot_number)
+    log.info("e2e.deposit_test_start", parent_id=parent_id, org_id=org_id)
 
     # ── Admin token + create table ────────────────────────────────────────────
     admin_token = await create_admin_token(pool, owner_email)
@@ -235,7 +235,7 @@ async def test_reservation_deposit_wompi_lifecycle(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=reservation_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info("e2e.deposit_turn_1_done", processed=processed_1, elapsed=round(time.monotonic() - t1, 1))
     assert processed_1 >= 1, "Turn 1 was not processed"
@@ -249,7 +249,7 @@ async def test_reservation_deposit_wompi_lifecycle(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=confirm_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info("e2e.deposit_turn_2_done", processed=processed_2, elapsed=round(time.monotonic() - t2, 1))
     assert processed_2 >= 1, "Turn 2 was not processed"

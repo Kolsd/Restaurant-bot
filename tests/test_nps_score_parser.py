@@ -40,7 +40,7 @@ def nps_state():
 
 async def _call(message: str) -> str:
     return await agent_module._handle_nps_flow(
-        phone="+57testnps", bot_number="testbot", message=message,
+        phone="+57testnps", org_id=4242, message=message,
         restaurant_name="Test", google_maps_url="",
     )
 

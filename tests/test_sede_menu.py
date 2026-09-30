@@ -353,11 +353,11 @@ async def test_the_bot_prices_a_dish_at_the_sede_of_the_turn(db_conn):
         token = sede_context.begin_turn()
         try:
             sede_context.set_sede(norte)
-            assert (await find_dish("ajiaco", "+570000000000"))["price"] == 28000
-            assert await find_dish("Sancocho", "+570000000000") is None
+            assert (await find_dish("ajiaco", org))["price"] == 28000
+            assert await find_dish("Sancocho", org) is None
             sede_context.set_sede(centro)
-            assert (await find_dish("ajiaco", "+570000000000"))["price"] == 25000
-            assert (await find_dish("Sancocho", "+570000000000"))["name"] == "Sancocho"
+            assert (await find_dish("ajiaco", org))["price"] == 25000
+            assert (await find_dish("Sancocho", org))["name"] == "Sancocho"
         finally:
             sede_context.end_turn(token)
     assert sede_context.current_sede_id() is None
@@ -375,10 +375,10 @@ async def test_cart_resolution_refuses_a_dish_the_sede_hides(db_conn):
         await _pin(db_conn, org)
         await sede_menu_repo.db_set_override(org, norte, "Limonada", price=None, hidden=True)
         await sede_menu_repo.db_save_own_dish(org, norte, "Postres", {"name": "Cuajada", "price": 9000})
-        assert await resolve_dish_for_cart("+57", org, name="Limonada", location_id=norte) is None
-        assert (await resolve_dish_for_cart("+57", org, name="Cuajada", location_id=norte))["price"] == 9000
-        assert (await resolve_dish_for_cart("+57", org, name="Limonada", location_id=centro))["price"] == 6000
-        assert await resolve_dish_for_cart("+57", org, name="Cuajada", location_id=centro) is None
+        assert await resolve_dish_for_cart(org, name="Limonada", location_id=norte) is None
+        assert (await resolve_dish_for_cart(org, name="Cuajada", location_id=norte))["price"] == 9000
+        assert (await resolve_dish_for_cart(org, name="Limonada", location_id=centro))["price"] == 6000
+        assert await resolve_dish_for_cart(org, name="Cuajada", location_id=centro) is None
 
 
 # ── Routes: who may change which sede's carta ────────────────────────────────

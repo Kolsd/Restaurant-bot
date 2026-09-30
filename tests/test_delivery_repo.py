@@ -205,7 +205,6 @@ async def _seed_order(conn, *, org_id: int, location_id: int, status: str = "pen
         "order_type": "domicilio",
         "subtotal": Decimal("20000"),
         "total": Decimal("20000"),
-        "bot_number": "573000000000",
         "org_id": org_id,
         "location_id": location_id,
         "status": status,

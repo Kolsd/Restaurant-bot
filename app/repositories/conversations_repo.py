@@ -6,7 +6,7 @@ Covers the conversations aggregate:
   - conversation listing, details, deletion
   - bot pause/unpause (toggle_bot, cleanup_old_conversations)
   - per-conversation NPS state (save_nps_response, pending score, waiting state)
-  - cart CRUD (get, save, clear, migrate)
+  - cart CRUD (get, save, clear)
 
 
 Analytics-level NPS functions (db_get_nps_stats, db_get_nps_responses) remain
@@ -44,16 +44,16 @@ def _to_date(s: str):
 
 # ── CONVERSACIONES ────────────────────────────────────────────────────
 
-async def db_get_history(phone: str, bot_number: str = "") -> list:
+async def db_get_history(phone: str, org_id: int) -> list:
     async with _tenant_connection() as conn:
-        row = await conn.fetchrow("SELECT history FROM conversations WHERE phone=$1 AND bot_number=$2", phone, bot_number)
+        row = await conn.fetchrow("SELECT history FROM conversations WHERE phone=$1 AND org_id=$2", phone, org_id)
         if row:
             h = row["history"]
             return h if isinstance(h, list) else json.loads(h)
         return []
 
 
-async def db_get_conversation_location_id(phone: str, bot_number: str) -> int | None:
+async def db_get_conversation_location_id(phone: str, org_id: int) -> int | None:
     """Return the last known location_id for a conversation, or None if not yet resolved.
 
     Used by _resolve_location_id in agent.py to persist the resolved Location
@@ -61,33 +61,30 @@ async def db_get_conversation_location_id(phone: str, bot_number: str) -> int | 
     """
     async with _tenant_connection() as conn:
         return await conn.fetchval(
-            "SELECT location_id FROM conversations WHERE phone=$1 AND bot_number=$2",
-            phone, bot_number,
+            "SELECT location_id FROM conversations WHERE phone=$1 AND org_id=$2",
+            phone, org_id,
         )
 
 
 async def db_save_history(
     phone: str,
-    bot_number: str,
+    org_id: int,
     history: list,
     branch_id: int = None,
     location_id: int | None = None,
 ):
     async with _tenant_connection() as conn:
         await conn.execute("""
-            INSERT INTO conversations (phone, bot_number, history, branch_id, location_id,
-                                       org_id, updated_at)
-            VALUES ($1, $2, $3, $4, $5,
-                    NULLIF(current_setting('app.org_id', true), '')::bigint,
-                    NOW())
-            ON CONFLICT (phone, bot_number)
+            INSERT INTO conversations (phone, org_id, history, branch_id, location_id,
+                                       updated_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (phone, org_id)
             DO UPDATE SET history=EXCLUDED.history, branch_id=EXCLUDED.branch_id,
                           location_id=COALESCE(EXCLUDED.location_id, conversations.location_id),
-                          org_id=COALESCE(EXCLUDED.org_id, conversations.org_id),
                           updated_at=NOW()
-        """, phone, bot_number, json.dumps(history[-20:]), branch_id, location_id)
+        """, phone, org_id, json.dumps(history[-20:]), branch_id, location_id)
 
-async def db_increment_turns_without_progress(phone: str, bot_number: str) -> int:
+async def db_increment_turns_without_progress(phone: str, org_id: int) -> int:
     """Increment turns_without_progress counter and return the new value.
 
     The row is expected to already exist (chat() calls db_save_history before/after
@@ -98,32 +95,32 @@ async def db_increment_turns_without_progress(phone: str, bot_number: str) -> in
             """
             UPDATE conversations
                SET turns_without_progress = turns_without_progress + 1
-             WHERE phone=$1 AND bot_number=$2
+             WHERE phone=$1 AND org_id=$2
             RETURNING turns_without_progress
             """,
-            phone, bot_number,
+            phone, org_id,
         )
         return row["turns_without_progress"] if row else 0
 
 
-async def db_reset_turns_without_progress(phone: str, bot_number: str) -> None:
+async def db_reset_turns_without_progress(phone: str, org_id: int) -> None:
     """Reset turns_without_progress to 0 after a productive tool call."""
     async with _tenant_connection() as conn:
         await conn.execute(
-            "UPDATE conversations SET turns_without_progress = 0 WHERE phone=$1 AND bot_number=$2",
-            phone, bot_number,
+            "UPDATE conversations SET turns_without_progress = 0 WHERE phone=$1 AND org_id=$2",
+            phone, org_id,
         )
 
 
-async def db_get_all_conversations(bot_number: str = None, branch_id: int | str = None, date_from: str = None, date_to: str = None):
+async def db_get_all_conversations(org_id: int | None = None, branch_id: int | str = None, date_from: str = None, date_to: str = None):
     async with _tenant_connection() as conn:
         conditions = []
         params = []
         idx = 1
 
-        if bot_number:
-            conditions.append(f"bot_number = ${idx}")
-            params.append(bot_number)
+        if org_id:
+            conditions.append(f"org_id = ${idx}")
+            params.append(org_id)
             idx += 1
 
         # 🛡️ LA MAGIA DEL "ALL"
@@ -133,8 +130,8 @@ async def db_get_all_conversations(bot_number: str = None, branch_id: int | str 
             conditions.append(f"branch_id = ${idx}")
             params.append(branch_id)
             idx += 1
-        elif bot_number:
-            pass  # bot_number filter already applied above
+        elif org_id:
+            pass  # org_id filter already applied above
 
         if date_from:
             conditions.append(f"created_at >= ${idx}")
@@ -152,7 +149,7 @@ async def db_get_all_conversations(bot_number: str = None, branch_id: int | str 
         # only renders the most recent 200 anyway; admins paginate via
         # date_from/date_to for older windows.
         query = (
-            f"SELECT phone, bot_number, history, updated_at, created_at "
+            f"SELECT phone, history, updated_at, created_at "
             f"FROM conversations {where} ORDER BY updated_at DESC LIMIT 200"
         )
 
@@ -183,28 +180,22 @@ async def db_delete_conversation(phone: str):
     async with _tenant_connection() as conn:
         await conn.execute("DELETE FROM conversations WHERE phone=$1", phone)
 
-async def db_get_conversation_details(phone: str, bot_number: str = ""):
+async def db_get_conversation_details(phone: str, org_id: int):
     async with _tenant_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT history, bot_paused, bot_number FROM conversations WHERE phone=$1 AND bot_number=$2",
-            phone, bot_number,
+            "SELECT history, bot_paused FROM conversations WHERE phone=$1 AND org_id=$2",
+            phone, org_id,
         )
-        if not row:
-            # Fallback: conversations assigned to a branch have a different bot_number
-            row = await conn.fetchrow(
-                "SELECT history, bot_paused, bot_number FROM conversations WHERE phone=$1 ORDER BY updated_at DESC LIMIT 1",
-                phone,
-            )
         if row:
             history = row["history"] if isinstance(row["history"], list) else json.loads(row["history"])
-            return {"history": history, "bot_paused": row["bot_paused"] or False, "bot_number": row["bot_number"]}
-    return {"history": [], "bot_paused": False, "bot_number": bot_number}
+            return {"history": history, "bot_paused": row["bot_paused"] or False}
+    return {"history": [], "bot_paused": False}
 
 
-async def db_cleanup_old_conversations(days: int = 7, bot_number: str = None):
+async def db_cleanup_old_conversations(days: int = 7, org_id: int | None = None):
     async with _tenant_connection() as conn:
-        if bot_number:
-            await conn.execute("DELETE FROM conversations WHERE updated_at < NOW() - ($1 || ' days')::INTERVAL AND bot_number=$2", str(days), bot_number)
+        if org_id:
+            await conn.execute("DELETE FROM conversations WHERE updated_at < NOW() - ($1 || ' days')::INTERVAL AND org_id=$2", str(days), org_id)
         else:
             await conn.execute("DELETE FROM conversations WHERE updated_at < NOW() - ($1 || ' days')::INTERVAL", str(days))
 
@@ -213,7 +204,7 @@ async def db_cleanup_old_conversations(days: int = 7, bot_number: str = None):
 # (Restaurant-wide analytics db_get_nps_stats/db_get_nps_responses stay in database.py)
 
 async def db_save_nps_response(
-    phone: str, bot_number: str, score: int, comment: str,
+    phone: str, org_id: int, score: int, comment: str,
     location_id: int | None = None,
 ):
     """`location_id` attributes a rating that has no table session behind it
@@ -241,15 +232,13 @@ async def db_save_nps_response(
         # 2. Save the rating tied to that branch + session
         await conn.execute("""
             INSERT INTO nps_responses
-                (phone, bot_number, score, comment, branch_id, table_session_id, org_id,
+                (phone, org_id, score, comment, branch_id, table_session_id,
                  location_id, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6,
-                    NULLIF(current_setting('app.org_id', true), '')::bigint,
-                    $7, NOW())
-        """, phone, bot_number, score, comment, branch_id, session_id, location_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        """, phone, org_id, score, comment, branch_id, session_id, location_id)
 
 
-async def db_save_nps_pending(phone: str, bot_number: str, score: int) -> int:
+async def db_save_nps_pending(phone: str, org_id: int, score: int) -> int:
     """Save a preliminary NPS record when score is received but comment is still pending.
     Returns the inserted row id so it can be updated later.
 
@@ -272,62 +261,45 @@ async def db_save_nps_pending(phone: str, bot_number: str, score: int) -> int:
 
         row = await conn.fetchrow(
             """INSERT INTO nps_responses
-                   (phone, bot_number, score, comment, branch_id, table_session_id, org_id)
-               VALUES ($1, $2, $3, '__pending__', $4, $5,
-                       NULLIF(current_setting('app.org_id', true), '')::bigint)
+                   (phone, org_id, score, comment, branch_id, table_session_id)
+               VALUES ($1, $2, $3, '__pending__', $4, $5)
                RETURNING id""",
-            phone, bot_number, score, branch_id, session_id
+            phone, org_id, score, branch_id, session_id
         )
         return row["id"] if row else 0
 
 
-async def db_update_nps_comment(phone: str, bot_number: str, comment: str) -> bool:
+async def db_update_nps_comment(phone: str, org_id: int, comment: str) -> bool:
     """Update the pending NPS record with the actual comment."""
     async with _tenant_connection() as conn:
         result = await conn.execute(
             """UPDATE nps_responses SET comment=$3
-               WHERE phone=$1 AND bot_number=$2 AND comment='__pending__'
+               WHERE phone=$1 AND org_id=$2 AND comment='__pending__'
                AND created_at > NOW() - INTERVAL '24 hours'""",
-            phone, bot_number, comment
+            phone, org_id, comment
         )
         return result != "UPDATE 0"
 
 
 # ── NPS WAITING STATE (persists the "waiting_score" state in DB) ──────
 
-async def db_save_nps_waiting(phone: str, bot_number: str, restaurant_id: int | None = None):
+async def db_save_nps_waiting(phone: str, org_id: int):
     """Persists that we are waiting for an NPS score from this customer.
-    Called when trigger_nps is invoked so state survives server restarts.
-
-    restaurant_id param kept for caller compatibility (Wave 1). The value is passed
-    as org_id into the nps_waiting table (org_id == restaurant_id during Wave 1).
-    If not passed, it is resolved from the restaurants VIEW via bot_number.
-    """
+    Called when trigger_nps is invoked so state survives server restarts."""
     async with _tenant_connection() as conn:
-        if restaurant_id is None:
-            resolved_org_id = await conn.fetchval(
-                """SELECT l.org_id FROM restaurants r
-                   JOIN locations l ON l.id = r.id
-                   WHERE r.whatsapp_number = $1""",
-                bot_number
-            )
-            if resolved_org_id is None:
-                raise ValueError(f"Cannot resolve org_id for bot_number {bot_number}")
-        else:
-            resolved_org_id = restaurant_id
         await conn.execute("""
-            INSERT INTO nps_waiting (phone, bot_number, org_id, created_at)
-            VALUES ($1, $2, $3, NOW())
-            ON CONFLICT (phone, bot_number) DO UPDATE SET created_at = NOW()
-        """, phone, bot_number, resolved_org_id)
+            INSERT INTO nps_waiting (phone, org_id, created_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (phone, org_id) DO UPDATE SET created_at = NOW()
+        """, phone, org_id)
 
 
-async def db_clear_nps_waiting(phone: str, bot_number: str):
+async def db_clear_nps_waiting(phone: str, org_id: int):
     """Removes the pending NPS state — called after score is received or survey is skipped."""
     async with _tenant_connection() as conn:
         await conn.execute(
-            "DELETE FROM nps_waiting WHERE phone=$1 AND bot_number=$2",
-            phone, bot_number
+            "DELETE FROM nps_waiting WHERE phone=$1 AND org_id=$2",
+            phone, org_id
         )
         # Prune expired records while we're at it
         await conn.execute(
@@ -353,39 +325,24 @@ async def db_cleanup_expired_nps_waiting() -> int:
 
 # ── CARRITOS ─────────────────────────────────────────────────────────
 
-async def db_get_cart(phone: str, bot_number: str) -> dict:
+async def db_get_cart(phone: str, org_id: int) -> dict:
     async with _tenant_connection() as conn:
-        row = await conn.fetchrow("SELECT cart_data FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number)
+        row = await conn.fetchrow("SELECT cart_data FROM carts WHERE phone=$1 AND org_id=$2", phone, org_id)
         if row:
             return json.loads(row["cart_data"]) if isinstance(row["cart_data"], str) else row["cart_data"]
         return {"items": [], "order_type": None, "address": None, "notes": ""}
 
-async def db_save_cart(phone: str, bot_number: str, cart_data: dict):
+async def db_save_cart(phone: str, org_id: int, cart_data: dict):
     async with _tenant_connection() as conn:
         await conn.execute("""
-            INSERT INTO carts (phone, bot_number, cart_data, updated_at, org_id)
-            VALUES ($1, $2, $3::jsonb, NOW(), NULLIF(current_setting('app.org_id', true), '')::bigint)
-            ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data=EXCLUDED.cart_data, updated_at=NOW()
-        """, phone, bot_number, json.dumps(cart_data))
+            INSERT INTO carts (phone, org_id, cart_data, updated_at)
+            VALUES ($1, $2, $3::jsonb, NOW())
+            ON CONFLICT (phone, org_id) DO UPDATE SET cart_data=EXCLUDED.cart_data, updated_at=NOW()
+        """, phone, org_id, json.dumps(cart_data))
 
-async def db_clear_cart(phone: str, bot_number: str):
+async def db_clear_cart(phone: str, org_id: int):
     async with _tenant_connection() as conn:
-        await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number)
-
-# 🛡️ NEW: Atomically migrate the cart to another branch
-async def db_migrate_cart(phone: str, from_bot_number: str, to_bot_number: str):
-    if from_bot_number == to_bot_number:
-        return
-    async with _tenant_connection() as conn:
-        # tenant_connection() already wraps in a transaction — no nested tx needed
-        row = await conn.fetchrow("SELECT cart_data FROM carts WHERE phone=$1 AND bot_number=$2", phone, from_bot_number)
-        if row:
-            await conn.execute("""
-                INSERT INTO carts (phone, bot_number, cart_data, updated_at, org_id)
-                VALUES ($1, $2, $3::jsonb, NOW(), NULLIF(current_setting('app.org_id', true), '')::bigint)
-                ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data=EXCLUDED.cart_data, updated_at=NOW()
-            """, phone, to_bot_number, row["cart_data"])
-            await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, from_bot_number)
+        await conn.execute("DELETE FROM carts WHERE phone=$1 AND org_id=$2", phone, org_id)
 
 
 # ── RATE LIMITING ─────────────────────────────────────────────────────
@@ -420,9 +377,7 @@ async def db_get_customer_order_history(
 ) -> list[dict[str, Any]]:
     """Return the top dishes ordered by this customer at this restaurant (last 90 days).
 
-    Aggregates items from the ``orders`` table (delivery/pickup) joined to
-    ``restaurants`` via ``whatsapp_number = bot_number`` so we can filter by
-    ``restaurant_id`` even though ``orders`` has no direct FK.
+    Aggregates items from the ``orders`` table (delivery/pickup) of this org.
 
     Returns a list sorted by frequency descending, e.g.:
         [{"name": "Bandeja Paisa", "count": 3, "last_ordered": "2026-04-10T14:00:00"}]
@@ -440,10 +395,8 @@ async def db_get_customer_order_history(
             """
             SELECT COUNT(*)
               FROM orders o
-              JOIN restaurants r ON r.whatsapp_number = o.bot_number
-              JOIN locations l ON l.id = r.id
              WHERE o.phone        = $1
-               AND l.org_id       = $2
+               AND o.org_id       = $2
                AND o.created_at  >= NOW() - INTERVAL '90 days'
             """,
             phone,
@@ -464,12 +417,10 @@ async def db_get_customer_order_history(
                 SELECT
                     item->>'name'  AS dish_name,
                     o.created_at   AS ordered_at
-                FROM orders o
-                JOIN restaurants r ON r.whatsapp_number = o.bot_number
-                JOIN locations l ON l.id = r.id,
+                FROM orders o,
                 LATERAL jsonb_array_elements(o.items) AS item
                WHERE o.phone        = $1
-                 AND l.org_id       = $2
+                 AND o.org_id       = $2
                  AND o.created_at  >= NOW() - INTERVAL '90 days'
                  AND item->>'name' IS NOT NULL
             )

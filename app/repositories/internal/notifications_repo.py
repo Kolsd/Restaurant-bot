@@ -99,27 +99,16 @@ async def _fetch_churn_risk() -> list[dict]:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                WITH bot_orgs AS (
-                    -- DISTINCT: every sede of an org shares its number, and one row
-                    -- per sede multiplied that org's conversation count.
-                    SELECT DISTINCT
-                        l.org_id,
-                        o.name AS org_name,
-                        COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) AS bot_number
-                    FROM locations l
-                    JOIN organizations o ON o.id = l.org_id
-                    WHERE COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) IS NOT NULL
-                ),
-                daily AS (
+                WITH daily AS (
                     SELECT
-                        bo.org_id,
-                        bo.org_name,
+                        o.id AS org_id,
+                        o.name AS org_name,
                         (c.created_at::date) AS day,
                         COUNT(*) AS cnt
                     FROM conversations c
-                    JOIN bot_orgs bo ON bo.bot_number = c.bot_number
+                    JOIN organizations o ON o.id = c.org_id
                     WHERE c.created_at >= CURRENT_DATE - INTERVAL '21 days'
-                    GROUP BY bo.org_id, bo.org_name, c.created_at::date
+                    GROUP BY o.id, o.name, c.created_at::date
                 ),
                 baseline AS (
                     SELECT org_id, org_name,

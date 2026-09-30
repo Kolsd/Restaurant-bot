@@ -92,7 +92,7 @@ async def _call_builder(restaurant_obj, table_context, branches_return, feats=No
             enriched, _menu_url, _hist = await _build_enriched_user_message(
                 user_message_clean="quiero pedir comida",
                 user_phone="+573001234567",
-                bot_number="573001112222",
+                org_id=4242,
                 restaurant_obj=restaurant_obj,
                 restaurant_name="Test Restaurant",
                 feats=feats,
@@ -204,7 +204,7 @@ async def test_branches_db_error_does_not_crash_builder():
             enriched, _menu_url, _hist = await _build_enriched_user_message(
                 user_message_clean="hola",
                 user_phone="+573001234567",
-                bot_number="573001112222",
+                org_id=4242,
                 restaurant_obj=_matriz(),
                 restaurant_name="Test",
                 feats={},

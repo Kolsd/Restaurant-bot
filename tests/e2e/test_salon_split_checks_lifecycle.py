@@ -133,14 +133,14 @@ async def test_salon_split_checks_with_tips(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Split Checks Test Restaurant",
-        bot_number_raw="+570E2ESPLIT1",
+        key="+570E2ESPLIT1",
         menu=MENU,
         payment_methods=PAYMENT_METHODS,
         num_branches=1,
         branch_latlons=[(4.710989, -74.072092)],
     )
     parent_id   = restaurant["id"]
-    bot_number  = restaurant["whatsapp_number"]
+    org_id      = restaurant["id"]
     branch_1    = restaurant["branches"][0]
     branch_1_id = branch_1["id"]
 
@@ -180,7 +180,7 @@ async def test_salon_split_checks_with_tips(
     # =====================================================================
     qr_message = f"Hola, acabo de llegar [table_id:{table_id}]"
     processed_1 = await send_diner_message(
-        client, pool, phone=CUSTOMER_PHONE_RAW, text=qr_message, bot_number=bot_number
+        client, pool, phone=CUSTOMER_PHONE_RAW, text=qr_message, org_id=org_id
     )
     assert processed_1 >= 1, "Turn 1: inbox item not processed"
 
@@ -214,7 +214,7 @@ async def test_salon_split_checks_with_tips(
         "Quiero pedir exactamente 2 empanaditas de carne y 1 ceviche especial por favor"
     )
     processed_2 = await send_diner_message(
-        client, pool, phone=CUSTOMER_PHONE_RAW, text=order_text, bot_number=bot_number
+        client, pool, phone=CUSTOMER_PHONE_RAW, text=order_text, org_id=org_id
     )
     assert processed_2 >= 1, "Turn 2: inbox item not processed"
 
@@ -222,7 +222,7 @@ async def test_salon_split_checks_with_tips(
     # Turn 3: Confirm order
     # =====================================================================
     processed_3 = await send_diner_message(
-        client, pool, phone=CUSTOMER_PHONE_RAW, text="sí confirmo", bot_number=bot_number
+        client, pool, phone=CUSTOMER_PHONE_RAW, text="sí confirmo", org_id=org_id
     )
     assert processed_3 >= 1, "Turn 3: confirmation not processed"
 

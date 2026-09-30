@@ -11,8 +11,8 @@ that "phone" is an opaque identity string, not a validated number.
 
 Scope notes (mirrors qr_claims_repo.py — see that file's docstring):
   - create() runs WITHIN tenant_scope(org_id). The org is already known at
-    session-creation time because the caller resolved it from bot_number or
-    table_id BEFORE calling this function.
+    session-creation time because the caller resolved it from the table or
+    the org slug BEFORE calling this function.
   - get_by_token() runs from the pre-tenant resolution path: a diner's
     request only carries the token, not the org_id, so the tenant cannot be
     known yet. It uses bypass_tenant_scope — that lookup IS the tenant
@@ -35,7 +35,6 @@ log = get_logger(__name__)
 async def create_session(
     token: str,
     org_id: int,
-    bot_number: str,
     location_id: Optional[int] = None,
     table_id: Optional[str] = None,
     table_name: Optional[str] = None,
@@ -45,8 +44,8 @@ async def create_session(
 
     # Requires active tenant_scope(org_id) — org must already be resolved.
     """
-    if not token or not bot_number:
-        raise ValueError("token and bot_number are required")
+    if not token or not org_id:
+        raise ValueError("token and org_id are required")
     if order_mode not in ("dine_in", "delivery", "pickup"):
         raise ValueError(f"invalid order_mode: {order_mode!r}")
 
@@ -55,14 +54,14 @@ async def create_session(
             """
             INSERT INTO diner_sessions
                 (token, org_id, location_id, table_id, table_name,
-                 bot_number, order_mode)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 order_mode)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id, token, org_id, location_id, table_id, table_name,
-                      bot_number, order_mode, phone, display_name,
+                      order_mode, phone, display_name,
                       created_at, last_seen_at
             """,
             token, org_id, location_id, table_id, table_name,
-            bot_number, order_mode,
+            order_mode,
         )
     log.info(
         "diner_session.created",
@@ -88,7 +87,7 @@ async def get_by_token(token: str) -> Optional[dict]:
             row = await conn.fetchrow(
                 """
                 SELECT id, token, org_id, location_id, table_id, table_name,
-                       bot_number, order_mode, phone, display_name,
+                       order_mode, phone, display_name,
                        created_at, last_seen_at
                 FROM diner_sessions
                 WHERE token = $1
@@ -127,7 +126,7 @@ async def set_contact_info(
                 last_seen_at = NOW()
             WHERE token = $1
             RETURNING id, token, org_id, location_id, table_id, table_name,
-                      bot_number, order_mode, phone, display_name,
+                      order_mode, phone, display_name,
                       created_at, last_seen_at
             """,
             token, phone, display_name,

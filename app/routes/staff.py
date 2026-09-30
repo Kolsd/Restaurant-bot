@@ -272,7 +272,6 @@ async def staff_pin_login(request: Request, body: StaffPinLoginRequest):
         "redirect": _staff_redirect(roles),
         "restaurant": {
             "name":             restaurant_data.get("name", "") if restaurant_data else "",
-            "whatsapp_number":  restaurant_data.get("whatsapp_number", "") if restaurant_data else "",
             "locale":           raw_features.get("locale", "es-CO"),
             "currency":         raw_features.get("currency", "COP"),
             "features":         raw_features,

@@ -416,7 +416,7 @@ async def seo_menu_page(slug: str):
     Server-rendered menu page with Open Graph tags.
     OG crawlers (WhatsApp, Facebook) read the meta tags.
     Humans are redirected to the org's ordering page, /pedir/{slug}. (It
-    sent them to the WhatsApp-era /menu/{bot_number} catalog, and to itself
+    sent them to the WhatsApp-era catalog, and to itself
     — an endless refresh — when the org had no number.)
     """
     data = await restaurant_repo.db_get_restaurant_by_slug(slug)
@@ -424,7 +424,6 @@ async def seo_menu_page(slug: str):
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
     name        = data.get("name") or "Restaurante"
-    bot_number  = data.get("whatsapp_number") or ""
     features    = data.get("features") or {}
     if isinstance(features, str):
         try:
@@ -483,7 +482,6 @@ async def seo_dish_page(slug: str, dish_slug: str):
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
     name        = data.get("name") or "Restaurante"
-    bot_number  = data.get("whatsapp_number") or ""
     features    = data.get("features") or {}
     if isinstance(features, str):
         try:

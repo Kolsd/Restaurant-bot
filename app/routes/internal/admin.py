@@ -302,9 +302,7 @@ async def admin_get_restaurant_detail(
     rest = await db.db_get_restaurant_by_org_id(restaurant_id)
     if not rest:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-    stats = await restaurant_repo.db_get_restaurant_detail_stats(
-        restaurant_id, rest.get("whatsapp_number", ""),  # the org's bot key
-    )
+    stats = await restaurant_repo.db_get_restaurant_detail_stats(restaurant_id)
     return {"restaurant": rest, "stats": stats}
 
 

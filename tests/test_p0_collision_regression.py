@@ -65,18 +65,16 @@ def _run(coro):
 
 
 async def _seed_collision(conn) -> dict:
-    """Seed org A (whatsapp-registered) with location L, plus a DIFFERENT
+    """Seed org A with location L, plus a DIFFERENT
     org B whose own id is explicitly set to equal L. This is exactly the
     P0 shape: `db_get_restaurant_by_id(L)` used to return org B."""
-    bot_number = f"57{os.urandom(4).hex()}"
-
     org_a = await conn.fetchval(
-        "INSERT INTO organizations (name, whatsapp_number) VALUES ($1, $2) RETURNING id",
-        "Restaurante A (collision regression)", bot_number,
+        "INSERT INTO organizations (name) VALUES ($1) RETURNING id",
+        "Restaurante A (collision regression)",
     )
     org_b = await conn.fetchval(
-        "INSERT INTO organizations (name, whatsapp_number) VALUES ($1, $2) RETURNING id",
-        "Restaurante B (OTRO cliente)", f"57{os.urandom(4).hex()}",
+        "INSERT INTO organizations (name) VALUES ($1) RETURNING id",
+        "Restaurante B (OTRO cliente)",
     )
 
     # Explicit id assignment: location L's id is forced to equal org_b's id.
@@ -109,7 +107,6 @@ async def _seed_collision(conn) -> dict:
 
     return {
         "org_a": org_a, "loc_l": loc_l, "org_b": org_b, "loc_b": loc_b,
-        "bot_number": bot_number,
     }
 
 
@@ -174,7 +171,7 @@ def test_bot_table_flow_resolves_own_restaurant_despite_collision(collision):
 
     async def _call():
         return await _load_restaurant_context(
-            bot_number=collision["bot_number"],
+            org_id=collision["org_a"],
             table_context=table_context,
             user_phone="+573000000001",
         )

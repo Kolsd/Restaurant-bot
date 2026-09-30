@@ -51,7 +51,7 @@ async def test_first_make_reservation_passes(monkeypatch):
         tool_input=dict(_RESERVATION_INPUT),
         reply="(LLM reply)",
         table_context=None,
-        bot_number="+57888",
+        org_id=4242,
         phone="+573001234567",
         full_history=_CONFIRMED_HISTORY,
     )
@@ -73,7 +73,7 @@ async def test_duplicate_make_reservation_blocked(monkeypatch):
         tool_input=dict(_RESERVATION_INPUT),
         reply="¡Reserva confirmada!",  # LLM's optimistic reply
         table_context=None,
-        bot_number="+57888",
+        org_id=4242,
         phone="+573001234567",
         full_history=_CONFIRMED_HISTORY,
     )
@@ -111,7 +111,7 @@ async def test_different_reservation_params_not_blocked(monkeypatch):
         tool_input={**_RESERVATION_INPUT, "time": "20:00"},
         reply="ok",
         table_context=None,
-        bot_number="+57888",
+        org_id=4242,
         phone="+573001234567",
         full_history=_CONFIRMED_HISTORY,
     )
@@ -121,7 +121,7 @@ async def test_different_reservation_params_not_blocked(monkeypatch):
         tool_input={**_RESERVATION_INPUT, "time": "21:00"},
         reply="ok",
         table_context=None,
-        bot_number="+57888",
+        org_id=4242,
         phone="+573001234567",
         full_history=_CONFIRMED_HISTORY,
     )

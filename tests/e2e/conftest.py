@@ -292,7 +292,7 @@ async def seed_restaurant(
     pool: asyncpg.Pool,
     *,
     name: str = "E2E Test Restaurant",
-    bot_number_raw: str = "+570000E2ETEST",
+    key: str = "E2ETEST",
     menu: dict | None = None,
     payment_methods: list[str] | None = None,
     features_override: dict | None = None,
@@ -306,38 +306,23 @@ async def seed_restaurant(
     `organizations JOIN locations`. This function writes directly to
     `organizations` + `locations`.
 
-    Schema summary (confirmed against live schema):
-      organizations: id, name, slug, whatsapp_number, menu, features, ...
-      locations:     id, org_id, name, code, address, latitude, longitude,
-                     whatsapp_number (location-level override), active, timezone, ...
-      restaurants VIEW: id=l.id, whatsapp_number=COALESCE(l.whatsapp_number, o.whatsapp_number),
-                        menu=o.menu, features=o.features, ...
-
-    Strategy:
-      - org.whatsapp_number = parent bot_number  (VIEW exposes this via the
-        "sede principal" location whose l.whatsapp_number IS NULL)
-      - each branch location: l.whatsapp_number = bot_number + _b{org_id}{i+1}
-        (the _b suffix just keeps each branch's whatsapp_number unique; it was
-        also read by the now-deleted agent_external.py branch routing, but
-        that stopped mattering when WhatsApp delivery/pickup was retired —
-        chunk 9, docs/claude/delivery-web.md)
+    `key` names the test restaurant: its org slug is `e2e-<key>`, so a
+    re-run finds the same org. The principal sede has code 'principal';
+    branch i has code 's<i>'.
 
     Returns:
         {
-          "id": int,                   # org_id — matches db_get_restaurant_by_phone return
-          "whatsapp_number": str,      # normalized bot_number
+          "id": int,                   # org_id — the bot runtime's tenant key
+          "principal_location_id": int,
           "owner_email": str,
           "branches": [
-              {"id": int, "whatsapp_number": str, "lat": float, "lon": float},
+              {"id": int, "lat": float, "lon": float},
               ...                      # id = location_id for each branch location
           ]
         }
 
-    Note on "id":
-      db_get_restaurant_by_phone() does `d["id"] = d["org_id"]` so all bot-runtime
-      code uses org_id as the tenant key. seed_restaurant() returns org_id under "id"
-      to match that convention. Branch "id" values are location_ids (used as
-      X-Branch-ID header in admin API calls).
+    Branch "id" values are location_ids (used as X-Branch-ID header in admin
+    API calls).
     """
     if menu is None:
         menu = {
@@ -359,8 +344,6 @@ async def seed_restaurant(
             (4.609710, -74.081741),
         ]
 
-    bot_number = _normalize_phone(bot_number_raw)
-
     base_features = {
         "bot_active": True,
         "domicilio_active": True,
@@ -378,19 +361,17 @@ async def seed_restaurant(
     if features_override:
         base_features.update(features_override)
 
-    slug = f"e2e-test-{bot_number[-8:]}"
+    slug = "e2e-" + re.sub(r"[^a-z0-9]+", "-", key.lower()).strip("-")
 
     async with pool.acquire() as conn:
         async with conn.transaction():
             # ── Upsert organization ───────────────────────────────────────────
-            # organizations has a partial unique index on whatsapp_number WHERE NOT NULL.
-            # Use ON CONFLICT to update menu/features on re-run.
+            # The slug is unique: update menu/features on re-run.
             org_row = await conn.fetchrow(
                 """
-                INSERT INTO organizations (name, slug, whatsapp_number, menu, features)
-                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
-                ON CONFLICT (whatsapp_number)
-                  WHERE whatsapp_number IS NOT NULL
+                INSERT INTO organizations (name, slug, menu, features)
+                VALUES ($1, $2, $3::jsonb, $4::jsonb)
+                ON CONFLICT (slug)
                   DO UPDATE SET
                     name     = EXCLUDED.name,
                     menu     = EXCLUDED.menu,
@@ -400,21 +381,16 @@ async def seed_restaurant(
                 """,
                 name,
                 slug,
-                bot_number,
                 json.dumps(menu),
                 json.dumps(base_features),
             )
             org_id = org_row["id"]
 
             # ── Upsert "sede principal" location ─────────────────────────────
-            # This location has NO whatsapp_number override so the VIEW resolves
-            # COALESCE(l.whatsapp_number, o.whatsapp_number) = org.whatsapp_number.
-            # It represents the "parent" entry visible in the restaurants VIEW as
-            # whatsapp_number = bot_number.
             existing_principal = await conn.fetchrow(
                 """
                 SELECT id FROM locations
-                WHERE org_id = $1 AND whatsapp_number IS NULL
+                WHERE org_id = $1 AND code = 'principal'
                 ORDER BY id ASC LIMIT 1
                 """,
                 org_id,
@@ -480,21 +456,12 @@ async def seed_restaurant(
             )
 
             # ── Branch locations ──────────────────────────────────────────────
-            # Each branch is a location with its own whatsapp_number override.
-            # The _b{org_id}{i+1} suffix just keeps each branch's whatsapp_number
-            # unique (see the docstring above).
             branches = []
             for i in range(num_branches):
                 lat, lon = branch_latlons[i] if i < len(branch_latlons) else (4.6, -74.1)
-                branch_bot = f"{bot_number}_b{org_id}{i + 1}"
-
-                # Check for existing branch location by whatsapp_number
                 b_existing = await conn.fetchrow(
-                    """
-                    SELECT id FROM locations
-                    WHERE whatsapp_number = $1
-                    """,
-                    branch_bot,
+                    "SELECT id FROM locations WHERE org_id = $1 AND code = $2",
+                    org_id, f"s{i + 1}",
                 )
                 if b_existing:
                     branch_loc_id = b_existing["id"]
@@ -513,8 +480,8 @@ async def seed_restaurant(
                         """
                         INSERT INTO locations
                           (org_id, name, code, address, latitude, longitude,
-                           whatsapp_number, active, timezone)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'America/Bogota')
+                           active, timezone)
+                        VALUES ($1, $2, $3, $4, $5, $6, true, 'America/Bogota')
                         RETURNING id
                         """,
                         org_id,
@@ -523,41 +490,18 @@ async def seed_restaurant(
                         f"Dirección Sucursal {i + 1}, Bogotá (E2E)",
                         lat,
                         lon,
-                        branch_bot,
                     )
                     branch_loc_id = b_row["id"]
 
                 branches.append({
                     "id": branch_loc_id,
-                    "whatsapp_number": branch_bot,
                     "lat": lat,
                     "lon": lon,
                 })
 
-        # ── Sanity check: VIEW must resolve both bot numbers ──────────────────
-        # If this fails the test seeding is wrong — fail fast with a clear message.
-        principal_view_row = await conn.fetchrow(
-            "SELECT id, whatsapp_number FROM restaurants WHERE whatsapp_number = $1",
-            bot_number,
-        )
-        assert principal_view_row is not None, (
-            f"seed_restaurant: 'restaurants' VIEW returned no row for bot_number={bot_number!r}. "
-            f"org_id={org_id}, principal_loc_id={principal_loc_id}. "
-            "Check that the location has whatsapp_number IS NULL so the VIEW COALESCEs to org.whatsapp_number."
-        )
-        for b in branches:
-            branch_view_row = await conn.fetchrow(
-                "SELECT id FROM restaurants WHERE whatsapp_number = $1",
-                b["whatsapp_number"],
-            )
-            assert branch_view_row is not None, (
-                f"seed_restaurant: 'restaurants' VIEW returned no row for branch {b['whatsapp_number']!r}. "
-                f"org_id={org_id}. Branch location insert may have failed."
-            )
-
         return {
             "id": org_id,
-            "whatsapp_number": bot_number,
+            "principal_location_id": principal_loc_id,
             "owner_email": owner_email,
             "branches": branches,
         }
@@ -578,7 +522,7 @@ async def create_admin_token(pool: asyncpg.Pool, username: str) -> str:
 _TABLE_MARKER_RE = re.compile(r"\[(?:table_id|t):([^\]]+)\]")
 
 
-async def _scan_table(phone: str, bot_number: str, table_id: str, org_id: int) -> None:
+async def _scan_table(phone: str, table_id: str, org_id: int) -> None:
     """What a QR scan does for this diner: sit them at `table_id`."""
     from app.services import database as db
     from app.services.tenant_context import tenant_scope
@@ -586,16 +530,16 @@ async def _scan_table(phone: str, bot_number: str, table_id: str, org_id: int) -
     with tenant_scope(org_id):
         table = await db.db_get_table_by_id(table_id)
         assert table, f"e2e: table {table_id!r} not found"
-        session = await db.db_get_active_session(phone, bot_number)
+        session = await db.db_get_active_session(phone, org_id)
         if session and session.get("table_id") == table["id"]:
             return
         if session:
             await db.db_close_session(
-                phone, bot_number, reason="scanned_new_table", closed_by_username="system",
+                phone, org_id, reason="scanned_new_table", closed_by_username="system",
             )
         await db.db_create_table_session(
-            phone, bot_number, table["id"], table["name"],
-            org_id=table.get("org_id"), location_id=table.get("location_id"),
+            phone, org_id, table["id"], table["name"],
+            location_id=table.get("location_id"),
         )
 
 
@@ -605,7 +549,7 @@ async def send_diner_message(
     *,
     phone: str,
     text: str,
-    bot_number: str,
+    org_id: int,
 ) -> int:
     """Send one diner message to the bot; returns 1 once the turn is done.
 
@@ -615,21 +559,18 @@ async def send_diner_message(
     from app.services import database as db
     from app.services.tenant_context import tenant_scope
 
-    normalized_bot = _normalize_phone(bot_number)
     normalized_phone = _normalize_phone(phone)
-    restaurant = await db.db_get_restaurant_by_bot_number(normalized_bot)
-    assert restaurant, f"e2e: no restaurant for bot_number {normalized_bot!r}"
-    org_id = int(restaurant.get("org_id") or restaurant["id"])
+    org_id = int(org_id)
 
     text = text or ""
     marker = _TABLE_MARKER_RE.search(text)
     if marker:
-        await _scan_table(normalized_phone, normalized_bot, marker.group(1).strip(), org_id)
+        await _scan_table(normalized_phone, marker.group(1).strip(), org_id)
         text = (text[:marker.start()] + text[marker.end():]).strip()
 
     with tenant_scope(org_id):
         result = await agent.chat(
-            user_phone=normalized_phone, user_message=text, bot_number=normalized_bot,
+            user_phone=normalized_phone, user_message=text, org_id=org_id,
         )
     reply = (result or {}).get("message", "")
     if reply and _ACTIVE_REPLIES:

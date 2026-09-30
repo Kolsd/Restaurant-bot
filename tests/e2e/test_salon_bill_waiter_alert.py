@@ -106,14 +106,14 @@ async def test_salon_bill_fires_waiter_alert_immediately(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Bill Alert Test Restaurant",
-        bot_number_raw="+570E2EBILLALT",
+        key="+570E2EBILLALT",
         menu=MENU,
         payment_methods=PAYMENT_METHODS,
         num_branches=1,
         branch_latlons=[(4.710989, -74.072092)],
     )
     parent_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
+    org_id = restaurant["id"]
     branch_1 = restaurant["branches"][0]
     branch_1_id = branch_1["id"]
 
@@ -136,7 +136,7 @@ async def test_salon_bill_fires_waiter_alert_immediately(
     auth_headers = {"Authorization": f"Bearer {admin_token}"}
     branch_headers = {**auth_headers, "X-Branch-ID": str(branch_1_id)}
 
-    log.info("e2e.bill_alert_start", parent_id=parent_id, bot_number=bot_number)
+    log.info("e2e.bill_alert_start", parent_id=parent_id, org_id=org_id)
 
     # ── Create table via admin API ─────────────────────────────────────────────
     create_table_resp = await client.post("/api/tables", headers=branch_headers)
@@ -155,7 +155,7 @@ async def test_salon_bill_fires_waiter_alert_immediately(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=qr_message,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info("e2e.bill_alert_turn_1_done", processed=processed_1, elapsed=round(time.monotonic() - t1, 1))
     assert processed_1 >= 1, "Turn 1 (QR scan) was not processed"
@@ -188,7 +188,7 @@ async def test_salon_bill_fires_waiter_alert_immediately(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=order_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info("e2e.bill_alert_turn_2_done", processed=processed_2, elapsed=round(time.monotonic() - t2, 1))
     assert processed_2 >= 1, "Turn 2 (order) was not processed"
@@ -206,7 +206,7 @@ async def test_salon_bill_fires_waiter_alert_immediately(
             client, pool,
             phone=CUSTOMER_PHONE_RAW,
             text=confirm_order_text,
-            bot_number=bot_number,
+            org_id=org_id,
         )
         log.info("e2e.bill_alert_turn_2b_done", processed=processed_2b, elapsed=round(time.monotonic() - t2b, 1))
         assert processed_2b >= 1, "Turn 2b (order confirmation) was not processed"
@@ -256,7 +256,7 @@ async def test_salon_bill_fires_waiter_alert_immediately(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=bill_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info("e2e.bill_alert_turn_3_done", processed=processed_3, elapsed=round(time.monotonic() - t3, 1))
     assert processed_3 >= 1, "Turn 3 (bill request) was not processed"

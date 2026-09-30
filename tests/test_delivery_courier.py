@@ -144,7 +144,6 @@ async def _seed_order(*, org_id: int, location_id: int, status: str = "pendiente
             "order_type": "domicilio",
             "subtotal": 20000,
             "total": 20000,
-            "bot_number": "573000000000",
             "org_id": org_id,
             "location_id": location_id,
             "status": status,

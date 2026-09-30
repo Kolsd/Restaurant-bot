@@ -52,24 +52,14 @@ def get_date_range(period: str, tz_str: str):
     elif period == "year": return str(today.replace(month=1, day=1)), str(today)
     return str(today), str(today)
 
-async def filter_conversations_for_branch(conversations: list, branch_id: int | str, bot_number: str) -> list:
+async def filter_conversations_for_branch(conversations: list, branch_id: int | str, org_id: int) -> list:
     """If the user belongs to a branch, only shows chats from their tables."""
     if not branch_id or branch_id == "all" or not conversations:
         return conversations
     from app.repositories import tables_repo
-    allowed_phones = await tables_repo.db_get_session_phones_by_branch(branch_id, bot_number)
+    allowed_phones = await tables_repo.db_get_session_phones_by_branch(branch_id, org_id)
     return [c for c in conversations if c.get("phone") in allowed_phones]
         
-async def _get_effective_bot_number(restaurant: dict) -> str:
-    """Wave-2: returns the restaurant's own WhatsApp number.
-
-    Pre-Wave-2 this resolved to the parent's number for branch restaurants
-    (parent_restaurant_id was used). That column was dropped in 0038; in the
-    Wave-2 model every location has its own whatsapp_number on the locations
-    row, so we always return the restaurant's own number.
-    """
-    return restaurant.get("whatsapp_number", "")
-
 def _resolve_branch_id(request: Request, user: dict, restaurant: dict) -> int | str | None:
     """Resolve the effective sede for stats filtering.
 
@@ -89,24 +79,23 @@ def _resolve_branch_id(request: Request, user: dict, restaurant: dict) -> int | 
 async def dashboard_sync(request: Request, period: str = Query("today")):
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    bot_number = restaurant["whatsapp_number"]
+    org_id = int(restaurant["id"])
     date_from, date_to = get_date_range(period, get_tz(restaurant))
     branch_id = _resolve_branch_id(request, user, restaurant)
-    effective_bot = await _get_effective_bot_number(restaurant)
     sede_id = resolve_sede_filter(request, user)
 
     with tenant_scope(restaurant["id"]):
         # Revenue/orders/chart: table rounds + paid delivery, same rules as the
         # channel card. `orders` alone (below) never saw a single table sale.
         sales_by_day  = await stats_repo.db_sales_daily(date_from, date_to, location_id=sede_id)
-        orders        = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
-        reservations  = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
+        orders        = await db.db_get_orders_range(date_from, date_to, org_id=org_id)
+        reservations  = await db.db_get_reservations_range(date_from, date_to, org_id=org_id)
         all_convs     = await db.db_get_all_conversations(
-            bot_number=effective_bot,
+            org_id=org_id,
             date_from=date_from,
             date_to=date_to
         )
-    conversations = await filter_conversations_for_branch(all_convs, branch_id, effective_bot)
+    conversations = await filter_conversations_for_branch(all_convs, branch_id, org_id)
 
     paid    = [o for o in orders if o["paid"]]
     pending = [o for o in orders if not o["paid"]]
@@ -167,8 +156,6 @@ async def get_conversations(request: Request):
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
 
-    bot_number = restaurant.get("whatsapp_number", "")
-
     # X-Branch-ID semantics for /dashboard/conversations:
     # - digit value (= location_id from sidebar dropdown) → filter to that sede
     # - 'matriz', 'all', missing → no sede filter; RLS (org_isolation on
@@ -182,7 +169,7 @@ async def get_conversations(request: Request):
     branch_id = resolve_sede_filter(request, user)
 
     with tenant_scope(restaurant["id"]):
-        conversations = await db.db_get_all_conversations(bot_number=bot_number, branch_id=branch_id)
+        conversations = await db.db_get_all_conversations(org_id=int(restaurant["id"]), branch_id=branch_id)
     return {"conversations": conversations}
 
 @router.get("/api/menu/availability")
@@ -310,14 +297,14 @@ async def update_menu_structure(request: Request):
 async def cleanup_conversations(request: Request):
     restaurant = await get_current_restaurant(request)
     with tenant_scope(restaurant["id"]):
-        result = await db.db_cleanup_old_conversations(days=7, bot_number=restaurant["whatsapp_number"])
+        result = await db.db_cleanup_old_conversations(days=7, org_id=int(restaurant["id"]))
     return {"success": True, "result": str(result)}
 
 @router.get("/api/conversations/{phone}")
 async def get_conversation(phone: str, request: Request):
     restaurant = await get_current_restaurant(request)
     with tenant_scope(restaurant["id"]):
-        details = await db.db_get_conversation_details(phone, restaurant["whatsapp_number"])
+        details = await db.db_get_conversation_details(phone, int(restaurant["id"]))
     return {"phone": phone, "history": details.get("history", []), "bot_paused": details.get("bot_paused", False)}
 
 # ── DASHBOARD ANALYTICS — TIER 2 ─────────────────────────────────────────────

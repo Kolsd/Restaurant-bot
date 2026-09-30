@@ -345,11 +345,10 @@ def test_nps_accepted_once_and_stored_via_existing_path(client):
     try:
         location_id = _run(_seed_location(org_id))
         token = f"web:{uuid.uuid4()}"
-        bot_number = "573000000999"
         code = "NPB" + uuid.uuid4().hex[:3].upper()
         _run(_seed_order(
             org_id=org_id, location_id=location_id, status="entregado",
-            public_code=code, phone=token, bot_number=bot_number,
+            public_code=code, phone=token,
         ))
 
         resp = _post(client, f"/api/diner/order/{code}/nps", json={"token": token, "score": 5, "comment": "Excelente"})
@@ -359,7 +358,7 @@ def test_nps_accepted_once_and_stored_via_existing_path(client):
         rows = _run(_fetch_nps_rows(org_id))
         assert len(rows) == 1, "must write through the SAME nps_responses table the WhatsApp flow uses"
         assert rows[0]["phone"] == token
-        assert rows[0]["bot_number"] == bot_number
+        assert rows[0]["org_id"] == org_id
         assert rows[0]["score"] == 5
         assert rows[0]["comment"] == "Excelente"
         # A delivery order has no table session; the rating must still count
@@ -479,8 +478,8 @@ def test_nps_submit_stores_the_rating(client):
 def test_checkout_sends_confirmation_email_with_the_right_link_when_email_given(client):
     info = _run(_seed_checkout_org())
     try:
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"]))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"]))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 40000.0, "line_id": "a1"},
         ]))
 
@@ -503,8 +502,8 @@ def test_checkout_sends_confirmation_email_with_the_right_link_when_email_given(
 def test_checkout_does_not_send_email_when_none_given(client):
     info = _run(_seed_checkout_org())
     try:
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"]))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"]))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 40000.0, "line_id": "a1"},
         ]))
 
@@ -521,8 +520,8 @@ def test_checkout_does_not_send_email_when_none_given(client):
 def test_checkout_succeeds_even_when_email_backend_fails(client):
     info = _run(_seed_checkout_org())
     try:
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"]))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"]))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 40000.0, "line_id": "a1"},
         ]))
 

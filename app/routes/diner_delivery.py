@@ -390,7 +390,6 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
     if session is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada o expirada")
     org_id = int(session["org_id"])
-    bot_number = session["bot_number"]
     order_mode = session.get("order_mode")
     location_id = session.get("location_id")
     if order_mode not in _VALID_MODES or not location_id:
@@ -446,7 +445,7 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
 
         currency = _features_dict(org.get("features")).get("currency", "COP")
 
-        cart = await db.db_get_cart(token, bot_number)
+        cart = await db.db_get_cart(token, org_id)
         cart_items = cart.get("items") or []
         if not cart_items:
             raise _refusal("empty_cart", "Tu carrito está vacío.")
@@ -545,7 +544,7 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
         order_type = _ORDER_TYPE_BY_MODE[order_mode]
 
         try:
-            async with orders._cart_lock(token, bot_number):
+            async with orders._cart_lock(token, org_id):
                 # Re-check the cache inside the lock too.
                 cached = await state_store.delivery_checkout_result_get(cache_key)
                 if cached:
@@ -555,7 +554,6 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
                     org_id=org_id,
                     location_id=location_id,
                     phone=token,
-                    bot_number=bot_number,
                     order_type=order_type,
                     items=cart_items,
                     address=body.address.strip(),
@@ -575,7 +573,7 @@ async def diner_delivery_checkout(request: Request, body: DinerDeliveryCheckoutR
                     channel=_DELIVERY_CHECKOUT_CHANNEL,
                 )
                 public_code = await delivery_repo.db_claim_public_code(created["id"], org_id)
-                await db.db_clear_cart(token, bot_number)
+                await db.db_clear_cart(token, org_id)
         except InsufficientStockError as exc:
             # db_create_delivery_order deducts inventory atomically with the
             # INSERT (docs/claude/delivery-web.md, chunk 4) — a shortage
@@ -904,7 +902,7 @@ async def diner_order_nps(public_code: str, body: DinerOrderNpsRequest, request:
     if order.get("status") != delivery_repo.STATUS_DELIVERED:
         raise HTTPException(status_code=422, detail="Todavía no puedes calificar este pedido.")
 
-    phone, bot_number = order["phone"], order["bot_number"]
+    phone = order["phone"]
     org_id = int(order["org_id"])
     with tenant_scope(org_id):
         # Claim first: the conditional UPDATE is the once-per-order guard,
@@ -913,7 +911,7 @@ async def diner_order_nps(public_code: str, body: DinerOrderNpsRequest, request:
             raise HTTPException(status_code=409, detail="Ya calificaste este pedido.")
         if not body.skip:
             await db.db_save_nps_response(
-                phone, bot_number, body.score, (body.comment or "").strip(),
+                phone, org_id, body.score, (body.comment or "").strip(),
                 location_id=order.get("location_id"),
             )
 

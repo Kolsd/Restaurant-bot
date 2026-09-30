@@ -16,7 +16,6 @@ def _loc_summary(loc: dict) -> dict:
         "id":               loc.get("id"),
         "name":             loc.get("name"),
         "is_primary":       loc.get("is_primary", False),
-        "whatsapp_number":  loc.get("whatsapp_number"),
         "active":           loc.get("active", True),
     }
 
@@ -32,7 +31,6 @@ async def _build_org_shape(org: dict) -> dict:
     return {
         "id":                 org.get("id"),
         "name":               org.get("name"),
-        "whatsapp_number":    org.get("whatsapp_number"),
         "features":           feats,
         "subscription_plan":  org.get("subscription_plan"),
         "locale":             feats.get("locale",   "es-CO"),
@@ -80,7 +78,6 @@ async def login(username: str, password: str) -> dict:
         roles     = member.get("roles") or [member.get("role", "mesero")]
         role      = ",".join(roles)
         branch_id = member.get("restaurant_id")
-        whatsapp_number = ""
         features: dict = {}
         restaurant_name = ""
 
@@ -102,7 +99,6 @@ async def login(username: str, password: str) -> dict:
                     restaurant_name = (
                         restaurant.get("display_name") or restaurant.get("name", "")
                     )
-                    whatsapp_number = restaurant.get("whatsapp_number", "")
                     raw = restaurant.get("features") or {}
                     features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
 
@@ -140,7 +136,6 @@ async def login(username: str, password: str) -> dict:
             "username":         member["name"],
             "role":             role,
             "branch_id":        branch_id,
-            "whatsapp_number":  whatsapp_number,
             "features":         features,
             "locale":           features.get("locale",   "es-CO"),
             "currency":         features.get("currency", "COP"),
@@ -174,7 +169,6 @@ async def login(username: str, password: str) -> dict:
     token = await sessions_repo.create_session(username.lower().strip())
 
     role = user.get("role", "owner")
-    whatsapp_number = ""
     features: dict = {}
 
     # ── New shape: resolve Org + Locations post-0037 (Wave 2) ────────────────
@@ -208,7 +202,6 @@ async def login(username: str, password: str) -> dict:
 
         restaurant = await db.db_get_restaurant_by_org_id(int(org_id))
         if restaurant:
-            whatsapp_number = restaurant.get("whatsapp_number", "")
             raw = restaurant.get("features") or {}
             features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
 
@@ -244,7 +237,6 @@ async def login(username: str, password: str) -> dict:
         "username": username,
         "role": role,
         "branch_id": org_id,
-        "whatsapp_number": whatsapp_number,
         "features": features,
         "locale":   features.get("locale",   "es-CO"),
         "currency": features.get("currency", "COP"),

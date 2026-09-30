@@ -14,8 +14,8 @@ ONE test that exercises:
   10. Outbound WA message capture asserted (>= 1 message)
 
 Why single location:
-  The reserve action in agent.py calls db_get_available_tables(date, time, guests, bot_number)
-  which resolves the location from the principal whatsapp_number and queries restaurant_tables
+  The reserve action in agent.py calls db_get_available_tables(date, time, guests, org_id)
+  which resolves the org's first sede and queries restaurant_tables
   for that location. Multi-branch GPS routing is not needed for reservation flow.
 
 Why we create a table first:
@@ -140,13 +140,13 @@ async def test_reservation_full_lifecycle(
     pool = test_pool
 
     # ── Seed restaurant ─────────────────────────────────────────────────────────
-    # num_branches=0: single sede only — reservations use the principal bot_number.
-    # The availability query resolves location from whatsapp_number (principal),
+    # num_branches=0: single sede only — reservations use the principal sede.
+    # The availability query resolves the org's first sede (principal),
     # so no branch locations are needed.
     restaurant = await seed_restaurant(
         pool,
         name="E2E Reservation Test Restaurant",
-        bot_number_raw="+570E2ERESERV1",
+        key="+570E2ERESERV1",
         menu=MENU,
         payment_methods=["Efectivo"],
         num_branches=0,  # No branch locations — single sede
@@ -157,7 +157,7 @@ async def test_reservation_full_lifecycle(
         },
     )
     parent_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]  # normalized (no +)
+    org_id = restaurant["id"]
     owner_email = restaurant["owner_email"]
 
     # Clean volatile data from prior runs
@@ -183,7 +183,7 @@ async def test_reservation_full_lifecycle(
     log.info(
         "e2e.reservation_test_start",
         parent_id=parent_id,
-        bot_number=bot_number,
+        org_id=org_id,
         reservation_date=RESERVATION_DATE_STR,
         reservation_time=RESERVATION_TIME,
         guests=RESERVATION_GUESTS,
@@ -201,7 +201,7 @@ async def test_reservation_full_lifecycle(
     #
     # POST /api/tables (no X-Branch-ID header) uses restaurant["location_id"] as the
     # branch_id for the new table, which is the principal location's ID — the same
-    # location that db_get_available_tables resolves via the principal bot_number.
+    # location that db_get_available_tables resolves as the principal sede.
     # The default capacity from migration 0014 is 4, satisfying >= RESERVATION_GUESTS (4).
     log.info("e2e.reservation_create_table", parent_id=parent_id)
     create_table_resp = await client.post(
@@ -233,7 +233,7 @@ async def test_reservation_full_lifecycle(
         pool,
         phone=CUSTOMER_PHONE_RAW,
         text=reservation_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info(
         "e2e.reservation_turn_1_done",
@@ -250,7 +250,7 @@ async def test_reservation_full_lifecycle(
     )
     assert len(turn1_replies) >= 1, (
         "Turn 1: bot sent no WA message. "
-        "Check ANTHROPIC_API_KEY, bot_number lookup, and module_reservations feature flag."
+        "Check ANTHROPIC_API_KEY, org lookup, and module_reservations feature flag."
     )
 
     # ── Turn 2 (conditional): Confirm if the bot asks ─────────────────────────
@@ -266,7 +266,7 @@ async def test_reservation_full_lifecycle(
         pool,
         phone=CUSTOMER_PHONE_RAW,
         text=confirm_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info(
         "e2e.reservation_turn_2_done",

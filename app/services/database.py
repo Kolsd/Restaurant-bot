@@ -293,13 +293,7 @@ from app.repositories.orders_repo import (
     db_get_orders_range,
     db_get_order,
     db_get_all_orders,
-    db_get_delivery_orders,
-    db_update_pending_order_payment_method,
-    db_attach_order_proof,
     db_update_order_status,
-    db_set_order_eta,
-    db_get_orders_needing_eta_communication,
-    db_mark_eta_communicated,
 )
 
 # === Conversations: moved to app.repositories.conversations_repo (Fase 6) ===
@@ -321,8 +315,6 @@ from app.repositories.restaurant_repo import (
     db_create_user,
     db_update_user_password,
     db_get_all_users,
-    db_get_restaurant_by_phone,
-    db_get_restaurant_by_bot_number,
     db_get_restaurant_by_name,
     db_get_restaurant_by_location_id,
     db_get_restaurant_by_org_id,
@@ -331,7 +323,6 @@ from app.repositories.restaurant_repo import (
     db_sync_menu_to_branches,
     db_update_menu,
     db_get_menu,
-    db_get_top_dishes,
     db_get_branches,
     db_delete_branch,
     db_get_menu_availability,
@@ -375,7 +366,6 @@ from app.repositories.conversations_repo import (
     db_get_cart,
     db_save_cart,
     db_clear_cart,
-    db_migrate_cart,
 )
 
 # === Tables/POS: moved to app.repositories.tables_repo (Fase 6) ===

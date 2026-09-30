@@ -21,7 +21,7 @@ Bypass rationale:
     db_get_active_session_table_ids) iterate across ALL tenants by design.
   - Kitchen/delivery views (db_get_delivery_orders_for_cashier) are
     tenant-scoped via active tenant_scope() at the call site.
-  - db_get_waiter_alerts(bot_number) is tenant-scoped; call site must pass bot_number.
+  - db_get_waiter_alerts(org_id) is tenant-scoped; call site must pass org_id.
   - db_verify_branch_is_child queries `restaurants` across tenant boundary.
 """
 
@@ -485,7 +485,7 @@ async def db_init_waiter_alerts():
 
 
 async def db_create_waiter_alert(
-    phone: str, bot_number: str, alert_type: str, message: str,
+    phone: str, org_id: int, alert_type: str, message: str,
     table_id: str = "", table_name: str = "", location_id: int | None = None,
 ) -> dict:
     """
@@ -512,14 +512,14 @@ async def db_create_waiter_alert(
                 """
                 SELECT id, message FROM waiter_alerts
                 WHERE table_id = $1
-                  AND bot_number = $2
+                  AND org_id = $2
                   AND alert_type = 'waiter'
                   AND dismissed = FALSE
                   AND created_at > NOW() - INTERVAL '60 seconds'
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
-                table_id, bot_number,
+                table_id, org_id,
             )
             if existing:
                 combined = f"{existing['message']} | {message}"
@@ -531,9 +531,9 @@ async def db_create_waiter_alert(
 
         if topic == "waiter_alert.created":
             row = await conn.fetchrow(
-                "INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message, org_id, location_id) "
-                "VALUES ($1, $2, $3, $4, $5, $6, NULLIF(current_setting('app.org_id', true), '')::bigint, $7) RETURNING *",
-                table_id, table_name, phone, bot_number, alert_type, message, location_id,
+                "INSERT INTO waiter_alerts (table_id, table_name, phone, org_id, alert_type, message, location_id) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+                table_id, table_name, phone, org_id, alert_type, message, location_id,
             )
         result = _serialize(dict(row))
 
@@ -547,14 +547,14 @@ async def db_create_waiter_alert(
     return result
 
 
-async def db_get_waiter_alerts(bot_number: str, location_id: int | None = None) -> list:
-    """List active (non-dismissed, <2h old) waiter alerts for a bot_number.
+async def db_get_waiter_alerts(org_id: int, location_id: int | None = None) -> list:
+    """List active (non-dismissed, <2h old) waiter alerts for an org.
 
     location_id: when given, restricts to alerts for THAT sede plus legacy
     rows with location_id IS NULL (created before this column was populated —
     they must not vanish for tenants that had alerts before this change).
     When omitted (None), no location filter is applied — every location
-    sharing this bot_number is returned (today's behaviour, e.g. an owner
+    of this org is returned (today's behaviour, e.g. an owner
     viewing "all sedes").
 
     # Requires active tenant_scope() or bypass_tenant_scope().
@@ -562,17 +562,17 @@ async def db_get_waiter_alerts(bot_number: str, location_id: int | None = None) 
     async with tenant_connection() as conn:
         if location_id is not None:
             rows = await conn.fetch(
-                "SELECT * FROM waiter_alerts WHERE bot_number=$1 AND dismissed=FALSE "
+                "SELECT * FROM waiter_alerts WHERE org_id=$1 AND dismissed=FALSE "
                 "AND created_at > NOW() - INTERVAL '2 hours' "
                 "AND (location_id = $2 OR location_id IS NULL) "
                 "ORDER BY created_at DESC",
-                bot_number, location_id,
+                org_id, location_id,
             )
         else:
             rows = await conn.fetch(
-                "SELECT * FROM waiter_alerts WHERE bot_number=$1 AND dismissed=FALSE "
+                "SELECT * FROM waiter_alerts WHERE org_id=$1 AND dismissed=FALSE "
                 "AND created_at > NOW() - INTERVAL '2 hours' ORDER BY created_at DESC",
-                bot_number,
+                org_id,
             )
         return [_serialize(dict(r)) for r in rows]
 
@@ -615,10 +615,10 @@ async def db_init_table_sessions():
     pass
 
 
-async def db_get_active_session(phone: str, bot_number: str) -> dict | None:
+async def db_get_active_session(phone: str, org_id: int) -> dict | None:
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
-        row = await conn.fetchrow("SELECT * FROM table_sessions WHERE phone=$1 AND bot_number=$2 AND status='active' ORDER BY started_at DESC LIMIT 1", phone, bot_number)
+        row = await conn.fetchrow("SELECT * FROM table_sessions WHERE phone=$1 AND org_id=$2 AND status='active' ORDER BY started_at DESC LIMIT 1", phone, org_id)
         return _serialize(dict(row)) if row else None
 
 
@@ -640,14 +640,14 @@ async def db_get_active_session_on_table_by_other_phone(table_id: str, phone: st
 
 
 async def db_get_active_session_by_table_id(table_id: str) -> dict | None:
-    """Return the active session for a table_id (phone, bot_number, meta_phone_id).
+    """Return the active session for a table_id (phone, org_id).
 
     Used by pre-cuenta to identify the customer to message.
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            """SELECT phone, bot_number, meta_phone_id
+            """SELECT phone, org_id
                FROM table_sessions
                WHERE table_id = $1 AND status = 'active'
                ORDER BY started_at DESC LIMIT 1""",
@@ -656,7 +656,7 @@ async def db_get_active_session_by_table_id(table_id: str) -> dict | None:
     return _serialize(dict(row)) if row else None
 
 
-async def db_get_session_join_code(table_id: str, bot_number: str) -> str | None:
+async def db_get_session_join_code(table_id: str, org_id: int) -> str | None:
     """Return the join_code of the active session for this table, or None if
     the table has no active session (caller becomes the host).
 
@@ -672,12 +672,12 @@ async def db_get_session_join_code(table_id: str, bot_number: str) -> str | None
             SELECT join_code
             FROM table_sessions
             WHERE table_id = $1
-              AND bot_number = $2
+              AND org_id = $2
               AND status = 'active'
             ORDER BY started_at DESC
             LIMIT 1
             """,
-            table_id, bot_number,
+            table_id, org_id,
         )
         if row is None:
             return None
@@ -711,11 +711,10 @@ async def db_set_session_join_code(session_id: int, join_code: str) -> bool:
 
 async def db_link_participant_session(
     phone: str,
-    bot_number: str,
+    org_id: int,
     table_id: str,
     table_name: str,
     join_code: str,
-    org_id: int,
     location_id: int | None,
 ) -> dict | None:
     """Open a NEW table_session for a participant joining an existing mesa
@@ -778,13 +777,13 @@ async def db_link_participant_session(
         row = await conn.fetchrow(
             """
             INSERT INTO table_sessions
-                (phone, bot_number, table_id, table_name,
+                (phone, table_id, table_name,
                  org_id, location_id, assigned_staff_id,
                  join_code, status, last_activity)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', NOW())
             RETURNING *
             """,
-            phone, bot_number, table_id, table_name,
+            phone, table_id, table_name,
             org_id, location_id, assigned_staff_id,
             join_code,
         )
@@ -800,35 +799,25 @@ async def db_link_participant_session(
 
 async def db_create_table_session(
     phone: str,
-    bot_number: str,
+    org_id: int,
     table_id: str,
     table_name: str,
-    org_id: int | None = None,
     location_id: int | None = None,
     assigned_staff_id: str | None = None,
 ) -> dict:
     """# Requires active tenant_scope() or bypass_tenant_scope().
 
-    org_id is required by schema (NOT NULL). If not passed, resolved from
-    restaurant_tables.org_id. location_id is also persisted when available.
+    location_id is resolved from restaurant_tables when not passed.
     assigned_staff_id: if not explicitly provided, auto-assigned to the
     least-loaded mesero at the location (fewest active table_sessions).
     If no mesero exists at the location, remains NULL — no exception raised.
     """
     async with tenant_connection() as conn:
-        if org_id is None or location_id is None:
-            tbl = await conn.fetchrow(
-                "SELECT org_id, location_id FROM restaurant_tables WHERE id=$1",
-                table_id,
+        if location_id is None:
+            location_id = await conn.fetchval(
+                "SELECT location_id FROM restaurant_tables WHERE id=$1 AND org_id=$2",
+                table_id, org_id,
             )
-            if not tbl:
-                raise ValueError(f"Cannot resolve org for table {table_id}")
-            if org_id is None:
-                org_id = tbl["org_id"]
-            if location_id is None:
-                location_id = tbl["location_id"]
-        if org_id is None:
-            raise ValueError(f"Cannot resolve org_id for table {table_id}")
 
         # Auto-assign least-loaded mesero when no explicit assignment is given.
         if assigned_staff_id is None and location_id is not None:
@@ -853,10 +842,10 @@ async def db_create_table_session(
 
         row = await conn.fetchrow(
             "INSERT INTO table_sessions "
-            "(phone, bot_number, table_id, table_name, org_id, location_id, "
+            "(phone, table_id, table_name, org_id, location_id, "
             "assigned_staff_id, status, last_activity) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', NOW()) RETURNING *",
-            phone, bot_number, table_id, table_name, org_id, location_id,
+            "VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW()) RETURNING *",
+            phone, table_id, table_name, org_id, location_id,
             assigned_staff_id,
         )
         session = _serialize(dict(row))
@@ -876,32 +865,32 @@ async def db_create_table_session(
         return session
 
 
-async def db_touch_session(phone: str, bot_number: str):
+async def db_touch_session(phone: str, org_id: int):
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
-        await conn.execute("UPDATE table_sessions SET last_activity=NOW() WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number)
+        await conn.execute("UPDATE table_sessions SET last_activity=NOW() WHERE phone=$1 AND org_id=$2 AND status='active'", phone, org_id)
 
 
-async def db_session_mark_order(phone: str, bot_number: str):
+async def db_session_mark_order(phone: str, org_id: int):
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
-        await conn.execute("UPDATE table_sessions SET has_order=TRUE, last_activity=NOW() WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number)
+        await conn.execute("UPDATE table_sessions SET has_order=TRUE, last_activity=NOW() WHERE phone=$1 AND org_id=$2 AND status='active'", phone, org_id)
 
 
-async def db_session_mark_delivered(phone: str, bot_number: str, total: int = 0):
+async def db_session_mark_delivered(phone: str, org_id: int, total: int = 0):
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
-        await conn.execute("UPDATE table_sessions SET order_delivered=TRUE, last_activity=NOW(), total_spent=$3 WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number, total)
+        await conn.execute("UPDATE table_sessions SET order_delivered=TRUE, last_activity=NOW(), total_spent=$3 WHERE phone=$1 AND org_id=$2 AND status='active'", phone, org_id, total)
 
 
-async def db_mark_session_nps_pending(phone: str, bot_number: str) -> None:
+async def db_mark_session_nps_pending(phone: str, org_id: int) -> None:
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "UPDATE table_sessions SET status='nps_pending', closed_by='factura_entregada', last_activity=NOW() "
-            "WHERE phone=$1 AND bot_number=$2 AND status='active' "
+            "WHERE phone=$1 AND org_id=$2 AND status='active' "
             "RETURNING id, table_id, org_id, location_id",
-            phone, bot_number
+            phone, org_id
         )
 
     if row is not None:
@@ -916,15 +905,15 @@ async def db_mark_session_nps_pending(phone: str, bot_number: str) -> None:
         )
 
 
-async def db_close_session(phone: str, bot_number: str, reason: str = "manual", closed_by_username: str = "") -> dict | None:
+async def db_close_session(phone: str, org_id: int, reason: str = "manual", closed_by_username: str = "") -> dict | None:
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
         row = await conn.fetchrow("""
             UPDATE table_sessions
             SET status='closed', closed_at=NOW(), closed_by=$3, closed_by_username=$4,
                 summary=jsonb_build_object('close_reason',$3::text,'closed_by_user',$4::text)
-            WHERE phone=$1 AND bot_number=$2 AND status IN ('active','nps_pending') RETURNING *
-        """, phone, bot_number, reason, closed_by_username)
+            WHERE phone=$1 AND org_id=$2 AND status IN ('active','nps_pending') RETURNING *
+        """, phone, org_id, reason, closed_by_username)
         return _serialize(dict(row)) if row else None
 
 
@@ -971,18 +960,6 @@ async def db_get_closeable_sessions() -> list:
             return [_serialize(dict(r)) for r in rows]
 
 
-async def db_get_closed_sessions(bot_number: str, hours: int = 24) -> list:
-    """# Requires active tenant_scope() or bypass_tenant_scope()."""
-    hours = max(1, min(hours, 720))
-    async with tenant_connection() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM table_sessions WHERE bot_number=$1 AND status='closed'"
-            " AND closed_at > NOW() - make_interval(hours => $2) ORDER BY closed_at DESC",
-            bot_number, hours,
-        )
-        return [_serialize(dict(r)) for r in rows]
-
-
 async def db_get_session_by_id(session_id: int) -> dict | None:
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
@@ -996,8 +973,8 @@ async def db_reopen_session(session_id: int) -> dict | None:
         target = await conn.fetchrow("SELECT * FROM table_sessions WHERE id=$1 AND status='closed'", session_id)
         if not target: return None
         phone = target["phone"]
-        bot_number = target["bot_number"]
-        await conn.execute("UPDATE table_sessions SET status='closed', closed_at=NOW(), closed_by='superseded', closed_by_username='' WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number)
+        org_id = target["org_id"]
+        await conn.execute("UPDATE table_sessions SET status='closed', closed_at=NOW(), closed_by='superseded', closed_by_username='' WHERE phone=$1 AND org_id=$2 AND status='active'", phone, org_id)
         row = await conn.fetchrow("UPDATE table_sessions SET status='active', closed_at=NULL, closed_by='', closed_by_username='', inactivity_warned=FALSE, last_activity=NOW(), summary=jsonb_build_object('reopened',true) WHERE id=$1 RETURNING *", session_id)
         return _serialize(dict(row)) if row else None
 
@@ -1706,7 +1683,7 @@ async def db_get_floor_plan(branch_id: int = None):
         return [_serialize(dict(r)) for r in rows]
 
 
-async def db_get_session_phones_by_branch(branch_id: int, bot_number: str) -> set:
+async def db_get_session_phones_by_branch(branch_id: int, org_id: int) -> set:
     """
     Return the set of phone numbers that have table sessions in a given branch.
     Used by stats.py to filter conversations to those belonging to branch tables.
@@ -1719,9 +1696,9 @@ async def db_get_session_phones_by_branch(branch_id: int, bot_number: str) -> se
             SELECT DISTINCT ts.phone
             FROM table_sessions ts
             JOIN restaurant_tables rt ON ts.table_id = rt.id
-            WHERE rt.branch_id = $1 AND ts.bot_number = $2
+            WHERE rt.branch_id = $1 AND ts.org_id = $2
             """,
-            branch_id, bot_number,
+            branch_id, org_id,
         )
     return {r["phone"] for r in rows}
 
@@ -1992,7 +1969,7 @@ async def db_get_table_order_record(order_id: str) -> dict | None:
     """
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT phone, table_name, base_order_id, table_id, org_id, location_id, bot_number "
+            "SELECT phone, table_name, base_order_id, table_id, org_id, location_id "
             "FROM table_orders WHERE id=$1",
             order_id,
         )
@@ -2044,7 +2021,7 @@ async def db_verify_branch_is_child(branch_id: int, parent_id: int) -> bool:
     return row is not None
 
 
-async def db_get_delivery_orders_for_cashier(location_id: int | None = None) -> list:
+async def db_get_delivery_orders_for_cashier(org_id: int, location_id: int | None = None) -> list:
     """
     Return pending delivery/pickup orders for the kitchen/caja view (last 24h,
     excluding terminal statuses).
@@ -2069,7 +2046,8 @@ async def db_get_delivery_orders_for_cashier(location_id: int | None = None) -> 
     no X-Location-ID header — see app/routes/tables.py); a concrete int
     filters to just that sede.
 
-    # Requires active tenant_scope(org_id). RLS filters rows by org_id.
+    # Requires active tenant_scope(org_id). The explicit org_id filter is
+    # defense in depth: RLS does not apply to a superuser connection.
     """
     async with tenant_connection() as conn:
         rows = await conn.fetch(
@@ -2080,9 +2058,10 @@ async def db_get_delivery_orders_for_cashier(location_id: int | None = None) -> 
                    'pendiente_aceptacion', 'rechazado',
                    'en_camino', 'en_puerta', 'entregado', 'cancelado'
                )
-               AND ($1::bigint IS NULL OR location_id = $1)
+               AND org_id = $1
+               AND ($2::bigint IS NULL OR location_id = $2)
                ORDER BY created_at DESC""",
-            location_id,
+            org_id, location_id,
         )
     return [dict(r) for r in rows]
 
@@ -2097,11 +2076,9 @@ async def db_get_delivery_status_hash_for_restaurant(restaurant_id: int) -> list
             """
             SELECT o.id, o.status
             FROM orders o
-            JOIN restaurants r ON r.whatsapp_number = o.bot_number
-            JOIN locations l ON l.id = r.id
             WHERE o.order_type IN ('domicilio', 'recoger')
               AND o.status IN ('pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta')
-              AND l.org_id = $1
+              AND o.org_id = $1
             ORDER BY o.id
             """,
             restaurant_id,
@@ -2146,18 +2123,18 @@ async def db_force_delete_conversation_data(phone: str, username: str) -> None:
         )
 
 
-async def db_get_closed_sessions(hours: int, bot_number: str | None) -> list[dict]:
+async def db_get_closed_sessions(hours: int, org_id: int | None) -> list[dict]:
     """Return closed table sessions within the given hours window.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
-        if bot_number:
+        if org_id:
             rows = await conn.fetch(
                 "SELECT * FROM table_sessions WHERE closed_at IS NOT NULL"
                 " AND closed_at >= NOW() - ($1 * INTERVAL '1 hour')"
-                " AND bot_number = $2 ORDER BY closed_at DESC",
-                hours, bot_number,
+                " AND org_id = $2 ORDER BY closed_at DESC",
+                hours, org_id,
             )
         else:
             rows = await conn.fetch(
@@ -2269,7 +2246,7 @@ async def db_session_alert_waiter(session_id: int, message: str) -> bool:
 
 # ── Capa 3: Anti-impostor (pending_table_validation) ────────────────────────
 
-async def db_session_is_verified(phone: str, bot_number: str) -> bool:
+async def db_session_is_verified(phone: str, org_id: int) -> bool:
     """Return True if the active session for this phone+bot is verified.
 
     Used by the bot to decide whether a place_order should set
@@ -2281,10 +2258,10 @@ async def db_session_is_verified(phone: str, bot_number: str) -> bool:
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT verified FROM table_sessions "
-            "WHERE phone=$1 AND bot_number=$2 AND status='active' "
+            "WHERE phone=$1 AND org_id=$2 AND status='active' "
             "ORDER BY started_at DESC LIMIT 1",
             phone,
-            bot_number,
+            org_id,
         )
         if row is None:
             # No active session — no pending hold needed.
@@ -2292,7 +2269,7 @@ async def db_session_is_verified(phone: str, bot_number: str) -> bool:
         return bool(row["verified"])
 
 
-async def db_session_has_prior_orders(phone: str, bot_number: str) -> bool:
+async def db_session_has_prior_orders(phone: str, org_id: int) -> bool:
     """Return True if the active session for this phone already has at least
     one table_order that is NOT pending_table_validation.
 
@@ -2305,10 +2282,10 @@ async def db_session_has_prior_orders(phone: str, bot_number: str) -> bool:
     async with tenant_connection() as conn:
         session = await conn.fetchrow(
             "SELECT table_id FROM table_sessions "
-            "WHERE phone=$1 AND bot_number=$2 AND status='active' "
+            "WHERE phone=$1 AND org_id=$2 AND status='active' "
             "ORDER BY started_at DESC LIMIT 1",
             phone,
-            bot_number,
+            org_id,
         )
         if session is None:
             return False

@@ -146,7 +146,6 @@ async def _seed_session(
     org_id_,
     *,
     phone,
-    bot_number,
     minutes_idle,
     has_order=False,
     order_delivered=False,
@@ -157,13 +156,13 @@ async def _seed_session(
     row = await conn.fetchrow(
         """
         INSERT INTO table_sessions
-            (org_id, table_id, table_name, phone, bot_number, status,
+            (org_id, table_id, table_name, phone, status,
              has_order, order_delivered, inactivity_warned, last_activity)
-        VALUES ($1, 'T1', 'Mesa 1', $2, $3, $4, $5, $6, $7,
-                NOW() - make_interval(mins => $8))
+        VALUES ($1, 'T1', 'Mesa 1', $2, $3, $4, $5, $6,
+                NOW() - make_interval(mins => $7))
         RETURNING id
         """,
-        org_id_, phone, bot_number, status,
+        org_id_, phone, status,
         has_order, order_delivered, inactivity_warned, minutes_idle,
     )
     return row["id"]
@@ -184,7 +183,7 @@ async def test_stale_sessions_no_order_picked_after_10min(db_conn, org_id):
     phone = "+573009990101"
     await _set_scope(db_conn, org_id)
     sid = await _seed_session(
-        db_conn, org_id, phone=phone, bot_number="+570000000101",
+        db_conn, org_id, phone=phone,
         minutes_idle=11, has_order=False, order_delivered=False,
     )
 
@@ -205,7 +204,7 @@ async def test_stale_sessions_no_order_idle_under_threshold_skipped(db_conn, org
 
     await _set_scope(db_conn, org_id)
     sid = await _seed_session(
-        db_conn, org_id, phone="+573009990102", bot_number="+570000000102",
+        db_conn, org_id, phone="+573009990102",
         minutes_idle=8, has_order=False,
     )
 
@@ -229,7 +228,7 @@ async def test_mark_warned_is_single_winner(db_conn, org_id):
 
     await _set_scope(db_conn, org_id)
     sid = await _seed_session(
-        db_conn, org_id, phone="+573009990103", bot_number="+570000000103",
+        db_conn, org_id, phone="+573009990103",
         minutes_idle=11,
     )
 
@@ -257,11 +256,10 @@ async def test_closeable_after_warning_picked_after_5min(db_conn, org_id):
     from app.services.tenant_context import tenant_scope
 
     phone = "+573009990104"
-    bot_number = "+570000000104"
 
     await _set_scope(db_conn, org_id)
     sid = await _seed_session(
-        db_conn, org_id, phone=phone, bot_number=bot_number,
+        db_conn, org_id, phone=phone,
         minutes_idle=6, has_order=False, inactivity_warned=True,
     )
 
@@ -275,7 +273,7 @@ async def test_closeable_after_warning_picked_after_5min(db_conn, org_id):
     # db_close_session is tenant-scoped — wrap it.
     with tenant_scope(org_id):
         closed = await db_close_session(
-            phone=phone, bot_number=bot_number,
+            phone=phone, org_id=org_id,
             reason="inactivity_timeout", closed_by_username="system",
         )
     assert closed is not None

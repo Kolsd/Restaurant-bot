@@ -149,7 +149,7 @@ class TestFeature3DiningPolish:
         bar_features: dict = {"bar_enabled": False, "bar_categories": []}
         if eta is not None:
             bar_features["kitchen_eta_minutes"] = eta
-        monkeypatch.setattr(db, "db_get_restaurant_by_bot_number", AsyncMock(return_value={
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value={
             "features": bar_features
         }))
 
@@ -180,7 +180,7 @@ class TestFeature3DiningPolish:
         reply = _run(execute_salon_action(
             parsed=parsed,
             phone="+57300",
-            bot_number="+57999",
+            org_id=4242,
             table_context=table_context,
             session_state=session_state,
             full_history=[],
@@ -233,7 +233,7 @@ class TestFeature3DiningPolish:
             reply = _run(execute_salon_action(
                 parsed=parsed,
                 phone="+57300",
-                bot_number="+57999",
+                org_id=4242,
                 table_context=table_context,
                 session_state={"has_order": True, "active": True},
                 full_history=[],
@@ -260,7 +260,7 @@ class TestFeature3DiningPolish:
         reply = _run(execute_salon_action(
             parsed=parsed,
             phone="+57300",
-            bot_number="+57999",
+            org_id=4242,
             table_context=table_context,
             session_state={"has_order": False, "active": True},
             full_history=[],
@@ -288,7 +288,7 @@ class TestFeature3DiningPolish:
         reply = _run(execute_salon_action(
             parsed=parsed,
             phone="+57300",
-            bot_number="+57999",
+            org_id=4242,
             table_context=table_context,
             session_state={"has_order": False, "active": True},
             full_history=[],
@@ -325,7 +325,7 @@ class TestFeature3DiningPolish:
         reply = _run(execute_salon_action(
             parsed=parsed,
             phone="+57300",
-            bot_number="+57999",
+            org_id=4242,
             table_context=table_context,
             session_state={"has_order": False, "active": True},
             full_history=[{"role": "assistant", "content": "¿Confirmas tu pedido de 1x Tamal?"},

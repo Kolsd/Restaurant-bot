@@ -56,17 +56,17 @@ def _build_anthropic_mock(reply_text: str):
 
 # ── Helper: patch the minimum DB calls that agent.chat() needs ───────────────
 
-def _patch_db_for_chat(monkeypatch, bot_number: str = "+573009876543"):
+def _patch_db_for_chat(monkeypatch, org_id: int = 4242):
     """Patch the minimum DB calls that agent.chat() needs."""
     from app.services import database as db
 
     restaurant = {
         "id": 1,
         "name": "Restaurante Test",
-        "whatsapp_number": bot_number,
+        "whatsapp_number": org_id,
         "features": {"locale": "es-CO", "currency": "COP"},
     }
-    monkeypatch.setattr(db, "db_get_restaurant_by_bot_number",
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id",
                         AsyncMock(return_value=restaurant))
     monkeypatch.setattr(db, "db_get_history",
                         AsyncMock(return_value=[]))
@@ -339,7 +339,7 @@ class TestCustomerMemoryIntegration:
             agent_mod.execute_action(
                 parsed,
                 phone="+573001234567",
-                bot_number="+573009876543",
+                org_id=4242,
                 table_context=None,
                 session_state={},
                 full_history=[],
@@ -390,7 +390,7 @@ class TestCustomerMemoryIntegration:
             agent_mod.execute_action(
                 parsed,
                 phone="+573001234567",
-                bot_number="+573009876543",
+                org_id=4242,
                 table_context=None,
                 session_state={},
                 full_history=[],
@@ -491,8 +491,8 @@ class TestCustomerMemoryIntegration:
         import app.repositories.customer_profiles_repo as repo
         from app.services import database as db
 
-        bot_number = "+573009876543"
-        _patch_db_for_chat(monkeypatch, bot_number)
+        org_id=4242
+        _patch_db_for_chat(monkeypatch, org_id)
 
         # Patch profile repo functions
         upsert_mock = AsyncMock(return_value={
@@ -543,7 +543,7 @@ class TestCustomerMemoryIntegration:
         # docs/claude/delivery-web.md: WhatsApp delivery/pickup retired). The
         # web channel still uses the LLM for menu conversation, so it's the
         # right shape to exercise this profile-loading wiring.
-        result = _run(agent_mod.chat("web:test-uuid-profile-1", "Hola", bot_number))
+        result = _run(agent_mod.chat("web:test-uuid-profile-1", "Hola", org_id))
 
         assert isinstance(result, dict), "chat() should return a dict"
         assert upsert_mock.called, "upsert_profile_from_message was not called"
@@ -564,8 +564,8 @@ class TestCustomerMemoryIntegration:
         import app.services.agent as agent_mod
         import app.repositories.customer_profiles_repo as repo
 
-        bot_number = "+573009876543"
-        _patch_db_for_chat(monkeypatch, bot_number)
+        org_id=4242
+        _patch_db_for_chat(monkeypatch, org_id)
 
         # Make upsert raise to simulate DB failure
         monkeypatch.setattr(
@@ -594,7 +594,7 @@ class TestCustomerMemoryIntegration:
         # "web:" identity — see test_chat_loads_customer_profile_at_start for
         # why a real WhatsApp number no longer reaches this code path.
         # Must NOT raise — the chat should still succeed
-        result = _run(agent_mod.chat("web:test-uuid-profile-2", "Hola", bot_number))
+        result = _run(agent_mod.chat("web:test-uuid-profile-2", "Hola", org_id))
 
         assert isinstance(result, dict), \
             "chat() should return dict even when profile load fails"
@@ -602,166 +602,3 @@ class TestCustomerMemoryIntegration:
         assert "" in captured_ctx, \
             "customer_context should fall back to '' when profile load raises"
 
-    # ── 16. create_order — increments customer profile after success ──────────
-
-    def test_order_commit_increments_customer_profile(self, monkeypatch):
-        """create_order() calls increment_after_order after a successful commit.
-
-        We mock: cart_lock (bypass), db_get_cart (has items), db_get_restaurant_by_phone,
-        get_pool (conn returns no base_order), commit_order_transaction (success),
-        and increment_after_order. Then we verify increment_after_order was awaited.
-        """
-        import app.services.orders as orders_mod
-        import app.services.database as db
-        import app.repositories.customer_profiles_repo as repo
-        import app.repositories.orders_repo as orders_repo
-
-        phone = "+573001234567"
-        bot_number = "+573009876543"
-
-        # Cart with one item
-        cart = {
-            "items": [{
-                "name": "Hamburguesa",
-                "qty": 1,
-                "quantity": 1,
-                "price": 25000,
-                "subtotal": 25000,
-            }]
-        }
-        monkeypatch.setattr(db, "db_get_cart", AsyncMock(return_value=cart))
-        monkeypatch.setattr(db, "db_get_restaurant_by_phone", AsyncMock(return_value={
-            "id": 1,
-            "name": "Restaurante Test",
-            "features": {"delivery_fee": 0, "timezone": "UTC"},
-        }))
-
-        # Pool / conn: fetchrow returns None (no existing base_order),
-        # fetchval also returns None. tenant_connection() wraps conn.transaction()
-        # as an async CM, so the mock needs to support that.
-        import contextlib
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value=None)
-        conn.fetchval = AsyncMock(return_value=None)
-        conn.execute  = AsyncMock(return_value=None)
-
-        @contextlib.asynccontextmanager
-        async def _fake_txn():
-            yield
-        conn.transaction = MagicMock(side_effect=lambda: _fake_txn())
-
-        pool_mock = AsyncMock()
-        pool_mock.acquire = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=conn),
-            __aexit__=AsyncMock(return_value=False),
-        ))
-        monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=pool_mock))
-
-        # Bypass the cart lock entirely
-        @contextlib.asynccontextmanager
-        async def _fake_cart_lock(phone, bot_number, ttl_seconds=30):
-            yield
-        monkeypatch.setattr(orders_mod, "_cart_lock", _fake_cart_lock)
-
-        # commit_order_transaction succeeds (no exception)
-        monkeypatch.setattr(orders_repo, "commit_order_transaction", AsyncMock())
-
-        # increment_after_order — the function we want to verify is called
-        increment_mock = AsyncMock()
-        monkeypatch.setattr(repo, "increment_after_order", increment_mock)
-
-        # orders.py:266 now uses tenant_connection() (RLS-safe) instead of
-        # raw pool.acquire() — caller must be inside tenant_scope.
-        with tenant_scope(1):
-            result = _run(
-                orders_mod.create_order(
-                    phone=phone,
-                    order_type="domicilio",
-                    address="Calle 1 #2-3",
-                    notes="",
-                    bot_number=bot_number,
-                    payment_method="efectivo",
-                )
-            )
-
-        assert result.get("success") is True, \
-            f"create_order should succeed; got: {result}"
-        assert increment_mock.called, \
-            "increment_after_order was not called after successful order commit"
-
-    # ── 17. create_order — survives increment error ───────────────────────────
-
-    def test_order_commit_survives_increment_error(self, monkeypatch):
-        """create_order() returns success even when increment_after_order raises.
-        The order must succeed — memory update is best-effort.
-        """
-        import app.services.orders as orders_mod
-        import app.services.database as db
-        import app.repositories.customer_profiles_repo as repo
-        import app.repositories.orders_repo as orders_repo
-
-        phone = "+573001234567"
-        bot_number = "+573009876543"
-
-        cart = {
-            "items": [{
-                "name": "Pizza",
-                "qty": 1,
-                "quantity": 1,
-                "price": 30000,
-                "subtotal": 30000,
-            }]
-        }
-        monkeypatch.setattr(db, "db_get_cart", AsyncMock(return_value=cart))
-        monkeypatch.setattr(db, "db_get_restaurant_by_phone", AsyncMock(return_value={
-            "id": 1,
-            "name": "Restaurante Test",
-            "features": {"delivery_fee": 0, "timezone": "UTC"},
-        }))
-
-        import contextlib
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value=None)
-        conn.fetchval = AsyncMock(return_value=None)
-        conn.execute  = AsyncMock(return_value=None)
-
-        @contextlib.asynccontextmanager
-        async def _fake_txn():
-            yield
-        conn.transaction = MagicMock(side_effect=lambda: _fake_txn())
-
-        pool_mock = AsyncMock()
-        pool_mock.acquire = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=conn),
-            __aexit__=AsyncMock(return_value=False),
-        ))
-        monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=pool_mock))
-
-        @contextlib.asynccontextmanager
-        async def _fake_cart_lock(phone, bot_number, ttl_seconds=30):
-            yield
-        monkeypatch.setattr(orders_mod, "_cart_lock", _fake_cart_lock)
-
-        monkeypatch.setattr(orders_repo, "commit_order_transaction", AsyncMock())
-
-        # increment_after_order raises — order must still succeed
-        monkeypatch.setattr(
-            repo,
-            "increment_after_order",
-            AsyncMock(side_effect=RuntimeError("db timeout")),
-        )
-
-        with tenant_scope(1):
-            result = _run(
-                orders_mod.create_order(
-                    phone=phone,
-                    order_type="domicilio",
-                    address="Calle 1 #2-3",
-                    notes="",
-                    bot_number=bot_number,
-                    payment_method="efectivo",
-                )
-            )
-
-        assert result.get("success") is True, \
-            "create_order should succeed even when increment_after_order raises"

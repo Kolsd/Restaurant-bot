@@ -324,7 +324,7 @@ async def test_create_delivery_order_writes_expected_fields(db_conn):
 
     with tenant_scope(org_id):
         created = await db_create_delivery_order(
-            org_id=org_id, location_id=location_id, phone="web:abc123", bot_number="573000000000",
+            org_id=org_id, location_id=location_id, phone="web:abc123",
             order_type="domicilio", items=_SAMPLE_ITEMS, address="Calle 1 # 2-3",
             subtotal=Decimal("40000"), delivery_fee=Decimal("3000"), tip_amount=Decimal("2000"),
             total=Decimal("45000"), payment_method="efectivo", cash_change_for=Decimal("50000"),
@@ -360,11 +360,11 @@ async def test_count_open_orders_excludes_terminal_statuses(db_conn):
         await _set_scope(db_conn, org_id)
         await db_conn.execute(
             """INSERT INTO orders
-                   (id, org_id, location_id, phone, bot_number, order_type, status,
+                   (id, org_id, location_id, phone, order_type, status,
                     items, subtotal, total, customer_phone)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11)""",
+               VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10)""",
             f"ord-{uuid.uuid4().hex[:10]}", org_id, location_id, f"web:{uuid.uuid4()}",
-            "573000000000", "domicilio", status, [], Decimal("10000"), Decimal("10000"), phone,
+            "domicilio", status, [], Decimal("10000"), Decimal("10000"), phone,
         )
 
     with tenant_scope(org_id):
@@ -395,7 +395,7 @@ async def test_tenant_isolation_open_orders_count_never_crosses_orgs(db_conn):
 
     with tenant_scope(org_a):
         await db_create_delivery_order(
-            org_id=org_a, location_id=loc_l, phone="web:a1", bot_number="573000000001",
+            org_id=org_a, location_id=loc_l, phone="web:a1",
             order_type="domicilio", items=[], address="A", subtotal=Decimal("10000"),
             delivery_fee=Decimal("0"), tip_amount=Decimal("0"), total=Decimal("10000"),
             payment_method="efectivo", cash_change_for=None, customer_name="A",
@@ -406,7 +406,7 @@ async def test_tenant_isolation_open_orders_count_never_crosses_orgs(db_conn):
     with tenant_scope(org_b):
         count_b_before = await db_count_open_orders_for_phone(org_b, shared_phone)
         await db_create_delivery_order(
-            org_id=org_b, location_id=loc_b, phone="web:b1", bot_number="573000000002",
+            org_id=org_b, location_id=loc_b, phone="web:b1",
             order_type="recoger", items=[], address="B", subtotal=Decimal("10000"),
             delivery_fee=Decimal("0"), tip_amount=Decimal("0"), total=Decimal("10000"),
             payment_method="efectivo", cash_change_for=None, customer_name="B",
@@ -451,8 +451,6 @@ async def _http_seed_checkout_org(
             "INSERT INTO organizations (name, slug, features, menu) VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id",
             f"Checkout Org {suffix}", f"checkout-org-{suffix}", json.dumps({"currency": "COP"}), _TEST_CARTA,
         )
-        # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
-        bot_number = f"web{org_id}"
         location_id = await conn.fetchval(
             """
             INSERT INTO locations
@@ -469,49 +467,48 @@ async def _http_seed_checkout_org(
             }),
             json.dumps(opening_hours or {}),
         )
-        return {"org_id": org_id, "location_id": location_id, "bot_number": bot_number, "suffix": suffix}
+        return {"org_id": org_id, "location_id": location_id, "suffix": suffix}
     finally:
         await conn.close()
 
 
-async def _seed_session(org_id: int, location_id: int, bot_number: str, order_mode: str = "delivery") -> str:
+async def _seed_session(org_id: int, location_id: int, order_mode: str = "delivery") -> str:
     token = f"web:{uuid.uuid4()}"
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         await conn.execute(
-            """INSERT INTO diner_sessions (token, org_id, location_id, table_id, table_name, bot_number, order_mode)
-               VALUES ($1, $2, $3, NULL, NULL, $4, $5)""",
-            token, org_id, location_id, bot_number, order_mode,
+            """INSERT INTO diner_sessions (token, org_id, location_id, table_id, table_name, order_mode)
+               VALUES ($1, $2, $3, NULL, NULL, $4)""",
+            token, org_id, location_id, order_mode,
         )
     finally:
         await conn.close()
     return token
 
 
-async def _seed_cart(token: str, bot_number: str, org_id: int, items: list) -> None:
+async def _seed_cart(token: str, org_id: int, items: list) -> None:
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         await conn.execute(
-            """INSERT INTO carts (phone, bot_number, cart_data, updated_at, org_id)
-               VALUES ($1, $2, $3::jsonb, NOW(), $4)
-               ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data = EXCLUDED.cart_data""",
-            token, bot_number, json.dumps({"items": items, "order_type": None, "address": None, "notes": ""}),
-            org_id,
+            """INSERT INTO carts (phone, org_id, cart_data, updated_at)
+               VALUES ($1, $2, $3::jsonb, NOW())
+               ON CONFLICT (phone, org_id) DO UPDATE SET cart_data = EXCLUDED.cart_data""",
+            token, org_id, json.dumps({"items": items, "order_type": None, "address": None, "notes": ""}),
         )
     finally:
         await conn.close()
 
 
-async def _seed_open_order(org_id: int, location_id: int, bot_number: str, customer_phone: str, status: str) -> None:
+async def _seed_open_order(org_id: int, location_id: int, customer_phone: str, status: str) -> None:
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         await conn.execute(
             """INSERT INTO orders
-                   (id, org_id, location_id, phone, bot_number, order_type, status,
+                   (id, org_id, location_id, phone, order_type, status,
                     items, subtotal, total, customer_phone)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11)""",
+               VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10)""",
             f"ord-{uuid.uuid4().hex[:10]}", org_id, location_id, f"web:{uuid.uuid4()}",
-            bot_number, "domicilio", status, json.dumps([]), Decimal("10000"), Decimal("10000"), customer_phone,
+            "domicilio", status, json.dumps([]), Decimal("10000"), Decimal("10000"), customer_phone,
         )
     finally:
         await conn.close()
@@ -576,8 +573,8 @@ def _default_checkout_body(token: str, **overrides) -> dict:
 
 
 def test_checkout_delivery_happy_path_totals_and_fields(client, checkout_org):
-    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"], "delivery"))
-    _run(_seed_cart(token, checkout_org["bot_number"], checkout_org["org_id"], [
+    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], "delivery"))
+    _run(_seed_cart(token, checkout_org["org_id"], [
         {"name": "Bandeja Paisa", "quantity": 2, "subtotal": 40000.0, "line_id": "a1"},
     ]))
 
@@ -611,8 +608,8 @@ def test_checkout_delivery_happy_path_totals_and_fields(client, checkout_org):
 def test_checkout_pickup_gets_zero_delivery_fee(client):
     info = _run(_http_seed_checkout_org(delivery_fee=5000))
     try:
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"], "pickup"))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"], "pickup"))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Jugo", "quantity": 1, "subtotal": 12000.0, "line_id": "b1"},
         ]))
 
@@ -631,8 +628,8 @@ def test_checkout_pickup_gets_zero_delivery_fee(client):
 
 
 def test_checkout_idempotent_same_key_yields_one_order(client, checkout_org):
-    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"], "delivery"))
-    _run(_seed_cart(token, checkout_org["bot_number"], checkout_org["org_id"], [
+    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], "delivery"))
+    _run(_seed_cart(token, checkout_org["org_id"], [
         {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 20000.0, "line_id": "a1"},
     ]))
     body = _default_checkout_body(token, idempotency_key="same-key-123")
@@ -652,8 +649,8 @@ def test_checkout_idempotent_same_key_yields_one_order(client, checkout_org):
 def test_checkout_refused_below_minimum(client):
     info = _run(_http_seed_checkout_org(min_order=100000))
     try:
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"], "delivery"))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"], "delivery"))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Jugo", "quantity": 1, "subtotal": 5000.0, "line_id": "c1"},
         ]))
         resp = _post(client, "/api/diner/delivery/checkout", json=_default_checkout_body(token))
@@ -666,8 +663,8 @@ def test_checkout_refused_below_minimum(client):
 def test_checkout_refused_out_of_coverage(client):
     info = _run(_http_seed_checkout_org(radius_km=1))
     try:
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"], "delivery"))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"], "delivery"))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Jugo", "quantity": 1, "subtotal": 20000.0, "line_id": "c1"},
         ]))
         resp = _post(client, "/api/diner/delivery/checkout", json=_default_checkout_body(
@@ -685,8 +682,8 @@ def test_checkout_refused_sede_closed(client):
     )}
     info = _run(_http_seed_checkout_org(opening_hours=closed_hours))
     try:
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"], "delivery"))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"], "delivery"))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Jugo", "quantity": 1, "subtotal": 20000.0, "line_id": "c1"},
         ]))
         resp = _post(client, "/api/diner/delivery/checkout", json=_default_checkout_body(token))
@@ -697,8 +694,8 @@ def test_checkout_refused_sede_closed(client):
 
 
 def test_checkout_refused_next_day_schedule(client, checkout_org):
-    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"], "delivery"))
-    _run(_seed_cart(token, checkout_org["bot_number"], checkout_org["org_id"], [
+    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], "delivery"))
+    _run(_seed_cart(token, checkout_org["org_id"], [
         {"name": "Jugo", "quantity": 1, "subtotal": 20000.0, "line_id": "c1"},
     ]))
     tomorrow = (datetime.now(dt_timezone.utc) + timedelta(days=1)).isoformat()
@@ -712,8 +709,8 @@ def test_checkout_refused_next_day_schedule(client, checkout_org):
 def test_checkout_refused_disallowed_payment_method(client):
     info = _run(_http_seed_checkout_org(payment_methods=("efectivo",)))
     try:
-        token = _run(_seed_session(info["org_id"], info["location_id"], info["bot_number"], "delivery"))
-        _run(_seed_cart(token, info["bot_number"], info["org_id"], [
+        token = _run(_seed_session(info["org_id"], info["location_id"], "delivery"))
+        _run(_seed_cart(token, info["org_id"], [
             {"name": "Jugo", "quantity": 1, "subtotal": 20000.0, "line_id": "c1"},
         ]))
         resp = _post(client, "/api/diner/delivery/checkout", json=_default_checkout_body(
@@ -726,8 +723,8 @@ def test_checkout_refused_disallowed_payment_method(client):
 
 
 def test_checkout_refused_cash_change_insufficient(client, checkout_org):
-    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"], "delivery"))
-    _run(_seed_cart(token, checkout_org["bot_number"], checkout_org["org_id"], [
+    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], "delivery"))
+    _run(_seed_cart(token, checkout_org["org_id"], [
         {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 40000.0, "line_id": "a1"},
     ]))
     resp = _post(client, "/api/diner/delivery/checkout", json=_default_checkout_body(
@@ -738,14 +735,14 @@ def test_checkout_refused_cash_change_insufficient(client, checkout_org):
 
 
 def test_checkout_refused_dine_in_session_token(client, checkout_org):
-    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"], "dine_in"))
+    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], "dine_in"))
     resp = _post(client, "/api/diner/delivery/checkout", json=_default_checkout_body(token))
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["reason"] == "invalid_session_mode"
 
 
 def test_checkout_refused_empty_cart(client, checkout_org):
-    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"], "delivery"))
+    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], "delivery"))
     resp = _post(client, "/api/diner/delivery/checkout", json=_default_checkout_body(token))
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["reason"] == "empty_cart"
@@ -755,12 +752,12 @@ def test_checkout_refused_too_many_open_orders(client, checkout_org):
     phone = "3007778899"
     for _ in range(3):  # _MAX_OPEN_ORDERS_PER_PHONE in app/routes/diner_delivery.py
         _run(_seed_open_order(
-            checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"],
+            checkout_org["org_id"], checkout_org["location_id"],
             phone, "pendiente_aceptacion",
         ))
 
-    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"], "delivery"))
-    _run(_seed_cart(token, checkout_org["bot_number"], checkout_org["org_id"], [
+    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], "delivery"))
+    _run(_seed_cart(token, checkout_org["org_id"], [
         {"name": "Jugo", "quantity": 1, "subtotal": 20000.0, "line_id": "c1"},
     ]))
     resp = _post(client, "/api/diner/delivery/checkout", json=_default_checkout_body(
@@ -791,7 +788,6 @@ def test_checkout_tenant_isolation_with_colliding_ids(client):
                 "INSERT INTO organizations (name, slug, menu) VALUES ($1, $2, $3::jsonb) RETURNING id",
                 f"Checkout Collision B {suffix}", f"checkout-collision-b-{suffix}", _TEST_CARTA,
             )
-            bot_number = f"web{org_a}"  # production shape: no WhatsApp number
             loc_l = await conn.fetchval(
                 """INSERT INTO locations (id, org_id, name, latitude, longitude, delivery_config)
                    VALUES ($1, $2, $3, $4, $5, $6::jsonb) RETURNING id""",
@@ -803,16 +799,16 @@ def test_checkout_tenant_isolation_with_colliding_ids(client):
             # the next ordinary INSERT anywhere in the suite dies on
             # locations_pkey (passes alone, fails in a full run).
             await _advance_location_seq(conn, loc_l)
-            return org_a, org_b, loc_l, bot_number
+            return org_a, org_b, loc_l
         finally:
             await conn.close()
 
-    org_a, org_b, loc_l, bot_number = _run(_seed())
+    org_a, org_b, loc_l = _run(_seed())
     assert loc_l == org_b, "setup invariant broken: location id must equal org_b's id"
 
     try:
-        token = _run(_seed_session(org_a, loc_l, bot_number, "delivery"))
-        _run(_seed_cart(token, bot_number, org_a, [
+        token = _run(_seed_session(org_a, loc_l, "delivery"))
+        _run(_seed_cart(token, org_a, [
             {"name": "Jugo", "quantity": 1, "subtotal": 20000.0, "line_id": "c1"},
         ]))
         resp = _post(client, "/api/diner/delivery/checkout", json=_default_checkout_body(token))
@@ -841,7 +837,7 @@ def test_payment_proof_upload_requires_valid_session(client, checkout_org):
 
 
 def test_payment_proof_upload_rejects_dine_in_session(client, checkout_org):
-    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"], "dine_in"))
+    token = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], "dine_in"))
     resp = _post(
         client, "/api/diner/delivery/payment-proof",
         data={"token": token},
@@ -864,10 +860,10 @@ def test_payment_proof_only_attaches_to_the_uploading_sessions_own_order(client,
         lambda org_id, data, content_type: {"secure_url": next(fake_urls), "public_id": "fake"},
     )
 
-    token_a = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"], "delivery"))
-    token_b = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], checkout_org["bot_number"], "delivery"))
+    token_a = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], "delivery"))
+    token_b = _run(_seed_session(checkout_org["org_id"], checkout_org["location_id"], "delivery"))
     for t in (token_a, token_b):
-        _run(_seed_cart(t, checkout_org["bot_number"], checkout_org["org_id"], [
+        _run(_seed_cart(t, checkout_org["org_id"], [
             {"name": "Jugo", "quantity": 1, "subtotal": 20000.0, "line_id": "c1"},
         ]))
 

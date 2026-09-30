@@ -5,7 +5,7 @@ The counts behind the owner's setup checklist.
 
 One query per fact, all inside a single tenant connection, all scoped by
 org (and by sede where the thing belongs to a sede). Nothing here is
-resolved through `bot_number`: an org created by self-serve signup has no
+resolved through the old WhatsApp key: an org created by self-serve signup has no
 WhatsApp number, and a checklist that told such a restaurant it had no
 tables because it had no phone would be worse than no checklist at all.
 

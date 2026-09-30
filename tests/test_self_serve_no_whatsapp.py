@@ -1,9 +1,9 @@
-"""A restaurant born from self-serve signup has no WhatsApp number.
+"""A restaurant born from self-serve signup can serve diners on the web.
 
-Every diner test seeds `locations.whatsapp_number`, so none of them notice
-when a web-channel flow still demands one. This file provisions the org the
-way `/api/signup` does (`create_tenant`, no number) and drives the flows a
-diner hits first: scanning the table QR and ordering from `/pedir`.
+This file provisions the org the way `/api/signup` does (`create_tenant`)
+and drives the flows a diner hits first: scanning the table QR and ordering
+from `/pedir`. (Until 0098 the bot keyed everything on a WhatsApp number a
+self-serve org never had.)
 """
 from __future__ import annotations
 
@@ -52,14 +52,6 @@ async def _provision() -> dict:
         location_id = await conn.fetchval(
             "SELECT id FROM locations WHERE org_id = $1 ORDER BY id LIMIT 1", org_id,
         )
-        assert await conn.fetchval(
-            "SELECT COALESCE(l.whatsapp_number, o.whatsapp_number) FROM locations l "
-            "JOIN organizations o ON o.id = l.org_id WHERE l.id = $1", location_id,
-        ) is None, "precondition: a self-serve sede has no WhatsApp number"
-        # 0096: the view gives such an org a web key instead of NULL.
-        assert await conn.fetchval(
-            "SELECT whatsapp_number FROM restaurants WHERE id = $1", location_id,
-        ) == f"web{org_id}"
         # The owner builds the carta and switches pickup on from the panel;
         # seed the result of that directly.
         menu = {"Principales": [
@@ -144,16 +136,10 @@ def test_table_qr_order_reaches_the_kitchen_without_whatsapp(client, self_serve_
     assert isinstance(items, list), f"items stored as a JSON string: {orders[0]['items'][:80]}"
     assert [(i["name"], i.get("qty") or i.get("quantity")) for i in items] == [("Ajiaco", 2)]
 
-    # The session carries the org's web key, and it is the same key the
-    # owner's NPS stats read from the view — otherwise ratings are saved
-    # under one key and looked up under another.
-    sessions = _run(_fetch(
-        "SELECT DISTINCT bot_number FROM diner_sessions WHERE org_id = $1", org_id,
-    ))
-    view_key = _run(_fetch(
-        "SELECT whatsapp_number FROM restaurants WHERE id = $1", self_serve_org["location_id"],
-    ))[0]["whatsapp_number"]
-    assert [r["bot_number"] for r in sessions] == [f"web{org_id}"] == [view_key]
+    # The order emptied the diner's cart, which is keyed by (token, org_id).
+    carts = _run(_fetch("SELECT cart_data FROM carts WHERE org_id = $1", org_id))
+    assert all(not (json.loads(c["cart_data"]) if isinstance(c["cart_data"], str) else c["cart_data"]).get("items")
+               for c in carts)
 
 
 def test_pickup_from_pedir_opens_without_whatsapp(client, self_serve_org):

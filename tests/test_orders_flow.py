@@ -67,7 +67,6 @@ _ORDER = {
     "order_type": "domicilio", "status": "pendiente", "paid": False,
     "items": [{"name": "Pizza", "quantity": 1, "price": 35000}],
     "total": 35000, "address": "Calle 123", "created_at": "2026-04-08T10:00:00",
-    "bot_number": "+573009999999",
 }
 
 
@@ -127,27 +126,6 @@ def test_get_single_order_not_found(client, monkeypatch):
 # ══════════════════════════════════════════════════════════════════════════════
 # C. CARRITO
 # ══════════════════════════════════════════════════════════════════════════════
-
-def test_view_cart_with_items(client, monkeypatch):
-    """GET /api/cart/{phone}/{bot} → 200, summary con items."""
-    _auth(monkeypatch)
-    summary = {"items": [{"name": "Pizza", "quantity": 1, "price": 35000}],
-               "total": 35000, "subtotal": 35000}
-    monkeypatch.setattr("app.routes.orders_routes.cart_summary", AsyncMock(return_value=summary))
-    r = client.get("/api/cart/+573001111111/+573009999999", headers=_HEADERS)
-    assert r.status_code == 200
-    assert r.json()["summary"]["total"] == 35000
-
-
-def test_view_cart_empty(client, monkeypatch):
-    """Carrito vacío → items=[]."""
-    _auth(monkeypatch)
-    monkeypatch.setattr("app.routes.orders_routes.cart_summary",
-                        AsyncMock(return_value={"items": [], "total": 0, "subtotal": 0}))
-    r = client.get("/api/cart/+573001111111/+573009999999", headers=_HEADERS)
-    assert r.status_code == 200
-    assert r.json()["summary"]["items"] == []
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # D. WEBHOOK WOMPI
@@ -300,7 +278,6 @@ def _make_order_payload(order_id="ord-test", sku="pizza-m", qty=1, price=35000):
         "total": price * qty,
         "paid": False,
         "address": "Calle 1",
-        "bot_number": "+57999",
     }
 
 
@@ -345,7 +322,7 @@ async def test_commit_insufficient_stock_raises(monkeypatch):
     conn.execute = AsyncMock()
     pool = make_pool(conn)
 
-    cart = {"items": _make_order_payload()["items"], "bot_number": "+57999"}
+    cart = {"items": _make_order_payload()["items"]}
     order = _make_order_payload()
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
@@ -376,7 +353,7 @@ async def test_commit_inserts_order(monkeypatch):
     conn.execute = capture_execute
     pool = make_pool(conn)
 
-    cart = {"items": _make_order_payload()["items"], "bot_number": "+57999"}
+    cart = {"items": _make_order_payload()["items"]}
     order = _make_order_payload()
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
@@ -406,7 +383,7 @@ async def test_commit_deletes_cart(monkeypatch):
     conn.execute = capture_execute
     pool = make_pool(conn)
 
-    cart = {"items": _make_order_payload()["items"], "bot_number": "+57999"}
+    cart = {"items": _make_order_payload()["items"]}
     order = _make_order_payload()
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
@@ -442,7 +419,7 @@ async def test_commit_zero_stock_raises(monkeypatch):
     conn.execute = AsyncMock()
     pool = make_pool(conn)
 
-    cart = {"items": _make_order_payload()["items"], "bot_number": "+57999"}
+    cart = {"items": _make_order_payload()["items"]}
     order = _make_order_payload(qty=3)
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
@@ -471,7 +448,7 @@ async def test_commit_float_total_coerced(monkeypatch):
 
     order = _make_order_payload(price=12500)
     order["total"] = 12500.50  # deliberate float
-    cart = {"items": order["items"], "bot_number": "+57999"}
+    cart = {"items": order["items"]}
 
     # Must not raise TypeError
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
@@ -497,7 +474,7 @@ async def test_commit_db_error_raises_order_commit_error(monkeypatch):
     pool = make_pool(conn)
 
     order = _make_order_payload()
-    cart = {"items": order["items"], "bot_number": "+57999"}
+    cart = {"items": order["items"]}
 
     with pytest.raises((OrderCommitError, Exception)):
         await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
@@ -523,7 +500,7 @@ async def test_commit_no_items_no_inventory_deduction(monkeypatch):
 
     order = _make_order_payload()
     order["items"] = []  # no items
-    cart = {"items": [], "bot_number": "+57999"}
+    cart = {"items": []}
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(1):

@@ -540,7 +540,7 @@ async def db_transfer_inventory(
     }
 
 
-async def db_deduct_inventory_for_order(bot_number: str, items: list,
+async def db_deduct_inventory_for_order(org_id: int, items: list,
                                         location_id: int | None = None):
     """
     Deducts stock for each ordered dish, with support for recipes (dish_recipes).
@@ -562,16 +562,7 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list,
     Raises:
         InsufficientStockError: if an ingredient's stock is insufficient.
     """
-    # Lazy import to avoid circular dependency:
-    # database.py imports inventory_repo (via re-export), inventory_repo imports
-    # db_get_restaurant_by_phone from database — use lazy import to break cycle.
-    from app.services.database import db_get_restaurant_by_phone
-
-    restaurant = await db_get_restaurant_by_phone(bot_number)
-    if not restaurant:
-        return
-
-    restaurant_id = restaurant["id"]
+    restaurant_id = org_id
 
     # tenant_connection() already wraps in a transaction — no nested tx needed
     async with _tenant_connection() as conn:

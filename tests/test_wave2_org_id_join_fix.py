@@ -1,15 +1,12 @@
 """
 tests/test_wave2_org_id_join_fix.py
 
-Locks down the Wave-2 org_id JOIN fix across 5 repository functions.
-
-Each function previously filtered `r.id = $N` against the restaurants VIEW,
-where `r.id` is actually `location_id`. Post-Wave-2, callers pass `org_id`
-(the tenant key), so the filter must use `JOIN locations l ON l.id = r.id
-WHERE l.org_id = $N`.
+Locks down that these repository functions filter by the row's own
+`org_id` — never `r.id` of the restaurants VIEW (a location id) and never
+the retired WhatsApp key (`bot_number` / `whatsapp_number`, 0098).
 
 Tests deliberately use org_id=42 while any plausible location_id would be
-a different value (e.g. 100), making the distinction testable via SQL string
+a different value, making the distinction testable via SQL string
 assertions.
 """
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -56,57 +53,32 @@ def _captured_sql(conn) -> str:
     return " ".join(parts).lower()
 
 
-# ── 2. conversations_repo.db_save_nps_waiting (bot_number resolution) ─────────
+# ── 2. conversations_repo.db_save_nps_waiting ────────────────────────────────
+
 
 @pytest.mark.asyncio
-async def test_db_save_nps_waiting_resolves_org_id():
-    """When restaurant_id is not provided, resolution must return org_id
-    (not location_id) by joining locations."""
+async def test_db_save_nps_waiting_writes_org_id():
+    """The pending-NPS row is keyed by (phone, org_id)."""
     from app.repositories.conversations_repo import db_save_nps_waiting
 
     conn = _make_conn()
-    # fetchval for org_id resolution, execute for INSERT
-    conn.fetchval = AsyncMock(return_value=42)
     conn.execute = AsyncMock()
 
     patch_path = "app.repositories.conversations_repo._tenant_connection"
     with patch(patch_path, _make_tenant_conn_ctx(conn)):
-        await db_save_nps_waiting("+573001234567", "+5713000001")  # no restaurant_id
+        await db_save_nps_waiting("+573001234567", 42)
 
     sql = _captured_sql(conn)
-    assert "l.org_id" in sql, "Resolution query must SELECT l.org_id"
-    assert "join locations" in sql, "Must JOIN locations to resolve org_id"
-    # Verify resolved org_id (42) is inserted — not a location_id
-    insert_args = conn.execute.call_args
-    assert insert_args is not None
-    assert insert_args.args[3] == 42, "INSERT must use the resolved org_id=42"
-
-
-@pytest.mark.asyncio
-async def test_db_save_nps_waiting_passthrough_org_id():
-    """When restaurant_id IS provided by caller, it must be used directly
-    (caller already holds org_id post-Wave-2)."""
-    from app.repositories.conversations_repo import db_save_nps_waiting
-
-    conn = _make_conn()
-    conn.execute = AsyncMock()
-
-    patch_path = "app.repositories.conversations_repo._tenant_connection"
-    with patch(patch_path, _make_tenant_conn_ctx(conn)):
-        await db_save_nps_waiting("+573001234567", "+5713000001", restaurant_id=42)
-
-    # fetchval must NOT be called when restaurant_id is provided
-    conn.fetchval.assert_not_called()
-    insert_args = conn.execute.call_args
-    assert insert_args is not None
-    assert insert_args.args[3] == 42, "INSERT must use caller-supplied org_id=42"
+    assert "on conflict (phone, org_id)" in sql
+    assert "bot_number" not in sql
+    assert conn.execute.call_args.args[1:] == ("+573001234567", 42)
 
 
 # ── 3. conversations_repo.db_get_customer_order_history ───────────────────────
 
 @pytest.mark.asyncio
 async def test_db_get_customer_order_history_uses_org_id():
-    """Both COUNT and item-explode queries must filter by l.org_id."""
+    """Both COUNT and item-explode queries must filter by orders.org_id."""
     from app.repositories.conversations_repo import db_get_customer_order_history
 
     conn = _make_conn()
@@ -120,41 +92,16 @@ async def test_db_get_customer_order_history_uses_org_id():
 
     assert result == []
     sql = _captured_sql(conn)
-    assert "l.org_id" in sql, "Must filter by l.org_id in order history queries"
-    assert "join locations" in sql, "Must JOIN locations to resolve org_id"
-    # Verify bare r.id = $2 is gone from both queries
-    assert "r.id           = $2" not in sql, "Must NOT use bare r.id = $2"
+    assert sql.count("o.org_id       = $2") == 2, "Both queries must filter o.org_id"
+    assert "whatsapp_number" not in sql and "bot_number" not in sql
     assert "r.id = $2" not in sql, "Must NOT use bare r.id = $2"
-
-
-# ── 4. orders_repo.db_get_delivery_orders ─────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_db_get_delivery_orders_uses_org_id():
-    """With restaurant_id provided, query must filter by org_id (Wave-2 tenant key)."""
-    from app.repositories.orders_repo import db_get_delivery_orders
-
-    conn = _make_conn(fetch_val=[])
-
-    # orders_repo uses _tenant_connection() (local helper wrapping tenant_connection)
-    patch_path = "app.repositories.orders_repo._tenant_connection"
-    with patch(patch_path, _make_tenant_conn_ctx(conn)):
-        result = await db_get_delivery_orders(["pendiente"], restaurant_id=42)
-
-    assert result == []
-    sql = _captured_sql(conn)
-    # The query filters by orders.org_id directly — no JOIN to locations is
-    # needed since orders has its own org_id column post-Wave-2. The previous
-    # JOIN multiplied rows by locations count (same whatsapp_number).
-    assert "org_id = $2" in sql, "Must filter by org_id (Wave-2 tenant key)"
-    assert "r.id = $2" not in sql, "Must NOT use bare r.id = $2 (pre-Wave-2 pattern)"
 
 
 # ── 5. tables_repo.db_get_delivery_status_hash_for_restaurant ─────────────────
 
 @pytest.mark.asyncio
 async def test_db_get_delivery_status_hash_uses_org_id():
-    """Must JOIN locations and filter by l.org_id, not r.id."""
+    """Must filter by orders.org_id, not r.id nor the WhatsApp key."""
     from app.repositories.tables_repo import db_get_delivery_status_hash_for_restaurant
 
     conn = _make_conn(fetch_val=[])
@@ -168,6 +115,6 @@ async def test_db_get_delivery_status_hash_uses_org_id():
 
     assert result == []
     sql = _captured_sql(conn)
-    assert "l.org_id" in sql, "Must filter by l.org_id (Wave-2 tenant key)"
-    assert "join locations" in sql, "Must JOIN locations"
+    assert "o.org_id = $1" in sql
+    assert "whatsapp_number" not in sql and "bot_number" not in sql
     assert "r.id = $1" not in sql, "Must NOT use bare r.id = $1"

@@ -291,7 +291,7 @@ async def test_execute_action_split_kitchen_and_bar():
         patch.object(agent_module.db, "db_get_cart", AsyncMock(return_value=MOCK_CART_MIXED)),
         patch.object(agent_module.orders, "get_cart_total", AsyncMock(return_value=70000)),
         patch.object(agent_module.db, "db_get_base_order_id", AsyncMock(return_value=None)),
-        patch.object(agent_module.db, "db_get_restaurant_by_bot_number", AsyncMock(return_value=MOCK_RESTAURANT_BAR)),
+        patch.object(agent_module.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=MOCK_RESTAURANT_BAR)),
         patch.object(agent_module.db, "db_save_table_order", AsyncMock(side_effect=fake_save)),
         patch.object(agent_module.db, "db_get_next_sub_number", AsyncMock(return_value=2)),
         patch.object(agent_module.db, "db_deduct_inventory_for_order", AsyncMock()),
@@ -308,7 +308,7 @@ async def test_execute_action_split_kitchen_and_bar():
         await agent_module.execute_action(
             parsed=parsed,
             phone="573001234567",
-            bot_number="15556293573",
+            org_id=4242,
             table_context=MOCK_TABLE,
             session_state={"has_order": False, "order_delivered": False, "active": True},
         )
@@ -347,7 +347,7 @@ async def test_execute_action_without_bar_uses_station_all():
         patch.object(agent_module.db, "db_get_cart", AsyncMock(return_value=MOCK_CART_MIXED)),
         patch.object(agent_module.orders, "get_cart_total", AsyncMock(return_value=70000)),
         patch.object(agent_module.db, "db_get_base_order_id", AsyncMock(return_value=None)),
-        patch.object(agent_module.db, "db_get_restaurant_by_bot_number", AsyncMock(return_value=MOCK_RESTAURANT_NO_BAR)),
+        patch.object(agent_module.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=MOCK_RESTAURANT_NO_BAR)),
         patch.object(agent_module.db, "db_save_table_order", AsyncMock(side_effect=lambda o: saved_orders.append(o))),
         patch.object(agent_module.db, "db_deduct_inventory_for_order", AsyncMock()),
         patch.object(agent_module.orders, "clear_cart", AsyncMock()),
@@ -363,7 +363,7 @@ async def test_execute_action_without_bar_uses_station_all():
         await agent_module.execute_action(
             parsed=parsed,
             phone="573001234567",
-            bot_number="15556293573",
+            org_id=4242,
             table_context=MOCK_TABLE,
             session_state={"has_order": False, "order_delivered": False, "active": True},
         )
@@ -388,7 +388,7 @@ async def test_execute_action_drinks_only_uses_bar():
         patch.object(agent_module.db, "db_get_cart", AsyncMock(return_value=cart_drinks_only)),
         patch.object(agent_module.orders, "get_cart_total", AsyncMock(return_value=61000)),
         patch.object(agent_module.db, "db_get_base_order_id", AsyncMock(return_value=None)),
-        patch.object(agent_module.db, "db_get_restaurant_by_bot_number", AsyncMock(return_value=MOCK_RESTAURANT_BAR)),
+        patch.object(agent_module.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=MOCK_RESTAURANT_BAR)),
         patch.object(agent_module.db, "db_save_table_order", AsyncMock(side_effect=lambda o: saved_orders.append(o))),
         patch.object(agent_module.db, "db_deduct_inventory_for_order", AsyncMock()),
         patch.object(agent_module.orders, "clear_cart", AsyncMock()),
@@ -404,7 +404,7 @@ async def test_execute_action_drinks_only_uses_bar():
         await agent_module.execute_action(
             parsed=parsed,
             phone="573001234567",
-            bot_number="15556293573",
+            org_id=4242,
             table_context=MOCK_TABLE,
             session_state={"has_order": False, "order_delivered": False, "active": True},
         )

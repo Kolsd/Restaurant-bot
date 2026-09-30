@@ -13,7 +13,7 @@ ONE test that exercises:
   8. Assert: the seeded (blocked) reservation remains unchanged
 
 Why this test:
-  agent.py calls db_get_available_tables(date, time, guests, bot_number) BEFORE
+  agent.py calls db_get_available_tables(date, time, guests, org_id) BEFORE
   inserting a reservation. When the only table is already booked within ±2h of the
   requested time, it returns [] and the bot appends an unavailability message
   WITHOUT creating a reservation row.
@@ -128,7 +128,7 @@ async def test_reservation_capacity_full(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Reservation Capacity Test",
-        bot_number_raw="+570E2ERESVFULL",
+        key="+570E2ERESVFULL",
         menu=MENU,
         payment_methods=["Efectivo"],
         num_branches=0,
@@ -137,7 +137,6 @@ async def test_reservation_capacity_full(
         },
     )
     org_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
     owner_email = restaurant["owner_email"]
 
     # Clean volatile state from prior runs
@@ -183,18 +182,7 @@ async def test_reservation_capacity_full(
     # db_get_available_tables queries: WHERE t.branch_id = $1 (the resolved location).
     # The table we created is attached to that principal location. We also need the
     # location_id to seed the reservation with the correct table_id.
-    with bypass_tenant_scope("e2e_capacity_resolve_location"):
-        async with pool.acquire() as conn:
-            loc_row = await conn.fetchrow(
-                """
-                SELECT id FROM locations
-                WHERE org_id = $1 AND whatsapp_number IS NULL
-                ORDER BY id ASC LIMIT 1
-                """,
-                org_id,
-            )
-    assert loc_row is not None, f"Could not find principal location for org_id={org_id}"
-    location_id = loc_row["id"]
+    location_id = restaurant["principal_location_id"]
     log.info("e2e.capacity.location_id", location_id=location_id)
 
     # ── Seed a CONFIRMED reservation that blocks the only table ───────────────
@@ -206,9 +194,9 @@ async def test_reservation_capacity_full(
             seeded_row = await conn.fetchrow(
                 """
                 INSERT INTO reservations
-                  (name, "date", "time", guests, phone, bot_number, status,
-                   table_id, org_id)
-                VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', $7, $8)
+                  (name, "date", "time", guests, phone, status,
+                   table_id, org_id, location_id)
+                VALUES ($1, $2, $3, $4, $5, 'confirmed', $6, $7, $8)
                 RETURNING id
                 """,
                 SEEDED_PERSON_NAME,
@@ -216,9 +204,9 @@ async def test_reservation_capacity_full(
                 "19:00",
                 RESERVATION_GUESTS,
                 "573009990000",   # a different phone (not the test customer)
-                bot_number,
                 table_id,
                 org_id,
+                location_id,
             )
     seeded_reservation_id: int = seeded_row["id"]
     log.info(
@@ -244,7 +232,7 @@ async def test_reservation_capacity_full(
         pool,
         phone=CUSTOMER_PHONE_RAW,
         text=request_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info(
         "e2e.capacity.turn_1_done",
@@ -256,7 +244,7 @@ async def test_reservation_capacity_full(
     # ── Assert: bot replied ────────────────────────────────────────────────────
     customer_texts = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     assert len(customer_texts) >= 1, (
-        "Bot sent no WA message. Check ANTHROPIC_API_KEY, bot_number lookup, "
+        "Bot sent no WA message. Check ANTHROPIC_API_KEY, org lookup, "
         "and module_reservations feature flag."
     )
 
@@ -278,7 +266,7 @@ async def test_reservation_capacity_full(
             client, pool,
             phone=CUSTOMER_PHONE_RAW,
             text="Sí, confirmo la reserva",
-            bot_number=bot_number,
+            org_id=org_id,
         )
         assert proc_conf >= 1, "Confirmation turn not processed"
 

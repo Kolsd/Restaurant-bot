@@ -367,7 +367,7 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Happy Restaurant",
-        bot_number_raw=BOT_NUMBER_RAW,
+        key=BOT_NUMBER_RAW,
         menu=MENU,
         num_branches=1,
         features_override={
@@ -375,23 +375,14 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
         },
     )
     org_id: int = restaurant["id"]
-    bot_number: str = restaurant["whatsapp_number"]
-    # location_id: the principal location (whatsapp_number=None) was created by seed_restaurant.
-    # We need its ID to create the table.
-    with bypass_tenant_scope("e2e_happy_get_principal_loc"):
-        async with pool.acquire() as conn:
-            loc_row = await conn.fetchrow(
-                "SELECT id FROM locations WHERE org_id=$1 AND whatsapp_number IS NULL ORDER BY id ASC LIMIT 1",
-                org_id,
-            )
-    assert loc_row, "Principal location must exist after seed_restaurant"
-    principal_location_id: int = loc_row["id"]
+    # The principal location was created by seed_restaurant; the table goes there.
+    principal_location_id: int = restaurant["principal_location_id"]
 
     # Sibling org for isolation check
     sibling = await seed_restaurant(
         pool,
         name="E2E Sibling Restaurant",
-        bot_number_raw=SIBLING_BOT_RAW,
+        key=SIBLING_BOT_RAW,
         num_branches=1,
     )
     sibling_org_id: int = sibling["id"]
@@ -476,7 +467,7 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
             e2e_app, pool,
             phone=phone,
             text=text,
-            bot_number=bot_number,
+            org_id=org_id,
         )
 
     with script.patch():
@@ -506,11 +497,11 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
             f"Session should be 'active', got {session_row['status']!r}"
         )
 
-        # Assert: conversations row created (no `id` column — natural key is phone+bot_number)
+        # Assert: conversations row created (no `id` column — natural key is phone+org_id)
         with bypass_tenant_scope("e2e_happy_verify_conv_step1"):
             async with pool.acquire() as conn:
                 conv_row = await conn.fetchrow(
-                    "SELECT phone, bot_number, org_id FROM conversations "
+                    "SELECT phone, org_id FROM conversations "
                     "WHERE org_id=$1 AND phone=$2 LIMIT 1",
                     org_id, CUSTOMER_PHONE,
                 )
@@ -518,9 +509,7 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
             "STEP 1 FAILED: No conversations row found after greeting. "
             "db_save_history did not persist the conversation."
         )
-        assert conv_row["bot_number"] == bot_number, (
-            f"Conversation bot_number mismatch: expected {bot_number!r}, got {conv_row['bot_number']!r}"
-        )
+        assert conv_row["org_id"] == org_id
 
         # Assert: bot replied to the customer
         greet_texts = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
@@ -594,12 +583,12 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
         table_order_id: str = order_row["id"]
 
         # Assert: cart is cleared after order placed (or empty)
-        # carts schema: (phone, bot_number, cart_data JSONB, org_id, ...) — no 'id' column.
+        # carts schema: (phone, org_id, cart_data JSONB, ...) — no 'id' column.
         with bypass_tenant_scope("e2e_happy_verify_step4_cart"):
             async with pool.acquire() as conn:
                 cart_row = await conn.fetchrow(
-                    "SELECT cart_data FROM carts WHERE org_id=$1 AND phone=$2 AND bot_number=$3",
-                    org_id, CUSTOMER_PHONE, bot_number,
+                    "SELECT cart_data FROM carts WHERE org_id=$1 AND phone=$2",
+                    org_id, CUSTOMER_PHONE,
                 )
         # After place_order, the cart should either not exist or have empty items list.
         # Production code in orders.py / agent_salon.py clears the cart post-order.
@@ -656,8 +645,8 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
             async with pool.acquire() as conn:
                 await conn.execute(
                     "UPDATE table_sessions SET order_delivered=TRUE, last_activity=NOW() "
-                    "WHERE org_id=$1 AND phone=$2 AND bot_number=$3 AND status='active'",
-                    org_id, CUSTOMER_PHONE, bot_number,
+                    "WHERE org_id=$1 AND phone=$2 AND status='active'",
+                    org_id, CUSTOMER_PHONE,
                 )
 
         bot_replies.messages.clear()
@@ -739,7 +728,7 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
         # Check that NPS state was set (waiting_score) in state_store.
         # We query state_store directly — it handles Redis-or-fallback transparently.
         from app.services import state_store as _ss
-        nps_state = await _ss.nps_get(CUSTOMER_PHONE, bot_number)
+        nps_state = await _ss.nps_get(CUSTOMER_PHONE, org_id)
         # NPS may be in waiting_score OR already in cooldown (if the test is re-run quickly).
         # Either way, it should not be None at this point unless something went wrong.
         # We accept None here with a BLOCKER note (see deliverable notes below).
@@ -789,7 +778,7 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
 
     # ── Tenant isolation check ────────────────────────────────────────────────
     # All queries above used org_id for the main restaurant.
-    # Verify that the sibling org (different bot_number) sees ZERO rows.
+    # Verify that the sibling org sees ZERO rows.
     with bypass_tenant_scope("e2e_happy_isolation_check"):
         async with pool.acquire() as conn:
             sib_orders = await conn.fetchval(

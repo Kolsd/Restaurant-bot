@@ -59,8 +59,6 @@ _WARN_THRESHOLDS = (50, 80, 90)
 
 async def check_and_consume_conv_slot(
     org_id: int,
-    *,
-    bot_number: str = "",
 ) -> CapDecision:
     """Check cap and consume one conversation slot.
 
@@ -73,7 +71,6 @@ async def check_and_consume_conv_slot(
 
     Args:
         org_id:       Organization ID (tenant key, equals restaurant_obj["id"] post-Wave-2).
-        bot_number:   The org's bot key — only for log context.
 
     Returns:
         CapDecision.PROCEED           — allow message to continue to LLM
@@ -166,7 +163,7 @@ async def check_and_consume_conv_slot(
                     fired_automatically=True,
                 )
             except Exception:
-                log.exception("plan_enforcement.create_pack_failed", org_id=org_id, bot_number=bot_number)
+                log.exception("plan_enforcement.create_pack_failed", org_id=org_id)
                 # If pack creation fails, we cannot safely proceed (no cap room)
                 return CapDecision.REDIRECT_TO_HUMAN
 
@@ -197,7 +194,6 @@ async def check_and_consume_conv_slot(
         conv_cap=conv.get("cap"),
         pack_credits=conv.get("pack_credits"),
         auto_recharge_enabled=auto_recharge_enabled,
-        bot_number=bot_number,
     )
     return CapDecision.REDIRECT_TO_HUMAN
 

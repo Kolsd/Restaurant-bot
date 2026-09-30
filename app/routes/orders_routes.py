@@ -54,12 +54,6 @@ async def get_single_order(request: Request, order_id: str):
         raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
     return order
 
-@router.get("/cart/{phone}/{bot_number}")
-async def view_cart(request: Request, phone: str, bot_number: str):
-    await require_auth(request)
-    summary = await cart_summary(phone, bot_number)
-    return {"summary": summary}
-
 @router.post("/payment/wompi-webhook")
 async def wompi_webhook(request: Request):
     # H1: Global rate limit 50 req/s. Return 200 (not 429) — Wompi retries on

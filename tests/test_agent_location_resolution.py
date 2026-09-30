@@ -59,7 +59,7 @@ async def test_conversation_persists_location_id_once_resolved():
     ):
         await db_save_history(
             phone="5551234",
-            bot_number="bot123",
+            org_id=42,
             history=[{"role": "user", "content": "hola"}],
             location_id=10,
         )
@@ -72,7 +72,7 @@ async def test_conversation_persists_location_id_once_resolved():
         None,
     )
     assert insert_call is not None, "No INSERT INTO conversations execute call found"
-    # positional args: (sql, phone, bot_number, history_json, branch_id, location_id)
+    # positional args: (sql, phone, org_id, history_json, branch_id, location_id)
     insert_args = insert_call.args
     assert 10 in insert_args, f"location_id=10 not found in execute args: {insert_args}"
 

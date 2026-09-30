@@ -34,11 +34,6 @@ def _serialize(d: dict) -> dict:
     return _db_serialize(d)
 
 
-def _normalize_phone(n: str) -> str:
-    from app.services.database import _normalize_phone as _np  # noqa: PLC0415
-    return _np(n)
-
-
 from app.services.logging import get_logger  # noqa: E402
 log = get_logger(__name__)
 
@@ -279,7 +274,7 @@ async def db_delete_user(username: str) -> None:
 
 # ── Restaurant detail stats (superadmin dashboard) ───────────────────────────
 
-async def db_get_restaurant_detail_stats(restaurant_id: int, wa: str) -> dict:
+async def db_get_restaurant_detail_stats(restaurant_id: int) -> dict:
     """
     Return 30-day and today order counts, table orders, conversation count,
     user count, fiscal invoice counts for a given restaurant.
@@ -296,24 +291,20 @@ async def db_get_restaurant_detail_stats(restaurant_id: int, wa: str) -> dict:
         async with _tenant_connection() as conn:
             orders_30d   = await conn.fetchrow(
                 "SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS rev "
-                "FROM orders WHERE bot_number=$1 AND created_at >= NOW()-INTERVAL '30 days'",
-                wa,
+                "FROM orders WHERE org_id=$1 AND created_at >= NOW()-INTERVAL '30 days'",
+                restaurant_id,
             )
             orders_today = await conn.fetchrow(
-                "SELECT COUNT(*) AS cnt FROM orders WHERE bot_number=$1 AND created_at >= CURRENT_DATE",
-                wa,
+                "SELECT COUNT(*) AS cnt FROM orders WHERE org_id=$1 AND created_at >= CURRENT_DATE",
+                restaurant_id,
             )
             table_30d    = await conn.fetchrow(
-                # Previously compared restaurants.whatsapp_number (text) with $1
-                # while also using $1 as an id (bigint): every call raised
-                # "operator does not exist: text = bigint" and the superadmin
-                # detail panel returned 500. It also mixed location and org ids.
                 "SELECT COUNT(*) AS cnt FROM table_orders "
                 "WHERE org_id=$1 AND created_at >= NOW()-INTERVAL '30 days' "
                 "AND status <> 'cancelado'",
                 restaurant_id,
             )
-            convs        = await conn.fetchval("SELECT COUNT(*) FROM conversations WHERE bot_number=$1", wa)
+            convs        = await conn.fetchval("SELECT COUNT(*) FROM conversations WHERE org_id=$1", restaurant_id)
             users_cnt    = await conn.fetchval("SELECT COUNT(*) FROM users WHERE org_id=$1", restaurant_id)
 
             has_invoices = await conn.fetchval("SELECT to_regclass('fiscal_invoices')")
@@ -330,7 +321,7 @@ async def db_get_restaurant_detail_stats(restaurant_id: int, wa: str) -> dict:
                 invoices_30d = None
                 invoices_all = 0
 
-            last_order = await conn.fetchval("SELECT MAX(created_at) FROM orders WHERE bot_number=$1", wa)
+            last_order = await conn.fetchval("SELECT MAX(created_at) FROM orders WHERE org_id=$1", restaurant_id)
 
     return {
         "orders_30d":       int(orders_30d["cnt"])  if orders_30d else 0,
@@ -502,7 +493,7 @@ async def db_get_dashboard_orders(
     start_date,
     end_date,
     branch_id,
-    bot_number: str | None,
+    org_id: int | None,
 ) -> tuple[list, list]:
     """
     Return (delivery_rows, table_rows) for the dashboard orders page.
@@ -517,13 +508,12 @@ async def db_get_dashboard_orders(
             # Delivery / pickup orders (orders table)
             q_wa = "SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2"
             p_wa: list = [start_date, end_date]
-            if bot_number:
-                if branch_id == "all":
-                    q_wa += " AND bot_number LIKE $3"
-                    p_wa.append(f"{bot_number}%")
-                else:
-                    q_wa += " AND bot_number = $3"
-                    p_wa.append(bot_number)
+            if org_id:
+                q_wa += " AND org_id = $3"
+                p_wa.append(org_id)
+                if branch_id and branch_id != "all":
+                    q_wa += " AND location_id = $4"
+                    p_wa.append(branch_id)
             q_wa += " ORDER BY created_at DESC"
             rows_wa = await conn.fetch(q_wa, *p_wa)
 
@@ -552,7 +542,7 @@ async def db_get_dashboard_orders(
 async def db_get_dashboard_reservations(
     start_date,
     end_date,
-    bot_number: str | None,
+    org_id: int | None,
 ) -> list[dict]:
     """Return reservations for the dashboard in the given date window.
 
@@ -563,9 +553,9 @@ async def db_get_dashboard_reservations(
         async with _tenant_connection() as conn:
             query = "SELECT * FROM reservations WHERE created_at >= $1 AND created_at < $2"
             params: list = [start_date, end_date]
-            if bot_number:
-                query += " AND bot_number = $3"
-                params.append(bot_number)
+            if org_id:
+                query += " AND org_id = $3"
+                params.append(org_id)
             query += " ORDER BY date ASC, time ASC"
             rows = await conn.fetch(query, *params)
     return [dict(r) for r in rows]
@@ -573,17 +563,15 @@ async def db_get_dashboard_reservations(
 
 async def db_get_dashboard_conversations(
     branch_id,
-    bot_number: str | None,
+    org_id: int | None,
 ) -> list[dict]:
-    """Return conversations for the dashboard filtered by branch/bot_number.
+    """Return conversations for the dashboard filtered by org and sede.
 
     Filter semantics post-Wave-2:
-      - branch_id = 'all' → no sede filter (relies on bot_number for tenant
-        scoping; admin owner viewing 'Casa Matriz' sees all of their org's
-        conversations across every sede)
+      - branch_id = 'all' → no sede filter (every sede of the org)
       - branch_id = digit AND looks like a location_id → filter location_id
-      - bot_number always applied when present (defense in depth — unique
-        per restaurant, ensures no cross-tenant leak under bypass)
+      - org_id always applied when present (ensures no cross-tenant leak
+        under bypass)
 
     Pre-2026-04-29 the SQL filtered `WHERE branch_id = $1`. Post-migration
     0057 (sync_table_branch_id) the conversations.branch_id column carries
@@ -601,16 +589,15 @@ async def db_get_dashboard_conversations(
             params: list = []
             idx = 1
 
-            # bot_number is the strongest tenant filter we have under bypass —
-            # apply unconditionally when known, regardless of branch selection.
-            if bot_number:
-                conditions.append(f"bot_number = ${idx}")
-                params.append(bot_number)
+            # org_id is the tenant filter under bypass — apply unconditionally
+            # when known, regardless of branch selection.
+            if org_id:
+                conditions.append(f"org_id = ${idx}")
+                params.append(org_id)
                 idx += 1
 
             # location_id filter only when caller explicitly picked a sede.
-            # 'all' or None → cross-sede view of the same org (bot_number filter
-            # already scopes to the org).
+            # 'all' or None → cross-sede view of the same org.
             if branch_id and branch_id != "all":
                 conditions.append(f"location_id = ${idx}")
                 params.append(branch_id)
@@ -624,68 +611,6 @@ async def db_get_dashboard_conversations(
 
 
 # ── Public menu ───────────────────────────────────────────────────────────────
-
-async def db_get_public_menu_data(normalized_bot_number: str) -> dict | None:
-    """
-    Return restaurant menu + availability + features for the public menu endpoint.
-    Normalizes by stripping + and spaces from bot_number.
-    Returns None if not found.
-    """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rest = await conn.fetchrow(
-            """
-            SELECT
-                r.id AS restaurant_id,
-                l.org_id,
-                r.name,
-                r.menu,
-                o.menu AS parent_menu,
-                r.features,
-                o.features AS parent_features
-            FROM restaurants r
-            JOIN locations l ON l.id = r.id
-            JOIN organizations o ON o.id = l.org_id
-            WHERE replace(replace(r.whatsapp_number, '+', ''), ' ', '') = $1
-            """,
-            normalized_bot_number,
-        )
-        if not rest:
-            return None
-        # `rest` is one sede (the view's id IS locations.id), so the sold-out
-        # state that applies is that sede's — not every sede's merged.
-        inv_rows = await conn.fetch(
-            "SELECT dish_name, available FROM menu_availability "
-            "WHERE org_id = $1 AND location_id = $2",
-            rest["org_id"], rest["id"],
-        )
-    availability = {r["dish_name"]: r["available"] for r in inv_rows}
-
-    # Catálogo v2: normalize dish shapes on read so consumers always see all fields.
-    def _parse_and_normalize(raw) -> dict | None:
-        if raw is None:
-            return None
-        if isinstance(raw, str):
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, str):
-                    parsed = json.loads(parsed)
-            except Exception:
-                return {}
-        else:
-            parsed = raw
-        return _normalize_menu_dishes(parsed)
-
-    return {
-        "restaurant_id":  rest["restaurant_id"],
-        "name":           rest["name"],
-        "menu":           _parse_and_normalize(rest["menu"]),
-        "parent_menu":    _parse_and_normalize(rest["parent_menu"]),
-        "features":       rest["features"],
-        "parent_features": rest["parent_features"],
-        "availability":   availability,
-    }
-
 
 # ── Team / Branch management ──────────────────────────────────────────────────
 
@@ -871,38 +796,6 @@ async def db_get_all_users():
 
 # ── Restaurant lookup functions ───────────────────────────────────────────────
 
-async def db_get_restaurant_by_phone(whatsapp_number: str):
-    """Return restaurant row for bot runtime.
-
-    Post-Wave-2: `id` is overridden with `org_id` so downstream code using
-    `restaurant_obj["id"]` as the tenant key (for FKs into organizations, RLS,
-    etc.) works correctly. The original location_id is preserved under
-    `location_id`. Callers needing the sede identifier should use that.
-    """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT r.*, l.org_id, l.id AS location_id
-            FROM restaurants r
-            JOIN locations l ON l.id = r.id
-            WHERE r.whatsapp_number=$1
-            ORDER BY (l.whatsapp_number = $1) DESC NULLS LAST, l.id ASC
-            LIMIT 1
-            """,
-            _normalize_phone(whatsapp_number.strip()),
-        )
-        if not row:
-            return None
-        d = _serialize(dict(row))
-        d["id"] = d["org_id"]  # bot runtime expects tenant key here
-        return d
-
-
-async def db_get_restaurant_by_bot_number(whatsapp_number: str):
-    return await db_get_restaurant_by_phone(whatsapp_number)
-
-
 async def db_get_restaurant_by_name(name: str):
     pool = await _get_pool()
     async with pool.acquire() as conn:
@@ -1024,13 +917,13 @@ async def db_get_all_restaurants(parent_id: int = None):
         return [_serialize(dict(r)) for r in rows]
 
 
-async def db_check_module(bot_number: str, module_name: str) -> bool:
+async def db_check_module(org_id: int, module_name: str) -> bool:
     """
     Return True if module_name is explicitly enabled (true) in the restaurant's
     features JSONB column.
 
     Returns False for:
-      - Restaurant not found for bot_number
+      - Org not found
       - Key not present in features
       - Key present but value is not the boolean true (e.g. false, null, string)
 
@@ -1046,8 +939,8 @@ async def db_check_module(bot_number: str, module_name: str) -> bool:
         # COALESCE turns NULL (restaurant not found, or key absent) into false.
         val = await conn.fetchval(
             "SELECT COALESCE((features->>$2) = 'true', false) "
-            "FROM restaurants WHERE whatsapp_number=$1",
-            _normalize_phone(bot_number),
+            "FROM organizations WHERE id=$1",
+            org_id,
             module_name,
         )
     # fetchval returns None when no rows match; bool(None) == False
@@ -1182,26 +1075,17 @@ async def db_sync_batch(restaurant_id: int, operations: list) -> list:
 
 # ── Menu functions ────────────────────────────────────────────────────────────
 
-async def db_get_menu(whatsapp_number: str):
+async def db_get_menu(org_id: int):
+    """The org's base carta (`organizations.menu`). A sede's carta is
+    `services/sede_menu.get_sede_menu(org_id, location_id)`."""
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT
-                r.menu,
-                o.menu AS parent_menu
-            FROM restaurants r
-            JOIN locations l ON l.id = r.id
-            JOIN organizations o ON o.id = l.org_id
-            WHERE r.whatsapp_number = $1
-        """, whatsapp_number)
+        row = await conn.fetchrow("SELECT menu FROM organizations WHERE id = $1", org_id)
 
         if not row:
             return None
 
         menu_data = row['menu']
-
-        if (not menu_data or menu_data == '{}' or menu_data == "{}") and row['parent_menu']:
-            menu_data = row['parent_menu']
 
         # 🛡️ AUTO-SANADOR: Repara cadenas doblemente codificadas al vuelo
         if menu_data:
@@ -1215,18 +1099,6 @@ async def db_get_menu(whatsapp_number: str):
                     return {}
             return _normalize_menu_dishes(menu_data)
         return {}
-
-
-async def db_get_top_dishes(whatsapp_number: str, top_n: int = 5):
-    menu = await db_get_menu(whatsapp_number)
-    if not menu:
-        return []
-    all_dishes = []
-    if isinstance(menu, dict):
-        for cat, dishes in menu.items():
-            if isinstance(dishes, list):
-                all_dishes.extend(dishes)
-    return all_dishes[:top_n]
 
 
 # db_update_subscription was DELETED 2026-09-12 — same P0 cross-tenant write
@@ -1304,8 +1176,8 @@ async def db_set_dish_availability(restaurant_id: int, dish_name: str, available
 
 # ── NPS analytics ─────────────────────────────────────────────────────────────
 
-async def db_get_nps_stats(bot_number: str, period: str = "month", branch_id: int | str = None, days: int = None) -> dict:
-    """Return NPS aggregate stats. bot_number used as tenant discriminator.
+async def db_get_nps_stats(org_id: int, period: str = "month", branch_id: int | str = None, days: int = None) -> dict:
+    """Return NPS aggregate stats of one org.
 
     RLS active — runs under bypass (nps.py route uses get_current_restaurant, not _scoped).
     """
@@ -1316,10 +1188,10 @@ async def db_get_nps_stats(bot_number: str, period: str = "month", branch_id: in
     else:
         interval_str = period_map.get(period, "30 days")
 
-    with bypass_tenant_scope("db_get_nps_stats: NPS dashboard cross-tenant read via bot_number"):
+    with bypass_tenant_scope("db_get_nps_stats: NPS dashboard cross-tenant read by org_id"):
         async with _tenant_connection() as conn:
-            conditions = ["bot_number = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
-            params = [bot_number]
+            conditions = ["org_id = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
+            params = [org_id]
 
             if branch_id == "all":
                 pass
@@ -1345,8 +1217,8 @@ async def db_get_nps_stats(bot_number: str, period: str = "month", branch_id: in
             }
 
 
-async def db_get_nps_responses(bot_number: str, period: str = "month", limit: int = 50, branch_id: int | str = None) -> list:
-    """Return paginated NPS responses. bot_number used as tenant discriminator.
+async def db_get_nps_responses(org_id: int, period: str = "month", limit: int = 50, branch_id: int | str = None) -> list:
+    """Return paginated NPS responses of one org.
 
     RLS active — runs under bypass (nps.py route uses get_current_restaurant, not _scoped).
     """
@@ -1354,10 +1226,10 @@ async def db_get_nps_responses(bot_number: str, period: str = "month", limit: in
     period_map = {"today": "1 day", "week": "7 days", "month": "30 days", "semester": "180 days", "year": "365 days"}
     interval_str = period_map.get(period, "30 days")
 
-    with bypass_tenant_scope("db_get_nps_responses: NPS dashboard cross-tenant read via bot_number"):
+    with bypass_tenant_scope("db_get_nps_responses: NPS dashboard cross-tenant read by org_id"):
         async with _tenant_connection() as conn:
-            conditions = ["bot_number = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
-            params = [bot_number]
+            conditions = ["org_id = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
+            params = [org_id]
 
             if branch_id == "all":
                 pass
@@ -1589,7 +1461,7 @@ async def db_get_restaurant_by_slug(slug: str) -> dict | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT r.id, r.name, r.slug, r.whatsapp_number, r.menu, r.features, r.address,
+            SELECT r.id, r.name, r.slug, r.menu, r.features, r.address,
                    o.menu AS parent_menu
             FROM restaurants r
             JOIN locations l ON l.id = r.id
@@ -1633,7 +1505,7 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, name, slug, whatsapp_number,
+                SELECT id, name, slug,
                        menu, features, subscription_plan, subscription_status,
                        plan_code, comp_until,
                        created_at, updated_at
@@ -1668,7 +1540,7 @@ async def db_get_all_orgs(active_only: bool = True) -> list[dict]:
     model and the vestigial is_primary flag.
 
     Returned dicts contain only Organization-level fields. If a caller
-    ALSO needs sede-level info (whatsapp_number per location, address,
+    ALSO needs sede-level info (address,
     etc.), follow up with db_get_org_locations(org_id) — locations are
     all peers, none of them is "the primary".
 
@@ -1687,7 +1559,7 @@ async def db_get_all_orgs(active_only: bool = True) -> list[dict]:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT id, name, slug, whatsapp_number,
+                SELECT id, name, slug,
                        menu, features, subscription_plan, subscription_status,
                        created_at, updated_at
                 FROM organizations
@@ -1728,7 +1600,6 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
                 rows = await conn.fetch(
                     """
                     SELECT id, org_id, name, code, address, latitude, longitude,
-                           whatsapp_number,
                            active, timezone, opening_hours,
                            created_at, updated_at
                     FROM locations
@@ -1741,7 +1612,6 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
                 rows = await conn.fetch(
                     """
                     SELECT id, org_id, name, code, address, latitude, longitude,
-                           whatsapp_number,
                            active, timezone, opening_hours,
                            created_at, updated_at
                     FROM locations
@@ -1782,7 +1652,6 @@ async def db_get_default_location(org_id: int) -> dict | None:
                 """
                 SELECT id, org_id, name, code, address, phone,
                        latitude, longitude,
-                       whatsapp_number,
                        active, timezone, opening_hours,
                        created_at, updated_at
                 FROM locations
@@ -1849,7 +1718,6 @@ async def db_get_location_by_id(location_id: int) -> dict | None:
             row = await conn.fetchrow(
                 """
                 SELECT id, org_id, name, code, address, phone, latitude, longitude,
-                       whatsapp_number,
                        active, timezone, opening_hours, delivery_config,
                        created_at, updated_at
                 FROM locations
@@ -1932,7 +1800,6 @@ async def db_resolve_location_by_gps(
             rows = await conn.fetch(
                 """
                 SELECT id, org_id, name, code, address, latitude, longitude,
-                       whatsapp_number,
                        active, timezone, opening_hours,
                        created_at, updated_at
                 FROM locations
@@ -2020,7 +1887,7 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
 
     sql = (
         f"UPDATE organizations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted above
-        f"WHERE id = ${idx} RETURNING id, name, slug, whatsapp_number, "
+        f"WHERE id = ${idx} RETURNING id, name, slug, "
         f"menu, features, subscription_plan, subscription_status, "
         f"created_at, updated_at"
     )
@@ -2083,7 +1950,7 @@ async def db_update_location(location_id: int, **fields) -> dict | None:
         f"UPDATE locations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted
         f"WHERE id = ${idx} RETURNING id, org_id, name, code, address, phone, "
         f"latitude, longitude, "
-        f"whatsapp_number, active, timezone, "
+        f"active, timezone, "
         f"opening_hours, created_at, updated_at"
     )
 
@@ -2138,7 +2005,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
         f"INSERT INTO locations ({', '.join(col_names)}) "  # noqa: S608 — col names are whitelisted
         f"VALUES ({', '.join(placeholders)}) "
         f"RETURNING id, org_id, name, code, address, phone, latitude, longitude, "
-        f"whatsapp_number, active, timezone, "
+        f"active, timezone, "
         f"opening_hours, created_at, updated_at"
     )
 
@@ -2171,7 +2038,7 @@ async def db_list_organizations() -> list[dict]:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT o.id, o.name, o.slug, o.whatsapp_number,
+                SELECT o.id, o.name, o.slug,
                        o.subscription_plan, o.subscription_status,
                        o.features, o.created_at, o.updated_at,
                        COUNT(l.id)::int AS location_count
@@ -2225,7 +2092,7 @@ async def db_create_organization(
                 """
                 INSERT INTO organizations (name, slug, features, subscription_plan)
                 VALUES ($1, $2, $3, $4)
-                RETURNING id, name, slug, whatsapp_number,
+                RETURNING id, name, slug,
                           menu, features, subscription_plan, subscription_status,
                           created_at, updated_at
                 """,

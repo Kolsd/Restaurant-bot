@@ -301,7 +301,7 @@ async def test_login_preserves_legacy_restaurant_key():
     assert "restaurant" in result, "Legacy 'restaurant' key must be present"
     r = result["restaurant"]
     # Legacy shape fields must all be present
-    for key in ("id", "name", "username", "role", "branch_id", "whatsapp_number",
+    for key in ("id", "name", "username", "role", "branch_id",
                 "features", "locale", "currency"):
         assert key in r, f"Legacy restaurant key missing: {key!r}"
 

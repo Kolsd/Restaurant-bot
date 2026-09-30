@@ -124,22 +124,22 @@ def _wompi_credentials_from_restaurant(
 
 
 @contextlib.asynccontextmanager
-async def _cart_lock(phone: str, bot_number: str, ttl_seconds: int = 30):
+async def _cart_lock(phone: str, org_id: int, ttl_seconds: int = 30):
     """
-    Async context manager that acquires a distributed cart lock for (phone, bot_number).
+    Async context manager that acquires a distributed cart lock for (phone, org_id).
     Uses Redis SET NX EX when available, falls back to an asyncio.Lock per worker.
     Raises RuntimeError if the lock cannot be acquired (e.g. already held by another request).
     """
-    token = await state_store.cart_lock_acquire(phone, bot_number, ttl_seconds=ttl_seconds)
+    token = await state_store.cart_lock_acquire(phone, org_id, ttl_seconds=ttl_seconds)
     if not token:
-        log.warning("cart_lock.contention", phone=phone, bot_number=bot_number)
+        log.warning("cart_lock.contention", phone=phone, org_id=org_id)
         raise RuntimeError("cart_lock_contention")
     try:
         yield
     finally:
-        await state_store.cart_lock_release(phone, bot_number, token=token)
+        await state_store.cart_lock_release(phone, org_id, token=token)
 
-async def _turn_menu(bot_number: str, org_id: int | None = None, location_id: int | None = None) -> dict:
+async def _turn_menu(org_id: int | None = None, location_id: int | None = None) -> dict:
     """The carta of the sede this turn serves (migration 0093 — each sede
     has its own prices, hidden dishes and dishes of its own).
 
@@ -151,23 +151,25 @@ async def _turn_menu(bot_number: str, org_id: int | None = None, location_id: in
     sede = location_id or sede_context.current_sede_id()
     if org and sede:
         return await sede_menu.get_sede_menu(int(org), int(sede))
-    log.warning("menu.read_without_sede", bot_number=bot_number, org_id=org)
-    return await db.db_get_menu(bot_number) or {}
+    log.warning("menu.read_without_sede", org_id=org)
+    if not org:
+        return {}
+    return await db.db_get_menu(int(org)) or {}
 
 
-async def find_dish(dish_name: str, bot_number: str) -> dict | None:
+async def find_dish(dish_name: str, org_id: int) -> dict | None:
     if not dish_name or not dish_name.strip():
-        log.info("find_dish.empty_query", bot_number=bot_number)
+        log.info("find_dish.empty_query", org_id=org_id)
         return None
 
-    menu = await _turn_menu(bot_number)
+    menu = await _turn_menu(org_id)
     if not menu:
-        log.info("find_dish.no_menu", bot_number=bot_number)
+        log.info("find_dish.no_menu", org_id=org_id)
         return None
-    return await _find_in_menu(dish_name, menu, bot_number)
+    return await _find_in_menu(dish_name, menu, org_id)
 
 
-async def _find_in_menu(dish_name: str, menu: dict, bot_number: str) -> dict | None:
+async def _find_in_menu(dish_name: str, menu: dict, org_id: int) -> dict | None:
     """find_dish's matching (rule 12) against a carta the caller already
     holds, so a caller with an explicit sede does not re-read it."""
     if not dish_name or not dish_name.strip():
@@ -225,18 +227,18 @@ async def _find_in_menu(dish_name: str, menu: dict, bot_number: str) -> dict | N
     log.info("find_dish.matched", query=dish_name, matched=matched.get("name"), method="substring")
     return matched
 
-async def add_to_cart(phone: str, dish_name: str, quantity: int, bot_number: str, note: str | None = None) -> dict:
+async def add_to_cart(phone: str, dish_name: str, quantity: int, org_id: int, note: str | None = None) -> dict:
     if quantity <= 0:
         return {"success": False, "error": "La cantidad debe ser mayor a cero"}
 
-    dish = await find_dish(dish_name, bot_number)
+    dish = await find_dish(dish_name, org_id)
     if not dish:
         return {"success": False, "error": f"No encontré '{dish_name}' en el menú"}
 
     norm_note = _normalize_note_for_storage(note)
     try:
-        async with _cart_lock(phone, bot_number):
-            cart = await db.db_get_cart(phone, bot_number)
+        async with _cart_lock(phone, org_id):
+            cart = await db.db_get_cart(phone, org_id)
             _ensure_line_ids(cart)
 
             found = False
@@ -259,7 +261,7 @@ async def add_to_cart(phone: str, dish_name: str, quantity: int, bot_number: str
                     new_item["sku"] = dish["sku"]
                 cart["items"].append(new_item)
 
-            await db.db_save_cart(phone, bot_number, cart)
+            await db.db_save_cart(phone, org_id, cart)
     except RuntimeError as exc:
         if "cart_lock_contention" in str(exc):
             return {"success": False, "error": "Tu pedido está siendo procesado, por favor espera un momento."}
@@ -269,7 +271,7 @@ async def add_to_cart(phone: str, dish_name: str, quantity: int, bot_number: str
 
 
 async def resolve_dish_for_cart(
-    bot_number: str, org_id: int, sku: str | None = None, name: str | None = None,
+    org_id: int, sku: str | None = None, name: str | None = None,
     location_id: int | None = None,
 ) -> dict | None:
     """Server-side dish resolution for DIRECT (non-LLM) cart taps from the
@@ -280,7 +282,7 @@ async def resolve_dish_for_cart(
     depth: the dish-card UI already hides these, but a stale client or a
     direct API call must not be able to bypass it.
     """
-    menu = await _turn_menu(bot_number, org_id, location_id)
+    menu = await _turn_menu(org_id, location_id)
     if not menu:
         return None
 
@@ -298,13 +300,13 @@ async def resolve_dish_for_cart(
                 break
 
     if dish is None and name and name.strip():
-        dish = await _find_in_menu(name, menu, bot_number)
+        dish = await _find_in_menu(name, menu, org_id)
 
     if dish is None:
         return None
 
     if dish.get("active", True) is False:
-        log.info("resolve_dish_for_cart.inactive", dish=dish.get("name"), bot_number=bot_number)
+        log.info("resolve_dish_for_cart.inactive", dish=dish.get("name"), org_id=org_id)
         return None
 
     # Sold out is per sede (migration 0091): the diner is at ONE of them, and
@@ -318,20 +320,20 @@ async def resolve_dish_for_cart(
         except Exception:
             log.exception(
                 "resolve_dish_for_cart.availability_check_failed",
-                bot_number=bot_number, location_id=location_id,
+                org_id=org_id, location_id=location_id,
             )
             availability = {}
     else:
-        log.warning("resolve_dish_for_cart.no_sede", bot_number=bot_number, org_id=org_id)
+        log.warning("resolve_dish_for_cart.no_sede", org_id=org_id)
 
     if availability.get(dish.get("name"), True) is False:
-        log.info("resolve_dish_for_cart.unavailable", dish=dish.get("name"), bot_number=bot_number)
+        log.info("resolve_dish_for_cart.unavailable", dish=dish.get("name"), org_id=org_id)
         return None
 
     return dish
 
 
-async def add_cart_line(phone: str, bot_number: str, dish: dict, qty: int, note: str | None = None) -> dict:
+async def add_cart_line(phone: str, org_id: int, dish: dict, qty: int, note: str | None = None) -> dict:
     """Deterministic (non-LLM) cart add for a tap on a dish card. `dish` MUST
     already be server-resolved (see resolve_dish_for_cart) — price/category
     are taken from it verbatim, never from client input.
@@ -347,8 +349,8 @@ async def add_cart_line(phone: str, bot_number: str, dish: dict, qty: int, note:
 
     norm_note = _normalize_note_for_storage(note)
     try:
-        async with _cart_lock(phone, bot_number):
-            cart = await db.db_get_cart(phone, bot_number)
+        async with _cart_lock(phone, org_id):
+            cart = await db.db_get_cart(phone, org_id)
             _ensure_line_ids(cart)
 
             price_dec = to_decimal(dish.get("price", 0))
@@ -377,7 +379,7 @@ async def add_cart_line(phone: str, bot_number: str, dish: dict, qty: int, note:
                     new_item["sku"] = dish["sku"]
                 cart["items"].append(new_item)
 
-            await db.db_save_cart(phone, bot_number, cart)
+            await db.db_save_cart(phone, org_id, cart)
     except RuntimeError as exc:
         if "cart_lock_contention" in str(exc):
             return {"success": False, "error": "Tu pedido está siendo procesado, por favor espera un momento."}
@@ -387,7 +389,7 @@ async def add_cart_line(phone: str, bot_number: str, dish: dict, qty: int, note:
 
 
 async def update_cart_line(
-    phone: str, bot_number: str, line_id: str, qty: int | None = None, note: str | None = None,
+    phone: str, org_id: int, line_id: str, qty: int | None = None, note: str | None = None,
 ) -> dict:
     """Update quantity and/or note on one cart line by `line_id`. qty=0
     removes the line. Returns {"success": False, "error": "not_found"} for
@@ -399,8 +401,8 @@ async def update_cart_line(
             return {"success": False, "error": f"La cantidad máxima por plato es {_MAX_CART_QTY}"}
 
     try:
-        async with _cart_lock(phone, bot_number):
-            cart = await db.db_get_cart(phone, bot_number)
+        async with _cart_lock(phone, org_id):
+            cart = await db.db_get_cart(phone, org_id)
             _ensure_line_ids(cart)
 
             target = next((i for i in cart["items"] if i.get("line_id") == line_id), None)
@@ -416,7 +418,7 @@ async def update_cart_line(
                     target["note"] = _normalize_note_for_storage(note)
                 target["subtotal"] = float(money_mul(to_decimal(target["price"]), target["quantity"]))  # JSON boundary
 
-            await db.db_save_cart(phone, bot_number, cart)
+            await db.db_save_cart(phone, org_id, cart)
     except RuntimeError as exc:
         if "cart_lock_contention" in str(exc):
             return {"success": False, "error": "Tu pedido está siendo procesado, por favor espera un momento."}
@@ -425,12 +427,12 @@ async def update_cart_line(
     return {"success": True, "cart": cart}
 
 
-async def remove_cart_line(phone: str, bot_number: str, line_id: str) -> dict:
+async def remove_cart_line(phone: str, org_id: int, line_id: str) -> dict:
     """Remove one cart line by `line_id`. Returns
     {"success": False, "error": "not_found"} for an unknown line_id."""
     try:
-        async with _cart_lock(phone, bot_number):
-            cart = await db.db_get_cart(phone, bot_number)
+        async with _cart_lock(phone, org_id):
+            cart = await db.db_get_cart(phone, org_id)
             _ensure_line_ids(cart)
 
             original_len = len(cart["items"])
@@ -438,7 +440,7 @@ async def remove_cart_line(phone: str, bot_number: str, line_id: str) -> dict:
             if len(cart["items"]) == original_len:
                 return {"success": False, "error": "not_found"}
 
-            await db.db_save_cart(phone, bot_number, cart)
+            await db.db_save_cart(phone, org_id, cart)
     except RuntimeError as exc:
         if "cart_lock_contention" in str(exc):
             return {"success": False, "error": "Tu pedido está siendo procesado, por favor espera un momento."}
@@ -447,52 +449,32 @@ async def remove_cart_line(phone: str, bot_number: str, line_id: str) -> dict:
     return {"success": True, "cart": cart}
 
 
-async def get_cart_with_line_ids(phone: str, bot_number: str) -> dict:
+async def get_cart_with_line_ids(phone: str, org_id: int) -> dict:
     """Read the cart, lazily backfilling `line_id` on any legacy item and
     persisting the backfill (under the cart lock, re-reading fresh to avoid
     clobbering a concurrent mutation) so ids are stable across repeated
     reads (a page reload must see the SAME line_id it saw before). Best
     effort: on lock contention, returns the in-memory backfilled copy
     without persisting — a later mutation will persist it."""
-    cart = await db.db_get_cart(phone, bot_number)
+    cart = await db.db_get_cart(phone, org_id)
     if not _ensure_line_ids(cart):
         return cart
     try:
-        async with _cart_lock(phone, bot_number):
-            fresh = await db.db_get_cart(phone, bot_number)
+        async with _cart_lock(phone, org_id):
+            fresh = await db.db_get_cart(phone, org_id)
             if _ensure_line_ids(fresh):
-                await db.db_save_cart(phone, bot_number, fresh)
+                await db.db_save_cart(phone, org_id, fresh)
             return fresh
     except RuntimeError as exc:
         if "cart_lock_contention" in str(exc):
-            log.warning("cart.line_id_backfill_lock_contention", phone=phone, bot_number=bot_number)
+            log.warning("cart.line_id_backfill_lock_contention", phone=phone, org_id=org_id)
             return cart
         raise
 
-async def remove_from_cart(phone: str, dish_name: str, bot_number: str) -> dict:
-    dish = await find_dish(dish_name, bot_number)
-    if not dish:
-        return {"success": False, "error": "Plato no encontrado"}
-
+async def clear_cart(phone: str, org_id: int):
     try:
-        async with _cart_lock(phone, bot_number):
-            cart = await db.db_get_cart(phone, bot_number)
-            original_count = len(cart["items"])
-            cart["items"] = [i for i in cart["items"] if i["name"].lower() != dish["name"].lower()]
-            if len(cart["items"]) == original_count:
-                return {"success": False, "error": f"{dish['name']} no está en tu pedido."}
-            await db.db_save_cart(phone, bot_number, cart)
-    except RuntimeError as exc:
-        if "cart_lock_contention" in str(exc):
-            return {"success": False, "error": "Tu pedido está siendo procesado, por favor espera un momento."}
-        raise
-
-    return {"success": True, "cart": cart}
-
-async def clear_cart(phone: str, bot_number: str):
-    try:
-        async with _cart_lock(phone, bot_number):
-            await db.db_clear_cart(phone, bot_number)
+        async with _cart_lock(phone, org_id):
+            await db.db_clear_cart(phone, org_id)
     except RuntimeError as e:
         if str(e) == "cart_lock_contention":
             log.warning("cart.clear_lock_contention", phone=phone)
@@ -500,12 +482,12 @@ async def clear_cart(phone: str, bot_number: str):
         raise
 
 
-async def get_cart_total(phone: str, bot_number: str) -> float:
-    cart = await db.db_get_cart(phone, bot_number)
+async def get_cart_total(phone: str, org_id: int) -> float:
+    cart = await db.db_get_cart(phone, org_id)
     return sum(item["subtotal"] for item in cart["items"])
 
-async def cart_summary(phone: str, bot_number: str) -> str:
-    cart = await db.db_get_cart(phone, bot_number)
+async def cart_summary(phone: str, org_id: int) -> str:
+    cart = await db.db_get_cart(phone, org_id)
     if not cart["items"]:
         return "Cart is empty."
 
@@ -579,258 +561,3 @@ def generate_wompi_payment_link(
     redirect_base = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
     redirect_url = f"{redirect_base}/api/payment/confirm"
     return f"https://checkout.wompi.co/p/?public-key={pk}&currency={currency}&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url={redirect_url}"
-
-async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "", channel: str | None = "whatsapp_bot", location_id: int | None = None, scheduled_pickup_at: str | None = None) -> dict:
-    from app.repositories.orders_repo import commit_order_transaction, OrderCommitError, InsufficientStockError
-
-    try:
-        async with _cart_lock(phone, bot_number):
-            cart = await db.db_get_cart(phone, bot_number)
-            if not cart["items"]:
-                return {"success": False, "error": "El carrito está vacío"}
-            if order_type == "domicilio" and not address:
-                return {"success": False, "error": "Se necesita dirección de entrega"}
-
-            rest_data = await db.db_get_restaurant_by_phone(bot_number)
-            delivery_fee = ZERO
-            tz_str = "UTC"
-            restaurant_id = None
-            if rest_data:
-                restaurant_id = rest_data.get("id")
-                _raw_feats = rest_data.get("features") or {}
-                if isinstance(_raw_feats, str):
-                    try:
-                        _raw_feats = json.loads(_raw_feats)
-                    except Exception:
-                        _raw_feats = {}
-                if not isinstance(_raw_feats, dict):
-                    _raw_feats = {}
-
-                delivery_fee = to_decimal(_raw_feats.get("delivery_fee", 0)) if order_type == "domicilio" else ZERO
-                tz_str = _raw_feats.get("timezone", "UTC")
-
-            # Resolve per-restaurant Wompi credentials (fallback to env vars).
-            # Done once here so both the additional-order and new-order branches
-            # below reuse the same values without re-querying.
-            wompi_pk, wompi_integrity = _wompi_credentials_from_restaurant(rest_data)
-
-            # Plan-limit guard: monthly orders cap. Enforced BEFORE we tie up
-            # any inventory or generate a Wompi link. UsageLimitExceeded is
-            # caught here and returned as a soft error so the bot replies with
-            # a message instead of dying with a stack trace.
-            if restaurant_id and rest_data:
-                try:
-                    from app.services.subscription_guard import enforce_order_limit  # noqa: PLC0415
-                    from app.services.database import UsageLimitExceeded  # noqa: PLC0415
-                    await enforce_order_limit(restaurant_id, rest_data)
-                except UsageLimitExceeded as exc:
-                    log.warning(
-                        "create_order.order_limit_hit",
-                        phone=phone, restaurant_id=restaurant_id,
-                        used=exc.used, limit=exc.limit,
-                    )
-                    return {"success": False, "error": str(exc)}
-
-            subtotal = sum(to_decimal(item["subtotal"]) for item in cart["items"])
-            total = subtotal + delivery_fee
-
-            # Use a SINGLE connection for all transit/status reads to eliminate TOCTOU races.
-            # tenant_connection() applies SET LOCAL app.org_id — required so the SELECT on
-            # orders below cannot match rows from a different tenant that shares phone+bot_number.
-            from app.services.tenant_db import tenant_connection  # noqa: PLC0415
-            pool = await db.get_pool()
-            async with tenant_connection() as conn:
-                base_order = await conn.fetchrow(
-                    """SELECT id, address, notes, payment_method, status
-                       FROM orders
-                       WHERE phone=$1 AND bot_number=$2
-                         AND order_type=$3
-                         AND (base_order_id IS NULL OR base_order_id = id)
-                         AND status NOT IN ('entregado','cancelado')
-                       ORDER BY created_at DESC LIMIT 1""",
-                    phone, bot_number, order_type
-                )
-
-                if base_order:
-                    current_status = base_order["status"]
-                    if current_status in ("en_camino", "en_puerta"):
-                        return {"success": False, "error": "in_transit", "blocked_in_transit": True}
-
-                    base_id = base_order["id"]
-                    # Re-check status within the same connection to close the TOCTOU window
-                    locked = await conn.fetchrow(
-                        "SELECT status FROM orders WHERE id=$1 AND status NOT IN ('en_camino','en_puerta','entregado','cancelado')",
-                        base_id
-                    )
-                    if not locked:
-                        return {"success": False, "error": "in_transit", "blocked_in_transit": True}
-
-                    # sub_number is intentionally a hint only; commit_order_transaction
-                    # recomputes it atomically inside the transaction to prevent races.
-                    max_sub = await conn.fetchval(
-                        "SELECT COALESCE(MAX(sub_number), 1) FROM orders WHERE base_order_id=$1 OR id=$1",
-                        base_id
-                    )
-                    sub_number = max_sub + 1
-                    order_id   = f"{base_id}-{sub_number}"
-
-                    order = {
-                        "id":                  order_id,
-                        "phone":               phone,
-                        "items":               cart["items"].copy(),
-                        "order_type":          order_type,
-                        "address":             address or base_order.get("address", ""),
-                        "notes":               notes or base_order.get("notes", ""),
-                        "subtotal":            subtotal,
-                        "delivery_fee":        ZERO,
-                        "total":               subtotal,
-                        "status":              "pendiente",
-                        "paid":                False,
-                        "created_at":          datetime.now(ZoneInfo(tz_str)).isoformat(),
-                        "bot_number":          bot_number,
-                        "payment_method":      payment_method or base_order.get("payment_method", ""),
-                        "is_additional":       True,
-                        "base_order_id":       base_id,
-                        "sub_number":          sub_number,
-                        "scheduled_pickup_at": scheduled_pickup_at if order_type == "recoger" else None,
-                    }
-                    # Wompi link is OPTIONAL. If env vars are missing, fall through
-                    # to the manual-proof flow: the conversation appends
-                    # `features.payment_instructions[method]` so the customer pays
-                    # to the restaurant's Nequi/Bancolombia and sends the receipt.
-                    # Cash/efectivo never needs a link.
-                    order["payment_url"] = None
-                    if payment_method and payment_method.lower() not in ("efectivo", "cash"):
-                        try:
-                            order["payment_url"] = generate_wompi_payment_link(
-                                order_id, subtotal,
-                                public_key=wompi_pk,
-                                integrity_secret=wompi_integrity,
-                            )
-                        except RuntimeError:
-                            log.warning(
-                                "create_order.wompi_unavailable_manual_proof_flow",
-                                phone=phone, order_id=order_id, payment_method=payment_method,
-                            )
-                    try:
-                        await commit_order_transaction(
-                            pool,
-                            restaurant_id=restaurant_id or 0,
-                            conversation_id=phone,
-                            cart=cart,
-                            order_payload=order,
-                            channel=channel,
-                            location_id=location_id,
-                        )
-                    except InsufficientStockError as exc:
-                        return {"success": False, "error": f"Stock insuficiente para '{exc.sku}'"}
-                    except OrderCommitError as exc:
-                        log.exception("create_order.commit_failed", error=str(exc), order_id=order_id)
-                        return {"success": False, "error": "No pudimos procesar tu pedido, por favor intenta de nuevo."}
-                    # Track subscription usage (best-effort, never blocks the order)
-                    try:
-                        from app.repositories.subscription_repo import db_increment_orders  # noqa: PLC0415
-                        if restaurant_id:
-                            await db_increment_orders(restaurant_id)
-                    except Exception:
-                        log.exception("subscription.order_increment_failed", phone=phone, order_id=order_id)
-                    # Update customer memory after successful order (best-effort, never blocks on failure)
-                    try:
-                        from app.repositories.customer_profiles_repo import increment_after_order  # noqa: PLC0415
-                        from decimal import Decimal
-                        item_strs = [f"{i.get('qty', i.get('quantity', 1))}x {i.get('name', 'item')}" for i in cart.get("items", [])][:5]
-                        summary = ", ".join(item_strs) if item_strs else "pedido"
-                        order_total_decimal = Decimal(str(order["total"]))
-                        if restaurant_id:
-                            await increment_after_order(
-                                restaurant_id=restaurant_id,
-                                phone=phone,
-                                order_total=order_total_decimal,
-                                order_summary=summary,
-                            )
-                    except Exception:
-                        log.exception("customer.profile_increment_failed", phone=phone)
-                    return {"success": True, "order": order}
-
-            order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
-            order = {
-                "id":                  order_id,
-                "phone":               phone,
-                "items":               cart["items"].copy(),
-                "order_type":          order_type,
-                "address":             address or "",
-                "notes":               notes,
-                "subtotal":            subtotal,
-                "delivery_fee":        delivery_fee,
-                "total":               total,
-                "status":              "pendiente",
-                "paid":                False,
-                "created_at":          datetime.now(ZoneInfo(tz_str)).isoformat(),
-                "bot_number":          bot_number,
-                "payment_method":      payment_method,
-                "is_additional":       False,
-                "base_order_id":       None,
-                "sub_number":          1,
-                "scheduled_pickup_at": scheduled_pickup_at if order_type == "recoger" else None,
-            }
-            # Wompi link is OPTIONAL. If env vars are missing, fall through to
-            # the manual-proof flow: the conversation appends
-            # `features.payment_instructions[method]` so the customer pays to the
-            # restaurant's Nequi/Bancolombia and sends the receipt.
-            # Cash/efectivo never needs a link.
-            order["payment_url"] = None
-            if payment_method and payment_method.lower() not in ("efectivo", "cash"):
-                try:
-                    order["payment_url"] = generate_wompi_payment_link(
-                        order_id, total,
-                        public_key=wompi_pk,
-                        integrity_secret=wompi_integrity,
-                    )
-                except RuntimeError:
-                    log.warning(
-                        "create_order.wompi_unavailable_manual_proof_flow",
-                        phone=phone, order_id=order_id, payment_method=payment_method,
-                    )
-            try:
-                await commit_order_transaction(
-                    pool,
-                    restaurant_id=restaurant_id or 0,
-                    conversation_id=phone,
-                    cart=cart,
-                    order_payload=order,
-                    channel=channel,
-                    location_id=location_id,
-                )
-            except InsufficientStockError as exc:
-                return {"success": False, "error": f"Stock insuficiente para '{exc.sku}'"}
-            except OrderCommitError as exc:
-                log.exception("create_order.commit_failed", error=str(exc), order_id=order_id)
-                return {"success": False, "error": "No pudimos procesar tu pedido, por favor intenta de nuevo."}
-            # Track subscription usage (best-effort, never blocks the order)
-            try:
-                from app.repositories.subscription_repo import db_increment_orders  # noqa: PLC0415
-                if restaurant_id:
-                    await db_increment_orders(restaurant_id)
-            except Exception:
-                log.exception("subscription.order_increment_failed", phone=phone, order_id=order_id)
-            # Update customer memory after successful order (best-effort, never blocks on failure)
-            try:
-                from app.repositories.customer_profiles_repo import increment_after_order  # noqa: PLC0415
-                from decimal import Decimal
-                item_strs = [f"{i.get('qty', i.get('quantity', 1))}x {i.get('name', 'item')}" for i in cart.get("items", [])][:5]
-                summary = ", ".join(item_strs) if item_strs else "pedido"
-                order_total_decimal = Decimal(str(order["total"]))
-                if restaurant_id:
-                    await increment_after_order(
-                        restaurant_id=restaurant_id,
-                        phone=phone,
-                        order_total=order_total_decimal,
-                        order_summary=summary,
-                    )
-            except Exception:
-                log.exception("customer.profile_increment_failed", phone=phone)
-            return {"success": True, "order": order}
-    except RuntimeError as exc:
-        if "cart_lock_contention" in str(exc):
-            return {"success": False, "error": "Tu pedido está siendo procesado, por favor espera un momento."}
-        raise

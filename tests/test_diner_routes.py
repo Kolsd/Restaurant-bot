@@ -132,7 +132,6 @@ async def _make_org(conn, *, with_menu: bool) -> dict:
         json.dumps(menu), json.dumps({"currency": "COP"}),
     )
     # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
-    bot_number = f"web{org_id}"
     location_id = await conn.fetchval(
         "INSERT INTO locations (org_id, name) VALUES ($1, $2) RETURNING id",
         org_id, f"Sede {suffix}",
@@ -154,7 +153,6 @@ async def _make_org(conn, *, with_menu: bool) -> dict:
         "org_id": org_id,
         "location_id": location_id,
         "table_id": table_id,
-        "bot_number": bot_number,
     }
 
 
@@ -525,7 +523,7 @@ async def test_diner_message_is_wrapped_before_llm(seed_org):
             enriched, menu_url, history = await agent._build_enriched_user_message(
                 injection_payload,
                 f"web:{uuid.uuid4()}",
-                seed_org["bot_number"],
+                seed_org["org_id"],
                 restaurant_obj,
                 "Diner Test",
                 {},

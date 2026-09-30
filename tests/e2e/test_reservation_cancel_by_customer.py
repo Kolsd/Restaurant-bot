@@ -124,7 +124,7 @@ async def test_customer_cancels_upcoming_reservation(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Cancel Reservation Restaurant",
-        bot_number_raw="+570E2ECANCELR",
+        key="+570E2ECANCELR",
         menu=MENU,
         payment_methods=["Efectivo"],
         num_branches=0,
@@ -133,7 +133,7 @@ async def test_customer_cancels_upcoming_reservation(
         },
     )
     parent_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
+    org_id = restaurant["id"]
     owner_email = restaurant["owner_email"]
 
     await truncate_e2e_data(pool, parent_id)
@@ -154,7 +154,7 @@ async def test_customer_cancels_upcoming_reservation(
     log.info(
         "e2e.cancel_reservation.test_start",
         parent_id=parent_id,
-        bot_number=bot_number,
+        org_id=org_id,
         customer_phone=CUSTOMER_PHONE,
     )
 
@@ -176,7 +176,7 @@ async def test_customer_cancels_upcoming_reservation(
     log.info("e2e.cancel_reservation.turn_1", text=reservation_text)
     t1_start = time.monotonic()
     processed_1 = await send_diner_message(
-        client, pool, phone=CUSTOMER_PHONE_RAW, text=reservation_text, bot_number=bot_number,
+        client, pool, phone=CUSTOMER_PHONE_RAW, text=reservation_text, org_id=org_id,
     )
     log.info("e2e.cancel_reservation.turn_1_done",
              processed=processed_1, elapsed_s=round(time.monotonic() - t1_start, 1))
@@ -190,7 +190,7 @@ async def test_customer_cancels_upcoming_reservation(
     log.info("e2e.cancel_reservation.turn_2", text=confirm_text)
     t2_start = time.monotonic()
     processed_2 = await send_diner_message(
-        client, pool, phone=CUSTOMER_PHONE_RAW, text=confirm_text, bot_number=bot_number,
+        client, pool, phone=CUSTOMER_PHONE_RAW, text=confirm_text, org_id=org_id,
     )
     log.info("e2e.cancel_reservation.turn_2_done",
              processed=processed_2, elapsed_s=round(time.monotonic() - t2_start, 1))
@@ -228,7 +228,7 @@ async def test_customer_cancels_upcoming_reservation(
     log.info("e2e.cancel_reservation.turn_3", text=cancel_text)
     t3_start = time.monotonic()
     processed_3 = await send_diner_message(
-        client, pool, phone=CUSTOMER_PHONE_RAW, text=cancel_text, bot_number=bot_number,
+        client, pool, phone=CUSTOMER_PHONE_RAW, text=cancel_text, org_id=org_id,
     )
     log.info("e2e.cancel_reservation.turn_3_done",
              processed=processed_3, elapsed_s=round(time.monotonic() - t3_start, 1))
@@ -241,7 +241,7 @@ async def test_customer_cancels_upcoming_reservation(
     log.info("e2e.cancel_reservation.turn_4", text=confirm_cancel_text)
     t4_start = time.monotonic()
     processed_4 = await send_diner_message(
-        client, pool, phone=CUSTOMER_PHONE_RAW, text=confirm_cancel_text, bot_number=bot_number,
+        client, pool, phone=CUSTOMER_PHONE_RAW, text=confirm_cancel_text, org_id=org_id,
     )
     log.info("e2e.cancel_reservation.turn_4_done",
              processed=processed_4, elapsed_s=round(time.monotonic() - t4_start, 1))
@@ -320,14 +320,14 @@ async def test_cancel_past_reservation_rejected(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Past Cancel Restaurant",
-        bot_number_raw="+570E2EPASTCNL",
+        key="+570E2EPASTCNL",
         menu=MENU,
         payment_methods=["Efectivo"],
         num_branches=0,
         features_override={"module_reservations": True},
     )
     parent_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
+    org_id = restaurant["id"]
 
     await truncate_e2e_data(pool, parent_id)
     async with pool.acquire() as conn:
@@ -353,16 +353,15 @@ async def test_cancel_past_reservation_rejected(
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """INSERT INTO reservations
-                   (name, "date", "time", guests, phone, bot_number, notes,
+                   (name, "date", "time", guests, phone, notes,
                     status, org_id, created_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, NOW())
+                   VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, NOW())
                    RETURNING id""",
                 "Carlos Prueba",
                 past_date,
                 "18:00",
                 2,
                 past_customer_phone,
-                bot_number,
                 "",
                 parent_id,
             )
@@ -380,7 +379,7 @@ async def test_cancel_past_reservation_rejected(
         client, pool,
         phone=past_customer_phone_raw,
         text=cancel_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info("e2e.cancel_past_reservation.turn_1_done",
              processed=processed_1, elapsed_s=round(time.monotonic() - t1_start, 1))

@@ -53,17 +53,8 @@ async def analytics_overview(_: None = Depends(verify_superadmin)):
                 # A multi-sede org should count once, not once per location.
                 restaurants["active_7d"] = await conn.fetchval(
                     """
-                    WITH bot_orgs AS (
-                        SELECT
-                            l.org_id,
-                            COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) AS bot_number
-                        FROM locations l
-                        JOIN organizations o ON o.id = l.org_id
-                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) IS NOT NULL
-                    )
-                    SELECT COUNT(DISTINCT bo.org_id)
+                    SELECT COUNT(DISTINCT c.org_id)
                     FROM conversations c
-                    JOIN bot_orgs bo ON bo.bot_number = c.bot_number
                     WHERE c.updated_at > NOW() - INTERVAL '7 days'
                     """
                 )
@@ -76,17 +67,8 @@ async def analytics_overview(_: None = Depends(verify_superadmin)):
                 # Same org-level dedup for 30-day window.
                 restaurants["active_30d"] = await conn.fetchval(
                     """
-                    WITH bot_orgs AS (
-                        SELECT
-                            l.org_id,
-                            COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) AS bot_number
-                        FROM locations l
-                        JOIN organizations o ON o.id = l.org_id
-                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number, 'web' || o.id::text) IS NOT NULL
-                    )
-                    SELECT COUNT(DISTINCT bo.org_id)
+                    SELECT COUNT(DISTINCT c.org_id)
                     FROM conversations c
-                    JOIN bot_orgs bo ON bo.bot_number = c.bot_number
                     WHERE c.updated_at > NOW() - INTERVAL '30 days'
                     """
                 )

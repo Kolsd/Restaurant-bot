@@ -40,15 +40,14 @@ async def seed_pool():
 
 async def _seed_org(conn, tag: str, suffix: str) -> dict:
     org = await conn.fetchrow(
-        "INSERT INTO organizations (name, slug, whatsapp_number) "
-        "VALUES ($1, $2, $3) RETURNING id, whatsapp_number",
-        f"Stats Org {suffix} {tag}", f"stats-{suffix}-{tag}", f"stats:{suffix}:{tag}",
+        "INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id",
+        f"Stats Org {suffix} {tag}", f"stats-{suffix}-{tag}",
     )
     loc_id = await conn.fetchval(
         "INSERT INTO locations (org_id, name) VALUES ($1, $2) RETURNING id",
         org["id"], f"Sede {suffix} {tag}",
     )
-    return {"org_id": org["id"], "wa": org["whatsapp_number"], "location_id": loc_id}
+    return {"org_id": org["id"], "location_id": loc_id}
 
 
 async def _seed_table_order(conn, org: dict, *, status: str, age: str) -> None:
@@ -101,7 +100,7 @@ async def test_detail_stats_does_not_crash_and_counts_exactly(two_orgs):
     from app.repositories.restaurant_repo import db_get_restaurant_detail_stats
 
     a, _b = two_orgs
-    stats = await db_get_restaurant_detail_stats(a["org_id"], a["wa"])
+    stats = await db_get_restaurant_detail_stats(a["org_id"])
 
     assert stats["table_orders_30d"] == 2  # cancelled and >30d rows excluded
     assert stats["users"] == 2
@@ -111,12 +110,12 @@ async def test_detail_stats_never_counts_another_org(two_orgs):
     from app.repositories.restaurant_repo import db_get_restaurant_detail_stats
 
     a, b = two_orgs
-    stats_b = await db_get_restaurant_detail_stats(b["org_id"], b["wa"])
+    stats_b = await db_get_restaurant_detail_stats(b["org_id"])
 
     assert stats_b["table_orders_30d"] == 1
     assert stats_b["users"] == 1
 
     # And org A's numbers are unaffected by org B's rows
-    stats_a = await db_get_restaurant_detail_stats(a["org_id"], a["wa"])
+    stats_a = await db_get_restaurant_detail_stats(a["org_id"])
     assert stats_a["table_orders_30d"] == 2
     assert stats_a["users"] == 2

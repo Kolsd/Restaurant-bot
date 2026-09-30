@@ -162,7 +162,6 @@ def test_wompi_handler_dedup_skips_second_processing():
         "restaurant_id": 1,
         "phone": "573000000001",
         "total": 50000,
-        "bot_number": "573100000001",
     })
 
     # Sequence: first call True (new), second call False (replay)
@@ -174,7 +173,7 @@ def test_wompi_handler_dedup_skips_second_processing():
         patch("app.routes.orders_routes.record_wompi_event", record_mock),
         patch("app.services.database.db_confirm_payment", confirm_mock),
         # Suppress loyalty side effects
-        patch("app.services.database.db_get_restaurant_by_bot_number", AsyncMock(return_value=None)),
+        patch("app.services.database.db_get_restaurant_by_org_id", AsyncMock(return_value=None)),
     ):
         client = TestClient(app)
         payload = _make_wompi_payload(event_id="txn-idempotent-777", status="APPROVED")

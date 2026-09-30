@@ -68,7 +68,7 @@ _TERMINAL_STATUSES = (STATUS_REJECTED, STATUS_CANCELLED, STATUS_DELIVERED)
 _PRE_EN_ROUTE_STATUSES = (STATUS_IN_PREPARATION, STATUS_READY)
 
 _ORDER_FIELDS = """
-    id, org_id, location_id, phone, bot_number, order_type, status,
+    id, org_id, location_id, phone, order_type, status,
     address, notes, items, subtotal, delivery_fee, total, paid,
     paid_at, paid_by_staff_id, payment_method, proof_url, channel,
     public_code, customer_name, customer_phone, customer_email,
@@ -265,7 +265,6 @@ async def db_create_delivery_order(
     org_id: int,
     location_id: int,
     phone: str,
-    bot_number: str,
     order_type: str,
     items: list,
     address: str,
@@ -323,21 +322,21 @@ async def db_create_delivery_order(
         row = await conn.fetchrow(
             f"""
             INSERT INTO orders (
-                id, org_id, location_id, phone, bot_number, order_type, status,
+                id, org_id, location_id, phone, order_type, status,
                 address, notes, items, subtotal, delivery_fee, tip_amount, total,
                 paid, payment_method, cash_change_for, customer_name,
                 customer_phone, customer_email, delivery_lat, delivery_lon,
                 proof_url, scheduled_pickup_at, channel
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7,
-                $8, $9, $10::jsonb, $11, $12, $13, $14,
-                $15, $16, $17, $18,
-                $19, $20, $21, $22,
-                $23, $24, $25
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9::jsonb, $10, $11, $12, $13,
+                $14, $15, $16, $17,
+                $18, $19, $20, $21,
+                $22, $23, $24
             )
             RETURNING {_ORDER_FIELDS}
             """,
-            order_id, org_id, location_id, phone, bot_number, order_type, STATUS_PENDING_ACCEPTANCE,
+            order_id, org_id, location_id, phone, order_type, STATUS_PENDING_ACCEPTANCE,
             address, notes, safe_items, subtotal, delivery_fee, tip_amount, total,
             False, payment_method, cash_change_for, customer_name,
             customer_phone, customer_email, delivery_lat, delivery_lon,

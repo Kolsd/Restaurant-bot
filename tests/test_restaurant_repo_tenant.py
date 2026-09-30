@@ -8,7 +8,7 @@ continue to use the raw pool path (no set_config call).
 Tests:
   1 — Tenant-scoped function inside tenant_scope() → set_config GUC called.
   2 — Tenant-scoped function without any scope → TenantNotSetError raised.
-  3 — GLOBAL function (db_get_restaurant_by_phone) → set_config NOT called.
+  3 — GLOBAL function (db_get_restaurant_by_org_id) → set_config NOT called.
   4 — GLOBAL function inside bypass_tenant_scope → still works (pool path).
 """
 import pytest
@@ -106,7 +106,7 @@ async def test_2_no_scope_raises_tenant_not_set_error():
 @pytest.mark.asyncio
 async def test_3_global_fn_does_not_call_set_config():
     """
-    db_get_restaurant_by_phone is a GLOBAL function (called from inbox_worker
+    db_get_restaurant_by_org_id is a GLOBAL function (called from inbox_worker
     dispatch resolution before any tenant is pinned).  It must use _get_pool
     directly and must NOT call set_config, even when called outside any scope.
     """
@@ -117,8 +117,8 @@ async def test_3_global_fn_does_not_call_set_config():
 
     # No tenant_scope active — GLOBAL functions must work without one
     with patch("app.repositories.restaurant_repo._get_pool", AsyncMock(return_value=pool)):
-        from app.repositories.restaurant_repo import db_get_restaurant_by_phone
-        result = await db_get_restaurant_by_phone("+573001234567")
+        from app.repositories.restaurant_repo import db_get_restaurant_by_org_id
+        result = await db_get_restaurant_by_org_id("+573001234567")
 
     assert result is None  # not found — expected
 
@@ -137,12 +137,12 @@ async def test_3_global_fn_does_not_call_set_config():
 @pytest.mark.asyncio
 async def test_4_global_fn_works_inside_bypass_scope():
     """
-    db_get_restaurant_by_phone must still work correctly when called inside
+    db_get_restaurant_by_org_id must still work correctly when called inside
     bypass_tenant_scope (e.g. superadmin tooling).  It uses _get_pool, not
     tenant_connection, so bypass has no effect on it — it just succeeds.
     """
     conn = _make_conn()
-    # Post-Wave-2: db_get_restaurant_by_phone JOINs locations and exposes
+    # Post-Wave-2: db_get_restaurant_by_org_id JOINs locations and exposes
     # `org_id` + `location_id`; the returned `id` is overridden with `org_id`
     # so bot-runtime callers using restaurant_obj["id"] as the tenant key
     # land on organizations.id (not locations.id).
@@ -174,8 +174,8 @@ async def test_4_global_fn_works_inside_bypass_scope():
 
     with patch("app.repositories.restaurant_repo._get_pool", AsyncMock(return_value=pool)):
         with bypass_tenant_scope("superadmin_lookup_test"):
-            from app.repositories.restaurant_repo import db_get_restaurant_by_phone
-            result = await db_get_restaurant_by_phone("573001234567")
+            from app.repositories.restaurant_repo import db_get_restaurant_by_org_id
+            result = await db_get_restaurant_by_org_id("573001234567")
 
     # Result should be the serialized row (or at minimum not None)
     assert result is not None

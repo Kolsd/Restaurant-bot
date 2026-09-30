@@ -108,7 +108,6 @@ def _mock_delivery_order(
         "paid": False,
         "status": status,
         "payment_method": "nequi",
-        "bot_number": "+573009876543",
         "created_at": datetime.now(timezone.utc),
     }
 
@@ -1003,7 +1002,7 @@ class TestEndToEndTableFlow:
         order_row = make_row(
             {"phone": "573001234567", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new"}
         )
-        session_row = {"bot_number": "+573009876543", "meta_phone_id": None}
+        session_row = {"org_id": 1, "meta_phone_id": None}
 
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(side_effect=[order_row, session_row])
@@ -1018,7 +1017,7 @@ class TestEndToEndTableFlow:
         }]))
         monkeypatch.setattr(db, "db_mark_session_nps_pending", AsyncMock())
         monkeypatch.setattr(db, "db_cleanup_after_checkout", AsyncMock())
-        monkeypatch.setattr(db, "db_get_restaurant_by_bot_number", AsyncMock(return_value={
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value={
             "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
         }))
 
@@ -1037,7 +1036,7 @@ class TestEndToEndTableFlow:
         order_row = make_row(
             {"phone": "573001234567", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new"}
         )
-        session_row = {"bot_number": "+573009876543", "meta_phone_id": None}
+        session_row = {"org_id": 1, "meta_phone_id": None}
 
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(side_effect=[order_row, session_row])
@@ -1050,7 +1049,7 @@ class TestEndToEndTableFlow:
         monkeypatch.setattr(db, "db_get_all_restaurants", AsyncMock(return_value=[{
             "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
         }]))
-        monkeypatch.setattr(db, "db_get_restaurant_by_bot_number", AsyncMock(return_value={
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value={
             "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
         }))
 

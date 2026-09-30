@@ -125,7 +125,7 @@ async def test_salon_qr_full_lifecycle(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Salon QR Test Restaurant",
-        bot_number_raw="+570E2ESALON1",
+        key="+570E2ESALON1",
         menu=MENU,
         payment_methods=PAYMENT_METHODS,
         num_branches=1,
@@ -134,10 +134,9 @@ async def test_salon_qr_full_lifecycle(
         ],
     )
     parent_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]  # normalized (no +)
+    org_id = restaurant["id"]
     branch_1 = restaurant["branches"][0]
     branch_1_id = branch_1["id"]
-    branch_1_bot = branch_1["whatsapp_number"]
 
     # Clean volatile data from prior runs
     await truncate_e2e_data(pool, parent_id)
@@ -158,8 +157,7 @@ async def test_salon_qr_full_lifecycle(
         "e2e.salon_test_start",
         parent_id=parent_id,
         branch_1_id=branch_1_id,
-        bot_number=bot_number,
-        branch_1_bot=branch_1_bot,
+        org_id=org_id,
     )
 
     # -- Create admin session token for API calls -----------------------------
@@ -189,7 +187,7 @@ async def test_salon_qr_full_lifecycle(
     qr_message = f"Hola, acabo de llegar a la mesa [table_id:{table_id}]"
     log.info("e2e.salon_turn_1", phone=CUSTOMER_PHONE, text=qr_message)
     t1_start = time.monotonic()
-    # The first message goes to the parent's bot_number.
+    # The first message goes to the parent org.
     # The agent resolves the table -> branch, so we can send to parent bot.
     # However, to be deterministic, send to the branch bot that owns the table.
     processed_1 = await send_diner_message(
@@ -197,7 +195,7 @@ async def test_salon_qr_full_lifecycle(
         pool,
         phone=CUSTOMER_PHONE_RAW,
         text=qr_message,
-        bot_number=bot_number,  # parent bot; agent resolves table -> branch
+        org_id=org_id,  # parent bot; agent resolves table -> branch
     )
     log.info(
         "e2e.salon_turn_1_done",
@@ -214,7 +212,7 @@ async def test_salon_qr_full_lifecycle(
     )
     assert len(turn1_replies) >= 1, (
         "Turn 1: bot sent no WA message. "
-        "Check ANTHROPIC_API_KEY, bot_number lookup, and that the table was created."
+        "Check ANTHROPIC_API_KEY, org lookup, and that the table was created."
     )
 
     # -- Assert: table_sessions row created -----------------------------------
@@ -258,7 +256,7 @@ async def test_salon_qr_full_lifecycle(
         pool,
         phone=CUSTOMER_PHONE_RAW,
         text=order_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info(
         "e2e.salon_turn_2_done",
@@ -287,7 +285,7 @@ async def test_salon_qr_full_lifecycle(
         pool,
         phone=CUSTOMER_PHONE_RAW,
         text=confirm_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info(
         "e2e.salon_turn_3_done",
