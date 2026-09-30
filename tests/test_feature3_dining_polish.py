@@ -123,7 +123,7 @@ class TestFeature3DiningPolish:
         features: dict = {}
         if eta is not None:
             features["kitchen_eta_minutes"] = eta
-        return {"id": 1, "name": "Test Rest", "whatsapp_number": "+57999", "features": features}
+        return {"id": 1, "name": "Test Rest", "features": features}
 
     def _patch_salon_order_deps(self, monkeypatch, *, order_id: str = "MESA-ABC123",
                                  base_order_id: str | None = None,
@@ -384,7 +384,6 @@ class TestFeature3DiningPolish:
         monkeypatch.setattr(tr, "db_get_table_order_record", AsyncMock(return_value=fake_order))
         monkeypatch.setattr(tr, "db_get_open_table_session_by_phone", AsyncMock(return_value={
             "table_id": "T1",
-            "meta_phone_id": "PHONE_ID_123",
         }))
         monkeypatch.setattr(db, "db_update_table_order_status", AsyncMock())
 

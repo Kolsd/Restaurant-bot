@@ -97,8 +97,6 @@ async def test_returns_org_level_fields_only():
 
     fake_row = {
         "id": 1, "name": "Test Org", "slug": "test",
-        "whatsapp_number": "+57300", "wa_phone_id": "ph",
-        "wa_access_token": "tok", "menu": {}, "features": {"timezone": "America/Bogota"},
         "subscription_plan": "free", "subscription_status": "active",
         "created_at": None, "updated_at": None,
     }
@@ -110,7 +108,7 @@ async def test_returns_org_level_fields_only():
     assert len(result) == 1
     org = result[0]
     # Org-level fields present
-    for key in ("id", "name", "whatsapp_number", "features", "subscription_status"):
+    for key in ("id", "name", "features", "subscription_status"):
         assert key in org, f"Missing org-level field: {key}"
     # Location-level fields ABSENT (intentional — caller should not assume a sede)
     assert "location_id" not in org
@@ -125,7 +123,6 @@ async def test_features_jsonb_string_is_deserialized():
 
     fake_row = {
         "id": 1, "name": "Test", "slug": "t",
-        "whatsapp_number": None, "wa_phone_id": None, "wa_access_token": None,
         "menu": "[]",
         "features": '{"locale": "es-CO"}',  # ← string form
         "subscription_plan": "free", "subscription_status": "active",

@@ -47,9 +47,6 @@ _ORG_ROW = _FakeRecord({
     "id": 1,
     "name": "Test Restaurant",
     "slug": "test-restaurant",
-    "whatsapp_number": "573001234567",
-    "wa_phone_id": "ph1",
-    "wa_access_token": "tok1",
     "menu": json.dumps({}),
     "features": json.dumps({"locale": "es-CO", "currency": "COP"}),
     "subscription_plan": "pro",
@@ -66,9 +63,6 @@ _LOC_PRIMARY = _FakeRecord({
     "address": "Calle 1",
     "latitude": 4.7110,
     "longitude": -74.0721,
-    "whatsapp_number": None,
-    "wa_phone_id": None,
-    "wa_access_token": None,
     "active": True,
     "is_primary": True,
     "timezone": "America/Bogota",
@@ -85,9 +79,6 @@ _LOC_SECONDARY = _FakeRecord({
     "address": "Calle 100",
     "latitude": 4.7500,
     "longitude": -74.0500,
-    "whatsapp_number": "573009999888",
-    "wa_phone_id": None,
-    "wa_access_token": None,
     "active": True,
     "is_primary": False,
     "timezone": "America/Bogota",
@@ -114,7 +105,6 @@ _USER_ROW = {
 _RESTAURANT_ROW = {
     "id": 1,
     "name": "Test Restaurant",
-    "whatsapp_number": "573001234567",
     "features": {"locale": "es-CO", "currency": "COP"},
     "subscription_plan": "pro",
     "subscription_status": "active",
@@ -132,7 +122,6 @@ _STAFF_ROW = {
 _RESTAURANT_BRANCH_ROW = {
     "id": 20,
     "name": "Sede Norte",
-    "whatsapp_number": "573009999888",
     "features": {"locale": "es-CO", "currency": "COP"},
 }
 
@@ -173,7 +162,6 @@ async def test_login_returns_org_and_locations_for_owner():
             AsyncMock(return_value={
                 "id": 1,
                 "name": "Test Restaurant",
-                "whatsapp_number": "573001234567",
                 "features": {"locale": "es-CO", "currency": "COP"},
                 "subscription_plan": "pro",
                 "subscription_status": "active",
@@ -231,7 +219,6 @@ async def test_login_returns_staff_scoped_locations_for_waiter():
             AsyncMock(return_value={
                 "id": 1,
                 "name": "Test Restaurant",
-                "whatsapp_number": "573001234567",
                 "features": {"locale": "es-CO", "currency": "COP"},
                 "subscription_plan": "pro",
             }),
@@ -284,7 +271,6 @@ async def test_login_preserves_legacy_restaurant_key():
             AsyncMock(return_value={
                 "id": 1,
                 "name": "Test Restaurant",
-                "whatsapp_number": "573001234567",
                 "features": {"locale": "es-CO", "currency": "COP"},
             }),
         ),

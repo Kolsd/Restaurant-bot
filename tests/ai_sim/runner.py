@@ -24,7 +24,7 @@ from tests.ai_sim.types import (
 from tests.ai_sim.seed import (
     truncate_test_data,
     reset_state_store_fallbacks,
-    SIM_BOT_NUMBER,
+    sim_org_id,
 )
 from tests.ai_sim import assertions as _assertions
 from tests.ai_sim import judge as _judge
@@ -33,7 +33,7 @@ from app.services.logging import get_logger
 log = get_logger(__name__)
 
 
-async def _sit_at_table(org_id: int, phone: str, bot_number: str, table_id: str) -> None:
+async def _sit_at_table(org_id: int, phone: str, table_id: str) -> None:
     """Open the diner's table session, as a QR scan does."""
     from app.services import database as db  # noqa: PLC0415
     from app.services.tenant_context import tenant_scope  # noqa: PLC0415
@@ -42,10 +42,10 @@ async def _sit_at_table(org_id: int, phone: str, bot_number: str, table_id: str)
         table = await db.db_get_table_by_id(table_id)
         if not table:
             raise RuntimeError(f"runner: table {table_id!r} not seeded")
-        if not await db.db_get_active_session(phone, bot_number):
+        if not await db.db_get_active_session(phone, org_id):
             await db.db_create_table_session(
-                phone, bot_number, table["id"], table["name"],
-                org_id=table.get("org_id"), location_id=table.get("location_id"),
+                phone, org_id, table["id"], table["name"],
+                location_id=table.get("location_id"),
             )
 
 
@@ -74,9 +74,6 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
     from app.services.database import _normalize_phone as _norm  # noqa: PLC0415
     from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
 
-    # Scenarios use "+57TESTBOT1" for readability; the stored key is normalized
-    # (no '+' / spaces), and the internal lookups assume the normalized form.
-    normalized_bot = _norm(scenario.bot_number)
     normalized_user = _norm(scenario.user_phone)
 
     # ── Resolve org_id for tenant_scope wrapping (Wave 2 / Rule 14) ───────────
@@ -85,15 +82,9 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
     # Cross-tenant lookup needs a bypass.
     async with pool.acquire() as conn:
         with bypass_tenant_scope("ai_sim_resolve_org_for_scope"):
-            org_id = await conn.fetchval(
-                "SELECT id FROM organizations WHERE whatsapp_number = $1",
-                normalized_bot,
-            )
+            org_id = await sim_org_id(conn)
     if org_id is None:
-        raise RuntimeError(
-            f"runner: could not resolve org_id for bot_number={normalized_bot!r}. "
-            f"Did seed_restaurant run?"
-        )
+        raise RuntimeError("runner: the sim org is not seeded. Did seed_restaurant run?")
 
     transcript: list[TurnResult] = []
     total_latency_ms = 0
@@ -109,7 +100,7 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
         # longer reads table ids from message text.)
         if turn_idx == 0 and scenario.table_hint is not None:
             await _sit_at_table(
-                org_id, normalized_user, normalized_bot, f"sim_mesa_{scenario.table_hint}",
+                org_id, normalized_user, f"sim_mesa_{scenario.table_hint}",
             )
             log.debug(
                 "runner.table_hint_applied",
@@ -129,7 +120,7 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
                 raw_result = await _agent.chat(
                     user_phone=normalized_user,
                     user_message=user_text,
-                    bot_number=normalized_bot,
+                    org_id=org_id,
                 )
             latency_ms = int((time.monotonic() - t_start) * 1000)
 
@@ -174,7 +165,7 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
         async with pool.acquire() as conn:
             db_state = await _assertions.snapshot_db_state(
                 conn,
-                bot_number=normalized_bot,
+                org_id=org_id,
                 user_phone=normalized_user,
             )
     except Exception as exc:  # noqa: BLE001

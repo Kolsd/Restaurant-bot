@@ -110,11 +110,10 @@ async def _insert_restaurant(conn, *, tip_distribution: dict | None = None) -> i
     if tip_distribution is not None:
         features["tip_distribution"] = tip_distribution
     org_id = await conn.fetchval(
-        """INSERT INTO organizations (name, whatsapp_number, features)
-           VALUES ($1, $2, $3::jsonb)
+        """INSERT INTO organizations (name, features)
+           VALUES ($1, $2::jsonb)
            RETURNING id""",
         "Test Restaurant",
-        f"+57{uuid.uuid4().int % 10_000_000_000:010d}",
         json.dumps(features),
     )
     # Insert location with explicit id = org_id (see docstring for rationale)
@@ -311,16 +310,14 @@ class TestDeliveryOrderFlow:
         )
 
         phone = "+573001111111"
-        bot_number = str(rid)
 
         # Insert a cart row (Wave-2: carts has org_id NOT NULL)
         await conn.execute(
             """
-            INSERT INTO carts (phone, bot_number, org_id, cart_data, updated_at)
-            VALUES ($1, $2, $3, $4::jsonb, NOW())
+            INSERT INTO carts (phone, org_id, cart_data, updated_at)
+            VALUES ($1, $2, $3::jsonb, NOW())
             """,
             phone,
-            bot_number,
             rid,
             json.dumps({"items": [{"name": dish_name, "quantity": 2, "price": 25_000}]}),
         )
@@ -338,7 +335,6 @@ class TestDeliveryOrderFlow:
             "status":         "pendiente_pago",
             "paid":           False,
             "payment_url":    "",
-            "bot_number":     bot_number,
             "payment_method": "",
             "base_order_id":  None,
             "sub_number":     1,
@@ -354,7 +350,7 @@ class TestDeliveryOrderFlow:
                     fake_pool,
                     restaurant_id=rid,
                     conversation_id=phone,
-                    cart={"bot_number": bot_number},
+                    cart={},
                     order_payload=order_payload,
                 )
 
@@ -366,9 +362,9 @@ class TestDeliveryOrderFlow:
 
         # Cart deleted
         cart = await conn.fetchrow(
-            "SELECT * FROM carts WHERE phone = $1 AND bot_number = $2",
+            "SELECT * FROM carts WHERE phone = $1 AND org_id = $2",
             phone,
-            bot_number,
+            rid,
         )
         assert cart is None
 
@@ -407,7 +403,6 @@ class TestDeliveryOrderFlow:
             "status":         "pendiente_pago",
             "paid":           False,
             "payment_url":    "",
-            "bot_number":     str(rid),
             "payment_method": "",
             "base_order_id":  None,
             "sub_number":     1,
@@ -422,7 +417,7 @@ class TestDeliveryOrderFlow:
                         fake_pool,
                         restaurant_id=rid,
                         conversation_id="+573009999999",
-                        cart={"bot_number": str(rid)},
+                        cart={},
                         order_payload=order_payload,
                     )
 
@@ -444,16 +439,14 @@ class TestDeliveryOrderFlow:
         rid = await _insert_restaurant(conn)
 
         phone = "+573002222222"
-        bot_number = str(rid)
 
         # Wave-2: carts has org_id NOT NULL
         await conn.execute(
             """
-            INSERT INTO carts (phone, bot_number, org_id, cart_data, updated_at)
-            VALUES ($1, $2, $3, $4::jsonb, NOW())
+            INSERT INTO carts (phone, org_id, cart_data, updated_at)
+            VALUES ($1, $2, $3::jsonb, NOW())
             """,
             phone,
-            bot_number,
             rid,
             json.dumps({"items": [{"name": "Café Americano", "quantity": 1, "price": 5_000}]}),
         )
@@ -474,7 +467,6 @@ class TestDeliveryOrderFlow:
             "status":         "pendiente_pago",
             "paid":           False,
             "payment_url":    "",
-            "bot_number":     bot_number,
             "payment_method": "",
             "base_order_id":  None,
             "sub_number":     1,
@@ -488,7 +480,7 @@ class TestDeliveryOrderFlow:
                     fake_pool,
                     restaurant_id=rid,
                     conversation_id=phone,
-                    cart={"bot_number": bot_number},
+                    cart={},
                     order_payload=order_payload,
                 )
 

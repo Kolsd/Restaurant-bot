@@ -29,7 +29,7 @@ SAMPLE_MENU = {
 
 ORG_ID   = 4242
 PHONE        = "573001112233"
-RESTAURANT_OBJ = {"id": 42, "name": "Test Rest", "whatsapp_number": ORG_ID}
+RESTAURANT_OBJ = {"id": 42, "name": "Test Rest"}
 
 
 # ---------------------------------------------------------------------------

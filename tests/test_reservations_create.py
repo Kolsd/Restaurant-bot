@@ -39,7 +39,6 @@ def _make_restaurant(org_id: int = ORG_A_ID) -> dict:
         "org_id":           org_id,
         "location_id":      org_id,
         "name":             f"Restaurante {org_id}",
-        "whatsapp_number":  f"5730012345{org_id:02d}",
         "address":          "Calle 1",
         "features":         {"bot_active": True, "module_reservations": True},
     }

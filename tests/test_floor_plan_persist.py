@@ -368,7 +368,6 @@ _RESTAURANT = {
     "org_id": 1,
     "location_id": 1,
     "name": "FloorPlanTest",
-    "whatsapp_number": "+573000000000",
     "features": {},
 }
 

@@ -63,7 +63,6 @@ def _patch_db_for_chat(monkeypatch, org_id: int = 4242):
     restaurant = {
         "id": 1,
         "name": "Restaurante Test",
-        "whatsapp_number": org_id,
         "features": {"locale": "es-CO", "currency": "COP"},
     }
     monkeypatch.setattr(db, "db_get_restaurant_by_org_id",

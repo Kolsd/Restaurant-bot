@@ -555,7 +555,7 @@ def test_create_waiter_alert_success(client, monkeypatch):
     alert = {"id": 1, "type": "admin_call", "status": "pending"}
     monkeypatch.setattr(db_mod, "db_create_waiter_alert", AsyncMock(return_value=alert))
     r = client.post("/api/waiter-alerts/admin-call",
-                    json={"phone": "", "table_id": "", "table_name": "", "bot_number": ""},
+                    json={"phone": "", "table_id": "", "table_name": ""},
                     headers=_HEADERS)
     assert r.status_code == 200
     assert r.json()["success"] is True

@@ -53,7 +53,6 @@ def _make_restaurant() -> dict:
         "org_id": 99,
         "location_id": 99,
         "name": "Bloqueador SA",
-        "whatsapp_number": "573000000001",
         "address": "Calle 1",
         "features": {"bot_active": True, "currency": "COP"},
     }

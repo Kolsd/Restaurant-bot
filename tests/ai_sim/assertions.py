@@ -173,7 +173,7 @@ def _collect_all_item_names(snapshot: DBSnapshot) -> list[str]:
 
 async def snapshot_db_state(
     conn: asyncpg.Connection,
-    bot_number: str,
+    org_id: int,
     user_phone: str,
 ) -> DBSnapshot:
     """Query the DB and return a point-in-time snapshot for assertion/reporting.
@@ -186,15 +186,6 @@ async def snapshot_db_state(
         if not rows:
             return []
         return [dict(r) for r in rows]
-
-    # ── org_id for this bot (Wave 2: tenant key is org_id, not restaurant_id) ─
-    # The `restaurants` VIEW is now (locations JOIN organizations) so its `id`
-    # is really the location_id — useless for the snapshot which needs the org.
-    # Query organizations directly instead.
-    org_id = await conn.fetchval(
-        "SELECT id FROM organizations WHERE whatsapp_number = $1",
-        bot_number,
-    )
 
     # ── table_orders ──────────────────────────────────────────────────────────
     table_orders = _rows_to_dicts(
@@ -229,28 +220,28 @@ async def snapshot_db_state(
     carts = _rows_to_dicts(
         await conn.fetch(
             """
-            SELECT phone, bot_number, cart_data AS items, updated_at
+            SELECT phone, org_id, cart_data AS items, updated_at
             FROM carts
-            WHERE phone = $1 AND bot_number = $2
+            WHERE phone = $1 AND org_id = $2
             """,
             user_phone,
-            bot_number,
+            org_id,
         )
     )
 
     # ── waiter_alerts ─────────────────────────────────────────────────────────
     waiter_alerts: list[dict] = []
     if org_id:
-        # Alerts are tied to bot_number or to the restaurant's tables
+        # Alerts of this org, or raised for this diner
         waiter_alerts = _rows_to_dicts(
             await conn.fetch(
                 """
-                SELECT id, table_id, table_name, phone, bot_number, alert_type AS type, created_at
+                SELECT id, table_id, table_name, phone, org_id, alert_type AS type, created_at
                 FROM waiter_alerts
-                WHERE bot_number = $1 OR phone = $2
+                WHERE org_id = $1 OR phone = $2
                 ORDER BY created_at DESC
                 """,
-                bot_number,
+                org_id,
                 user_phone,
             )
         )
@@ -274,12 +265,12 @@ async def snapshot_db_state(
     conversations = _rows_to_dicts(
         await conn.fetch(
             """
-            SELECT phone, bot_number, history, updated_at
+            SELECT phone, org_id, history, updated_at
             FROM conversations
-            WHERE phone = $1 AND bot_number = $2
+            WHERE phone = $1 AND org_id = $2
             """,
             user_phone,
-            bot_number,
+            org_id,
         )
     )
 
@@ -298,7 +289,7 @@ async def snapshot_db_state(
 
     log.debug(
         "snapshot.taken",
-        bot_number=bot_number,
+        org_id=org_id,
         user_phone=user_phone,
         table_orders=len(table_orders),
         orders=len(orders),

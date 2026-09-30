@@ -173,7 +173,6 @@ def _restaurant_dict(org_id: int, location_id: int | None = None) -> dict:
         "org_id": org_id,
         "location_id": location_id,
         "name": "QuickInvoiceTest",
-        "whatsapp_number": "+573000000000",
         "features": {},
     }
 

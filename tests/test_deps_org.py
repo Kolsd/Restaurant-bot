@@ -62,7 +62,6 @@ class _FakeRecord(dict):
 _ORG = {
     "id": 1,
     "name": "Test Org",
-    "whatsapp_number": "573001234567",
     "features": {"locale": "es-CO", "currency": "COP"},
     "subscription_plan": "pro",
     "subscription_status": "active",
@@ -73,7 +72,6 @@ _LOC_PRIMARY = {
     "org_id": 1,
     "name": "Principal",
     "is_primary": True,
-    "whatsapp_number": None,
     "active": True,
 }
 
@@ -82,7 +80,6 @@ _LOC_OTHER_ORG = {
     "org_id": 999,  # different org!
     "name": "Otro Restaurante",
     "is_primary": True,
-    "whatsapp_number": None,
     "active": True,
 }
 
@@ -242,7 +239,6 @@ async def test_get_current_restaurant_legacy_still_returns_data():
     _restaurant = {
         "id": 1,
         "name": "Test Restaurant",
-        "whatsapp_number": "573001234567",
         "features": {"locale": "es-CO", "currency": "COP"},
     }
 
@@ -273,7 +269,6 @@ async def test_get_current_restaurant_legacy_still_returns_data():
     assert restaurant is not None
     assert restaurant["id"] == 1
     assert restaurant["name"] == "Test Restaurant"
-    assert "whatsapp_number" in restaurant
 
 
 # ── test_require_location_raises_when_none ───────────────────────────────────

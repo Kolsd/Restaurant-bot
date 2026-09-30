@@ -248,7 +248,6 @@ def _wompi_auth_setup(monkeypatch):
             "org_id": 1,
             "location_id": 1,
             "name": "Test",
-            "whatsapp_number": "+573000000000",
             "address": "",
             "features": dict(state["features"]),
         }

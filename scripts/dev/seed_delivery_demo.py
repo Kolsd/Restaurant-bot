@@ -25,8 +25,8 @@ Usage:
     DATABASE_URL=postgresql://postgres:mesio_local_dev@localhost:5432/mesio_tests \\
     .venv/Scripts/python.exe scripts/dev/seed_delivery_demo.py
 
-Idempotent: safe to run multiple times (upserts by org slug / unique
-whatsapp_number, and by (org_id, name) for locations/staff/dishes). Refuses
+Idempotent: safe to run multiple times (upserts by org slug, and by
+(org_id, name) for locations/staff/dishes). Refuses
 to run if DATABASE_URL is unset, or looks like a remote/production database.
 """
 from __future__ import annotations
@@ -43,7 +43,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 ORG_NAME = "Mesio Delivery Demo"
 ORG_SLUG = "delivery-demo"
-BOT_NUMBER = "+570DELIVERYDEMO"
 
 # Two sedes in Bogotá, ~4.5 km apart — close enough that a GPS point near
 # either one exercises the "nearest open covering sede wins" ladder, far
@@ -204,14 +203,14 @@ async def seed(conn: asyncpg.Connection) -> dict:
     async with conn.transaction():
         org_row = await conn.fetchrow(
             """
-            INSERT INTO organizations (name, slug, whatsapp_number, menu, features)
-            VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
-            ON CONFLICT (whatsapp_number) WHERE whatsapp_number IS NOT NULL
-              DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug,
+            INSERT INTO organizations (name, slug, menu, features)
+            VALUES ($1, $2, $3::jsonb, $4::jsonb)
+            ON CONFLICT (slug)
+              DO UPDATE SET name = EXCLUDED.name,
                             menu = EXCLUDED.menu, features = EXCLUDED.features
             RETURNING id
             """,
-            ORG_NAME, ORG_SLUG, BOT_NUMBER, json.dumps(MENU), json.dumps(FEATURES),
+            ORG_NAME, ORG_SLUG, json.dumps(MENU), json.dumps(FEATURES),
         )
         org_id = org_row["id"]
 

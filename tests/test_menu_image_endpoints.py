@@ -31,7 +31,6 @@ def _make_restaurant(restaurant_id: int = RESTAURANT_ID) -> dict:
         "org_id": restaurant_id,
         "location_id": restaurant_id,
         "name": "Restaurante Test",
-        "whatsapp_number": "+573001234567",
         "features": {},
         "parent_restaurant_id": None,
     }

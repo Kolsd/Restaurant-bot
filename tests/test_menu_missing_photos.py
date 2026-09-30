@@ -38,7 +38,6 @@ def _restaurant(menu, rid: int = 1, whatsapp_number: str = "+573000000001"):
     """Build a minimal restaurant dict — only the keys the handler reads."""
     return {
         "id":              rid,
-        "whatsapp_number": whatsapp_number,
         "menu":            menu,
     }
 
@@ -110,7 +109,7 @@ def test_endpoint_handles_empty_menu():
     """menu = {} (and no whatsapp_number fallback target) → zeros, empty list, NO 500."""
     # whatsapp_number=None disables the fallback DB lookup so we don't have to
     # mock db_get_menu in this pure-shape test.
-    rest = {"id": 1, "whatsapp_number": None, "menu": {}}
+    rest = {"id": 1, "menu": {}}
 
     result = _run(get_dishes_missing_photos(restaurant=rest))
 

@@ -21,18 +21,18 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from scripts.demo_data import DEMO_MENU, DEMO_FEATURES  # noqa: E402
-from app.services.database import _normalize_phone  # noqa: E402
 from app.services.logging import get_logger  # noqa: E402
 
 log = get_logger(__name__)
 
 # ── Sim-specific constants ────────────────────────────────────────────────────
-# Scenarios pass this as bot_number to agent.chat(). The agent normalizes it via
-# _normalize_phone (strips '+' and spaces) before looking up the restaurant. We
-# MUST store the normalized form in DB or the lookup fails. "+57TESTBOT1" →
-# "57TESTBOT1" in DB. Matches the invariant used by the rest of the codebase.
-SIM_BOT_NUMBER_RAW = "+57TESTBOT1"                       # what scenarios pass in
-SIM_BOT_NUMBER = _normalize_phone(SIM_BOT_NUMBER_RAW)    # what's stored in DB
+# The sim restaurant is found by its org slug.
+SIM_SLUG = "mesio-test-sim"
+
+
+async def sim_org_id(conn) -> int | None:
+    """The seeded sim org's id, or None before seeding."""
+    return await conn.fetchval("SELECT id FROM organizations WHERE slug = $1", SIM_SLUG)
 SIM_RESTAURANT_NAME = "Mesio Test Restaurant"
 SIM_ADDRESS = "Calle 93 #13-24, Bogotá (Sim)"
 SIM_USER_EMAIL = "sim@mesio.co"
@@ -59,7 +59,7 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
     multiple times.
 
     Returns:
-        {"restaurant_id": int, "bot_number": str}
+        {"restaurant_id": int}
     """
     # ── 0. Clean orphaned sim data from prior runs ─────────────────────────────
     # If a previous seed created a restaurant and tables, then the restaurant
@@ -71,9 +71,13 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
         """
         DELETE FROM restaurant_tables
         WHERE id LIKE 'sim_mesa_%'
-          AND branch_id NOT IN (SELECT id FROM restaurants WHERE whatsapp_number = $1)
+          AND branch_id NOT IN (
+              SELECT l.id FROM locations l
+              JOIN organizations o ON o.id = l.org_id
+              WHERE o.slug = $1
+          )
         """,
-        SIM_BOT_NUMBER,
+        SIM_SLUG,
     )
 
     # ── 1. Restaurant (post-0037: insert Organization + primary Location) ──────
@@ -85,8 +89,7 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
     #   matches the runtime code which uses org_id as the tenant scope.
     #   location_id is the primary Location for operational scoping.
     existing_org = await conn.fetchrow(
-        "SELECT id FROM organizations WHERE whatsapp_number = $1",
-        SIM_BOT_NUMBER,
+        "SELECT id FROM organizations WHERE slug = $1", SIM_SLUG,
     )
 
     if existing_org:
@@ -100,21 +103,17 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
         )
         log.info("seed.restaurant_exists", org_id=org_id, location_id=loc_id)
     else:
-        # UNIQUE index on organizations.whatsapp_number is PARTIAL
-        # (WHERE whatsapp_number IS NOT NULL in 0034), so ON CONFLICT can't
-        # use it without specifying the predicate. Plain INSERT — existence
-        # check above already prevented dupes.
+        # Plain INSERT — the existence check above already prevented dupes.
         org_id = await conn.fetchval(
             """
-            INSERT INTO organizations (name, whatsapp_number, menu, features, slug)
-            VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
+            INSERT INTO organizations (name, menu, features, slug)
+            VALUES ($1, $2::jsonb, $3::jsonb, $4)
             RETURNING id
             """,
             SIM_RESTAURANT_NAME,
-            SIM_BOT_NUMBER,
             json.dumps(DEMO_MENU),
             json.dumps(SIM_FEATURES),
-            "mesio-test-sim",
+            SIM_SLUG,
         )
         # Post-0041: no is_primary column, legacy_restaurant_id column dropped.
         loc_id = await conn.fetchval(
@@ -201,7 +200,7 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
         )
     log.info("seed.subscription_usage_seeded", org_id=org_id)
 
-    return {"restaurant_id": restaurant_id, "bot_number": SIM_BOT_NUMBER}
+    return {"restaurant_id": restaurant_id}
 
 
 # ── Volatile tables to truncate between scenarios ─────────────────────────────
@@ -253,10 +252,7 @@ async def truncate_test_data(conn: asyncpg.Connection) -> None:
 
     # Re-seed subscription_usage so UsageLimitExceeded doesn't fire.
     # Post-0037: query organizations (not restaurants VIEW) and use org_id.
-    org_id = await conn.fetchval(
-        "SELECT id FROM organizations WHERE whatsapp_number = $1",
-        SIM_BOT_NUMBER,
-    )
+    org_id = await sim_org_id(conn)
     if org_id is not None:
         # Same RLS bypass as seed_restaurant — re-seed runs cross-tenant.
         async with conn.transaction():

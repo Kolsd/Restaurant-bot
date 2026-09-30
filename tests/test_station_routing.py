@@ -32,7 +32,7 @@ def mock_auth(monkeypatch):
     monkeypatch.setattr(
         "app.routes.deps.db.db_get_restaurant_by_org_id",
         AsyncMock(return_value={"id": 1, "org_id": 1, "location_id": None,
-                                "name": "Test", "whatsapp_number": "573000000000"}),
+                                "name": "Test"}),
     )
 
 

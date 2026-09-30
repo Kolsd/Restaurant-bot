@@ -3,15 +3,10 @@ tests/test_dashboard_menu_endpoint.py
 =====================================
 GET /api/dashboard/menu — the carta the full editor loads.
 
-It used to resolve the restaurant by its WhatsApp number
-(`db_get_menu(bot_number)`). Since self-serve signup deliberately does not
-claim `organizations.whatsapp_number` — the column is UNIQUE, and claiming
-it stopped an owner from registering a second restaurant — every org
-created that way had no phone, so this endpoint returned `{}` and the
-editor opened blank on top of a carta that was sitting in the database.
-
-It also contradicted the standing rule that nothing reads a carta through
-`db_get_menu(bot_number)` any more.
+It used to resolve the restaurant by its WhatsApp number. Every org
+created by self-serve signup had none, so this endpoint returned `{}` and
+the editor opened blank on top of a carta that was sitting in the
+database. It now resolves by org_id.
 
 Requires TEST_DATABASE_URL: the bug is about how a row is looked up, so a
 mocked repository would not have caught it and would not catch it again.
@@ -52,7 +47,7 @@ def client():
 
 @pytest.fixture
 def org_without_phone():
-    """A committed org with a carta and NO whatsapp_number, cleaned up after."""
+    """A committed org with a carta, as self-serve signup creates it."""
     import asyncio
 
     slug = f"carta-test-{uuid.uuid4().hex[:8]}"
@@ -61,8 +56,8 @@ def org_without_phone():
         conn = await asyncpg.connect(TEST_DB_URL)
         try:
             org_id = await conn.fetchval(
-                """INSERT INTO organizations (name, slug, whatsapp_number, menu)
-                   VALUES ($1, $2, NULL, $3::jsonb) RETURNING id""",
+                """INSERT INTO organizations (name, slug, menu)
+                   VALUES ($1, $2, $3::jsonb) RETURNING id""",
                 f"Carta Test {slug}", slug, json.dumps(_MENU),
             )
             return org_id
@@ -89,12 +84,12 @@ def _as_owner_of(org_id: int):
         "app.routes.settings_routes",
         require_auth=AsyncMock(return_value=None),
         get_current_restaurant=AsyncMock(return_value={
-            "id": org_id, "name": "Carta Test", "whatsapp_number": None,
+            "id": org_id, "name": "Carta Test",
         }),
     )
 
 
-def test_an_org_with_no_whatsapp_number_still_gets_its_carta(client, org_without_phone):
+def test_a_self_serve_org_gets_its_carta(client, org_without_phone):
     with _as_owner_of(org_without_phone):
         r = client.get("/api/dashboard/menu")
 

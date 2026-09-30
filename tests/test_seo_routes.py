@@ -86,7 +86,6 @@ _SAMPLE_RESTAURANT = {
     "id": 1,
     "name": "El Sabor",
     "slug": "el-sabor",
-    "whatsapp_number": "+573001234567",
     "menu": _SAMPLE_MENU,
     "features": {"currency": "COP", "locale": "es-CO"},
     "address": "Calle 1 # 2-3",

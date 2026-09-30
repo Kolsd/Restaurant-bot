@@ -43,7 +43,7 @@ def test_pos_menu_returns_empty_when_user_has_no_branch_id(client):
         # If the legacy fallback fired, this mock would be hit and return the
         # wrong tenant's data. We assert assert_not_called below.
         patch("app.routes.tables.db.db_get_all_restaurants",
-              AsyncMock(return_value=[{"id": ORG_OTHER, "whatsapp_number": "+other"}])),
+              AsyncMock(return_value=[{"id": ORG_OTHER}])),
         patch("app.routes.tables.db.db_get_menu",
               AsyncMock(return_value={"Should not see this": []})),
     ]
@@ -88,8 +88,7 @@ async def test_login_returns_failure_when_name_match_fails_no_cross_tenant():
     match any org must fail-friendly — NOT log into another tenant."""
     from app.services import auth
 
-    other_org = {"id": ORG_OTHER, "name": "Some Other Customer", "whatsapp_number": "+99",
-                 "wa_phone_id": "ph", "wa_access_token": "tok",
+    other_org = {"id": ORG_OTHER, "name": "Some Other Customer",
                  "menu": [], "features": {}, "subscription_plan": "free",
                  "subscription_status": "active", "created_at": None, "updated_at": None}
 
@@ -136,7 +135,6 @@ async def test_get_current_restaurant_raises_403_for_orphaned_owner():
     }
     other_org = {
         "id": ORG_OTHER, "name": "Some Other Customer",
-        "whatsapp_number": "+99", "features": {},
     }
 
     # Patch the chain: get_current_user returns the orphaned user;

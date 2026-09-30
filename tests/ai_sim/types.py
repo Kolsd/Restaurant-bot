@@ -81,9 +81,6 @@ class Scenario:
     user_phone: str
     """Simulated customer phone, e.g. "+573000000001"."""
 
-    bot_number: str
-    """WhatsApp number of the seeded restaurant, must match seed row."""
-
     table_hint: Optional[str] = None
     """If set (e.g. "1"), the runner prefixes the first turn with
     "Estoy en la mesa {table_hint}. " unless the turn already mentions "mesa"."""

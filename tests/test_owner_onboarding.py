@@ -213,7 +213,7 @@ def _checklist_for(client, org_id: int, location_id: int | None):
         "app.routes.onboarding_routes",
         require_auth=AsyncMock(return_value=None),
         get_current_user=AsyncMock(return_value={"username": "o", "role": "owner", "org_id": org_id}),
-        get_current_restaurant=AsyncMock(return_value={"id": org_id, "whatsapp_number": None}),
+        get_current_restaurant=AsyncMock(return_value={"id": org_id}),
         resolve_sede_filter=lambda request, user: location_id,
     ):
         r = client.get("/api/onboarding")

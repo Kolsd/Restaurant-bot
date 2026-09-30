@@ -19,7 +19,7 @@ Usage:
     DATABASE_URL=postgresql://postgres:mesio_local_dev@localhost:5432/mesio_tests \\
     .venv/Scripts/python.exe scripts/dev/seed_staff_app_demo.py
 
-Idempotent: safe to run multiple times (upserts by unique whatsapp_number /
+Idempotent: safe to run multiple times (upserts by unique org slug /
 username), and only ever touches the target database given via DATABASE_URL.
 """
 from __future__ import annotations
@@ -39,7 +39,6 @@ from app.services.password_hash import hash_password  # noqa: E402
 
 ORG_NAME = "Mesio Staff App Demo"
 ORG_SLUG = "staff-app-demo"
-BOT_NUMBER = "+570STAFFDEMO"
 
 ADMIN_EMAIL = "admin@staffdemo.mesio.test"
 ADMIN_PASSWORD = "StaffDemo123!"
@@ -88,18 +87,18 @@ async def seed(conn: asyncpg.Connection) -> dict:
     async with conn.transaction():
         org_row = await conn.fetchrow(
             """
-            INSERT INTO organizations (name, slug, whatsapp_number, menu, features)
-            VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
-            ON CONFLICT (whatsapp_number) WHERE whatsapp_number IS NOT NULL
+            INSERT INTO organizations (name, slug, menu, features)
+            VALUES ($1, $2, $3::jsonb, $4::jsonb)
+            ON CONFLICT (slug)
               DO UPDATE SET name = EXCLUDED.name, menu = EXCLUDED.menu, features = EXCLUDED.features
             RETURNING id
             """,
-            ORG_NAME, ORG_SLUG, BOT_NUMBER, json.dumps(MENU), json.dumps(FEATURES),
+            ORG_NAME, ORG_SLUG, json.dumps(MENU), json.dumps(FEATURES),
         )
         org_id = org_row["id"]
 
         loc_row = await conn.fetchrow(
-            "SELECT id FROM locations WHERE org_id = $1 AND whatsapp_number IS NULL ORDER BY id ASC LIMIT 1",
+            "SELECT id FROM locations WHERE org_id = $1 ORDER BY id ASC LIMIT 1",
             org_id,
         )
         if loc_row:
@@ -203,10 +202,10 @@ async def seed(conn: asyncpg.Connection) -> dict:
         if not existing_session:
             await conn.execute(
                 """INSERT INTO table_sessions
-                     (table_id, table_name, phone, bot_number, status, has_order,
+                     (table_id, table_name, phone, status, has_order,
                       org_id, location_id)
-                   VALUES ($1, 'Mesa 1', $2, $3, 'active', true, $4, $5)""",
-                table_ids[0], "573000000000", BOT_NUMBER, org_id, location_id,
+                   VALUES ($1, 'Mesa 1', $2, 'active', true, $3, $4)""",
+                table_ids[0], "573000000000", org_id, location_id,
             )
 
         existing_order = await conn.fetchrow(
@@ -226,11 +225,11 @@ async def seed(conn: asyncpg.Connection) -> dict:
             await conn.execute(
                 """INSERT INTO table_orders
                      (id, org_id, location_id, branch_id, table_id, table_name, phone,
-                      status, items, total, bot_number, channel)
+                      status, items, total, channel)
                    VALUES ($1, $2, $3, $3::integer, $4, 'Mesa 1', $5, 'recibido',
-                           $6::jsonb, $7, $8, 'manual')""",
+                           $6::jsonb, $7, 'manual')""",
                 order_id, org_id, location_id, table_ids[0], "573000000000",
-                items, 56000, BOT_NUMBER,
+                items, 56000,
             )
 
     return {"org_id": org_id, "location_id": location_id}

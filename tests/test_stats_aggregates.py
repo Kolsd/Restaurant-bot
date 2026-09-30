@@ -171,13 +171,12 @@ async def _seed_org(conn, name: str) -> tuple[int, int]:
     )
     location_id = await conn.fetchval(
         """
-        INSERT INTO locations (org_id, name, address, whatsapp_number)
-        VALUES ($1, $2, 'Calle 1 # 1-1', '+57300000' || $3)
+        INSERT INTO locations (org_id, name, address)
+        VALUES ($1, $2, 'Calle 1 # 1-1')
         RETURNING id
         """,
         org_id,
         name + " - Principal",
-        str(org_id)[-4:].zfill(4),
     )
     return org_id, location_id
 
@@ -454,12 +453,11 @@ class TestBranchesComparison:
         # Add a second location to the same org
         loc2_id = await db_conn.fetchval(
             """
-            INSERT INTO locations (org_id, name, address, whatsapp_number)
-            VALUES ($1, 'Sede 2', 'Calle 2 # 2-2', '+573009999' || $2)
+            INSERT INTO locations (org_id, name, address)
+            VALUES ($1, 'Sede 2', 'Calle 2 # 2-2')
             RETURNING id
             """,
             org_id,
-            str(org_id)[-3:].zfill(3),
         )
 
         # Set scope before inserting tenant-scoped rows (RLS WITH CHECK requires this)

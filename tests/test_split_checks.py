@@ -349,7 +349,7 @@ def _mock_auth(monkeypatch):
         return {"username": "caja_user", "branch_id": 1, "org_id": 1,
                 "location_id": 1, "role": "caja", "restaurant_name": "R"}
     async def mock_get_restaurant(request):
-        return {"id": 1, "org_id": 1, "location_id": 1, "whatsapp_number": "+57300", "name": "R"}
+        return {"id": 1, "org_id": 1, "location_id": 1, "name": "R"}
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
     monkeypatch.setattr("app.routes.tables.get_current_restaurant", mock_get_restaurant)
@@ -570,7 +570,7 @@ def _pay_check_mocks(monkeypatch, check_total: float):
 
     async def mock_get_restaurant(request):
         # features={} → dian_active=False, currency=None
-        return {"id": 1, "whatsapp_number": "+57300", "name": "R", "features": {}}
+        return {"id": 1, "name": "R", "features": {}}
 
     def _check_dict(check_id, status="paying"):
         return {

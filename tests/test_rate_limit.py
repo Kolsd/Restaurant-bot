@@ -55,7 +55,7 @@ class TestPayCheckRateLimit:
             "org_id": 1, "location_id": 1, "role": "owner", "password_hash": "$2b$12$x"
         }))
         _rest_mock = AsyncMock(return_value={
-            "id": 1, "org_id": 1, "location_id": 1, "name": "Test", "whatsapp_number": "+57300", "features": {}
+            "id": 1, "org_id": 1, "location_id": 1, "name": "Test", "features": {}
         })
         monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock)
         monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock)

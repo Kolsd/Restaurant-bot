@@ -48,14 +48,12 @@ async def test_create_org_also_creates_primary_location():
 
     created_org = {
         "id": 99, "name": "Test Org", "slug": None,
-        "whatsapp_number": "+573001234567", "wa_phone_id": None, "wa_access_token": None,
         "menu": [], "features": {}, "subscription_plan": "free",
         "subscription_status": "active", "created_at": None, "updated_at": None,
     }
     created_loc = {
         "id": 200, "org_id": 99, "name": "Principal", "code": "principal",
         "address": None, "latitude": None, "longitude": None,
-        "whatsapp_number": None, "wa_phone_id": None, "wa_access_token": None,
         "active": True, "is_primary": False, "timezone": "America/Bogota",
         "opening_hours": {}, "created_at": None, "updated_at": None,
     }
@@ -95,8 +93,7 @@ async def test_promote_location_to_primary_demotes_existing():
     existing_loc = {
         "id": 201, "org_id": 99, "name": "Sede Norte", "is_primary": False,
         "active": True, "code": "norte", "address": None, "latitude": None,
-        "longitude": None, "whatsapp_number": None, "wa_phone_id": None,
-        "wa_access_token": None, "timezone": "America/Bogota",
+        "longitude": None,
         "opening_hours": {}, "created_at": None, "updated_at": None,
     }
     after_promote = dict(existing_loc, is_primary=True)
@@ -146,8 +143,7 @@ async def test_cannot_delete_primary_location():
     primary_loc = {
         "id": 200, "org_id": 99, "name": "Principal", "is_primary": True,
         "active": True, "code": "principal", "address": None, "latitude": None,
-        "longitude": None, "whatsapp_number": None, "wa_phone_id": None,
-        "wa_access_token": None, "timezone": "America/Bogota",
+        "longitude": None,
         "opening_hours": {}, "created_at": None, "updated_at": None,
     }
 
@@ -176,7 +172,6 @@ async def test_hard_delete_org_blocked_with_recent_orders():
 
     existing_org = {
         "id": 99, "name": "Test Org", "slug": None,
-        "whatsapp_number": None, "wa_phone_id": None, "wa_access_token": None,
         "menu": [], "features": {}, "subscription_plan": "free",
         "subscription_status": "active", "created_at": None, "updated_at": None,
     }
@@ -222,14 +217,12 @@ async def test_list_organizations_returns_location_count():
     mock_orgs = [
         {
             "id": 1, "name": "Org Alpha", "slug": "alpha",
-            "whatsapp_number": "+571111111", "wa_phone_id": None,
             "subscription_plan": "pro", "subscription_status": "active",
             "features": {}, "created_at": None, "updated_at": None,
             "location_count": 3,
         },
         {
             "id": 2, "name": "Org Beta", "slug": "beta",
-            "whatsapp_number": None, "wa_phone_id": None,
             "subscription_plan": "free", "subscription_status": "active",
             "features": {}, "created_at": None, "updated_at": None,
             "location_count": 1,

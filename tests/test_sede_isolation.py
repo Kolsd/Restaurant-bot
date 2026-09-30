@@ -60,18 +60,15 @@ async def _seed_two_sede_org() -> dict:
     """One org, two sedes, each with its own table order, waiter alert and
     table."""
     suffix = uuid.uuid4().hex[:10]
-    bot_number = f"573{suffix[:9]}"
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         org_id = await conn.fetchval(
-            "INSERT INTO organizations (name, slug, menu, features, whatsapp_number) "
-            "VALUES ($1, $2, $3::jsonb, $4::jsonb, $5) RETURNING id",
-            f"Sede Iso {suffix}", f"sede-iso-{suffix}", "{}", "{}", bot_number,
+            "INSERT INTO organizations (name, slug, menu, features) "
+            "VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id",
+            f"Sede Iso {suffix}", f"sede-iso-{suffix}", "{}", "{}",
         )
-        # Neither sede overrides the WhatsApp number: the whole org shares the
-        # one on `organizations`. That is the case the sede filter has to
-        # actually carry — when each sede has its own number, a bot_number
-        # filter accidentally does the separating and hides the bug.
+        # Both sedes share the org's tenant key: only the sede filter can
+        # separate them.
         loc_a = await conn.fetchval(
             "INSERT INTO locations (org_id, name) VALUES ($1,$2) RETURNING id",
             org_id, "Sede A",
@@ -87,17 +84,17 @@ async def _seed_two_sede_org() -> dict:
             # asyncpg cannot deduce one type for a parameter used as both.
             await conn.execute(
                 "INSERT INTO table_orders (id, org_id, location_id, branch_id, table_id, "
-                "table_name, phone, status, station, items, total, bot_number) "
-                "VALUES ($1,$2,$3,$4,$5,$6,$7,'recibido','kitchen',$8::jsonb,0,$9)",
+                "table_name, phone, status, station, items, total) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,'recibido','kitchen',$8::jsonb,0)",
                 f"to-{label}-{suffix}", org_id, loc, loc,
                 f"table-{label}-{suffix}", f"Mesa {label}", f"web:{uuid.uuid4().hex}",
-                json.dumps([{"name": "Plato", "quantity": 1}]), bot_number,
+                json.dumps([{"name": "Plato", "quantity": 1}]),
             )
             await conn.execute(
-                "INSERT INTO waiter_alerts (org_id, location_id, bot_number, table_id, "
+                "INSERT INTO waiter_alerts (org_id, location_id, table_id, "
                 "table_name, phone, alert_type, message) "
-                "VALUES ($1,$2,$3,$4,$5,$6,'cuenta','Pide la cuenta')",
-                org_id, loc, bot_number, f"table-{label}-{suffix}",
+                "VALUES ($1,$2,$3,$4,$5,'cuenta','Pide la cuenta')",
+                org_id, loc, f"table-{label}-{suffix}",
                 f"Mesa {label}", f"web:{uuid.uuid4().hex}",
             )
             await conn.execute(
@@ -119,7 +116,7 @@ async def _seed_two_sede_org() -> dict:
 
         return {
             "org_id": org_id, "loc_a": loc_a, "loc_b": loc_b,
-            "bot_number": bot_number, "suffix": suffix,
+            "suffix": suffix,
         }
     finally:
         await conn.close()

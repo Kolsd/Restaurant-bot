@@ -180,29 +180,28 @@ async def _fetch_location_config(location_id: int) -> dict:
         await conn.close()
 
 
-async def _seed_session(org_id: int, location_id: int, bot_number: str, order_mode: str = "delivery") -> str:
+async def _seed_session(org_id: int, location_id: int, order_mode: str = "delivery") -> str:
     token = f"web:{uuid.uuid4()}"
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         await conn.execute(
-            """INSERT INTO diner_sessions (token, org_id, location_id, table_id, table_name, bot_number, order_mode)
-               VALUES ($1, $2, $3, NULL, NULL, $4, $5)""",
-            token, org_id, location_id, bot_number, order_mode,
+            """INSERT INTO diner_sessions (token, org_id, location_id, table_id, table_name, order_mode)
+               VALUES ($1, $2, $3, NULL, NULL, $4)""",
+            token, org_id, location_id, order_mode,
         )
     finally:
         await conn.close()
     return token
 
 
-async def _seed_cart(token: str, bot_number: str, org_id: int, items: list) -> None:
+async def _seed_cart(token: str, org_id: int, items: list) -> None:
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         await conn.execute(
-            """INSERT INTO carts (phone, bot_number, cart_data, updated_at, org_id)
-               VALUES ($1, $2, $3::jsonb, NOW(), $4)
-               ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data = EXCLUDED.cart_data""",
-            token, bot_number, json.dumps({"items": items, "order_type": None, "address": None, "notes": ""}),
-            org_id,
+            """INSERT INTO carts (phone, org_id, cart_data, updated_at)
+               VALUES ($1, $2, $3::jsonb, NOW())
+               ON CONFLICT (phone, org_id) DO UPDATE SET cart_data = EXCLUDED.cart_data""",
+            token, org_id, json.dumps({"items": items, "order_type": None, "address": None, "notes": ""}),
         )
     finally:
         await conn.close()
@@ -490,7 +489,6 @@ def test_admin_role_is_allowed_not_only_owner(client, org_with_location, monkeyp
 
 def test_checkout_honors_newly_set_min_order_fee_and_payment_method(client, monkeypatch):
     suffix = uuid.uuid4().hex[:10]
-    bot_number = f"573{suffix[:9]}"
     org_id = _run(_seed_org(f"LocCfg Checkout Org {suffix}", features={"currency": "COP"}))
     location_id = _run(_seed_location(org_id, name=f"Sede {suffix}"))
 
@@ -498,8 +496,8 @@ def test_checkout_honors_newly_set_min_order_fee_and_payment_method(client, monk
         conn = await asyncpg.connect(TEST_DB_URL)
         try:
             await conn.execute(
-                "UPDATE locations SET whatsapp_number=$1, latitude=4.6097, longitude=-74.0817 WHERE id=$2",
-                bot_number, location_id,
+                "UPDATE locations SET latitude=4.6097, longitude=-74.0817 WHERE id=$1",
+                location_id,
             )
         finally:
             await conn.close()
@@ -517,8 +515,8 @@ def test_checkout_honors_newly_set_min_order_fee_and_payment_method(client, monk
         assert cfg_resp.status_code == 200, cfg_resp.text
 
         # Below the new minimum -> refused, naming the reason.
-        token = _run(_seed_session(org_id, location_id, bot_number))
-        _run(_seed_cart(token, bot_number, org_id, [
+        token = _run(_seed_session(org_id, location_id))
+        _run(_seed_cart(token, org_id, [
             {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 10000, "price": 10000},
         ]))
         low_body = {
@@ -532,8 +530,8 @@ def test_checkout_honors_newly_set_min_order_fee_and_payment_method(client, monk
         assert resp_low.json()["detail"]["reason"] == "below_minimum"
 
         # Above minimum but with a payment method the sede does NOT accept.
-        token2 = _run(_seed_session(org_id, location_id, bot_number))
-        _run(_seed_cart(token2, bot_number, org_id, [
+        token2 = _run(_seed_session(org_id, location_id))
+        _run(_seed_cart(token2, org_id, [
             {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 60000, "price": 60000},
         ]))
         wrong_method_body = dict(low_body, token=token2, idempotency_key=uuid.uuid4().hex, payment_method="efectivo")
@@ -543,8 +541,8 @@ def test_checkout_honors_newly_set_min_order_fee_and_payment_method(client, monk
 
         # Above minimum, allowed method -> succeeds, and the fee from the
         # config we just set is the one actually charged.
-        token3 = _run(_seed_session(org_id, location_id, bot_number))
-        _run(_seed_cart(token3, bot_number, org_id, [
+        token3 = _run(_seed_session(org_id, location_id))
+        _run(_seed_cart(token3, org_id, [
             {"name": "Bandeja Paisa", "quantity": 1, "subtotal": 60000, "price": 60000},
         ]))
         ok_body = dict(low_body, token=token3, idempotency_key=uuid.uuid4().hex, payment_method="nequi")

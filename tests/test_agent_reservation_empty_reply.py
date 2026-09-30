@@ -26,7 +26,7 @@ from unittest.mock import AsyncMock, patch
 
 
 def _restaurant_obj(**features):
-    return {"id": 1, "name": "Test Rest", "whatsapp_number": "+57999", "features": features}
+    return {"id": 1, "name": "Test Rest", "features": features}
 
 
 def _reservation_parsed(reply: str) -> dict:

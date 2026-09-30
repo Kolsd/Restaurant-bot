@@ -22,9 +22,7 @@ asserts:
   1. Org A's name/subscription_status/features change to exact values.
   2. Org B is byte-for-byte unchanged (proves no bleed-through via the
      colliding location id — the exact scenario that broke before).
-  3. wa_access_token is never returned in plaintext (GET or PATCH response).
-  4. An empty/masked wa_access_token on save preserves the stored secret.
-  5. A menu carrying another restaurant's image_public_id is rejected
+  3. A menu carrying another restaurant's image_public_id is rejected
      (db_update_organization's normalize+ownership path), and does not
      mutate the stored menu.
 
@@ -40,8 +38,7 @@ operation is in progress" / "connection was closed in the middle of
 operation" on the second call). tests/test_internal_admin_plan_reset.py
 documents and works around the exact same constraint. Calling the handler
 coroutines directly exercises the identical code FastAPI would call
-(including the route-level wa_access_token preservation logic, which does
-NOT live in the repo layer), just without the ASGI/portal machinery.
+just without the ASGI/portal machinery.
 
 All seeded rows are deleted in a fixture teardown.
 """
@@ -124,20 +121,16 @@ async def collision_orgs(seed_pool):
     ON DELETE CASCADE).
     """
     tag = uuid.uuid4().hex[:10]
-    secret_a = f"EAA_secret_{tag}_A_1234"
 
     async with seed_pool.acquire() as conn:
         org_a = await conn.fetchrow(
             """
             INSERT INTO organizations
-                (name, whatsapp_number, wa_phone_id, wa_access_token,
-                 features, subscription_plan, subscription_status)
-            VALUES ($1, $2, $3, $4, $5::jsonb, 'pro', 'active')
-            RETURNING id, name, whatsapp_number, wa_phone_id, wa_access_token,
-                      menu, features, subscription_plan, subscription_status
+                (name, slug, features, subscription_plan, subscription_status)
+            VALUES ($1, $2, $3::jsonb, 'pro', 'active')
+            RETURNING id, name, menu, features, subscription_plan, subscription_status
             """,
-            f"Org A {tag}", f"+5730000{tag[:4]}", "phoneid_a",
-            secret_a, '{"existing_key": "keepme", "locale": "es-CO"}',
+            f"Org A {tag}", f"org-a-{tag}", '{"existing_key": "keepme", "locale": "es-CO"}',
         )
         loc_a = await conn.fetchrow(
             "INSERT INTO locations (org_id, name, active) VALUES ($1, $2, true) RETURNING id",
@@ -147,14 +140,11 @@ async def collision_orgs(seed_pool):
         org_b = await conn.fetchrow(
             """
             INSERT INTO organizations
-                (name, whatsapp_number, wa_phone_id, wa_access_token,
-                 features, subscription_plan, subscription_status)
-            VALUES ($1, $2, $3, $4, $5::jsonb, 'restaurante', 'active')
-            RETURNING id, name, whatsapp_number, wa_phone_id, wa_access_token,
-                      menu, features, subscription_plan, subscription_status
+                (name, slug, features, subscription_plan, subscription_status)
+            VALUES ($1, $2, $3::jsonb, 'restaurante', 'active')
+            RETURNING id, name, menu, features, subscription_plan, subscription_status
             """,
-            f"Org B {tag}", f"+5730001{tag[:4]}", "phoneid_b",
-            f"EAA_secret_{tag}_B_5678", '{"locale": "es-MX"}',
+            f"Org B {tag}", f"org-b-{tag}", '{"locale": "es-MX"}',
         )
         # THE COLLISION: org B's location id is set (explicitly) to org A's
         # own id. locations.id is a plain BIGSERIAL — explicit inserts are
@@ -193,8 +183,7 @@ async def collision_orgs(seed_pool):
 async def _fetch_org(pool, org_id: int) -> dict | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """SELECT id, name, whatsapp_number, wa_phone_id, wa_access_token,
-                      menu, features, subscription_plan, subscription_status
+            """SELECT id, name, menu, features, subscription_plan, subscription_status
                FROM organizations WHERE id = $1""",
             org_id,
         )
@@ -264,11 +253,6 @@ async def test_patch_organization_changes_a_and_never_touches_b(
     assert org_a_db["features"]["new_flag"] is True
     assert org_a_db["features"]["existing_key"] == "keepme"
 
-    # wa_access_token is plain TEXT (no jsonb involved) — a raw re-select is
-    # reliable here. It was never sent in this PATCH — must be preserved verbatim.
-    org_a_raw = await _fetch_org(seed_pool, org_a_id)
-    assert org_a_raw["wa_access_token"] == collision_orgs["org_a"]["wa_access_token"]
-
     # ── Org B: byte-for-byte unchanged ───────────────────────────────────────
     org_b_after = await _fetch_org(seed_pool, org_b_id)
     assert org_b_after == org_b_before, (
@@ -278,33 +262,6 @@ async def test_patch_organization_changes_a_and_never_touches_b(
     )
     assert org_b_after["subscription_status"] == "active"
     assert org_b_after["name"] == org_b_before["name"]
-
-
-@pytest.mark.asyncio
-async def test_wa_access_token_never_returned_in_plaintext(
-    seed_pool, collision_orgs,
-):
-    """GET and PATCH never carry a Meta credential — not even a masked hint.
-    (WhatsApp was removed 2026-09-25; these columns are no longer read.)"""
-    admin_module, PatchOrgRequest = _import_admin_route_pieces()
-
-    org_a_id = collision_orgs["org_a"]["id"]
-    real_secret = collision_orgs["org_a"]["wa_access_token"]
-
-    get_result = await admin_module.get_organization_detail(org_a_id, None, None)
-    org_payload = get_result["data"]["org"]
-    assert real_secret not in json.dumps(get_result)
-    assert not [k for k in org_payload if k.startswith("wa_")]
-
-    patch_result = await admin_module.update_organization(
-        org_a_id,
-        PatchOrgRequest(name=collision_orgs["org_a"]["name"]),  # touch the write path
-        None,
-        None,
-    )
-    assert real_secret not in json.dumps(patch_result)
-    patched_org = patch_result["data"]["org"]
-    assert not [k for k in patched_org if k.startswith("wa_")]
 
 
 @pytest.mark.asyncio

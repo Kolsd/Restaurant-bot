@@ -59,7 +59,7 @@ class TestIsDianEnabled:
 class TestSettingsResponseDefault:
     def test_dian_enabled_defaults_false(self):
         from app.routes.settings_routes import _build_settings_response
-        restaurant = {"id": 1, "name": "Test", "whatsapp_number": "", "address": "",
+        restaurant = {"id": 1, "name": "Test", "address": "",
                       "latitude": None, "longitude": None}
         features = {}
         resp = _build_settings_response(restaurant, features)
@@ -68,7 +68,7 @@ class TestSettingsResponseDefault:
 
     def test_dian_enabled_true_when_set(self):
         from app.routes.settings_routes import _build_settings_response
-        restaurant = {"id": 1, "name": "Test", "whatsapp_number": "", "address": "",
+        restaurant = {"id": 1, "name": "Test", "address": "",
                       "latitude": None, "longitude": None}
         features = {"dian_enabled": True}
         resp = _build_settings_response(restaurant, features)
@@ -148,7 +148,6 @@ class TestBillingEmitGate:
         # Mock db_get_restaurant_by_id to return a restaurant with dian_enabled=False
         mock_restaurant = {
             "id": 1, "name": "Test", "features": {"dian_enabled": False},
-            "whatsapp_number": "test:1", "address": "",
         }
 
         with (
@@ -173,7 +172,6 @@ class TestBillingEmitGate:
         mock_user = {"branch_id": 1, "org_id": 1, "role": "owner", "id": 99}
         mock_restaurant = {
             "id": 1, "name": "Test", "features": {"dian_enabled": True},
-            "whatsapp_number": "test:1", "address": "",
         }
 
         with (

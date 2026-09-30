@@ -87,8 +87,6 @@ async def _make_org(conn, *, with_stock_dish: bool = False) -> dict:
         f"Order Flow Org {suffix}", f"order-flow-{suffix}",
         json.dumps(menu), json.dumps({"currency": "COP"}),
     )
-    # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
-    bot_number = f"web{org_id}"
     location_id = await conn.fetchval(
         "INSERT INTO locations (org_id, name) VALUES ($1, $2) RETURNING id",
         org_id, f"Sede {suffix}",
@@ -109,7 +107,6 @@ async def _make_org(conn, *, with_stock_dish: bool = False) -> dict:
         "org_id": org_id,
         "location_id": location_id,
         "table_id": table_id,
-        "bot_number": bot_number,
     }
 
 
@@ -185,8 +182,6 @@ async def _make_colliding_org(conn, collide_with_org_id: int) -> dict:
     )
     # Force this location's PRIMARY KEY to equal another org's id.
     location_id = collide_with_org_id
-    # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
-    bot_number = f"web{org_id}"
     await conn.execute(
         "INSERT INTO locations (id, org_id, name) VALUES ($1, $2, $3)",
         location_id, org_id, f"Sede Collide {suffix}",
@@ -201,7 +196,6 @@ async def _make_colliding_org(conn, collide_with_org_id: int) -> dict:
         "org_id": org_id,
         "location_id": location_id,
         "table_id": table_id,
-        "bot_number": bot_number,
     }
 
 
@@ -555,6 +549,3 @@ def test_full_diner_flow_survives_org_location_id_collision(client, org_a, org_c
     assert view["table_name"] == session_a["table_name"]
     assert len(view["orders"]) == 1
     assert view["orders"][0]["order_id"] == order["order_id"]
-    # Org A's identity must never appear anywhere in org_collide's diner-facing data.
-    resp_view = _table_view(client, token_a)
-    assert org_a["bot_number"] not in resp_view.text

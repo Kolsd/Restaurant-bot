@@ -10,9 +10,9 @@ def mock_db_pool(monkeypatch):
             if "table_orders" in query:
                 return {"phone": "573000000000", "table_name": "Mesa 1", "base_order_id": "MESA-TEST"}
             if "table_sessions" in query:
-                return {"bot_number": "15556293573", "meta_phone_id": "123"}
+                return {"bot_number": "15556293573"}
             if "restaurants" in query:
-                return {"id": 1, "name": "Restaurante Test", "whatsapp_number": "15556293573"}
+                return {"id": 1, "name": "Restaurante Test"}
             return None
         async def fetchval(self, query, *args): return None  # set_config calls
         async def execute(self, query, *args): pass

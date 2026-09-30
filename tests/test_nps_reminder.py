@@ -149,7 +149,7 @@ async def _set_scope(conn, org):
     )
 
 
-async def _seed_nps_waiting(conn, org, phone: str, bot_number: str, hours_ago: int,
+async def _seed_nps_waiting(conn, org, phone: str, hours_ago: int,
                              reminded_hours_ago: int | None = None):
     """Insert a nps_waiting row with created_at offset by hours_ago into the past.
 
@@ -164,17 +164,17 @@ async def _seed_nps_waiting(conn, org, phone: str, bot_number: str, hours_ago: i
     created_at = datetime.utcnow() - timedelta(hours=hours_ago)
     if reminded_hours_ago is None:
         await conn.execute(
-            """INSERT INTO nps_waiting (phone, bot_number, org_id, created_at)
-               VALUES ($1, $2, $3, $4)""",
-            phone, bot_number, org, created_at,
+            """INSERT INTO nps_waiting (phone, org_id, created_at)
+               VALUES ($1, $2, $3)""",
+            phone, org, created_at,
         )
     else:
         # reminded_at is TIMESTAMPTZ — tz-aware is fine here
         reminded_at = datetime.now(timezone.utc) - timedelta(hours=reminded_hours_ago)
         await conn.execute(
-            """INSERT INTO nps_waiting (phone, bot_number, org_id, created_at, reminded_at)
-               VALUES ($1, $2, $3, $4, $5)""",
-            phone, bot_number, org, created_at, reminded_at,
+            """INSERT INTO nps_waiting (phone, org_id, created_at, reminded_at)
+               VALUES ($1, $2, $3, $4)""",
+            phone, org, created_at, reminded_at,
         )
 
 
@@ -194,10 +194,9 @@ async def test_cleanup_deletes_only_after_48h(db_conn, org_id):
     from app.services.tenant_context import bypass_tenant_scope
 
     await _set_scope(db_conn, org_id)
-    bot_number = "bot-cleanup-1"
 
-    await _seed_nps_waiting(db_conn, org_id, "3001000030", bot_number, hours_ago=30)
-    await _seed_nps_waiting(db_conn, org_id, "3001000031", bot_number, hours_ago=50)
+    await _seed_nps_waiting(db_conn, org_id, "3001000030", hours_ago=30)
+    await _seed_nps_waiting(db_conn, org_id, "3001000031", hours_ago=50)
 
     # cross-tenant cleanup scheduler — must run under bypass
     with bypass_tenant_scope("test_nps_cleanup"):
@@ -208,15 +207,15 @@ async def test_cleanup_deletes_only_after_48h(db_conn, org_id):
 
     # 30h row should still exist
     survives = await db_conn.fetchval(
-        "SELECT COUNT(*) FROM nps_waiting WHERE phone=$1 AND bot_number=$2",
-        "3001000030", bot_number,
+        "SELECT COUNT(*) FROM nps_waiting WHERE phone=$1 AND org_id=$2",
+        "3001000030", org_id,
     )
     assert survives == 1
 
     # 50h row should be gone
     gone = await db_conn.fetchval(
-        "SELECT COUNT(*) FROM nps_waiting WHERE phone=$1 AND bot_number=$2",
-        "3001000031", bot_number,
+        "SELECT COUNT(*) FROM nps_waiting WHERE phone=$1 AND org_id=$2",
+        "3001000031", org_id,
     )
     assert gone == 0
 
@@ -232,12 +231,12 @@ async def test_recent_nps_endpoint_anonymizes_phone(db_conn, org_id):
 
     await _set_scope(db_conn, org_id)
 
-    # Seed an NPS response. nps_responses requires bot_number + score.
+    # Seed an NPS response.
     await db_conn.execute(
         """INSERT INTO nps_responses
-           (phone, bot_number, score, comment, org_id, created_at)
-           VALUES ($1, $2, $3, $4, $5, NOW())""",
-        "573001234567", "bot-anon-1", 5, "Excelente!", org_id,
+           (phone, score, comment, org_id, created_at)
+           VALUES ($1, $2, $3, $4, NOW())""",
+        "573001234567", 5, "Excelente!", org_id,
     )
 
     with tenant_scope(org_id):
@@ -276,16 +275,16 @@ async def test_recent_nps_endpoint_tenant_isolated(raw_pool, monkeypatch):
         # Org A — score 5, distinct comment marker
         await setup_conn.execute(
             """INSERT INTO nps_responses
-               (phone, bot_number, score, comment, org_id, created_at)
-               VALUES ($1, $2, $3, $4, $5, NOW())""",
-            "573009999111", "bot-iso-a", 5, "ISOLATION_MARKER_A", org_a_id,
+               (phone, score, comment, org_id, created_at)
+               VALUES ($1, $2, $3, $4, NOW())""",
+            "573009999111", 5, "ISOLATION_MARKER_A", org_a_id,
         )
         # Org B — score 1, distinct comment marker
         await setup_conn.execute(
             """INSERT INTO nps_responses
-               (phone, bot_number, score, comment, org_id, created_at)
-               VALUES ($1, $2, $3, $4, $5, NOW())""",
-            "573009999222", "bot-iso-b", 1, "ISOLATION_MARKER_B", org_b_id,
+               (phone, score, comment, org_id, created_at)
+               VALUES ($1, $2, $3, $4, NOW())""",
+            "573009999222", 1, "ISOLATION_MARKER_B", org_b_id,
         )
     finally:
         await raw_pool.release(setup_conn)

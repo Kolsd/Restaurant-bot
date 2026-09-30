@@ -21,7 +21,6 @@ RESTAURANT = {
     "org_id": 1,
     "location_id": 1,
     "name": "Test Restaurant",
-    "whatsapp_number": "+573001234567",
     "features": {},
 }
 

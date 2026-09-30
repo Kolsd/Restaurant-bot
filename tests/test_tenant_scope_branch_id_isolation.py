@@ -56,7 +56,6 @@ def matriz_org_dict():
         "org_id": ORG_ID,
         "location_id": LOCATION_ID,
         "name": "Test Restaurant",
-        "whatsapp_number": "+57300",
         "parent_restaurant_id": None,
         "features": {},
     }
@@ -298,7 +297,7 @@ def test_pos_tables_status_fails_fast_when_location_id_missing(
         "id": ORG_ID,
         "org_id": ORG_ID,
         # location_id intentionally absent — simulates a misconfigured caller
-        "name": "Test", "whatsapp_number": "+57300",
+        "name": "Test",
     }
 
     patches = _patch_tenant_scope_capture(captured_scope) + [

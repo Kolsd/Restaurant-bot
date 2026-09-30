@@ -21,7 +21,6 @@ MESA_SCENARIOS: list[Scenario] = [
         ),
         mode="table",
         user_phone="+573000000001",
-        bot_number="+57TESTBOT1",
         table_hint="1",
         turns=[
             Turn(
@@ -92,7 +91,6 @@ MESA_SCENARIOS: list[Scenario] = [
         ),
         mode="table",
         user_phone="+573000000002",
-        bot_number="+57TESTBOT1",
         table_hint="2",
         turns=[
             Turn(
@@ -138,7 +136,6 @@ MESA_SCENARIOS: list[Scenario] = [
         ),
         mode="table",
         user_phone="+573000000003",
-        bot_number="+57TESTBOT1",
         table_hint="3",
         turns=[
             Turn(
@@ -185,7 +182,6 @@ MESA_SCENARIOS: list[Scenario] = [
         ),
         mode="table",
         user_phone="+573000000004",
-        bot_number="+57TESTBOT1",
         table_hint="4",
         turns=[
             Turn(
@@ -227,7 +223,6 @@ MESA_SCENARIOS: list[Scenario] = [
         ),
         mode="table",
         user_phone="+573000000005",
-        bot_number="+57TESTBOT1",
         table_hint="1",
         turns=[
             Turn(
@@ -273,7 +268,6 @@ MESA_SCENARIOS: list[Scenario] = [
         ),
         mode="table",
         user_phone="+573000000006",
-        bot_number="+57TESTBOT1",
         table_hint="3",
         turns=[
             Turn(

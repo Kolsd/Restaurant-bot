@@ -39,7 +39,7 @@ def client():
 def matriz_dict():
     return {
         "id": ORG_OWN, "org_id": ORG_OWN, "location_id": LOCATION,
-        "name": "Test Restaurant", "whatsapp_number": "+57300",
+        "name": "Test Restaurant",
         "parent_restaurant_id": None, "features": {},
     }
 

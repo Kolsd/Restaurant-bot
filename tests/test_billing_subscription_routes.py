@@ -45,7 +45,6 @@ def _patch_auth(monkeypatch, org_id: int = 42):
         "org_id":          org_id,
         "location_id":     org_id,
         "name":            "Test Restaurant",
-        "whatsapp_number": "+573001234567",
         "features":        {},
     }
     user = {

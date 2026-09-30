@@ -24,7 +24,6 @@ ADVERSARIAL_SCENARIOS: list[Scenario] = [
         ),
         mode="table",
         user_phone="+573000000016",
-        bot_number="+57TESTBOT1",
         table_hint="1",
         turns=[
             Turn(
@@ -77,7 +76,6 @@ ADVERSARIAL_SCENARIOS: list[Scenario] = [
         ),
         mode="table",
         user_phone="+573000000017",
-        bot_number="+57TESTBOT1",
         table_hint="2",
         turns=[
             Turn(
@@ -116,7 +114,6 @@ ADVERSARIAL_SCENARIOS: list[Scenario] = [
         ),
         mode="table",
         user_phone="+573000000019",
-        bot_number="+57TESTBOT1",
         table_hint="3",
         turns=[
             Turn(

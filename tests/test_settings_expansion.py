@@ -43,7 +43,6 @@ def _make_restaurant(extra_features: dict | None = None) -> dict:
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10 # 5-30",
         "latitude": 4.711,
         "longitude": -74.072,
@@ -340,7 +339,6 @@ def _pause_auth_patches(monkeypatch, role: str = "owner", features: dict | None 
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10",
         "features": feats,
     }
@@ -386,7 +384,6 @@ def test_pause_sets_bot_active_false(monkeypatch):
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10",
         "features": paused_features,
     }
@@ -421,7 +418,6 @@ def test_unpause_sets_bot_active_true(monkeypatch):
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10",
         "features": active_features,
     }
@@ -457,7 +453,6 @@ def test_pause_stores_timestamp_and_user(monkeypatch):
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10",
         "features": paused_features,
     }
@@ -496,7 +491,6 @@ def test_pause_tenant_isolation(monkeypatch):
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10",
         "features": {"bot_active": False, "paused_at": "2026-04-20T12:00:00Z"},
     }

@@ -11,9 +11,8 @@ back in the loop if they broke:
   - the org, its first sede, its trial and its owner all exist when the
     request returns, and the owner can log in with the password they typed
     (not with one mailed to them — RESEND_API_KEY may not be set);
-  - registering does NOT write the phone onto organizations.whatsapp_number,
-    whose UNIQUE index used to mean one owner could never register a second
-    restaurant;
+  - the same owner (same phone) can register a second restaurant — the
+    phone once landed on a UNIQUE WhatsApp column and made that a 409;
   - a repeat email is refused outright rather than silently given a
     suffixed username the person could never guess.
 
@@ -147,7 +146,7 @@ def _payload(unique: str, **overrides) -> dict:
 
 def _org(org_id: int) -> dict:
     return _run(_query(
-        """SELECT id, name, slug, whatsapp_number, subscription_plan, comp_until
+        """SELECT id, name, slug, subscription_plan, comp_until
            FROM organizations WHERE id = $1""",
         org_id,
     ))
@@ -234,12 +233,10 @@ def test_signup_creates_a_tenant_the_owner_can_log_into(client, unique, cleanup)
     assert not verify_password("otraClaveCualquiera", user["password_hash"])
 
 
-def test_signup_does_not_claim_the_whatsapp_number(client, unique, cleanup):
-    """The phone is a sales contact, not the org's WhatsApp line.
-
-    organizations.whatsapp_number is UNIQUE; writing the signup phone there
-    made a second restaurant by the same owner impossible to register.
-    """
+def test_same_phone_can_register_a_second_restaurant(client, unique, cleanup):
+    """The phone is a sales contact. It once landed on a UNIQUE WhatsApp
+    column, which made a second restaurant by the same owner impossible to
+    register."""
     orgs, usernames, phones = cleanup
     shared_phone = "+57 321 555 7788"
 
@@ -250,8 +247,6 @@ def test_signup_does_not_claim_the_whatsapp_number(client, unique, cleanup):
     orgs.append(first.json()["org_id"])
     usernames.append(first.json()["username"])
     phones.append(shared_phone)
-
-    assert _org(first.json()["org_id"])["whatsapp_number"] is None
 
     # Same person, same phone, second restaurant — this used to be a 409.
     second = client.post("/api/signup", json=_payload(

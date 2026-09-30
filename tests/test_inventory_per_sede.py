@@ -64,13 +64,12 @@ def _delete(client, url, **kwargs):
 
 async def _seed() -> dict:
     suffix = uuid.uuid4().hex[:10]
-    bot_number = f"573{suffix[:9]}"
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         org_id = await conn.fetchval(
-            "INSERT INTO organizations (name, slug, menu, features, whatsapp_number) "
-            "VALUES ($1,$2,$3::jsonb,$4::jsonb,$5) RETURNING id",
-            f"Inv Sede {suffix}", f"inv-sede-{suffix}", "{}", "{}", bot_number,
+            "INSERT INTO organizations (name, slug, menu, features) "
+            "VALUES ($1,$2,$3::jsonb,$4::jsonb) RETURNING id",
+            f"Inv Sede {suffix}", f"inv-sede-{suffix}", "{}", "{}",
         )
         loc_a = await conn.fetchval(
             "INSERT INTO locations (org_id, name) VALUES ($1,'Sede A') RETURNING id", org_id)
@@ -93,7 +92,7 @@ async def _seed() -> dict:
             org_id, loc_a, json.dumps([]),
         )
         return {"org_id": org_id, "loc_a": loc_a, "loc_b": loc_b,
-                "items": items, "bot_number": bot_number}
+                "items": items}
     finally:
         await conn.close()
 

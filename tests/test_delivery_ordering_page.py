@@ -63,8 +63,6 @@ async def _seed_delivery_org() -> dict:
             f"Pedir Page Org {suffix}", f"pedir-page-{suffix}",
             json.dumps({"currency": "COP"}),
         )
-        # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
-        bot_number = f"web{org_id}"
         location_id = await conn.fetchval(
             """
             INSERT INTO locations

@@ -42,15 +42,15 @@ async def test_login_success():
         "role":            "owner",
         "password_hash":   hashed,
     }
-    mock_restaurant = {"id": 1, "whatsapp_number": "+57300", "name": "El Bistro", "features": {}}
+    mock_restaurant = {"id": 1, "name": "El Bistro", "features": {}}
     fake_token = "a" * 64
 
     mock_location = {
         "id": 1, "org_id": 1, "name": "El Bistro",
-        "is_primary": True, "whatsapp_number": "+57300", "active": True,
+        "is_primary": True, "active": True,
     }
     mock_org = {
-        "id": 1, "name": "El Bistro", "whatsapp_number": "+57300",
+        "id": 1, "name": "El Bistro",
         "features": {}, "subscription_plan": "free",
     }
     mock_org_locations = [mock_location]
@@ -120,9 +120,9 @@ async def test_login_legacy_sha256_triggers_bcrypt_upgrade():
         "role":            "owner",
         "password_hash":   legacy_hash,
     }
-    mock_restaurant = {"id": 1, "whatsapp_number": "+57300", "name": "El Bistro", "features": {}}
-    mock_location = {"id": 1, "org_id": 1, "name": "El Bistro", "is_primary": True, "whatsapp_number": "+57300", "active": True}
-    mock_org = {"id": 1, "name": "El Bistro", "whatsapp_number": "+57300", "features": {}, "subscription_plan": "free"}
+    mock_restaurant = {"id": 1, "name": "El Bistro", "features": {}}
+    mock_location = {"id": 1, "org_id": 1, "name": "El Bistro", "is_primary": True, "active": True}
+    mock_org = {"id": 1, "name": "El Bistro", "features": {}, "subscription_plan": "free"}
     update_mock = AsyncMock(return_value=True)
 
     with (
@@ -156,9 +156,9 @@ async def test_login_bcrypt_user_no_upgrade():
         "role":            "owner",
         "password_hash":   hash_password("supersecreta"),
     }
-    mock_restaurant = {"id": 1, "whatsapp_number": "+57300", "name": "El Bistro", "features": {}}
-    mock_location = {"id": 1, "org_id": 1, "name": "El Bistro", "is_primary": True, "whatsapp_number": "+57300", "active": True}
-    mock_org = {"id": 1, "name": "El Bistro", "whatsapp_number": "+57300", "features": {}, "subscription_plan": "free"}
+    mock_restaurant = {"id": 1, "name": "El Bistro", "features": {}}
+    mock_location = {"id": 1, "org_id": 1, "name": "El Bistro", "is_primary": True, "active": True}
+    mock_org = {"id": 1, "name": "El Bistro", "features": {}, "subscription_plan": "free"}
     update_mock = AsyncMock(return_value=True)
 
     with (

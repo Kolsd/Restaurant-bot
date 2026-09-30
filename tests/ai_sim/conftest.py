@@ -77,7 +77,7 @@ async def test_db_pool():
 async def clean_db(test_db_pool):
     """Function-scoped fixture: truncate volatile tables, re-seed, reset fallbacks.
 
-    Yields the seed info dict: {"restaurant_id": int, "bot_number": str}
+    Yields the seed info dict: {"restaurant_id": int}
 
     NOTE: Does NOT use a transaction-rollback approach (like tests/conftest.py
     db_conn does). agent.chat() acquires its own pool connections and commits

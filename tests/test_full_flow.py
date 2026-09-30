@@ -1002,7 +1002,7 @@ class TestEndToEndTableFlow:
         order_row = make_row(
             {"phone": "573001234567", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new"}
         )
-        session_row = {"org_id": 1, "meta_phone_id": None}
+        session_row = {"org_id": 1}
 
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(side_effect=[order_row, session_row])
@@ -1013,12 +1013,12 @@ class TestEndToEndTableFlow:
         monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock_empty)
         monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock_empty)
         monkeypatch.setattr(db, "db_get_all_restaurants", AsyncMock(return_value=[{
-            "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
+            "id": 1, "name": "Test"
         }]))
         monkeypatch.setattr(db, "db_mark_session_nps_pending", AsyncMock())
         monkeypatch.setattr(db, "db_cleanup_after_checkout", AsyncMock())
         monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value={
-            "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
+            "id": 1, "name": "Test"
         }))
 
         with patch("app.routes.tables.asyncio.create_task"):
@@ -1036,7 +1036,7 @@ class TestEndToEndTableFlow:
         order_row = make_row(
             {"phone": "573001234567", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new"}
         )
-        session_row = {"org_id": 1, "meta_phone_id": None}
+        session_row = {"org_id": 1}
 
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(side_effect=[order_row, session_row])
@@ -1047,10 +1047,10 @@ class TestEndToEndTableFlow:
         monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock_empty)
         monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock_empty)
         monkeypatch.setattr(db, "db_get_all_restaurants", AsyncMock(return_value=[{
-            "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
+            "id": 1, "name": "Test"
         }]))
         monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value={
-            "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
+            "id": 1, "name": "Test"
         }))
 
         nps_mock = AsyncMock()

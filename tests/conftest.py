@@ -185,7 +185,6 @@ def patch_auth(monkeypatch, *, restaurant_id: int = 1,
         "org_id":           restaurant_id,
         "location_id":      restaurant_id,
         "name":             "Restaurante Test",
-        "whatsapp_number":  whatsapp_number,
         "features":         features,
     }
     user = {

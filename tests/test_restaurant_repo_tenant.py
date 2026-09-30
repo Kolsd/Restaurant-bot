@@ -151,9 +151,6 @@ async def test_4_global_fn_works_inside_bypass_scope():
         "org_id": 42,             # tenant key — id is overridden to this
         "location_id": 7,
         "name": "Restaurante Demo",
-        "whatsapp_number": "573001234567",
-        "wa_access_token": "tok",
-        "wa_phone_id": "pid",
         "features": {},
         "menu": {},
         "address": "",

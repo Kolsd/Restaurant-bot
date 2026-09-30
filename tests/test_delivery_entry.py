@@ -491,8 +491,6 @@ async def _http_seed_delivery_org(*, with_delivery_sede: bool = True) -> dict:
             f"Delivery Entry Org {suffix}", f"delivery-entry-{suffix}",
             json.dumps({"currency": "COP"}),
         )
-        # Production shape: a sede has no WhatsApp number; the org's bot key is web<org_id>.
-        bot_number = f"web{org_id}"
         location_id = await conn.fetchval(
             """
             INSERT INTO locations
@@ -505,7 +503,7 @@ async def _http_seed_delivery_org(*, with_delivery_sede: bool = True) -> dict:
             json.dumps({"delivery_enabled": True, "pickup_enabled": True, "radius_km": 50})
             if with_delivery_sede else json.dumps({}),
         )
-        return {"org_id": org_id, "location_id": location_id, "bot_number": bot_number, "suffix": suffix}
+        return {"org_id": org_id, "location_id": location_id, "suffix": suffix}
     finally:
         await conn.close()
 
@@ -544,7 +542,6 @@ def test_org_info_endpoint_leaks_no_whatsapp_or_features_blob(client, delivery_o
     assert resp.status_code == 200, resp.text
 
     raw_body = resp.text
-    assert delivery_org["bot_number"] not in raw_body
     assert "whatsapp_number" not in raw_body
     assert "wa_access_token" not in raw_body
     assert "wa_phone_id" not in raw_body
