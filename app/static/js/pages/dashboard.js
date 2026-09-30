@@ -352,11 +352,17 @@ const CHANNEL_META = {
     svg: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><path d="M3 12H1V6h7l3 3h3v3h-3M7 3h4"/></svg>',
     barColor: 'var(--info,#3b82f6)',
   },
-  table_qr: {
+  qr_table: {
     label: 'QR de mesa',
     bg: '#EDE9FE', color: '#5B21B6',
     svg: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="2" width="10" height="12" rx="1"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>',
     barColor: 'var(--purple,#8b5cf6)',
+  },
+  pickup: {
+    label: 'Para recoger',
+    bg: '#FCE7F3', color: '#9D174D',
+    svg: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5h10l-1 9H4L3 5z"/><path d="M6 5V4a2 2 0 014 0v1"/></svg>',
+    barColor: 'var(--danger,#db2777)',
   },
   web_chat: {
     label: 'Chat Mesio',
@@ -387,7 +393,7 @@ async function loadSalesByChannel() {
 
     channels.forEach(ch => {
       const meta    = CHANNEL_META[ch.channel] || {
-        label: ch.channel_label || ch.channel,
+        label: ch.label || ch.channel,
         bg: '#f0f0e8', color: '#555',
         svg: '',
         barColor: 'var(--brand)',

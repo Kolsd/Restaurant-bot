@@ -82,16 +82,25 @@ _CHANNEL_LABELS: dict[str, str] = {
     "pos":          "Salón · POS",
     "qr_table":     "QR de mesa",
     "delivery":     "Domicilios",
+    "pickup":       "Para recoger",
     "web":          "Web",
     "unknown":      "Sin clasificar",
 }
 
 
 def _classify_channel(channel: str | None, order_type: str | None) -> str:
-    """Map raw channel + order_type to one of our canonical buckets."""
+    """Map raw channel + order_type to one of our canonical buckets.
+
+    A delivery or pickup order is counted as such whatever channel took it:
+    web delivery/pickup orders carry channel "web_chat" like the dine-in
+    chat, and were all lumped into "Chat Mesio"."""
     ch = (channel or "").strip().lower()
     ot = (order_type or "").strip().lower()
 
+    if ot == "domicilio":
+        return "delivery"
+    if ot == "recoger":
+        return "pickup"
     if ch == "whatsapp_bot":
         return "whatsapp_bot"
     if ch == "web_chat":
@@ -100,9 +109,6 @@ def _classify_channel(channel: str | None, order_type: str | None) -> str:
         return "pos"
     if ch == "qr_table":
         return "qr_table"
-    # Delivery orders without explicit channel → delivery bucket
-    if ot in ("domicilio",):
-        return "delivery"
     if ch in ("web",):
         return "web"
     if ch:
