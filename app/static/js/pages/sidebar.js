@@ -228,15 +228,16 @@
     const userEl = sb.querySelector('#sb-user');
     if (!token && userEl) {
       userEl.style.display = 'none';
-    } else if (restaurant.email || restaurant.name) {
+    } else {
+      // Who is logged in: login stores it in rb_name (owners included since
+      // 2026-09-30 — nothing ever wrote restaurant.email, so this read "—").
+      const who      = localStorage.getItem('rb_name') || restaurant.email || '';
       const nameEl   = sb.querySelector('#sb-user-name');
       const roleEl   = sb.querySelector('#sb-user-role');
       const avatarEl = sb.querySelector('#sb-user-avatar');
-      if (nameEl && restaurant.email) nameEl.textContent = restaurant.email;
+      if (nameEl && who) nameEl.textContent = who;
       if (roleEl) roleEl.textContent = restaurant.role || 'Owner';
-      if (avatarEl && restaurant.email) {
-        avatarEl.textContent = restaurant.email.slice(0, 2).toUpperCase();
-      }
+      if (avatarEl && who) avatarEl.textContent = who.slice(0, 2).toUpperCase();
     }
 
     // Role-based and feature-flag filtering

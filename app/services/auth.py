@@ -146,6 +146,8 @@ async def login(username: str, password: str) -> dict:
             "token":    token,
             "role":     role,
             "staff_id": member["id"],
+            # Who is logged in — the staff app greets by it (rb_staff_name).
+            "name":     member["name"],
             "restaurant": legacy_restaurant,  # legacy key — kept for backward compat
         }
         if org_shape is not None:
@@ -246,6 +248,8 @@ async def login(username: str, password: str) -> dict:
         "success": True,
         "token": token,
         "role": role,
+        # Who is logged in (an owner has no display name on file — their login).
+        "name": username,
         "restaurant": legacy_restaurant,  # legacy key — kept for backward compat
     }
     if org_shape is not None:

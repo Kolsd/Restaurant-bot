@@ -440,6 +440,7 @@ function renderNpsPromptBlock(block) {
     input.className = 'diner-nps-comment-input';
     input.maxLength = 500;
     input.placeholder = 'Escribe tu comentario...';
+    input.setAttribute('aria-label', '¿Qué podríamos mejorar?');
     row.appendChild(input);
 
     var sendBtn = document.createElement('button');
@@ -2219,6 +2220,7 @@ var CheckoutSheet = (function () {
     tipLabel.className = 'diner-sheet-note-label';
     tipLabel.textContent = 'Propina (opcional)';
     tipInput = document.createElement('input');
+    tipInput.setAttribute('aria-label', 'Propina');
     tipInput.type = 'number';
     tipInput.min = '0';
     tipInput.className = 'diner-sheet-input';
@@ -2233,6 +2235,7 @@ var CheckoutSheet = (function () {
     nameLabel.className = 'diner-sheet-note-label';
     nameLabel.textContent = 'Tu nombre (opcional)';
     nameInput = document.createElement('input');
+    nameInput.setAttribute('aria-label', 'Tu nombre');
     nameInput.type = 'text';
     nameInput.maxLength = 100;
     nameInput.className = 'diner-sheet-input';
@@ -2246,6 +2249,7 @@ var CheckoutSheet = (function () {
     phoneLabel.className = 'diner-sheet-note-label';
     phoneLabel.textContent = 'Tu teléfono (opcional)';
     phoneInput = document.createElement('input');
+    phoneInput.setAttribute('aria-label', 'Tu teléfono');
     phoneInput.type = 'tel';
     phoneInput.maxLength = 30;
     phoneInput.className = 'diner-sheet-input';
@@ -2527,6 +2531,7 @@ var DeliveryCheckoutSheet = (function () {
       fileInput.type = 'file';
       fileInput.accept = 'image/*';
       fileInput.className = 'diner-checkout-file-input';
+      fileInput.setAttribute('aria-label', 'Comprobante de pago (foto o captura)');
       uploadWrap.appendChild(fileInput);
 
       var status = document.createElement('p');
@@ -2717,6 +2722,7 @@ var DeliveryCheckoutSheet = (function () {
     refs.tipCustom.min = '0';
     refs.tipCustom.className = 'diner-sheet-input';
     refs.tipCustom.placeholder = 'Otro monto';
+    refs.tipCustom.setAttribute('aria-label', 'Otro monto de propina');
     refs.tipCustom.addEventListener('input', function () {
       var v = Number(refs.tipCustom.value);
       tipAmount = isFinite(v) && v > 0 ? v : 0;

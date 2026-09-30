@@ -284,6 +284,8 @@ async def test_login_preserves_legacy_restaurant_key():
         result = await login("owner@test.com", "password")
 
     assert result["success"] is True
+    # The staff app shows who is logged in from this (it read "—" for owners).
+    assert result["name"] == "owner@test.com"
     assert "restaurant" in result, "Legacy 'restaurant' key must be present"
     r = result["restaurant"]
     # Legacy shape fields must all be present
