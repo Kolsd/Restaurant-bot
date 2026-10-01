@@ -99,10 +99,41 @@ function connectDinerRealtime() {
   _rtConnected = true;
   MesioRealtime.connect('/api/diner/stream', getToken);
   MesioRealtime.on('table_order.created', () => TablePanel.refresh());
-  MesioRealtime.on('table_order.updated', () => TablePanel.refresh());
+  MesioRealtime.on('table_order.updated', () => { TablePanel.refresh(); announceKitchenProgress(); });
   MesioRealtime.on('check.updated', () => pollDinerStatus());
   MesioRealtime.on('nps.updated', () => pollDinerStatus());
   MesioRealtime.on('resync', () => { TablePanel.refresh(); pollDinerStatus(); });
+  announceKitchenProgress();  // baseline, so the first change is the one announced
+}
+
+/* ── Kitchen progress in the chat ───────────────────────────────────
+ * table_order.updated used to refresh only the "Tu mesa" panel, and only
+ * while it was open — a diner never learned their food was ready. Compare
+ * the statuses of the diner's OWN orders with the last ones seen and say
+ * the change in the chat. The first read only records the baseline, so a
+ * reload never repeats an old notice. */
+var KITCHEN_NOTICES = {
+  listo: '¡Tu pedido está listo! Ya te lo llevan a la mesa.',
+  entregado: '¡Buen provecho!',
+};
+var _kitchenSeen = null;  // order_id -> status; null until the baseline read
+
+async function announceKitchenProgress() {
+  if (!state.token || isDeliveryOrderMode()) return;
+  var data;
+  try {
+    data = await DinerSession.fetch('/api/diner/table', 'GET', null, getToken());
+  } catch (e) { return; }
+  var mine = (data && Array.isArray(data.orders) ? data.orders : []).filter(function (o) { return o.mine; });
+  var first = _kitchenSeen === null;
+  var seen = _kitchenSeen || {};
+  _kitchenSeen = {};
+  mine.forEach(function (o) {
+    _kitchenSeen[o.order_id] = o.status;
+    if (!first && seen[o.order_id] !== o.status && KITCHEN_NOTICES[o.status]) {
+      processBotTurn({ message: KITCHEN_NOTICES[o.status] });
+    }
+  });
 }
 
 function renderer() { return window.MesioCatalogRenderer; }
@@ -172,6 +203,7 @@ function applyAssistant(enabled) {
   state.assistant = enabled !== false;
   var composer = dinerEl('diner-composer');
   if (composer) composer.style.display = state.assistant ? '' : 'none';
+  document.body.classList.toggle('diner-no-assistant', !state.assistant);
 }
 
 function setBusy(busy) {
@@ -3160,7 +3192,8 @@ function initTablePolling() {
   // is connected (table_order.* events call TablePanel.refresh() directly —
   // see connectDinerRealtime() above). TablePanel.refresh() itself is a
   // no-op unless the panel is open.
-  mesioLiveInterval(function () { TablePanel.refresh(); }, 8000);
+  // The same tick catches a ready order when a realtime event was missed.
+  mesioLiveInterval(function () { TablePanel.refresh(); announceKitchenProgress(); }, 8000);
 }
 
 /* ── Status polling — GET /api/diner/status ───────────────────────────

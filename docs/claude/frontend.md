@@ -10,7 +10,7 @@
 
 **Operational (dark theme)**: `/cashier` (POS), `/kitchen` (KDS), `/bar` (KDS variant), `/waiter` (tablet grid), `/courier` (mobile).
 
-**Public**: `/login.html`, `/menu.html` (public QR), `/demo`, `/dashboard-demo`, `/chat/{table_id}` (diner's web channel: `diner-chat.html` + `pages/diner-chat.js` + `diner-session.js`).
+**Public**: `/login.html`, `/menu.html` (public QR), `/demo` (live demo: `demo.html` + `pages/demo.js`, API in `routes/live_demo.py`), `/chat/{table_id}` (diner's web channel: `diner-chat.html` + `pages/diner-chat.js` + `diner-session.js`).
 
 Sprint A-W redesign detail in [docs/history/sprints.md](docs/history/sprints.md). For "what got deferred" see "Calendar pending items" above.
 

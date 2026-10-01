@@ -948,7 +948,8 @@ async def update_order_status(request: Request, order_id: str):
     else:
         with bypass_tenant_scope("update_order_status: normal status update by order ID"):
             await db.db_update_table_order_status(order_id, status)
-        # The diner sees "listo"/"entregado" in their chat (SSE table_order_updated).
+        # The diner's chat says "listo"/"entregado" (SSE table_order.updated →
+        # diner-chat.js announceKitchenProgress).
         if status == "listo" and phone and phone != "manual":
             # Notify the assigned mesero that food is ready at the pass.
             # Best-effort: failure to create the alert MUST NOT block the

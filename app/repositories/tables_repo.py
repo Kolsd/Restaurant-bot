@@ -96,13 +96,15 @@ async def db_create_table(table_id: str, number: int, name: str, branch_id: int 
         await conn.execute("""
             INSERT INTO restaurant_tables
                 (id, number, name, branch_id, location_id, org_id, active, capacity, table_type, zone)
-            VALUES ($1, $2, $3, $4, $4,
+            VALUES ($1, $2, $3, $4::integer, $8::bigint,
                     NULLIF(current_setting('app.org_id', true), '')::bigint,
                     TRUE, $5, $6, $7)
             ON CONFLICT (id) DO UPDATE SET number=EXCLUDED.number, name=EXCLUDED.name,
                 branch_id=EXCLUDED.branch_id, location_id=EXCLUDED.location_id, active=TRUE,
                 capacity=EXCLUDED.capacity, table_type=EXCLUDED.table_type, zone=EXCLUDED.zone
-        """, table_id, number, name, branch_id, capacity, table_type, zone)
+        """, table_id, number, name, branch_id, capacity, table_type, zone, branch_id)
+        # branch_id (INTEGER) and location_id (BIGINT) get separate parameters:
+        # one $n in both columns failed every call with AmbiguousParameterError.
 
 
 async def db_auto_create_table(restaurant_id: int) -> dict:
@@ -637,6 +639,21 @@ async def db_get_active_session_on_table_by_other_phone(table_id: str, phone: st
             phone,
         )
         return _serialize(dict(row)) if row else None
+
+
+async def db_get_open_sessions_by_table(org_id: int) -> list:
+    """Open table sessions of an org, oldest first: table_id, phone, started_at.
+
+    Used by the live demo to find a free table or recycle the oldest one.
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT table_id, phone, started_at FROM table_sessions "
+            "WHERE org_id=$1 AND status IN ('active','nps_pending') ORDER BY started_at ASC",
+            org_id,
+        )
+        return [_serialize(dict(r)) for r in rows]
 
 
 async def db_get_active_session_by_table_id(table_id: str) -> dict | None:

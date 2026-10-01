@@ -57,9 +57,10 @@ body {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  flex-wrap: wrap;  /* the cart chip pushes the actions to their own row on a phone */
   z-index: 10;
 }
-.diner-header-info { min-width: 0; }
+.diner-header-info { min-width: 0; flex: 1 1 140px; }
 .diner-header-restaurant {
   margin: 0;
   font-family: var(--font-display);
@@ -377,6 +378,10 @@ body {
   z-index: 30;
 }
 .diner-waiter-fab:hover { background: var(--surface-hover); }
+/* Plans without the AI assistant hide the composer (diner-chat.js
+   applyAssistant): the button drops to the bottom edge, inside the room the
+   log already keeps under its last message (padding-bottom 96px). */
+body.diner-no-assistant .diner-waiter-fab { bottom: max(var(--s-4), env(safe-area-inset-bottom)); }
 .diner-waiter-fab-label { white-space: nowrap; }
 
 /* ── Overlays (bottom sheets + fullscreen panels) ── */

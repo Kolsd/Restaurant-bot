@@ -35,6 +35,7 @@ from pathlib import Path
 from starlette.responses import RedirectResponse
 from app.routes.orders_routes import router as orders_router
 from app.routes.dashboard import router as dashboard_router
+from app.routes.live_demo import router as live_demo_router
 from app.routes.auth_routes import router as auth_router
 from app.routes.settings_routes import router as settings_router
 from app.routes.sede_menu_routes import router as sede_menu_router
@@ -343,6 +344,7 @@ app.include_router(internal_ops_router)
 app.include_router(internal_costs_router)
 app.include_router(internal_search_router)
 app.include_router(internal_notifications_router)
+app.include_router(live_demo_router)
 
 # ── Audit middleware (HQ compliance) ─────────────────────────────────────────
 # Records every state-changing /api/internal/* call to hq_audit_log.
