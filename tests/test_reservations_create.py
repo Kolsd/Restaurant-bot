@@ -192,7 +192,7 @@ def test_create_past_date_400(monkeypatch):
         headers={"Authorization": "Bearer faketoken"},
     )
     assert resp.status_code == 400
-    assert "future" in resp.json()["detail"].lower()
+    assert "futura" in resp.json()["detail"].lower()
 
 
 def test_create_returns_full_shape(monkeypatch):

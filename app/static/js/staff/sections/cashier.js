@@ -13,7 +13,7 @@
 <style>
 /* ── v2 dark POS shell — scoped to .mesio-sec-cashier instead of body/html
    so it doesn't leak onto the admin shell (sidebar/topbar) of /staff. ── */
-.mesio-sec-cashier { background: #0b0d12; color: #E8EAEE; overflow: hidden; height: 100%; font-family: var(--font-body); display: block; }
+.mesio-sec-cashier { background: var(--bg); color: var(--text); overflow: hidden; height: 100%; font-family: var(--font-body); display: block; }
 
 .mesio-sec-cashier .caja-v2 {
   display: grid;
@@ -27,19 +27,19 @@
 
 /* Mini topbar */
 .mesio-sec-cashier .caja-topbar {
-  padding: 10px 20px; border-bottom: 1px solid #1a1d26;
+  padding: 10px 20px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 12px;
-  background: #0a0c10; flex-shrink: 0;
+  background: var(--bg); flex-shrink: 0;
 }
-.mesio-sec-cashier .caja-live { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #9CA3AF; }
+.mesio-sec-cashier .caja-live { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-3); }
 .mesio-sec-cashier .caja-live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); animation: pulse-c 2s infinite; }
 @keyframes pulse-c { 0%,100%{opacity:1} 50%{opacity:0.3} }
-.mesio-sec-cashier .caja-clock { font-family: var(--font-mono); font-size: 12px; color: #9CA3AF; margin-left: auto; }
-.mesio-sec-cashier .caja-branch { font-size: 11px; background: #14171f; color: #9FE1CB; border: 1px solid rgba(29,158,117,0.3); padding: 3px 8px; border-radius: 5px; }
+.mesio-sec-cashier .caja-clock { font-family: var(--font-mono); font-size: 12px; color: var(--text-3); margin-left: auto; }
+.mesio-sec-cashier .caja-branch { font-size: 11px; background: var(--surface); color: var(--brand-dark); border: 1px solid rgba(29,158,117,0.3); padding: 3px 8px; border-radius: 5px; }
 
 /* Table chips bar */
 .mesio-sec-cashier .caja-table-bar {
-  padding: 12px 20px; border-bottom: 1px solid #1a1d26;
+  padding: 12px 20px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 8px; overflow-x: auto; flex-shrink: 0;
 }
 .mesio-sec-cashier .caja-table-bar.mesa-grid-mode {
@@ -47,21 +47,21 @@
   flex-direction: column; align-items: stretch; padding: 14px 16px; gap: 0;
 }
 .mesio-sec-cashier .mesa-tile {
-  background: #14171f; border: 2px solid #1a1d26; border-radius: 10px;
+  background: var(--surface); border: 2px solid var(--border); border-radius: 10px;
   padding: 14px 12px; cursor: pointer; display: flex; flex-direction: column;
   gap: 4px; transition: border-color .15s, background .15s; min-height: 85px;
 }
-.mesio-sec-cashier .mesa-tile:hover { background: #181c25; }
+.mesio-sec-cashier .mesa-tile:hover { background: var(--surface); }
 .mesio-sec-cashier .mesa-tile.t-alert   { border-color: #EF4444; }
 .mesio-sec-cashier .mesa-tile.t-active  { border-color: rgba(29,158,117,.5); }
 .mesio-sec-cashier .mesa-tile.t-billing { border-color: rgba(167,139,250,.5); }
 .mesio-sec-cashier .tbl-chip {
-  padding: 6px 12px; background: #14171f; border: 1px solid #1a1d26;
+  padding: 6px 12px; background: var(--surface); border: 1px solid var(--border);
   border-radius: 8px; display: flex; align-items: center; gap: 8px; cursor: pointer;
   flex-shrink: 0; transition: border-color 0.15s;
 }
-.mesio-sec-cashier .tbl-chip:hover { border-color: #2a2f3d; }
-.mesio-sec-cashier .tbl-chip.active { background: rgba(29,158,117,0.12); border-color: rgba(29,158,117,0.3); color: #9FE1CB; }
+.mesio-sec-cashier .tbl-chip:hover { border-color: var(--border); }
+.mesio-sec-cashier .tbl-chip.active { background: rgba(29,158,117,0.12); border-color: rgba(29,158,117,0.3); color: var(--brand-dark); }
 .mesio-sec-cashier .tbl-chip-num { font-family: var(--font-display); font-weight: 700; font-size: 14px; }
 .mesio-sec-cashier .tbl-chip-sub { font-size: 10.5px; color: #6B7280; }
 .mesio-sec-cashier .tbl-chip.active .tbl-chip-sub { color: rgba(159,225,203,0.7); }
@@ -69,32 +69,32 @@
 /* Search row */
 .mesio-sec-cashier .search-row {
   padding: 12px 20px; display: flex; gap: 10px; align-items: center;
-  border-bottom: 1px solid #1a1d26; flex-shrink: 0;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
 .mesio-sec-cashier .search-dark {
   flex: 1; display: flex; align-items: center; gap: 10px;
-  background: #14171f; border: 1px solid #1a1d26; border-radius: 9px; padding: 8px 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 8px 14px;
 }
-.mesio-sec-cashier .search-dark:focus-within { border-color: #2a2f3d; }
+.mesio-sec-cashier .search-dark:focus-within { border-color: var(--border); }
 .mesio-sec-cashier .search-dark input {
   flex: 1; background: transparent; border: none; outline: none;
-  color: #E8EAEE; font-family: inherit; font-size: 14px;
+  color: var(--text); font-family: inherit; font-size: 14px;
 }
 .mesio-sec-cashier .search-dark input::placeholder { color: #4B5563; }
-.mesio-sec-cashier .kbd { font-family: var(--font-mono); font-size: 11px; color: #6B7280; background: #0a0c10; border: 1px solid #1a1d26; border-radius: 4px; padding: 1px 6px; }
+.mesio-sec-cashier .kbd { font-family: var(--font-mono); font-size: 11px; color: #6B7280; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
 
 /* Category bar */
 .mesio-sec-cashier .cat-bar {
   padding: 10px 20px; display: flex; gap: 6px; align-items: center;
-  border-bottom: 1px solid #1a1d26; overflow-x: auto; flex-shrink: 0;
+  border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0;
 }
 .mesio-sec-cashier .cat {
   padding: 5px 12px; border-radius: 7px; font-size: 12px; font-weight: 500;
-  color: #9CA3AF; cursor: pointer; background: transparent; border: 1px solid transparent;
+  color: var(--text-3); cursor: pointer; background: transparent; border: 1px solid transparent;
   white-space: nowrap; font-family: inherit; transition: background 0.1s, color 0.1s;
 }
-.mesio-sec-cashier .cat:hover { color: #E8EAEE; background: #14171f; }
-.mesio-sec-cashier .cat.active { color: #E8EAEE; background: #14171f; border-color: #1a1d26; }
+.mesio-sec-cashier .cat:hover { color: var(--text); background: var(--surface); }
+.mesio-sec-cashier .cat.active { color: var(--text); background: var(--surface); border-color: var(--border); }
 
 /* Product grid */
 .mesio-sec-cashier .products {
@@ -103,46 +103,46 @@
   gap: 10px; align-content: start;
 }
 .mesio-sec-cashier .products::-webkit-scrollbar { width: 6px; }
-.mesio-sec-cashier .products::-webkit-scrollbar-thumb { background: #1a1d26; border-radius: 3px; }
+.mesio-sec-cashier .products::-webkit-scrollbar-thumb { background: var(--surface); border-radius: 3px; }
 .mesio-sec-cashier .prd {
-  background: #14171f; border: 1px solid #1a1d26; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
   padding: 14px; cursor: pointer; display: flex; flex-direction: column;
   gap: 5px; position: relative; transition: transform 0.1s, border-color 0.12s, background 0.12s;
   min-height: 108px;
 }
-.mesio-sec-cashier .prd:hover { border-color: rgba(29,158,117,0.4); background: #181c25; transform: translateY(-1px); }
+.mesio-sec-cashier .prd:hover { border-color: rgba(29,158,117,0.4); background: var(--surface); transform: translateY(-1px); }
 .mesio-sec-cashier .prd-hint { position: absolute; top: 9px; right: 11px; font-family: var(--font-mono); font-size: 10px; color: #4B5563; }
 .mesio-sec-cashier .prd-cat { font-size: 10px; color: #6B7280; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
-.mesio-sec-cashier .prd-name { font-size: 13px; font-weight: 500; line-height: 1.3; color: #E8EAEE; margin-top: 2px; }
+.mesio-sec-cashier .prd-name { font-size: 13px; font-weight: 500; line-height: 1.3; color: var(--text); margin-top: 2px; }
 .mesio-sec-cashier .prd-price { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--brand); margin-top: auto; font-variant-numeric: tabular-nums; }
 .mesio-sec-cashier .prd-stock { font-size: 10px; color: #6B7280; }
 .mesio-sec-cashier .prd-stock.low { color: #F59E0B; }
 .mesio-sec-cashier .prd.out { opacity: 0.5; pointer-events: none; }
-.mesio-sec-cashier .prd.out::after { content: 'Sin stock'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #F5F6F8; background: rgba(10,12,16,0.7); border-radius: 10px; text-transform: uppercase; }
+.mesio-sec-cashier .prd.out::after { content: 'Sin stock'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--text); background: rgba(10,12,16,0.7); border-radius: 10px; text-transform: uppercase; }
 
 /* Tabs (Mesas / Pickup / Domicilios) */
 .mesio-sec-cashier .caja-tabs {
-  padding: 10px 20px 0; display: flex; gap: 4px; flex-shrink: 0; border-bottom: 1px solid #1a1d26;
+  padding: 10px 20px 0; display: flex; gap: 4px; flex-shrink: 0; border-bottom: 1px solid var(--border);
   overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; min-width: 0;
 }
 .mesio-sec-cashier .caja-tabs::-webkit-scrollbar { display: none; }
 .mesio-sec-cashier .seg-btn {
-  padding: 7px 14px; border-radius: 7px 7px 0 0; border: 1px solid #1a1d26;
-  border-bottom: none; background: #0e1117; color: #9CA3AF;
+  padding: 7px 14px; border-radius: 7px 7px 0 0; border: 1px solid var(--border);
+  border-bottom: none; background: var(--bg); color: var(--text-3);
   font-size: 12.5px; font-weight: 500; cursor: pointer; font-family: inherit;
   transition: background 0.1s, color 0.1s;
   flex-shrink: 0; white-space: nowrap;
 }
-.mesio-sec-cashier .seg-btn.active { background: #14171f; color: #E8EAEE; border-color: #2a2f3d; }
-.mesio-sec-cashier .seg-btn:hover:not(.active) { background: #11141b; color: #E8EAEE; }
+.mesio-sec-cashier .seg-btn.active { background: var(--surface); color: var(--text); border-color: var(--border); }
+.mesio-sec-cashier .seg-btn:hover:not(.active) { background: var(--bg); color: var(--text); }
 
 /* Cart sidebar */
 .mesio-sec-cashier .cart {
-  background: #0e1117; border-left: 1px solid #1a1d26;
+  background: var(--bg); border-left: 1px solid var(--border);
   display: flex; flex-direction: column; min-width: 0;
 }
 .mesio-sec-cashier .cart-head {
-  padding: 14px 18px; border-bottom: 1px solid #1a1d26;
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 10px; flex-shrink: 0;
 }
 .mesio-sec-cashier .cart-title { font-size: 13px; font-weight: 600; flex: 1; }
@@ -151,12 +151,12 @@
 /* Customer card */
 .mesio-sec-cashier .cust-tag {
   display: none; align-items: center; gap: 8px;
-  padding: 10px 18px; border-bottom: 1px solid #14171f; flex-shrink: 0;
+  padding: 10px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
 .mesio-sec-cashier .cust-avatar {
-  width: 28px; height: 28px; border-radius: 50%; background: #1a1d26;
+  width: 28px; height: 28px; border-radius: 50%; background: var(--surface);
   display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; color: #9FE1CB;
+  font-size: 11px; font-weight: 700; color: var(--brand-dark);
 }
 .mesio-sec-cashier .cust-name { font-size: 12.5px; font-weight: 500; }
 .mesio-sec-cashier .cust-sub { font-size: 10.5px; color: #6B7280; }
@@ -164,26 +164,26 @@
 /* Cart lines */
 .mesio-sec-cashier .cart-lines { flex: 1; overflow-y: auto; padding: 6px 0; }
 .mesio-sec-cashier .cart-lines::-webkit-scrollbar { width: 4px; }
-.mesio-sec-cashier .cart-lines::-webkit-scrollbar-thumb { background: #1a1d26; border-radius: 2px; }
-.mesio-sec-cashier .cart-line { display: grid; grid-template-columns: 28px 1fr auto; align-items: flex-start; gap: 10px; padding: 11px 18px; border-bottom: 1px solid #14171f; }
-.mesio-sec-cashier .cart-line:hover { background: #11141b; }
+.mesio-sec-cashier .cart-lines::-webkit-scrollbar-thumb { background: var(--surface); border-radius: 2px; }
+.mesio-sec-cashier .cart-line { display: grid; grid-template-columns: 28px 1fr auto; align-items: flex-start; gap: 10px; padding: 11px 18px; border-bottom: 1px solid var(--border); }
+.mesio-sec-cashier .cart-line:hover { background: var(--bg); }
 .mesio-sec-cashier .cart-qty { width: 26px; height: 26px; background: rgba(29,158,117,0.12); color: var(--brand); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 13px; }
-.mesio-sec-cashier .cart-name { font-size: 13px; font-weight: 500; color: #E8EAEE; line-height: 1.3; }
-.mesio-sec-cashier .cart-price { font-family: var(--font-display); font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; color: #E8EAEE; }
+.mesio-sec-cashier .cart-name { font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.3; }
+.mesio-sec-cashier .cart-price { font-family: var(--font-display); font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text); }
 .mesio-sec-cashier .cart-actions { display: flex; gap: 2px; margin-top: 3px; }
-.mesio-sec-cashier .cart-actions button { width: 22px; height: 22px; background: #14171f; border: none; border-radius: 4px; color: #9CA3AF; cursor: pointer; font-size: 13px; line-height: 1; font-family: inherit; }
-.mesio-sec-cashier .cart-actions button:hover { background: #1a1d26; color: #E8EAEE; }
+.mesio-sec-cashier .cart-actions button { width: 22px; height: 22px; background: var(--surface); border: none; border-radius: 4px; color: var(--text-3); cursor: pointer; font-size: 13px; line-height: 1; font-family: inherit; }
+.mesio-sec-cashier .cart-actions button:hover { background: var(--surface); color: var(--text); }
 
 /* Totals */
-.mesio-sec-cashier .cart-totals { border-top: 1px solid #1a1d26; padding: 12px 18px; flex-shrink: 0; }
-.mesio-sec-cashier .total-row { display: flex; justify-content: space-between; font-size: 12px; color: #9CA3AF; padding: 2px 0; }
-.mesio-sec-cashier .total-row.grand { font-size: 13.5px; color: #E8EAEE; font-weight: 600; padding-top: 9px; margin-top: 7px; border-top: 1px solid #1a1d26; }
+.mesio-sec-cashier .cart-totals { border-top: 1px solid var(--border); padding: 12px 18px; flex-shrink: 0; }
+.mesio-sec-cashier .total-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-3); padding: 2px 0; }
+.mesio-sec-cashier .total-row.grand { font-size: 13.5px; color: var(--text); font-weight: 600; padding-top: 9px; margin-top: 7px; border-top: 1px solid var(--border); }
 .mesio-sec-cashier .total-row.grand .t-amount { font-family: var(--font-display); font-weight: 700; font-size: 26px; color: var(--brand); letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
 
 /* Action buttons */
-.mesio-sec-cashier .cart-foot { padding: 12px 18px; border-top: 1px solid #1a1d26; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex-shrink: 0; }
-.mesio-sec-cashier .sec-btn { padding: 10px; border-radius: 8px; background: #14171f; border: 1px solid #1a1d26; color: #E8EAEE; font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 4px; transition: background 0.15s; }
-.mesio-sec-cashier .sec-btn:hover { background: #1a1d26; }
+.mesio-sec-cashier .cart-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex-shrink: 0; }
+.mesio-sec-cashier .sec-btn { padding: 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 4px; transition: background 0.15s; }
+.mesio-sec-cashier .sec-btn:hover { background: var(--surface); }
 .mesio-sec-cashier .pay-btn {
   grid-column: 1 / -1; padding: 14px; border-radius: 10px;
   background: var(--brand); color: #fff; border: none;
@@ -196,19 +196,19 @@
 
 /* Delivery / pickup list views */
 .mesio-sec-cashier .order-proposal {
-  background: #14171f; border: 1px solid #1a1d26; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
   padding: 14px; width: 240px; flex-shrink: 0;
 }
 
 /* QIM dish card */
 .mesio-sec-cashier .qim-cat-title { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#6B7280;padding:10px 4px 4px;margin-top:8px; }
-.mesio-sec-cashier .qim-dish { background:#14171f;border:1px solid #1a1d26;border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:border-color 0.12s; }
+.mesio-sec-cashier .qim-dish { background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:border-color 0.12s; }
 .mesio-sec-cashier .qim-dish:hover { border-color:rgba(29,158,117,0.4); }
-.mesio-sec-cashier .qim-dish-name { font-size:13px;color:#E8EAEE; }
+.mesio-sec-cashier .qim-dish-name { font-size:13px;color:var(--text); }
 .mesio-sec-cashier .qim-dish-price { font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--brand); }
-.mesio-sec-cashier .qim-cart-line { display:flex;justify-content:space-between;align-items:center;padding:9px 16px;border-bottom:1px solid #14171f;font-size:13px;color:#E8EAEE; }
-.mesio-sec-cashier .qim-qty-btn { width:24px;height:24px;background:#14171f;border:1px solid #1a1d26;color:#9CA3AF;border-radius:4px;cursor:pointer;font-family:inherit;font-size:14px; }
-.mesio-sec-cashier .qim-qty-btn:hover { background:#1a1d26;color:#E8EAEE; }
+.mesio-sec-cashier .qim-cart-line { display:flex;justify-content:space-between;align-items:center;padding:9px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--text); }
+.mesio-sec-cashier .qim-qty-btn { width:24px;height:24px;background:var(--surface);border:1px solid var(--border);color:var(--text-3);border-radius:4px;cursor:pointer;font-family:inherit;font-size:14px; }
+.mesio-sec-cashier .qim-qty-btn:hover { background:var(--surface);color:var(--text); }
 </style>
 <div class="mesio-sec-cashier">
 <div class="caja-v2">
@@ -219,7 +219,7 @@
     <!-- Mini topbar -->
     <div class="caja-topbar">
       <div class="caja-live"><div class="dot"></div>Turno abierto</div>
-      <div id="caja-staff-name" style="font-size:12.5px;color:#9CA3AF;"></div>
+      <div id="caja-staff-name" style="font-size:12.5px;color:var(--text-3);"></div>
       <div class="caja-clock" id="caja-clock"></div>
       <div class="caja-branch" id="caja-branch-name"></div>
     </div>
@@ -264,7 +264,7 @@
 
     <!-- Chats / comprobantes view -->
     <div data-view="chats" style="display:none;flex:1;overflow-y:auto;padding:16px;">
-      <div style="font-size:14px;font-weight:600;color:#E8EAEE;margin-bottom:4px;">Comprobantes de Pago</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">Comprobantes de Pago</div>
       <div style="font-size:12px;color:#6B7280;margin-bottom:14px;">Mesas con propuestas de pago pendientes de validar.</div>
       <div id="chats-list" style="display:flex;flex-wrap:wrap;gap:12px;">
         <div style="color:#6B7280;font-size:13px;">Cargando…</div>
@@ -273,7 +273,7 @@
 
     <!-- NPS recent feed view -->
     <div data-view="nps" style="display:none;flex:1;overflow-y:auto;padding:16px;">
-      <div style="font-size:14px;font-weight:600;color:#E8EAEE;margin-bottom:4px;">Calificaciones Recientes</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">Calificaciones Recientes</div>
       <div style="font-size:12px;color:#6B7280;margin-bottom:14px;">Últimas respuestas NPS de clientes (anonimizadas). Refresca cada 30s.</div>
       <div id="nps-list" style="display:flex;flex-direction:column;gap:10px;">
         <div style="color:#6B7280;font-size:13px;">Cargando…</div>
@@ -331,20 +331,20 @@
 </div><!-- /.mesio-sec-cashier -->
 
 <!-- ── Pay modal ── -->
-<div id="pay-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;align-items:center;justify-content:center;">
-  <div style="background:#1a1d26;border-radius:16px;width:480px;max-width:95vw;max-height:85vh;overflow-y:auto;padding:28px;box-shadow:0 24px 64px rgba(0,0,0,0.5);">
+<div id="pay-modal" style="display:none;position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:3000;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border-radius:16px;width:480px;max-width:95vw;max-height:85vh;overflow-y:auto;padding:28px;box-shadow:0 24px 64px rgba(0,0,0,0.5);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <h2 id="pay-modal-title" style="font-size:18px;font-weight:700;color:#E8EAEE;">💰 Cobrar Cuenta</h2>
-      <button id="btn-close-pay" style="background:none;border:1px solid #343b4d;color:#9CA3AF;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-family:inherit;">✕ Volver</button>
+      <h2 id="pay-modal-title" style="font-size:18px;font-weight:700;color:var(--text);">💰 Cobrar Cuenta</h2>
+      <button id="btn-close-pay" style="background:none;border:1px solid var(--border-strong);color:var(--text-3);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-family:inherit;">✕ Volver</button>
     </div>
-    <div style="background:#12161f;border:1px solid rgba(29,158,117,0.25);padding:16px;border-radius:12px;margin-bottom:20px;display:flex;justify-content:space-between;">
+    <div style="background:var(--bg);border:1px solid rgba(29,158,117,0.25);padding:16px;border-radius:12px;margin-bottom:20px;display:flex;justify-content:space-between;">
       <div>
-        <div style="font-size:11px;color:#9FE1CB;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Pendiente</div>
+        <div style="font-size:11px;color:var(--brand-dark);font-weight:700;text-transform:uppercase;letter-spacing:1px;">Pendiente</div>
         <div id="pay-pending-display" style="font-size:28px;font-weight:900;color:var(--brand);font-family:var(--font-display);margin-top:4px;">—</div>
       </div>
       <div style="text-align:right;">
-        <div style="font-size:11px;color:#9FE1CB;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Cambio</div>
-        <div id="pay-change-display" style="font-size:28px;font-weight:900;color:#4ADE9E;font-family:var(--font-display);margin-top:4px;">$0</div>
+        <div style="font-size:11px;color:var(--brand-dark);font-weight:700;text-transform:uppercase;letter-spacing:1px;">Cambio</div>
+        <div id="pay-change-display" style="font-size:28px;font-weight:900;color:var(--brand-dark);font-family:var(--font-display);margin-top:4px;">$0</div>
       </div>
     </div>
     <div id="pay-feedback" role="alert" aria-live="polite"></div>
@@ -353,25 +353,25 @@
 </div>
 
 <!-- ── Quick invoice screen ── -->
-<div id="quick-invoice-screen" style="display:none;position:fixed;inset:0;background:#111827;z-index:2000;flex-direction:column;">
-  <div style="padding:16px 20px;border-bottom:1px solid #1a1d26;display:flex;align-items:center;justify-content:space-between;background:#0a0c10;">
-    <div style="font-weight:700;font-size:15px;color:#E8EAEE;">🧾 Nueva Factura</div>
-    <button id="qim-close-btn" style="background:#14171f;border:1px solid #1a1d26;color:#9CA3AF;border-radius:8px;padding:8px 14px;cursor:pointer;font-family:inherit;font-size:13px;">✕ Cerrar</button>
+<div id="quick-invoice-screen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:2000;flex-direction:column;">
+  <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg);">
+    <div style="font-weight:700;font-size:15px;color:var(--text);">🧾 Nueva Factura</div>
+    <button id="qim-close-btn" style="background:var(--surface);border:1px solid var(--border);color:var(--text-3);border-radius:8px;padding:8px 14px;cursor:pointer;font-family:inherit;font-size:13px;">✕ Cerrar</button>
   </div>
   <div style="display:flex;flex:1;min-height:0;">
     <div style="flex:1;overflow-y:auto;padding:16px;" id="qim-menu-area">
       <div style="color:#6B7280;font-size:13px;">Cargando menú…</div>
     </div>
-    <div style="width:340px;border-left:1px solid #1a1d26;display:flex;flex-direction:column;background:#0e1117;">
-      <div style="padding:14px 16px;font-weight:600;font-size:13px;border-bottom:1px solid #1a1d26;color:#E8EAEE;">🧾 Factura</div>
+    <div style="width:340px;border-left:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg);">
+      <div style="padding:14px 16px;font-weight:600;font-size:13px;border-bottom:1px solid var(--border);color:var(--text);">🧾 Factura</div>
       <div style="flex:1;overflow-y:auto;padding:8px 0;" id="qim-cart-items">
         <div style="padding:20px;text-align:center;color:#6B7280;font-size:13px;">Toca un producto para agregarlo.</div>
       </div>
-      <div style="padding:14px 16px;border-top:1px solid #1a1d26;">
-        <div style="display:flex;justify-content:space-between;font-size:13px;color:#9CA3AF;margin-bottom:4px;">
+      <div style="padding:14px 16px;border-top:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-3);margin-bottom:4px;">
           <span>Subtotal</span><span id="qim-subtotal">—</span>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;color:#E8EAEE;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;color:var(--text);margin-bottom:12px;">
           <span>Total</span><span id="qim-total">—</span>
         </div>
         <button id="qim-gen-btn" style="width:100%;background:var(--brand);color:#fff;border:none;border-radius:9px;padding:13px;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit;">🧾 Generar Factura</button>
@@ -629,7 +629,7 @@ function _tableStateCashier(t) {
 }
 function _tableBorderColor(t) {
   if (t.has_waiter_alert) return '#EF4444';
-  if (!(t.session_active || t.bot_active)) return '#1a1d26';
+  if (!(t.session_active || t.bot_active)) return 'var(--border)';
   if (t.has_open_check) return 'rgba(167,139,250,.5)';
   return 'rgba(29,158,117,.5)';
 }
@@ -685,7 +685,7 @@ function _renderTableGrid() {
       tile.className = 'mesa-tile' + (cls !== 'free' ? ' t-' + (cls === 'alert' ? 'alert' : cls === 'billing' ? 'billing' : 'active') : '');
 
       const name = document.createElement('div');
-      name.style.cssText = 'font-family:var(--font-display);font-weight:700;font-size:20px;color:#E8EAEE;';
+      name.style.cssText = 'font-family:var(--font-display);font-weight:700;font-size:20px;color:var(--text);';
       name.textContent = t.name || t.table_name || String(t.id);
 
       const statusEl = document.createElement('div');
@@ -729,7 +729,7 @@ function _renderTableChips() {
 
   const backBtn = document.createElement('button');
   backBtn.className = 'm-btn m-btn--ghost m-btn--sm';
-  backBtn.style.cssText = 'border-color:#1a1d26;color:#9CA3AF;background:#14171f;font-size:11px;flex-shrink:0;white-space:nowrap;';
+  backBtn.style.cssText = 'border-color:var(--border);color:var(--text-3);background:var(--surface);font-size:11px;flex-shrink:0;white-space:nowrap;';
   backBtn.textContent = '⬅ Mesas';
   backBtn.addEventListener('click', () => {
     _cart = [];
@@ -775,6 +775,10 @@ function selectTable(idx) {
   if (t) _loadActiveOrderForTable(t).catch(e => console.warn('caja: load table order failed', e));
 }
 
+// Rounds that are no longer on the bill. table_orders cancels as 'cancelled'
+// (English, 0097-era) — the old list only knew 'cancelado'.
+const _DEAD_TABLE_ORDER_STATUSES = ['factura_entregada', 'cancelado', 'cancelled', 'closed', 'invoiced'];
+
 async function _loadActiveOrderForTable(table) {
   if (!table || !table.id) return;
   try {
@@ -783,21 +787,39 @@ async function _loadActiveOrderForTable(table) {
     if (!res.ok) return;
     const data = await res.json();
     const all = (data.orders || []);
-    const active = all.find(o => o.base_order_id && !['factura_entregada','cancelado','closed'].includes(o.status));
-    if (!active) return;
-    const items = Array.isArray(active.items) ? active.items : [];
-    if (!items.length) return;
-    // Populate _cart from the existing order items so the order panel
-    // and totals reflect the real table state. Caja can still tweak +/−
-    // if they want to add extras to the current order before charging.
-    _cart = items.map((it, i) => ({
-      id: it.id || ('mesa-' + i),
-      name: it.name || '—',
-      price: Number(it.price || it.unit_price || 0),
-      qty: Number(it.quantity || it.qty || 1),
-      notes: it.notes || '',
-      _from_mesa: true,
-    }));
+    const live = all.filter(o => o.base_order_id && !_DEAD_TABLE_ORDER_STATUSES.includes(o.status));
+    if (!live.length) return;
+    // /api/table-orders lists oldest first: the table's current bill is the newest group.
+    const active = live[live.length - 1];
+    // A table's bill is EVERY round under its base_order_id (a second
+    // "Enviar pedido", the bar ticket) — not just one row. Showing one row
+    // made the comanda say $50.000 while the bill said $100.000.
+    const rounds = live.filter(o => o.base_order_id === active.base_order_id);
+    const merged = [];
+    const byKey = {};
+    rounds.forEach(function (round) {
+      (Array.isArray(round.items) ? round.items : []).forEach(function (it) {
+        const price = Number(it.price || it.unit_price || 0);
+        const notes = it.notes || it.note || '';
+        const key = (it.name || '') + '|' + price + '|' + notes;
+        const qty = Number(it.quantity || it.qty || 1);
+        if (byKey[key]) { byKey[key].qty += qty; return; }
+        byKey[key] = {
+          id: it.id || ('mesa-' + merged.length),
+          name: it.name || '—',
+          price: price,
+          qty: qty,
+          notes: notes,
+          _from_mesa: true,
+        };
+        merged.push(byKey[key]);
+      });
+    });
+    if (!merged.length) return;
+    // Populate _cart from the table's items so the order panel and totals
+    // reflect the real table state. Caja can still tweak +/− if they want
+    // to add extras to the current order before charging.
+    _cart = merged;
     _selectedTableOrder = {
       base_order_id: active.base_order_id,
       table_name: table.name || `Mesa ${table.id}`,
@@ -961,12 +983,13 @@ async function openPayModal() {
   let baseOrderId = _selectedTableOrder?.base_order_id;
   if (!baseOrderId) {
     try {
-      const res = await fetch(`/api/table-orders?table_id=${encodeURIComponent(table.id)}&status=recibido,en_preparacion,listo,entregado`, { headers: mesioHeaders() });
+      // No status param: the API matches it exactly, so a comma list returned nothing.
+      const res = await fetch(`/api/table-orders?table_id=${encodeURIComponent(table.id)}`, { headers: mesioHeaders() });
       if (res.ok) {
         const data = await res.json();
         const orders = data.orders || [];
-        const active = orders.find(o => o.base_order_id && !['factura_entregada','cancelado'].includes(o.status));
-        if (active) baseOrderId = active.base_order_id;
+        const live = orders.filter(o => o.base_order_id && !_DEAD_TABLE_ORDER_STATUSES.includes(o.status));
+        if (live.length) baseOrderId = live[live.length - 1].base_order_id;
       }
     } catch (_) {}
   }
@@ -996,18 +1019,18 @@ function _openCheckModal(baseOrderId, tableName) {
 function _buildCheckModal() {
   const modal = document.createElement('div');
   modal.id = 'check-modal';
-  modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:3100;align-items:center;justify-content:center;';
+  modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:3100;align-items:center;justify-content:center;';
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
   modal.setAttribute('aria-labelledby', 'cm-title');
   modal.innerHTML = `
-    <div style="background:#1a1d26;border-radius:16px;width:540px;max-width:96vw;max-height:88vh;overflow-y:auto;padding:0;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
-      <div style="padding:20px 24px;border-bottom:1px solid #252836;display:flex;align-items:center;justify-content:space-between;">
+    <div style="background:var(--surface);border-radius:16px;width:540px;max-width:96vw;max-height:88vh;overflow-y:auto;padding:0;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+      <div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
         <div>
-          <div id="cm-title" style="font-size:16px;font-weight:700;color:#E8EAEE;"></div>
-          <div id="cm-subtitle" style="font-size:12px;color:#9CA3AF;margin-top:2px;"></div>
+          <div id="cm-title" style="font-size:16px;font-weight:700;color:var(--text);"></div>
+          <div id="cm-subtitle" style="font-size:12px;color:var(--text-3);margin-top:2px;"></div>
         </div>
-        <button id="cm-close" style="background:none;border:1px solid #343b4d;color:#9CA3AF;border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;font-size:13px;">✕</button>
+        <button id="cm-close" style="background:none;border:1px solid var(--border-strong);color:var(--text-3);border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;font-size:13px;">✕</button>
       </div>
       <div id="cm-body" style="padding:20px 24px;"></div>
     </div>`;
@@ -1037,10 +1060,10 @@ function _renderCheckModal(baseOrderId, tableName) {
     // No checks yet — show split options + direct pay
     body.innerHTML = `
       <div style="margin-bottom:20px;">
-        <div style="font-size:13px;color:#9CA3AF;margin-bottom:14px;">La mesa no tiene checks divididos. Puedes cobrar el total directamente o dividir la cuenta.</div>
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:14px;">La mesa no tiene checks divididos. Puedes cobrar el total directamente o dividir la cuenta.</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <button id="cm-pay-full" style="flex:1;padding:12px 16px;background:var(--brand);color:#fff;border:none;border-radius:9px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">Cobrar total completo</button>
-          <button id="cm-split" style="flex:1;padding:12px 16px;background:#14171f;border:1px solid #2a2f3d;color:#E8EAEE;border-radius:9px;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit;">Dividir cuenta</button>
+          <button id="cm-split" style="flex:1;padding:12px 16px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:9px;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit;">Dividir cuenta</button>
         </div>
       </div>`;
     body.querySelector('#cm-pay-full')?.addEventListener('click', () => openPayCheckForm(baseOrderId, null, remaining || totalAll));
@@ -1053,15 +1076,15 @@ function _renderCheckModal(baseOrderId, tableName) {
   _checks.forEach(chk => {
     const isPaid = chk.status !== 'open';
     const statusLabel = isPaid
-      ? `<span style="font-size:10px;background:rgba(29,158,117,0.15);color:#4ADE9E;padding:2px 7px;border-radius:4px;font-weight:600;">Cobrado</span>`
+      ? `<span style="font-size:10px;background:rgba(29,158,117,0.15);color:var(--brand-dark);padding:2px 7px;border-radius:4px;font-weight:600;">Cobrado</span>`
       : `<span style="font-size:10px;background:rgba(245,158,11,0.15);color:#F59E0B;padding:2px 7px;border-radius:4px;font-weight:600;">Pendiente</span>`;
     const items = Array.isArray(chk.items) ? chk.items : (chk.items ? JSON.parse(chk.items) : []);
     const grossTotal = Number(chk.total || 0);
     const totalDisplay = `<div style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--brand);">${fmt(grossTotal)}</div>`;
     html += `
-      <div style="background:#12161f;border:1px solid #252836;border-radius:10px;padding:14px;margin-bottom:10px;">
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <div style="font-size:13px;font-weight:600;color:#E8EAEE;">Cuenta #${_esc(String(chk.check_number || chk.id))}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--text);">Cuenta #${_esc(String(chk.check_number || chk.id))}</div>
           <div style="display:flex;align-items:center;gap:8px;">${statusLabel}${totalDisplay}</div>
         </div>
         <div style="font-size:11.5px;color:#6B7280;margin-bottom:10px;">${items.map(it => `${_esc(String(it.qty || 1))}× ${_esc(it.name)}`).join(' · ')}</div>
@@ -1070,10 +1093,10 @@ function _renderCheckModal(baseOrderId, tableName) {
   });
 
   if (open.length === 0 && paid.length > 0) {
-    html += `<div style="text-align:center;padding:16px;color:#4ADE9E;font-weight:600;">Todos los checks cobrados</div>`;
+    html += `<div style="text-align:center;padding:16px;color:var(--brand-dark);font-weight:600;">Todos los checks cobrados</div>`;
   }
 
-  html += `<div style="margin-top:4px;"><button id="cm-split-btn" style="width:100%;padding:10px;background:#14171f;border:1px solid #2a2f3d;color:#9CA3AF;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;">Redistribuir / volver a dividir</button></div>`;
+  html += `<div style="margin-top:4px;"><button id="cm-split-btn" style="width:100%;padding:10px;background:var(--surface);border:1px solid var(--border);color:var(--text-3);border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;">Redistribuir / volver a dividir</button></div>`;
 
   body.innerHTML = html;
   body.querySelectorAll('.cm-pay-check').forEach(btn => {
@@ -1108,19 +1131,19 @@ function openPayCheckForm(baseOrderId, checkId, checkTotal) {
 function _buildPayCheckModal() {
   const modal = document.createElement('div');
   modal.id = 'pay-check-modal';
-  modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:3200;align-items:center;justify-content:center;padding:12px;';
+  modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:3200;align-items:center;justify-content:center;padding:12px;';
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
   modal.setAttribute('aria-labelledby', 'pcm-title');
   modal.innerHTML = `
-    <div style="background:#1a1d26;border-radius:16px;width:100%;max-width:920px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
-      <div style="padding:18px 24px;border-bottom:1px solid #252836;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
-        <div id="pcm-title" style="font-size:16px;font-weight:700;color:#E8EAEE;">Cobrar Check</div>
-        <button id="pcm-close" style="background:none;border:1px solid #343b4d;color:#9CA3AF;border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;font-size:13px;">✕</button>
+    <div style="background:var(--surface);border-radius:16px;width:100%;max-width:920px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+      <div style="padding:18px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+        <div id="pcm-title" style="font-size:16px;font-weight:700;color:var(--text);">Cobrar Check</div>
+        <button id="pcm-close" style="background:none;border:1px solid var(--border-strong);color:var(--text-3);border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;font-size:13px;">✕</button>
       </div>
       <div style="display:flex;flex:1;min-height:0;overflow:hidden;">
-        <div id="pcm-body" style="flex:1;min-width:0;padding:20px 24px;overflow-y:auto;border-right:1px solid #252836;"></div>
-        <div id="pcm-invoice-preview" style="width:300px;flex-shrink:0;padding:20px 18px;overflow-y:auto;background:#0e1016;"></div>
+        <div id="pcm-body" style="flex:1;min-width:0;padding:20px 24px;overflow-y:auto;border-right:1px solid var(--border);"></div>
+        <div id="pcm-invoice-preview" style="width:300px;flex-shrink:0;padding:20px 18px;overflow-y:auto;background:var(--bg);"></div>
       </div>
     </div>`;
   modal.querySelector('#pcm-close').addEventListener('click', () => { modal.style.display = 'none'; });
@@ -1137,54 +1160,54 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
   const tipPresets = [0, 10, 15, 18, 20];
 
   body.innerHTML = `
-    <div style="background:#12161f;border:1px solid rgba(29,158,117,0.25);padding:14px 18px;border-radius:10px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;">
+    <div style="background:var(--bg);border:1px solid rgba(29,158,117,0.25);padding:14px 18px;border-radius:10px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;">
       <div>
-        <div style="font-size:11px;color:#9FE1CB;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Total del check</div>
+        <div style="font-size:11px;color:var(--brand-dark);font-weight:700;text-transform:uppercase;letter-spacing:1px;">Total del check</div>
         <div id="pcm-check-total" style="font-size:28px;font-weight:900;color:var(--brand);font-family:var(--font-display);margin-top:4px;">${fmt(checkTotal)}</div>
       </div>
       <div style="text-align:right;">
-        <div style="font-size:11px;color:#9FE1CB;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Cambio</div>
-        <div id="pcm-change" style="font-size:22px;font-weight:900;color:#4ADE9E;font-family:var(--font-display);margin-top:4px;">$0</div>
+        <div style="font-size:11px;color:var(--brand-dark);font-weight:700;text-transform:uppercase;letter-spacing:1px;">Cambio</div>
+        <div id="pcm-change" style="font-size:22px;font-weight:900;color:var(--brand-dark);font-family:var(--font-display);margin-top:4px;">$0</div>
       </div>
     </div>
 
     <div style="margin-bottom:16px;">
-      <div style="font-size:12px;color:#9CA3AF;margin-bottom:8px;font-weight:600;">Propina</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:8px;font-weight:600;">Propina</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;" id="pcm-tip-chips">
-        ${tipPresets.map(p => `<button class="pcm-tip-preset" data-pct="${p}" style="padding:6px 12px;border-radius:7px;border:1px solid #2a2f3d;background:#14171f;color:#9CA3AF;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">${p === 0 ? 'Sin propina' : p + '%'}</button>`).join('')}
-        <button class="pcm-tip-preset" data-pct="custom" style="padding:6px 12px;border-radius:7px;border:1px solid #2a2f3d;background:#14171f;color:#9CA3AF;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Personalizado</button>
+        ${tipPresets.map(p => `<button class="pcm-tip-preset" data-pct="${p}" style="padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text-3);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">${p === 0 ? 'Sin propina' : p + '%'}</button>`).join('')}
+        <button class="pcm-tip-preset" data-pct="custom" style="padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text-3);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Personalizado</button>
       </div>
       <div id="pcm-tip-custom-row" style="display:none;margin-bottom:8px;">
-        <input id="pcm-tip-custom-input" type="number" min="0" placeholder="Valor propina" style="width:100%;background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 12px;color:#E8EAEE;font-family:inherit;font-size:13px;outline:none;">
+        <input id="pcm-tip-custom-input" type="number" min="0" placeholder="Valor propina" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:inherit;font-size:13px;outline:none;">
       </div>
-      <div id="pcm-tip-display" style="font-size:12px;color:#9FE1CB;font-weight:600;min-height:18px;"></div>
-      <div id="pcm-tip-split-preview" style="margin-top:8px;font-size:11px;color:#9CA3AF;line-height:1.4;min-height:0;"></div>
+      <div id="pcm-tip-display" style="font-size:12px;color:var(--brand-dark);font-weight:600;min-height:18px;"></div>
+      <div id="pcm-tip-split-preview" style="margin-top:8px;font-size:11px;color:var(--text-3);line-height:1.4;min-height:0;"></div>
     </div>
 
     <div style="margin-bottom:16px;">
-      <div style="font-size:12px;color:#9CA3AF;margin-bottom:8px;font-weight:600;">Método de pago</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:8px;font-weight:600;">Método de pago</div>
       <div id="pcm-payments-list" style="display:flex;flex-direction:column;gap:8px;">
         ${_paymentRowHtml(0)}
       </div>
-      <button id="pcm-add-method" style="margin-top:8px;padding:7px 12px;background:#14171f;border:1px solid #2a2f3d;color:#9CA3AF;border-radius:7px;font-size:12px;cursor:pointer;font-family:inherit;">+ Agregar método</button>
+      <button id="pcm-add-method" style="margin-top:8px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);color:var(--text-3);border-radius:7px;font-size:12px;cursor:pointer;font-family:inherit;">+ Agregar método</button>
     </div>
 
     <div style="margin-bottom:16px;">
-      <div style="font-size:12px;color:#9CA3AF;margin-bottom:8px;font-weight:600;">Cargo de servicio (opcional)</div>
-      <input id="pcm-service-charge" type="number" min="0" placeholder="0" style="width:100%;background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 12px;color:#E8EAEE;font-family:inherit;font-size:13px;outline:none;">
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:8px;font-weight:600;">Cargo de servicio (opcional)</div>
+      <input id="pcm-service-charge" type="number" min="0" placeholder="0" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:inherit;font-size:13px;outline:none;">
     </div>
 
     ${mesioFeatureEnabled('dian_enabled') ? `
     <div style="margin-bottom:20px;">
-      <div style="font-size:12px;color:#9CA3AF;margin-bottom:8px;font-weight:600;">Datos del cliente (opcional, para factura)</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:8px;font-weight:600;">Datos del cliente (opcional, para factura)</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <input id="pcm-cust-name" type="text" placeholder="Nombre cliente" value="Consumidor Final" style="background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 12px;color:#E8EAEE;font-family:inherit;font-size:12px;outline:none;">
-        <input id="pcm-cust-nit" type="text" placeholder="NIT / Cédula" value="222222222" style="background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 12px;color:#E8EAEE;font-family:inherit;font-size:12px;outline:none;">
+        <input id="pcm-cust-name" type="text" placeholder="Nombre cliente" value="Consumidor Final" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:inherit;font-size:12px;outline:none;">
+        <input id="pcm-cust-nit" type="text" placeholder="NIT / Cédula" value="222222222" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:inherit;font-size:12px;outline:none;">
       </div>
     </div>` : ''}
 
     <button id="pcm-submit" style="width:100%;padding:14px;background:var(--brand);color:#fff;border:none;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer;font-family:inherit;">Cobrar</button>
-    <div id="pcm-error" style="margin-top:10px;font-size:12px;color:#F87171;text-align:center;min-height:18px;"></div>`;
+    <div id="pcm-error" style="margin-top:10px;font-size:12px;color:#dc2626;text-align:center;min-height:18px;"></div>`;
 
   // Tip chip logic
   let _tipPct = 0;
@@ -1226,29 +1249,29 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
           const price = it.price || it.unit_price || 0;
           const sub   = qty * price;
           return `<tr>
-            <td style="padding:3px 0;color:#9CA3AF;font-size:11px;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(it.name)}</td>
+            <td style="padding:3px 0;color:var(--text-3);font-size:11px;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(it.name)}</td>
             <td style="padding:3px 0;color:#6B7280;font-size:11px;text-align:center;">${qty}</td>
-            <td style="padding:3px 0;color:#E8EAEE;font-size:11px;text-align:right;">${fmt(sub)}</td>
+            <td style="padding:3px 0;color:var(--text);font-size:11px;text-align:right;">${fmt(sub)}</td>
           </tr>`;
         }).join('')
       : `<tr><td colspan="3" style="color:#4B5563;font-size:11px;padding:6px 0;text-align:center;">sin ítems</td></tr>`;
 
     const payHtml = payMethods.length
-      ? payMethods.map(p => `<div style="display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF;margin-top:3px;"><span>${labelMap[p.method] || p.method}</span><span>${fmt(p.amount)}</span></div>`).join('')
+      ? payMethods.map(p => `<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-top:3px;"><span>${labelMap[p.method] || p.method}</span><span>${fmt(p.amount)}</span></div>`).join('')
       : `<div style="font-size:11px;color:#4B5563;">—</div>`;
 
     preview.innerHTML = `
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#4ADE9E;margin-bottom:14px;">Vista previa · Factura</div>
-      <div style="background:#14171f;border-radius:10px;padding:16px;font-family:monospace,monospace;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--brand-dark);margin-bottom:14px;">Vista previa · Factura</div>
+      <div style="background:var(--surface);border-radius:10px;padding:16px;font-family:monospace,monospace;">
         <div style="text-align:center;margin-bottom:12px;">
-          <div style="font-size:13px;font-weight:700;color:#E8EAEE;">${_esc(restName)}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--text);">${_esc(restName)}</div>
           <div style="font-size:10px;color:#6B7280;margin-top:2px;">${_esc(tableName)}</div>
           <div style="font-size:10px;color:#6B7280;">${dateStr}</div>
         </div>
-        <div style="border-top:1px dashed #252836;margin:10px 0;"></div>
-        <div style="font-size:10px;color:#9CA3AF;margin-bottom:4px;">Cliente: <span style="color:#E8EAEE;">${_esc(custName)}</span></div>
-        <div style="font-size:10px;color:#9CA3AF;margin-bottom:10px;">NIT/CC: <span style="color:#E8EAEE;">${_esc(custNit)}</span></div>
-        <div style="border-top:1px dashed #252836;margin:8px 0;"></div>
+        <div style="border-top:1px dashed var(--border);margin:10px 0;"></div>
+        <div style="font-size:10px;color:var(--text-3);margin-bottom:4px;">Cliente: <span style="color:var(--text);">${_esc(custName)}</span></div>
+        <div style="font-size:10px;color:var(--text-3);margin-bottom:10px;">NIT/CC: <span style="color:var(--text);">${_esc(custNit)}</span></div>
+        <div style="border-top:1px dashed var(--border);margin:8px 0;"></div>
         <table style="width:100%;border-collapse:collapse;margin-bottom:4px;">
           <thead><tr>
             <th style="font-size:10px;color:#4B5563;text-align:left;padding-bottom:4px;font-weight:600;">Ítem</th>
@@ -1257,12 +1280,12 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
           </tr></thead>
           <tbody>${itemsHtml}</tbody>
         </table>
-        <div style="border-top:1px dashed #252836;margin:8px 0;"></div>
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF;margin-bottom:3px;"><span>Subtotal</span><span>${fmt(checkTotal)}</span></div>
-        ${svc > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF;margin-bottom:3px;"><span>Cargo servicio</span><span>${fmt(svc)}</span></div>` : ''}
-        ${tip > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF;margin-bottom:3px;"><span>Propina</span><span>${fmt(tip)}</span></div>` : ''}
-        <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:#4ADE9E;margin-top:6px;border-top:1px solid #252836;padding-top:6px;"><span>TOTAL</span><span>${fmt(grand)}</span></div>
-        <div style="border-top:1px dashed #252836;margin:10px 0;"></div>
+        <div style="border-top:1px dashed var(--border);margin:8px 0;"></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:3px;"><span>Subtotal</span><span>${fmt(checkTotal)}</span></div>
+        ${svc > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:3px;"><span>Cargo servicio</span><span>${fmt(svc)}</span></div>` : ''}
+        ${tip > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:3px;"><span>Propina</span><span>${fmt(tip)}</span></div>` : ''}
+        <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:var(--brand-dark);margin-top:6px;border-top:1px solid var(--border);padding-top:6px;"><span>TOTAL</span><span>${fmt(grand)}</span></div>
+        <div style="border-top:1px dashed var(--border);margin:10px 0;"></div>
         <div style="font-size:10px;color:#6B7280;margin-bottom:4px;font-weight:600;">PAGO</div>
         ${payHtml}
       </div>`;
@@ -1353,7 +1376,7 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
     list.style.gap = '4px 10px';
     splits.forEach((s, idx) => {
       const span = document.createElement('span');
-      span.style.color = '#9FE1CB';
+      span.style.color = 'var(--brand-dark)';
       const role = s.role ? ` (${s.role})` : '';
       // textContent assigns each piece safely
       span.textContent = `${s.name || '—'}${role}: ${fmt(Number(s.amount || 0))}`;
@@ -1377,8 +1400,8 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
 
   body.querySelectorAll('.pcm-tip-preset').forEach(btn => {
     btn.addEventListener('click', () => {
-      body.querySelectorAll('.pcm-tip-preset').forEach(b => { b.style.background = '#14171f'; b.style.color = '#9CA3AF'; });
-      btn.style.background = 'rgba(29,158,117,0.2)'; btn.style.color = '#9FE1CB';
+      body.querySelectorAll('.pcm-tip-preset').forEach(b => { b.style.background = 'var(--surface)'; b.style.color = 'var(--text-3)'; });
+      btn.style.background = 'rgba(29,158,117,0.2)'; btn.style.color = 'var(--brand-dark)';
       const customRow = document.getElementById('pcm-tip-custom-row');
       if (btn.dataset.pct === 'custom') {
         _tipMode = 'custom';
@@ -1412,6 +1435,22 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
 
   // Wire existing row change listeners
   body.querySelectorAll('.pcm-pay-amount').forEach(inp => inp.addEventListener('input', _updateChange));
+
+  // Most checks are paid in full with one method: start from the check's
+  // total and the method the diner announced from the chat, if any. The
+  // cashier still changes either before charging.
+  const firstRow = body.querySelector('.pcm-pay-row');
+  if (firstRow) {
+    const amountEl = firstRow.querySelector('.pcm-pay-amount');
+    if (amountEl && !amountEl.value && checkTotal) amountEl.value = String(Math.round(Number(checkTotal)));
+    const chk = (_checks || []).find(c => String(c.id) === String(checkId));
+    let proposed = chk && chk.proposed_payments;
+    if (typeof proposed === 'string') { try { proposed = JSON.parse(proposed); } catch (_) { proposed = null; } }
+    const announced = Array.isArray(proposed) && proposed[0] && proposed[0].method;
+    const methodEl = firstRow.querySelector('.pcm-pay-method');
+    if (announced && methodEl && [...methodEl.options].some(o => o.value === announced)) methodEl.value = announced;
+    _updateChange();
+  }
 
   // Customer info updates preview in real-time
   document.getElementById('pcm-cust-name')?.addEventListener('input', _renderInvoicePreview);
@@ -1492,6 +1531,12 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
       loadOpenTables();
       _checks = [];
       _selectedTableOrder = null;
+      // The comanda kept showing what was just paid. Clear it and reload what
+      // is still unpaid on this table (nothing, unless the bill was split).
+      _cart = [];
+      _renderCart();
+      const paidTable = _activeTables[_activeTableIdx];
+      if (paidTable) _loadActiveOrderForTable(paidTable).catch(() => {});
     } catch (err) {
       if (errEl) errEl.textContent = 'Error de red: ' + err.message;
       if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Cobrar'; }
@@ -1504,14 +1549,15 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
 
 function _paymentRowHtml(idx) {
   return `<div class="pcm-pay-row" style="display:grid;grid-template-columns:1fr 1fr 28px;gap:8px;align-items:center;">
-    <select class="pcm-pay-method" style="background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 10px;color:#E8EAEE;font-family:inherit;font-size:12px;outline:none;">
+    <select class="pcm-pay-method" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text);font-family:inherit;font-size:12px;outline:none;">
       <option value="efectivo">Efectivo</option>
       <option value="tarjeta">Tarjeta</option>
       <option value="transferencia">Transferencia</option>
       <option value="nequi">Nequi</option>
+      <option value="bancolombia">Bancolombia</option>
       <option value="daviplata">Daviplata</option>
     </select>
-    <input class="pcm-pay-amount" type="number" min="0" placeholder="Monto" style="background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 10px;color:#E8EAEE;font-family:inherit;font-size:13px;outline:none;">
+    <input class="pcm-pay-amount" type="number" min="0" placeholder="Monto" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text);font-family:inherit;font-size:13px;outline:none;">
     <button class="pcm-pay-remove" style="background:none;border:none;color:#6B7280;cursor:pointer;font-size:16px;line-height:1;" title="Quitar">✕</button>
   </div>`;
 }
@@ -1539,15 +1585,15 @@ function openSplitModal(baseOrderId, tableName) {
 function _buildSplitModal() {
   const modal = document.createElement('div');
   modal.id = 'split-modal';
-  modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:3300;align-items:center;justify-content:center;';
+  modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:3300;align-items:center;justify-content:center;';
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
   modal.setAttribute('aria-labelledby', 'sm-title');
   modal.innerHTML = `
-    <div style="background:#1a1d26;border-radius:16px;width:500px;max-width:96vw;max-height:90vh;overflow-y:auto;padding:0;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
-      <div style="padding:20px 24px;border-bottom:1px solid #252836;display:flex;align-items:center;justify-content:space-between;">
-        <div id="sm-title" style="font-size:16px;font-weight:700;color:#E8EAEE;">Dividir cuenta</div>
-        <button id="sm-close" style="background:none;border:1px solid #343b4d;color:#9CA3AF;border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;font-size:13px;">✕</button>
+    <div style="background:var(--surface);border-radius:16px;width:500px;max-width:96vw;max-height:90vh;overflow-y:auto;padding:0;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+      <div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+        <div id="sm-title" style="font-size:16px;font-weight:700;color:var(--text);">Dividir cuenta</div>
+        <button id="sm-close" style="background:none;border:1px solid var(--border-strong);color:var(--text-3);border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;font-size:13px;">✕</button>
       </div>
       <div id="sm-body" style="padding:20px 24px;"></div>
     </div>`;
@@ -1563,23 +1609,23 @@ function _renderSplitModal(baseOrderId, tableName) {
 
   body.innerHTML = `
     <div style="margin-bottom:16px;">
-      <div style="font-size:12px;color:#9CA3AF;margin-bottom:8px;font-weight:600;">División igual entre personas</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:8px;font-weight:600;">División igual entre personas</div>
       <div style="display:flex;gap:8px;align-items:center;">
-        <input id="sm-n-people" type="number" min="2" max="20" value="2" style="width:80px;background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 12px;color:#E8EAEE;font-family:inherit;font-size:13px;outline:none;">
-        <span style="color:#9CA3AF;font-size:13px;">personas</span>
+        <input id="sm-n-people" type="number" min="2" max="20" value="2" style="width:80px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:inherit;font-size:13px;outline:none;">
+        <span style="color:var(--text-3);font-size:13px;">personas</span>
         <button id="sm-equal-split" style="padding:9px 16px;background:var(--brand);color:#fff;border:none;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit;">Dividir igual</button>
       </div>
     </div>
-    <div style="height:1px;background:#252836;margin:16px 0;"></div>
-    <div style="font-size:12px;color:#9CA3AF;margin-bottom:4px;font-weight:600;">O crea los checks manualmente</div>
+    <div style="height:1px;background:var(--surface-hover);margin:16px 0;"></div>
+    <div style="font-size:12px;color:var(--text-3);margin-bottom:4px;font-weight:600;">O crea los checks manualmente</div>
     <div style="font-size:11px;color:#6B7280;margin-bottom:12px;">Asigna cada plato a un check. Todos los ítems deben quedar asignados.</div>
-    <div id="sm-ticket-items" style="font-size:12px;color:#9FE1CB;margin-bottom:12px;padding:10px 12px;background:#12161f;border-radius:8px;">Cargando ítems del ticket…</div>
+    <div id="sm-ticket-items" style="font-size:12px;color:var(--brand-dark);margin-bottom:12px;padding:10px 12px;background:var(--bg);border-radius:8px;">Cargando ítems del ticket…</div>
     <div id="sm-checks-list" style="margin-bottom:12px;"></div>
     <div style="display:flex;gap:8px;">
-      <button id="sm-add-check" style="padding:8px 14px;background:#14171f;border:1px solid #2a2f3d;color:#E8EAEE;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;">+ Agregar check</button>
+      <button id="sm-add-check" style="padding:8px 14px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;">+ Agregar check</button>
       <button id="sm-submit-split" style="flex:1;padding:10px;background:var(--brand);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">Guardar división</button>
     </div>
-    <div id="sm-error" style="margin-top:10px;font-size:12px;color:#F87171;min-height:18px;"></div>`;
+    <div id="sm-error" style="margin-top:10px;font-size:12px;color:#dc2626;min-height:18px;"></div>`;
 
   // Load ticket items
   fetch(`/api/table-orders/${encodeURIComponent(baseOrderId)}/ticket`, { headers: mesioHeaders() })
@@ -1649,12 +1695,12 @@ function _renderManualChecks() {
   const el = document.getElementById('sm-checks-list');
   if (!el) return;
   el.innerHTML = _manualChecks.map((chk, ci) => `
-    <div style="background:#12161f;border:1px solid #252836;border-radius:8px;padding:12px;margin-bottom:8px;">
-      <div style="font-size:12px;font-weight:600;color:#E8EAEE;margin-bottom:8px;">Check #${_esc(String(chk.check_number))}</div>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;">
+      <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px;">Check #${_esc(String(chk.check_number))}</div>
       ${chk.items.map((it, ii) => `
         <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-          <input class="mc-name" data-ci="${ci}" data-ii="${ii}" type="text" value="${_esc(it.name)}" style="flex:1;background:#0e1117;border:1px solid #1a1d26;border-radius:6px;padding:6px 8px;color:#E8EAEE;font-size:12px;font-family:inherit;outline:none;">
-          <input class="mc-qty" data-ci="${ci}" data-ii="${ii}" type="number" min="1" value="${_esc(String(it.qty))}" style="width:50px;background:#0e1117;border:1px solid #1a1d26;border-radius:6px;padding:6px 8px;color:#E8EAEE;font-size:12px;font-family:inherit;outline:none;">
+          <input class="mc-name" data-ci="${ci}" data-ii="${ii}" type="text" value="${_esc(it.name)}" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;font-family:inherit;outline:none;">
+          <input class="mc-qty" data-ci="${ci}" data-ii="${ii}" type="number" min="1" value="${_esc(String(it.qty))}" style="width:50px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;font-family:inherit;outline:none;">
           <button class="mc-del" data-ci="${ci}" data-ii="${ii}" style="background:none;border:none;color:#6B7280;cursor:pointer;font-size:14px;">✕</button>
         </div>`).join('')}
     </div>`).join('');
@@ -1707,7 +1753,7 @@ async function loadChatsTab() {
   try {
     const res = await fetch('/api/checkout-proposals', { headers: mesioHeaders() });
     if (!res.ok) {
-      el.innerHTML = `<div style="padding:20px;color:#9CA3AF;font-size:13px;text-align:center;">Funcionalidad disponible cuando se configure el endpoint de propuestas.</div>`;
+      el.innerHTML = `<div style="padding:20px;color:var(--text-3);font-size:13px;text-align:center;">Funcionalidad disponible cuando se configure el endpoint de propuestas.</div>`;
       return;
     }
     const data = await res.json();
@@ -1728,15 +1774,15 @@ async function loadChatsTab() {
     });
   } catch (_) {
     const el2 = document.getElementById('chats-list');
-    if (el2) el2.innerHTML = `<div style="padding:20px;color:#9CA3AF;font-size:13px;text-align:center;">Funcionalidad disponible cuando se configure el endpoint de propuestas.</div>`;
+    if (el2) el2.innerHTML = `<div style="padding:20px;color:var(--text-3);font-size:13px;text-align:center;">Funcionalidad disponible cuando se configure el endpoint de propuestas.</div>`;
   }
 }
 function _chatProposalCardHtml(p) {
   // proof_url is already a /api/media/{id} URL — use directly.
   return `
-    <div style="font-weight:700;font-size:13px;color:#E8EAEE;">${_esc(p.table_name || p.base_order_id || '')}</div>
+    <div style="font-weight:700;font-size:13px;color:var(--text);">${_esc(p.table_name || p.base_order_id || '')}</div>
     <div style="font-size:12px;color:#71717A;margin:2px 0;">${_esc(p.customer_phone || '')}</div>
-    ${p.proof_url ? `<img src="${_esc(p.proof_url)}" alt="Comprobante" style="width:100%;height:100px;object-fit:cover;border-radius:6px;background:#0e1117;margin:6px 0;display:block;" onerror="this.style.display='none'">` : '<div style="height:40px;background:#0e1117;border-radius:6px;margin:6px 0;display:flex;align-items:center;justify-content:center;color:#6B7280;font-size:11px;">Sin imagen</div>'}
+    ${p.proof_url ? `<img src="${_esc(p.proof_url)}" alt="Comprobante" style="width:100%;height:100px;object-fit:cover;border-radius:6px;background:var(--bg);margin:6px 0;display:block;" onerror="this.style.display='none'">` : '<div style="height:40px;background:var(--bg);border-radius:6px;margin:6px 0;display:flex;align-items:center;justify-content:center;color:#6B7280;font-size:11px;">Sin imagen</div>'}
     <div style="font-size:15px;font-weight:700;color:var(--brand);margin-bottom:8px;">${mesioFmt(p.total || 0)}</div>
     <button class="m-btn m-btn--primary m-btn--sm prop-confirm" style="width:100%;">Procesar pago</button>`;
 }
@@ -1763,7 +1809,7 @@ async function loadRecentNpsTab() {
     if (!res.ok) {
       el.textContent = '';
       const fallback = document.createElement('div');
-      fallback.style.cssText = 'padding:20px;color:#9CA3AF;font-size:13px;text-align:center;';
+      fallback.style.cssText = 'padding:20px;color:var(--text-3);font-size:13px;text-align:center;';
       fallback.textContent = 'No se pudo cargar la lista de calificaciones.';
       el.appendChild(fallback);
       return;
@@ -1782,7 +1828,7 @@ async function loadRecentNpsTab() {
   } catch (_) {
     el.textContent = '';
     const errEl = document.createElement('div');
-    errEl.style.cssText = 'padding:20px;color:#9CA3AF;font-size:13px;text-align:center;';
+    errEl.style.cssText = 'padding:20px;color:var(--text-3);font-size:13px;text-align:center;';
     errEl.textContent = 'No se pudo cargar la lista de calificaciones.';
     el.appendChild(errEl);
   }

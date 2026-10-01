@@ -95,6 +95,19 @@ class TestMenuImageSign:
         assert "folder" in data
         assert "public_id_prefix" in data
 
+    def test_sign_without_any_body_returns_200(self, client, monkeypatch):
+        """The editor used to POST with no body: that answered 422 with a
+        list-shaped `detail`, which the toast rendered as "[object Object]"."""
+        _patch_restaurant_auth(monkeypatch)
+
+        with patch("app.services.state_store.rate_limit_check", new=AsyncMock(return_value=True)),              patch("app.services.image_host.sign_upload_params", return_value=SAMPLE_SIGN_RESPONSE) as sign:
+
+            resp = client.post("/api/menu/image/sign", headers=AUTH_HEADERS)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["signature"] == SAMPLE_SIGN_RESPONSE["signature"]
+        assert sign.call_args.kwargs["folder_suffix"] == "menu"
+
     def test_sign_returns_correct_folder(self, client, monkeypatch):
         """Folder in response matches restaurant_id and folder_suffix."""
         _patch_restaurant_auth(monkeypatch)

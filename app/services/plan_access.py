@@ -33,8 +33,21 @@ async def org_staff_cap(org_id: int) -> int | None:
 
 async def org_is_open(org_id: int) -> bool:
     """Whether diners can order from the org — false once it is suspendido
-    (trial over with no payment, or a payment more than the grace late)."""
-    return plans.is_open(await org_plan_row(org_id))
+    (trial over with no payment, or a payment more than the grace late), or
+    while the owner paused it from Configuración (features.bot_active =
+    false). The pause button only flipped that flag before 2026-10-01 and
+    nothing read it: a "paused" restaurant kept taking orders."""
+    org = await org_plan_row(org_id)
+    features = org.get("features") or {}
+    if isinstance(features, str):
+        import json  # noqa: PLC0415
+        try:
+            features = json.loads(features)
+        except ValueError:
+            features = {}
+    if isinstance(features, dict) and features.get("bot_active") is False:
+        return False
+    return plans.is_open(org)
 
 
 async def require_feature(org_id: int, feature: str) -> None:

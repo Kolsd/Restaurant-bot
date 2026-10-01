@@ -175,9 +175,10 @@ function renderTables() {
     return (t.zone || 'Salón').trim().toLowerCase() === _activeZone;
   });
 
-  // Grid mode by default for predictable layout. Absolute mode only inside edit
-  // mode (when user is actively dragging tiles to a custom layout).
-  var useGrid = !_editMode || !_hasCustomPositions(_tables);
+  // Zone grid until the owner arranges the room; once a layout is saved the
+  // map shows it (it used to show it only inside "Editar layout", so a saved
+  // layout was never seen again).
+  var useGrid = !_hasCustomPositions(_tables);
   canvas.classList.toggle('grid-mode', useGrid);
 
   if (useGrid) {
@@ -223,6 +224,12 @@ function _renderGridMode(canvas, tables) {
   });
 }
 
+// Free layout is drawn inside this margin so a table saved at (0, 0) is not
+// cut by the canvas edge or hidden under the zone filter bar. Stored
+// positions stay margin-free (_attachDrag subtracts it back).
+var FP_PAD_X = 24;
+var FP_PAD_Y = 64;
+
 function _renderAbsoluteMode(canvas, tables) {
   // Compute canvas minimum size so tiles don't go off-screen
   var maxX = 0; var maxY = 0;
@@ -230,8 +237,8 @@ function _renderAbsoluteMode(canvas, tables) {
     var x = t.position_x || 0;
     var y = t.position_y || 0;
     var s = _tileSize(t.capacity);
-    if (x + s + 20 > maxX) maxX = x + s + 20;
-    if (y + s + 20 > maxY) maxY = y + s + 20;
+    if (x + s + 20 + FP_PAD_X > maxX) maxX = x + s + 20 + FP_PAD_X;
+    if (y + s + 20 + FP_PAD_Y > maxY) maxY = y + s + 20 + FP_PAD_Y;
   });
   canvas.style.minWidth = maxX + 'px';
   canvas.style.minHeight = maxY + 'px';
@@ -241,8 +248,8 @@ function _renderAbsoluteMode(canvas, tables) {
     var x = tbl.position_x || 0;
     var y = tbl.position_y || 0;
     var s = _tileSize(tbl.capacity);
-    tile.style.left = x + 'px';
-    tile.style.top  = y + 'px';
+    tile.style.left = (x + FP_PAD_X) + 'px';
+    tile.style.top  = (y + FP_PAD_Y) + 'px';
     tile.style.width  = s + 'px';
     tile.style.height = s + 'px';
     canvas.appendChild(tile);
@@ -360,8 +367,8 @@ function _attachDrag(tile, tbl) {
       var dx = ev.clientX - startClientX;
       var dy = ev.clientY - startClientY;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
-      tile.style.left = Math.max(0, origLeft + dx) + 'px';
-      tile.style.top  = Math.max(0, origTop  + dy) + 'px';
+      tile.style.left = Math.max(FP_PAD_X, origLeft + dx) + 'px';
+      tile.style.top  = Math.max(FP_PAD_Y, origTop  + dy) + 'px';
     }
 
     async function onUp(ev) {
@@ -373,8 +380,8 @@ function _attachDrag(tile, tbl) {
       if (!moved) return;
       ev._wasDrag = true;
 
-      var newX = parseFloat(tile.style.left) || 0;
-      var newY = parseFloat(tile.style.top)  || 0;
+      var newX = Math.max(0, (parseFloat(tile.style.left) || 0) - FP_PAD_X);
+      var newY = Math.max(0, (parseFloat(tile.style.top)  || 0) - FP_PAD_Y);
 
       // Persist position
       try {
@@ -766,18 +773,18 @@ async function _showTicket(tableId) {
   if (!tbl) return;
 
   // Try to get order_id from the table data, else fetch active orders
-  var orderId = tbl.current_order_id;
+  // The ticket covers the whole bill: every round under its group id.
+  var orderId = tbl.current_base_order_id;
   if (!orderId) {
     try {
-      var r = await fetch('/api/table-orders?status=active', { headers: mesioHeaders() });
+      var r = await fetch('/api/table-orders?table_id=' + encodeURIComponent(tableId), { headers: mesioHeaders() });
       mesioTrackFetch(r.ok);
       if (r.ok) {
         var data = await r.json();
-        var orders = Array.isArray(data) ? data : (data.orders || []);
-        var match = orders.find(function (o) {
-          return String(o.table_id) === String(tableId);
+        var orders = (Array.isArray(data) ? data : (data.orders || [])).filter(function (o) {
+          return ['cancelado', 'cancelled', 'factura_entregada'].indexOf(o.status) === -1;
         });
-        if (match) orderId = match.id;
+        if (orders.length) orderId = orders[orders.length - 1].base_order_id;
       }
     } catch (e) { /* ignore */ }
   }
@@ -1120,12 +1127,13 @@ function bindAll() {
 
   var btnInvoice = el('btnInvoice');
   if (btnInvoice) btnInvoice.addEventListener('click', function () {
-    if (_selectedTableId) window.location.href = '/cashier?table=' + _selectedTableId;
+    if (_selectedTableId) window.location.href = '/staff?section=cashier&tableId=' + encodeURIComponent(_selectedTableId);
   });
 
   var btnAddItem = el('btnAddItem');
   if (btnAddItem) btnAddItem.addEventListener('click', function () {
-    if (_selectedTableId) window.location.href = '/cashier?table=' + _selectedTableId + '&action=add';
+    // Caja is where items are added to an open table (the old /cashier page is gone).
+    if (_selectedTableId) window.location.href = '/staff?section=cashier&tableId=' + encodeURIComponent(_selectedTableId);
   });
 
   // Edit table (capacity, type, zone) — opens the properties modal

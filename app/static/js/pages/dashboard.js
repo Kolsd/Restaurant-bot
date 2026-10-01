@@ -65,9 +65,12 @@ function _setupChrome() {
 
   // User info
   const role     = (localStorage.getItem('rb_role') || '').toLowerCase();
-  // Login writes rb_name only for staff accounts; an owner account has no
-  // person name, so fall back to the restaurant's name, never "Usuario".
-  const userName = (localStorage.getItem('rb_name') || '').trim();
+  // Login writes rb_name: the person's name (owners give it at signup), or
+  // their login when none is on file. A login that is an email is not a name
+  // to greet someone by ("Buenas tardes, admin@gmail.com"), so it is dropped
+  // and the greeting goes without a name.
+  const storedName = (localStorage.getItem('rb_name') || '').trim();
+  const userName = storedName.includes('@') ? '' : storedName;
   let restaurantName = '';
   try { restaurantName = (JSON.parse(localStorage.getItem('rb_restaurant') || '{}').name || '').trim(); } catch (e) { /* corrupt key */ }
   const shownName = userName || restaurantName || 'Mi cuenta';

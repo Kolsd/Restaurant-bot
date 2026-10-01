@@ -56,24 +56,22 @@ function renderSettings(r) {
   }
 
   // Hours
-  var hours = (r.features && r.features.opening_hours) ? r.features.opening_hours : {};
+  // Hours are the sede's (r.opening_hours); old saves only ever reached features.
+  var hours = (r.opening_hours && Object.keys(r.opening_hours).length) ? r.opening_hours
+    : ((r.features && r.features.opening_hours) ? r.features.opening_hours : {});
   renderHours(hours);
 
-  // Payment methods
-  var pm = (r.features && r.features.payment_methods) ? r.features.payment_methods : {};
-  renderPaymentToggles(pm);
+  // Address and hours are per sede: say which one is being edited.
+  var hoursSub = document.querySelector('#horarios .s-sub');
+  if (hoursSub) {
+    hoursSub.textContent = r.location_name
+      ? 'Cuándo la sede ' + r.location_name + ' acepta pedidos por QR y a domicilio. Cada sede tiene su propio horario.'
+      : 'Elige una sede en el selector de la barra lateral para ver y cambiar su horario.';
+  }
 
   // Payment instructions (text per digital method)
   var pi = (r.features && r.features.payment_instructions) ? r.features.payment_instructions : {};
   renderPaymentInstructions(pi);
-
-  // Wompi per-restaurant credentials (server returns masked secret summary)
-  renderWompiCredentials(r.wompi || (r.features && r.features.wompi) || {});
-
-  // Notifications
-  var notif = (r.features && r.features.notifications) ? r.features.notifications : {};
-  renderNotifToggles(notif);
-
 
   // Commerce features — DIAN toggle
   renderCommerceFeatures(r);
@@ -121,16 +119,8 @@ function renderHours(hours) {
 }
 
 // ── Payment method toggles ────────────────────────────────────────
-var PAYMENT_KEYS = ['cash', 'wompi', 'nequi', 'daviplata', 'bancolombia', 'bold'];
-// Methods that require payment_instructions text (cash/wompi/bold use other flows)
-var PAYMENT_INSTRUCTION_KEYS = ['nequi', 'daviplata', 'bancolombia'];
-function renderPaymentToggles(pm) {
-  PAYMENT_KEYS.forEach(function (key) {
-    var sw = document.getElementById('pay-sw-' + key);
-    if (!sw) return;
-    if (pm[key] !== false) { sw.classList.add('on'); } else { sw.classList.remove('on'); }
-  });
-}
+// The transfer methods a sede can accept (app/services/delivery.ALLOWED_PAYMENT_METHODS).
+var PAYMENT_INSTRUCTION_KEYS = ['nequi', 'bancolombia'];
 function renderPaymentInstructions(pi) {
   PAYMENT_INSTRUCTION_KEYS.forEach(function (key) {
     var ta = document.getElementById('pay-inst-' + key);
@@ -138,65 +128,6 @@ function renderPaymentInstructions(pi) {
     // Tolerate both lower and capitalized keys (agent_external looks up both)
     var val = pi[key] || pi[key.charAt(0).toUpperCase() + key.slice(1)] || '';
     ta.value = val;
-  });
-}
-
-// ── Wompi per-restaurant credentials ─────────────────────────────────
-// The server returns a masked summary: { public_key, integrity_secret_set,
-// integrity_secret_last4 }. The plaintext integrity_secret is NEVER returned
-// — admin only sees it when typing it into the form. On save, if the input
-// is empty the backend preserves the previously-stored secret.
-function renderWompiCredentials(wompi) {
-  var pkInput = document.getElementById('wompiPublicKey');
-  var secretInput = document.getElementById('wompiIntegritySecret');
-  var hintEl = document.getElementById('wompi-secret-hint');
-  var badgeEl = document.getElementById('wompi-status-badge');
-  if (!pkInput || !secretInput) return;
-
-  var publicKey = (wompi && wompi.public_key) || '';
-  var secretSet = !!(wompi && wompi.integrity_secret_set);
-  var last4 = (wompi && wompi.integrity_secret_last4) || '';
-
-  pkInput.value = publicKey;
-  // NEVER populate the secret input with the plaintext value — it never leaves
-  // the server. Leave it empty; placeholder hints what's stored.
-  secretInput.value = '';
-  if (secretSet) {
-    secretInput.placeholder = last4 ? ('•••• •••• •••• ' + last4) : '•••• Integrity Secret guardado';
-  } else {
-    secretInput.placeholder = 'Integrity Secret';
-  }
-
-  if (hintEl) {
-    hintEl.textContent = secretSet
-      ? 'Secret guardado. Dejá este campo vacío para conservarlo o escribí uno nuevo para reemplazarlo.'
-      : 'Sin secret configurado. Sin él, el bot usará el flujo de comprobante manual.';
-  }
-
-  if (badgeEl) {
-    var configured = !!publicKey && secretSet;
-    badgeEl.textContent = configured ? 'Conectado' : 'Sin configurar';
-    badgeEl.classList.toggle('success', configured);
-  }
-
-  // Show/hide credentials block based on Wompi toggle state
-  _toggleWompiCredentialsBlock();
-}
-
-function _toggleWompiCredentialsBlock() {
-  var sw = document.getElementById('pay-sw-wompi');
-  var block = document.getElementById('wompi-credentials');
-  if (!sw || !block) return;
-  block.style.display = sw.classList.contains('on') ? '' : 'none';
-}
-
-// ── Notification toggles ──────────────────────────────────────────
-var NOTIF_KEYS = ['waiter_call', 'late_order', 'low_stock', 'nps_negative', 'tips_ready'];
-function renderNotifToggles(notif) {
-  NOTIF_KEYS.forEach(function (key) {
-    var sw = document.getElementById('notif-sw-' + key);
-    if (!sw) return;
-    if (notif[key] !== false) { sw.classList.add('on'); } else { sw.classList.remove('on'); }
   });
 }
 
@@ -237,25 +168,11 @@ function collectFormData() {
     };
   });
 
-  // Payment methods
-  var payment_methods = {};
-  PAYMENT_KEYS.forEach(function (key) {
-    var sw = document.getElementById('pay-sw-' + key);
-    payment_methods[key] = sw ? sw.classList.contains('on') : true;
-  });
-
   // Payment instructions (free-text per digital method)
   var payment_instructions = {};
   PAYMENT_INSTRUCTION_KEYS.forEach(function (key) {
     var ta = document.getElementById('pay-inst-' + key);
     if (ta) payment_instructions[key] = (ta.value || '').trim();
-  });
-
-  // Notifications
-  var notifications = {};
-  NOTIF_KEYS.forEach(function (key) {
-    var sw = document.getElementById('notif-sw-' + key);
-    notifications[key] = sw ? sw.classList.contains('on') : true;
   });
 
   // Commerce features
@@ -264,15 +181,6 @@ function collectFormData() {
     dian_enabled: dianSw ? dianSw.classList.contains('on') : false,
   };
 
-  var currentFeatures = (_restaurant && _restaurant.features) ? Object.assign({}, _restaurant.features) : {};
-
-  // Wompi credentials — empty integrity_secret means "preserve existing" on the server.
-  var wompiPkEl = document.getElementById('wompiPublicKey');
-  var wompiSecretEl = document.getElementById('wompiIntegritySecret');
-  var wompiPayload = {
-    public_key:       wompiPkEl ? (wompiPkEl.value || '').trim() : '',
-    integrity_secret: wompiSecretEl ? (wompiSecretEl.value || '').trim() : ''
-  };
 
   return {
     name: getVal('inputName'),
@@ -280,15 +188,13 @@ function collectFormData() {
     address: getVal('inputAddress'),
     city: getVal('inputCity'),
     cuisine_type: getVal('inputCuisine'),
-    wompi: wompiPayload,
     // commerce feature flags
     dian_enabled: commerceFeatures.dian_enabled,
-    features: Object.assign(currentFeatures, {
-      opening_hours: opening_hours,
-      payment_methods: payment_methods,
-      payment_instructions: payment_instructions,
-      notifications: notifications,
-    })
+    // Top level, where POST /api/settings reads them. They used to be nested
+    // inside `features`, which the server ignores — hours and transfer
+    // instructions were never saved.
+    opening_hours: opening_hours,
+    payment_instructions: payment_instructions
   };
 }
 
@@ -325,15 +231,6 @@ async function saveSettings() {
 }
 
 // ── Danger zone actions ───────────────────────────────────────────
-async function handleTransfer() {
-  var ok = await mesioConfirm(
-    'Transferir la propiedad cede el control total a otro usuario. ¿Continuar?',
-    { confirmText: 'Transferir', danger: true }
-  );
-  if (!ok) return;
-  mesioToast('Disponible en la próxima versión', 'info');
-}
-
 async function handlePause() {
   var currentlyPaused = _restaurant && _restaurant.features && _restaurant.features.bot_active === false;
 
@@ -388,15 +285,6 @@ function _updatePauseButton() {
   btn.textContent = currentlyPaused ? 'Reanudar restaurante' : 'Pausar restaurante';
 }
 
-async function handleDelete() {
-  var ok = await mesioConfirm(
-    '¿Eliminar este restaurante? Esta acción borra todo y es IRREVERSIBLE.',
-    { confirmText: 'Eliminar', cancelText: 'Cancelar', danger: true }
-  );
-  if (!ok) return;
-  mesioToast('Disponible en la próxima versión', 'info');
-}
-
 // ── Sidenav scroll spy ────────────────────────────────────────────
 function initScrollSpy() {
   var sections = document.querySelectorAll('.set-sec[id]');
@@ -429,10 +317,6 @@ function bindSwitches() {
         if (openEl) openEl.disabled = !isOpen;
         if (closeEl) closeEl.disabled = !isOpen;
       }
-      // Wompi toggle controls visibility of the credentials sub-block
-      if (sw.id === 'pay-sw-wompi') {
-        _toggleWompiCredentialsBlock();
-      }
     });
   });
 }
@@ -455,197 +339,6 @@ function bindLogout() {
 }
 
 
-// ── Phone blocklist (admin) ───────────────────────────────────────
-function _formatRelativeUntil(iso) {
-  if (!iso) return '';
-  var t = Date.parse(iso);
-  if (isNaN(t)) return '';
-  var diffMs = t - Date.now();
-  if (diffMs <= 0) return 'expirado';
-  var mins = Math.round(diffMs / 60000);
-  if (mins < 60) return 'expira en ' + mins + ' min';
-  var hours = Math.round(mins / 60);
-  if (hours < 48) return 'expira en ' + hours + ' h';
-  var days = Math.round(hours / 24);
-  return 'expira en ' + days + ' días';
-}
-
-async function loadBlocklist() {
-  var listEl = document.getElementById('bl-list');
-  var countEl = document.getElementById('bl-count');
-  if (!listEl) return;
-
-  // Loading state — innerHTML with static markup only (no user data)
-  listEl.innerHTML = '<div style="padding:14px;color:var(--text-3);font-size:13px;">Cargando&hellip;</div>';
-
-  try {
-    var res = await fetch('/api/admin/blocklist', { headers: mesioHeaders() });
-    if (res.status === 401) { window.location.href = '/login'; return; }
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    var data = await res.json();
-    var items = (data && data.items) || [];
-
-    if (countEl) {
-      countEl.textContent = items.length === 0
-        ? 'No hay bloqueos activos'
-        : items.length + ' bloqueo' + (items.length === 1 ? '' : 's') + ' activo' + (items.length === 1 ? '' : 's');
-    }
-
-    // Clear and rebuild via DOM (textContent for all user data)
-    listEl.textContent = '';
-    if (items.length === 0) {
-      var empty = document.createElement('div');
-      empty.style.cssText = 'padding:14px;color:var(--text-3);font-size:13px;';
-      empty.textContent = 'No hay teléfonos bloqueados en este momento.';
-      listEl.appendChild(empty);
-      return;
-    }
-
-    items.forEach(function (item) {
-      var row = document.createElement('div');
-      row.setAttribute('role', 'listitem');
-      row.style.cssText = 'display:grid;grid-template-columns:140px 1fr auto;gap:12px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);';
-
-      // Phone (obfuscated)
-      var phoneCell = document.createElement('div');
-      var phoneSpan = document.createElement('span');
-      phoneSpan.className = 'mono';
-      phoneSpan.style.cssText = 'font-weight:600;';
-      phoneSpan.textContent = item.phone_obf || '***';
-      phoneCell.appendChild(phoneSpan);
-      var expSpan = document.createElement('div');
-      expSpan.style.cssText = 'font-size:11px;color:var(--text-3);margin-top:2px;';
-      expSpan.textContent = _formatRelativeUntil(item.blocked_until);
-      phoneCell.appendChild(expSpan);
-      row.appendChild(phoneCell);
-
-      // Reason + blocker
-      var infoCell = document.createElement('div');
-      var reasonDiv = document.createElement('div');
-      reasonDiv.style.cssText = 'font-size:13px;color:var(--text-1);';
-      reasonDiv.textContent = item.reason || '(sin razón)';
-      infoCell.appendChild(reasonDiv);
-      var byDiv = document.createElement('div');
-      byDiv.style.cssText = 'font-size:11px;color:var(--text-3);margin-top:2px;';
-      byDiv.textContent = 'Bloqueado por: ' + (item.blocked_by || 'sistema');
-      infoCell.appendChild(byDiv);
-      row.appendChild(infoCell);
-
-      // Unblock button
-      var btnCell = document.createElement('div');
-      var btn = document.createElement('button');
-      btn.className = 'btn sm';
-      btn.type = 'button';
-      btn.textContent = 'Desbloquear';
-      btn.addEventListener('click', function () {
-        handleUnblockPhone(item.phone, item.phone_obf);
-      });
-      btnCell.appendChild(btn);
-      row.appendChild(btnCell);
-
-      listEl.appendChild(row);
-    });
-  } catch (e) {
-    listEl.textContent = '';
-    var errDiv = document.createElement('div');
-    errDiv.style.cssText = 'padding:14px;color:var(--danger);font-size:13px;';
-    errDiv.textContent = 'No se pudieron cargar los bloqueos: ' + e.message;
-    listEl.appendChild(errDiv);
-  }
-}
-
-async function handleBlockPhone() {
-  var phoneEl = document.getElementById('bl-phone');
-  var reasonEl = document.getElementById('bl-reason');
-  var hoursEl = document.getElementById('bl-hours');
-  var btn = document.getElementById('bl-block-btn');
-  if (!phoneEl || !btn) return;
-
-  var rawPhone = (phoneEl.value || '').trim();
-  var phone = rawPhone.replace(/[^\d]/g, '');
-  if (phone.length < 7 || phone.length > 15) {
-    mesioToast('El teléfono debe tener entre 7 y 15 dígitos', 'error');
-    phoneEl.focus();
-    return;
-  }
-  var reason = (reasonEl && reasonEl.value || '').trim();
-  if (!reason) {
-    mesioToast('Escribí una razón breve para el bloqueo', 'error');
-    if (reasonEl) reasonEl.focus();
-    return;
-  }
-  var hours = parseInt(hoursEl && hoursEl.value || '24', 10);
-  if (!hours || hours < 1 || hours > 720) hours = 24;
-
-  btn.disabled = true;
-  var originalText = btn.textContent;
-  btn.textContent = 'Bloqueando…';
-  try {
-    var res = await fetch('/api/admin/blocklist', {
-      method: 'POST',
-      headers: mesioHeaders(),
-      body: JSON.stringify({ phone: phone, reason: reason, hours: hours })
-    });
-    if (res.status === 401) { window.location.href = '/login'; return; }
-    if (res.status === 403) {
-      mesioToast('No tenés permiso para bloquear teléfonos', 'error');
-      return;
-    }
-    if (!res.ok) {
-      var err = await res.json().catch(function () { return {}; });
-      throw new Error(err.detail || ('HTTP ' + res.status));
-    }
-    mesioToast('Teléfono bloqueado por ' + hours + ' h', 'success');
-    phoneEl.value = '';
-    if (reasonEl) reasonEl.value = '';
-    await loadBlocklist();
-  } catch (e) {
-    mesioToast('No se pudo bloquear: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = originalText;
-  }
-}
-
-async function handleUnblockPhone(phone, phoneObf) {
-  if (!phone) return;
-  var label = phoneObf || ('***' + phone.slice(-4));
-  var ok = await mesioConfirm('¿Desbloquear el teléfono ' + label + '? Recibirá mensajes del bot inmediatamente.');
-  if (!ok) return;
-
-  try {
-    var res = await fetch('/api/admin/blocklist/' + encodeURIComponent(phone), {
-      method: 'DELETE',
-      headers: mesioHeaders()
-    });
-    if (res.status === 401) { window.location.href = '/login'; return; }
-    if (res.status === 403) {
-      mesioToast('No tenés permiso para desbloquear teléfonos', 'error');
-      return;
-    }
-    if (res.status === 404) {
-      mesioToast('Ese teléfono ya no estaba bloqueado', 'info');
-      await loadBlocklist();
-      return;
-    }
-    if (!res.ok) {
-      var err = await res.json().catch(function () { return {}; });
-      throw new Error(err.detail || ('HTTP ' + res.status));
-    }
-    mesioToast('Teléfono desbloqueado', 'success');
-    await loadBlocklist();
-  } catch (e) {
-    mesioToast('No se pudo desbloquear: ' + e.message, 'error');
-  }
-}
-
-function bindBlocklistHandlers() {
-  var blockBtn = document.getElementById('bl-block-btn');
-  var refreshBtn = document.getElementById('bl-refresh-btn');
-  if (blockBtn) blockBtn.addEventListener('click', handleBlockPhone);
-  if (refreshBtn) refreshBtn.addEventListener('click', loadBlocklist);
-}
-
 // ── Init ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
   // Save buttons
@@ -654,18 +347,12 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Danger zone
-  var btnTransfer = document.getElementById('btnTransfer');
   var btnPause = document.getElementById('btnPause');
-  var btnDelete = document.getElementById('btnDelete');
-  if (btnTransfer) btnTransfer.addEventListener('click', handleTransfer);
   if (btnPause) btnPause.addEventListener('click', handlePause);
-  if (btnDelete) btnDelete.addEventListener('click', handleDelete);
 
   bindSwitches();
   bindNavLinks();
   bindLogout();
-  bindBlocklistHandlers();
   initScrollSpy();
   loadSettings().then(function () { _updatePauseButton(); });
-  loadBlocklist();
 });

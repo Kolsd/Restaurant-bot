@@ -287,6 +287,7 @@ async def convert_prospect_to_restaurant(
             # Generated and returned once, for the founder to relay.
             password=None,
             owner_email=dest_email,
+            owner_name=(prospect.get("owner_name") or "").strip() or None,
             plan_code=plan,
             trial_days=body.trial_days,
             features=body.features or {},

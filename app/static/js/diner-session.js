@@ -86,6 +86,63 @@ function dinerGetDeviceToken() {
   }
 }
 
+var DINER_MEMORY_KEY = 'mesio_diner_memory_key';
+var DINER_MEMORY_DECLINED_KEY = 'mesio_diner_memory_declined';
+
+/**
+ * "Recuérdame" (app/services/diner_memory.py): a random secret that exists
+ * only once the diner said yes. The server keeps its hash as the profile key,
+ * so whoever holds it sees that diner's past orders — hence crypto-random
+ * only, never the Math.random fallback the rate-limit token above accepts,
+ * and a separate key from that token (which lands in Redis key names).
+ * create=false (every scan) returns '' for a browser that never consented.
+ */
+function dinerGetMemoryKey(create) {
+  try {
+    var existing = localStorage.getItem(DINER_MEMORY_KEY);
+    if (existing) return existing;
+    if (!create || !window.crypto || typeof window.crypto.getRandomValues !== 'function') return '';
+    var bytes = new Uint8Array(24);
+    window.crypto.getRandomValues(bytes);
+    var fresh = Array.prototype.map.call(bytes, function (b) {
+      return ('0' + b.toString(16)).slice(-2);
+    }).join('');
+    localStorage.setItem(DINER_MEMORY_KEY, fresh);
+    return fresh;
+  } catch (e) {
+    // No storage, no memory: the diner stays anonymous, nothing breaks.
+    return '';
+  }
+}
+
+function dinerForgetMemoryKey() {
+  try { localStorage.removeItem(DINER_MEMORY_KEY); } catch (e) { /* nothing stored */ }
+}
+
+/* "No, gracias" is remembered per restaurant (org) so the offer isn't repeated. */
+function _dinerDeclinedOrgs() {
+  try {
+    var list = JSON.parse(localStorage.getItem(DINER_MEMORY_DECLINED_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function dinerMemoryDeclined(orgId) {
+  return _dinerDeclinedOrgs().indexOf(String(orgId)) !== -1;
+}
+
+function dinerSetMemoryDeclined(orgId) {
+  try {
+    var list = _dinerDeclinedOrgs();
+    if (list.indexOf(String(orgId)) === -1) list.push(String(orgId));
+    localStorage.setItem(DINER_MEMORY_DECLINED_KEY, JSON.stringify(list.slice(-50)));
+  } catch (e) {
+    // Storage unavailable — the offer may show again; harmless.
+  }
+}
+
 var DINER_CHECKOUT_PROFILE_KEY = 'mesio_delivery_checkout_profile';
 
 /**
@@ -191,6 +248,44 @@ function dinerSaveSession(session) {
   } catch (e) {
     // Storage unavailable (private mode / quota) — session stays in-memory
     // only for the life of this page load. Non-fatal.
+  }
+  // A diner who is actually seated also leaves a seat that outlives the tab.
+  if (session && session.tableId && session.token && !session.needsJoin) {
+    dinerSaveSeat(session.tableId, session.token);
+  }
+}
+
+/* ── The seat: "this phone sits at this table" ───────────────────────
+ * sessionStorage dies with the tab, so closing the browser — or the camera
+ * app opening the QR in a new tab — made the diner a stranger at their own
+ * table ("la mesa ya tiene un pedido activo"). The seat is the last token
+ * this browser held at a table, kept in localStorage. It is NOT trusted by
+ * itself: it is sent as `resume_token` and the server hands the seat back
+ * only if that token still holds an ACTIVE session on that same table.
+ * The age limit just stops a long-dead token from being sent at all. */
+var DINER_SEAT_KEY = 'mesio_table_seat';
+var DINER_SEAT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+function dinerSaveSeat(tableId, token) {
+  try {
+    localStorage.setItem(DINER_SEAT_KEY, JSON.stringify({
+      tableId: tableId, token: token, savedAt: Date.now(),
+    }));
+  } catch (e) {
+    // Private mode / quota: the diner just loses the convenience.
+  }
+}
+
+function dinerLoadSeat(tableId) {
+  try {
+    var raw = localStorage.getItem(DINER_SEAT_KEY);
+    if (!raw) return null;
+    var seat = JSON.parse(raw);
+    if (!seat || !seat.token || seat.tableId !== tableId) return null;
+    if (Date.now() - (Number(seat.savedAt) || 0) > DINER_SEAT_MAX_AGE_MS) return null;
+    return seat;
+  } catch (e) {
+    return null;
   }
 }
 
@@ -304,6 +399,10 @@ window.DinerSession = {
   getTableToken: dinerGetTableToken,
   getEntryMode: dinerGetEntryMode,
   getDeviceToken: dinerGetDeviceToken,
+  getMemoryKey: dinerGetMemoryKey,
+  forgetMemoryKey: dinerForgetMemoryKey,
+  memoryDeclined: dinerMemoryDeclined,
+  setMemoryDeclined: dinerSetMemoryDeclined,
   loadCheckoutProfile: dinerLoadCheckoutProfile,
   saveCheckoutProfile: dinerSaveCheckoutProfile,
   saveLastOrderCode: dinerSaveLastOrderCode,
@@ -311,6 +410,7 @@ window.DinerSession = {
   getGeolocation: dinerGetGeolocation,
   load: dinerLoadSession,
   save: dinerSaveSession,
+  loadSeat: dinerLoadSeat,
   clear: dinerClearSession,
   headers: dinerHeaders,
   fetch: dinerFetch,

@@ -202,7 +202,7 @@
 .btn-print-factura:hover { background: #EFF6FF; border-color: #3B82F6; }
 
 /* ── ADJUST INVOICE MODAL ── */
-.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; padding: 1rem; }
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(17,24,39,0.45); z-index: 1000; align-items: center; justify-content: center; padding: 1rem; }
 .modal-overlay.open { display: flex; }
 .modal-box { background: #fff; border-radius: var(--radius-xl); padding: 1.5rem; max-width: 480px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }
@@ -231,7 +231,7 @@
 .btn-split:hover { background: #ECFDF5; border-color: #059669; }
 
 /* ── SPLIT & PAY MODALS ── */
-.sp-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 1100; align-items: center; justify-content: center; padding: 1rem; }
+.sp-overlay { display: none; position: fixed; inset: 0; background: rgba(17,24,39,0.45); z-index: 1100; align-items: center; justify-content: center; padding: 1rem; }
 .sp-overlay.open { display: flex; }
 .sp-box { background: #fff; border-radius: 20px; width: 860px; max-width: 98vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); overflow: hidden; }
 .sp-head { padding: 1.1rem 1.5rem; border-bottom: 1px solid #E4E4E7; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
@@ -330,16 +330,16 @@
 .caja-preview-header span {
   font-size: 12px;
   font-weight: 700;
-  color: #9CA3AF;
+  color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 1px;
 }
 .caja-preview-header button {
-  background: rgba(255,255,255,0.1);
+  background: rgba(17,24,39,0.05);
   border: none;
   font-size: 18px;
   cursor: pointer;
-  color: #9CA3AF;
+  color: var(--text-3);
   width: 32px;
   height: 32px;
   border-radius: 8px;
@@ -349,8 +349,8 @@
   transition: all 0.2s;
 }
 .caja-preview-header button:hover {
-  background: rgba(255,255,255,0.2);
-  color: #fff;
+  background: rgba(17,24,39,0.08);
+  color: var(--text);
 }
 .ticket-card.selected {
   border-color: #7C3AED;
@@ -449,7 +449,7 @@
     padding: 0 10px !important;
     gap: 4px !important;
     border-right: none !important;
-    border-bottom: 1px solid #1a1d26 !important;
+    border-bottom: 1px solid var(--border) !important;
     overflow-x: auto;
   }
   .rail-sep { width: 1px; height: 24px; margin: 0 4px; }
@@ -460,7 +460,7 @@
     width: 100% !important;
     max-width: 100% !important;
     border-left: none !important;
-    border-top: 1px solid #1a1d26 !important;
+    border-top: 1px solid var(--border) !important;
   }
   .mesio-sec-cashier { overflow-y: auto !important; height: auto !important; }
 }

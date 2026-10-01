@@ -57,7 +57,7 @@ async def create_session(
                  order_mode)
             VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id, token, org_id, location_id, table_id, table_name,
-                      order_mode, phone, display_name,
+                      order_mode, phone, display_name, customer_profile_id,
                       created_at, last_seen_at
             """,
             token, org_id, location_id, table_id, table_name,
@@ -87,7 +87,7 @@ async def get_by_token(token: str) -> Optional[dict]:
             row = await conn.fetchrow(
                 """
                 SELECT id, token, org_id, location_id, table_id, table_name,
-                       order_mode, phone, display_name,
+                       order_mode, phone, display_name, customer_profile_id,
                        created_at, last_seen_at
                 FROM diner_sessions
                 WHERE token = $1
@@ -126,9 +126,31 @@ async def set_contact_info(
                 last_seen_at = NOW()
             WHERE token = $1
             RETURNING id, token, org_id, location_id, table_id, table_name,
-                      order_mode, phone, display_name,
+                      order_mode, phone, display_name, customer_profile_id,
                       created_at, last_seen_at
             """,
             token, phone, display_name,
         )
     return dict(row) if row else None
+
+
+async def link_profile(token: str, org_id: int, profile_id: Optional[int]) -> None:
+    """Point this diner session at a remembered customer profile (or clear it
+    with None). Runs inside the caller's tenant_scope(org_id)."""
+    async with tenant_connection() as conn:
+        await conn.execute(
+            "UPDATE diner_sessions SET customer_profile_id = $2 WHERE token = $1 AND org_id = $3",
+            token, profile_id, org_id,
+        )
+
+
+async def get_profile_id(token: str, org_id: int) -> Optional[int]:
+    """The remembered customer profile behind this session, or None. Unlike
+    get_by_token(), this runs INSIDE the caller's tenant_scope(org_id) — for
+    code that already resolved the tenant (the bot turn)."""
+    async with tenant_connection() as conn:
+        pid = await conn.fetchval(
+            "SELECT customer_profile_id FROM diner_sessions WHERE token = $1 AND org_id = $2",
+            token, org_id,
+        )
+    return int(pid) if pid else None

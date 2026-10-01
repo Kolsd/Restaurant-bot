@@ -391,7 +391,18 @@ async def parse_menu(
             "No pude conectarme para leer la carta. Intenta de nuevo en un momento."
         ) from exc
     except APIStatusError as exc:
-        log.warning("menu_import.llm_status_error", status=exc.status_code)
+        # The upstream message is what tells "no credit / bad key" (our side,
+        # nothing the owner can fix) from "that photo is unreadable" (theirs).
+        # It was never logged, so a prod failure was undiagnosable.
+        upstream = str(getattr(exc, "message", "") or exc)[:300]
+        log.warning(
+            "menu_import.llm_status_error",
+            status=exc.status_code, upstream_message=upstream, has_image=bool(image_b64),
+        )
+        if image_b64 and exc.status_code in (400, 413) and "image" in upstream.lower():
+            raise MenuImportError(
+                "No pude leer esa foto. Prueba con otra más nítida, bien iluminada y de frente."
+            ) from exc
         raise MenuImportError(
             "El lector de cartas no está disponible ahora. Puedes escribir los platos a mano."
         ) from exc

@@ -33,7 +33,7 @@ async def _editor_scope(request: Request) -> tuple[int, int]:
         raise HTTPException(status_code=403, detail="Solo el dueño, un admin o el gerente cambian la carta")
     sede = resolve_sede_filter(request, user, admin_without_header="own")
     if not isinstance(sede, int):
-        raise HTTPException(status_code=400, detail="Elegí la sede cuya carta querés cambiar")
+        raise HTTPException(status_code=400, detail="Elige la sede cuya carta querés cambiar")
     restaurant = await get_current_restaurant(request)
     return int(restaurant["id"]), sede
 

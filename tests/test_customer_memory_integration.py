@@ -310,13 +310,18 @@ class TestCustomerMemoryIntegration:
     # ── 9. execute_action — remember calls update_preference ─────────────────
 
     def test_execute_action_remember_calls_update_preference(self, monkeypatch):
-        """execute_action with action='remember' calls update_preference with correct kwargs
-        and returns the reply unchanged."""
+        """A remembered diner's preference is written to THEIR profile (the
+        device-keyed row, diner_memory), keyed by org_id — never by
+        restaurant_obj["id"], which can be a sede id — and the reply is unchanged."""
         import app.services.agent as agent_mod
+        import app.services.diner_memory as memory
         import app.repositories.customer_profiles_repo as repo
 
         update_mock = AsyncMock()
         monkeypatch.setattr(repo, "update_preference", update_mock)
+        monkeypatch.setattr(memory, "profile_id_for_session", AsyncMock(return_value=7))
+        monkeypatch.setattr(repo, "get_profile_by_id",
+                            AsyncMock(return_value={"id": 7, "phone": "device:abc"}))
 
         # Patch the lazy import inside execute_action to use our mock
         monkeypatch.setattr(
@@ -352,16 +357,30 @@ class TestCustomerMemoryIntegration:
 
         assert result == "¡Anotado! Recordaré que eres vegetariano.", \
             "execute_action should return reply unchanged"
-        update_mock.assert_awaited_once()
-        call_kwargs = update_mock.call_args
-        # Works with both positional and keyword call styles
-        args, kwargs = call_kwargs
-        # Combine positional and keyword for flexible assertion
-        all_args = list(args) + list(kwargs.values())
-        assert 1 in all_args or kwargs.get("restaurant_id") == 1, \
-            "restaurant_id=1 should be passed to update_preference"
-        assert "+573001234567" in all_args or kwargs.get("phone") == "+573001234567", \
-            "phone should be passed to update_preference"
+        update_mock.assert_awaited_once_with(
+            restaurant_id=4242, phone="device:abc", key="dietary", value="vegetariano",
+        )
+
+    def test_execute_action_remember_skips_a_diner_who_is_not_remembered(self, monkeypatch):
+        """No consent, no profile: the preference is not stored anywhere."""
+        import app.services.agent as agent_mod
+        import app.services.diner_memory as memory
+        import app.repositories.customer_profiles_repo as repo
+
+        update_mock = AsyncMock()
+        monkeypatch.setattr(repo, "update_preference", update_mock)
+        monkeypatch.setattr(memory, "profile_id_for_session", AsyncMock(return_value=None))
+
+        parsed = {
+            "action": "remember", "reply": "¡Anotado!", "items": [],
+            "preference": {"key": "dietary", "value": "vegetariano", "reason": "lo dijo"},
+        }
+        result = _run(agent_mod.execute_action(
+            parsed, phone="web:x", org_id=4242, table_context=None, session_state={},
+            full_history=[], restaurant_obj={"id": 1}, routing_context={}, message="soy vegetariano",
+        ))
+        assert result == "¡Anotado!"
+        update_mock.assert_not_awaited()
 
     # ── 10. execute_action — survives DB error ───────────────────────────────
 
@@ -515,6 +534,12 @@ class TestCustomerMemoryIntegration:
 
         monkeypatch.setattr(repo, "upsert_profile_from_message", upsert_mock)
         monkeypatch.setattr(repo, "get_profile", get_profile_mock)
+        import app.services.diner_memory as memory
+        context_mock = AsyncMock(return_value=(
+            "Cliente: Miguel. 5 pedidos previos. Último: 2x Hamburguesa.",
+            [{"name": "Hamburguesa", "count": 4}, {"name": "Papas", "count": 2}],
+        ))
+        monkeypatch.setattr(memory, "prompt_context", context_mock)
 
         # Track what customer_context build_system_prompt received
         captured_ctx: list = []
@@ -547,8 +572,9 @@ class TestCustomerMemoryIntegration:
         result = _run(agent_mod.chat("web:test-uuid-profile-1", "Hola", org_id))
 
         assert isinstance(result, dict), "chat() should return a dict"
-        assert upsert_mock.called, "upsert_profile_from_message was not called"
-        assert get_profile_mock.called, "get_profile was not called"
+        context_mock.assert_awaited_once_with("web:test-uuid-profile-1", org_id)
+        # 0104: no more one-profile-per-visit rows keyed by the web:<uuid>.
+        assert not upsert_mock.called, "a profile must not be created for an unremembered visit"
         # The customer_context passed to build_system_prompt should be non-empty
         # (since the profile has total_orders=5, serialize_for_prompt returns a string)
         assert captured_ctx, "build_system_prompt was never called"

@@ -19,7 +19,7 @@ come back flagged, never accepted quietly.
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -316,3 +316,41 @@ def test_importing_over_and_over_is_rate_limited(client):
     assert r.status_code == 429
     mock.assert_not_awaited()
 
+
+
+def _status_error(status: int, message: str):
+    import anthropic
+    import httpx
+
+    response = httpx.Response(status, request=httpx.Request("POST", "http://upstream.test"))
+    return anthropic.APIStatusError(message, response=response, body=None)
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_photo_says_so_instead_of_blaming_the_service():
+    """A 400 about the image is the owner's photo, not an outage."""
+    from app.services import agent
+    from app.services.menu_import import MenuImportError, parse_menu
+
+    fake = MagicMock()
+    fake.messages.create = AsyncMock(side_effect=_status_error(400, "Could not process image"))
+    with patch.object(agent, "client", fake):
+        with pytest.raises(MenuImportError) as exc:
+            await parse_menu(image_b64="aGk=", image_type="image/jpeg")
+    assert "foto" in exc.value.reason.lower()
+    assert "no está disponible" not in exc.value.reason
+
+
+@pytest.mark.asyncio
+async def test_a_billing_or_outage_error_is_the_generic_unavailable_message():
+    """No credit / bad key is ours to fix; the owner is told the reader is
+    unavailable and can still type the carta by hand."""
+    from app.services import agent
+    from app.services.menu_import import MenuImportError, parse_menu
+
+    fake = MagicMock()
+    fake.messages.create = AsyncMock(side_effect=_status_error(400, "Your credit balance is too low"))
+    with patch.object(agent, "client", fake):
+        with pytest.raises(MenuImportError) as exc:
+            await parse_menu(image_b64="aGk=", image_type="image/jpeg")
+    assert "no está disponible" in exc.value.reason

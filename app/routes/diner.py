@@ -57,7 +57,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.services import blocks
 from app.services import database as db
 from app.services import delivery as delivery_service
+from app.services import diner_memory
 from app.services import orders
+from app.services import payment_options
 from app.services import plan_access, plans
 from app.services import realtime
 from app.services import sede_menu
@@ -69,7 +71,7 @@ from app.services.logging import get_logger
 from app.services.money import ZERO, format_money_es, money_mul, money_sum, quantize_money, to_decimal
 from app.services.table_order_commit import deduct_inventory_or_cancel, save_table_order_round
 from app.services.tenant_context import bypass_tenant_scope, tenant_scope
-from app.repositories import delivery_repo, diner_sessions_repo, tables_repo
+from app.repositories import customer_profiles_repo, delivery_repo, diner_sessions_repo, tables_repo
 
 log = get_logger(__name__)
 
@@ -143,6 +145,16 @@ class DinerSessionRequest(BaseModel):
     slug: str | None = Field(default=None, min_length=1, max_length=100)
     location_id: int | None = Field(default=None, gt=0)
     turnstile_token: str | None = Field(default=None, max_length=2000)
+    # The token this browser was given the last time it scanned THIS table.
+    # Lets a diner who closed the browser (or the camera opened a new tab) get
+    # their own seat back instead of being treated as a stranger at their
+    # own table. Only honoured while that token still holds an active session
+    # on this very table — see create_diner_session.
+    resume_token: str | None = Field(default=None, max_length=200)
+    # This browser's diner-memory secret (localStorage), sent on every scan.
+    # It only matters when the diner said "recuérdame" before at any sede of
+    # this org — see app/services/diner_memory.py.
+    memory_key: str | None = Field(default=None, max_length=200)
 
     @field_validator("order_mode")
     @classmethod
@@ -212,9 +224,10 @@ class DinerOrderSendRequest(BaseModel):
 
 
 _CHECKOUT_SCOPES = ("mine", "table")
-_CHECKOUT_METHODS = ("card", "cash")
-_CHECKOUT_METHOD_LABELS = {"card": "tarjeta", "cash": "efectivo"}
-_CHECKOUT_METHOD_DISPLAY = {"card": "Tarjeta", "cash": "Efectivo"}
+# Whatever the sede accepts (app/services/payment_options.py) — checked
+# against the sede's own list inside diner_checkout. "card"/"cash" are the
+# original keys, still sent by a page opened before 2026-10-01.
+_CHECKOUT_METHODS = ("card", "cash", "efectivo", "tarjeta", "nequi", "bancolombia")
 
 
 class DinerCheckoutRequest(BaseModel):
@@ -337,13 +350,11 @@ def _cart_error_to_http(error: str) -> HTTPException:
     return HTTPException(status_code=422, detail=error or "No pudimos actualizar tu pedido")
 
 
-async def _opening_turn(
-    org_id: int, location_id: int | None, restaurant_name: str, table_name: str | None = None,
-) -> dict:
+async def _opening_turn(org_id: int, location_id: int | None, restaurant_name: str) -> dict:
     """Deterministic opening turn (greeting + category chips) — shared by a
     fresh scan on a free table (create_diner_session), a participant who
     just supplied the right join code (diner_join), and a delivery/pickup
-    session (no table_name — docs/claude/delivery-web.md chunk 2). No LLM
+    session (docs/claude/delivery-web.md chunk 2). No LLM
     round-trip for a fixed template. Caller must already be inside
     tenant_scope(org_id). The chips are the categories of THIS sede's carta
     (migration 0093), which may hold categories of its own."""
@@ -352,15 +363,37 @@ async def _opening_turn(
     reply_blocks = []
     if categories:
         reply_blocks.append(blocks.build_category_chips_block(categories))
-    greeting = (
-        f"¡Hola! Bienvenido a {restaurant_name}, {table_name}. Esto es lo que tenemos hoy:"
-        if table_name else
-        f"¡Hola! Bienvenido a {restaurant_name}. Esto es lo que tenemos hoy:"
-    )
+    # Never the table here: table names are plain numbers now ("12"), and
+    # "Bienvenido a Casa Mesio, 12" reads as if 12 were the diner's name.
+    # The chat header already says "Mesa 12".
+    greeting = f"¡Hola! Bienvenido a {restaurant_name}. Esto es lo que tenemos hoy:"
     return {
         "message": greeting,
         "blocks": reply_blocks,
     }
+
+
+async def _with_memory(
+    turn: dict, org_id: int, location_id: int | None, profile: dict | None, currency: str,
+) -> dict:
+    """A remembered diner's opening turn: "¡Hola de nuevo!", their last
+    order with a repeat button and their favorites, then the usual category
+    chips. A stranger (or a remembered diner with nothing to recall yet) gets
+    `turn` unchanged. Best-effort: a memory failure never blocks the scan.
+    Caller must already be inside tenant_scope(org_id)."""
+    if not profile:
+        return turn
+    try:
+        welcome = await diner_memory.welcome_back_turn(org_id, location_id, profile, currency)
+    except Exception:
+        log.exception("diner_memory.welcome_back_failed", org_id=org_id)
+        return turn
+    if not welcome:
+        return turn
+    chips = turn.get("blocks") or []
+    if chips:
+        welcome["blocks"].append({"type": "text", "text": "¿O prefieres ver la carta?"})
+    return {"message": welcome["message"], "blocks": welcome["blocks"] + chips}
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -447,8 +480,10 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
             table_name=None,
             order_mode=body.order_mode,
         )
+        profile = await diner_memory.recognize_session(token, org_id, body.memory_key)
 
         turn = await _opening_turn(org_id, location_id, restaurant_name)
+        turn = await _with_memory(turn, org_id, location_id, profile, currency)
 
     log.info(
         "diner_session.opened",
@@ -482,9 +517,32 @@ async def _create_delivery_pickup_session(body: DinerSessionRequest, ip: str) ->
         "assistant": await plan_access.org_has_feature(org_id, plans.AI_ASSISTANT),
         "requires_join_code": False,
         "join_code": None,
+        "remembered": profile is not None,
         "message": turn["message"],
         "blocks": turn["blocks"],
     }
+
+
+async def _try_resume_table_session(prev: dict | None, org_id: int, table_id: str) -> dict | None:
+    """Give a returning diner their own seat back, or None.
+
+    Resumes only when the token is a diner session for THIS org and THIS
+    table AND still holds an ACTIVE table session there. Anything else (an
+    unknown token, another table's, a dinner that already closed) falls
+    through to the normal scan, which is what keeps a leaked or stale token
+    from opening anything. `prev` is the diner_sessions row for the token the
+    browser sent (looked up BEFORE the tenant scope: that lookup is itself a
+    cross-tenant one). Must run inside tenant_scope(org_id).
+    """
+    if not prev or int(prev["org_id"]) != org_id or prev.get("table_id") != table_id:
+        return None
+    token = prev["token"]
+    active = await db.db_get_active_session(token, org_id)
+    if not active or active.get("table_id") != table_id:
+        return None
+    await diner_sessions_repo.touch_last_seen(token, org_id)
+    log.info("diner_session.resumed", org_id=org_id, table_id=table_id)
+    return {"token": token, "join_code": active.get("join_code")}
 
 
 @router.post("/session")
@@ -537,6 +595,10 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
     table_name = table.get("name") or table_id
     await _require_open(org_id)
 
+    # The returning-diner lookup is cross-tenant by nature, so it happens
+    # here, outside the tenant scope below.
+    prev_session = await diner_sessions_repo.get_by_token((body.resume_token or "").strip())
+
     with tenant_scope(org_id):
         restaurant = await _resolve_diner_restaurant(org_id, location_id)
         if not restaurant:
@@ -550,6 +612,30 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         currency = feats.get("currency", "COP")
         location_id_int = int(location_id) if location_id else None
 
+        # Coming back to a table this device already sits at (closed the
+        # browser, a new tab, the camera app opening another browser). The
+        # token proves identity, and the table session must still be ACTIVE:
+        # a token from yesterday's dinner is not a seat at tonight's table.
+        resumed = await _try_resume_table_session(prev_session, org_id, table_id)
+        if resumed:
+            return {
+                "token": resumed["token"],
+                "org_id": org_id,
+                "location_id": location_id,
+                "table_id": table_id,
+                "table_name": table_name,
+                "restaurant_name": restaurant_name,
+                "currency": currency,
+                "order_mode": "dine_in",
+                "assistant": await plan_access.org_has_feature(org_id, plans.AI_ASSISTANT),
+                "requires_join_code": False,
+                "resumed": True,
+                # Only the diner who opened the table has a code to hand out.
+                "join_code": resumed["join_code"],
+                "message": "",
+                "blocks": [],
+            }
+
         token = f"web:{uuid.uuid4()}"
         await diner_sessions_repo.create_session(
             token=token,
@@ -559,11 +645,48 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
             table_name=table_name,
             order_mode="dine_in",
         )
+        # Linked even when the table turns out to be occupied: the diner who
+        # joins with the code is greeted as themselves (diner_join).
+        profile = await diner_memory.recognize_session(token, org_id, body.memory_key)
 
         # Capa 2 (mirrors agent.detect_table_context): is this table already
         # held by someone else? `token` is brand new, so `phone<>token` is
         # trivially true for any real existing session on the table.
         other_session = await tables_repo.db_get_active_session_on_table_by_other_phone(table_id, token)
+        if other_session and not other_session.get("join_code"):
+            # A sitting the STAFF opened (a reservation's "Cliente llegó", a
+            # waiter) has no code — there is no diner screen to show one. The
+            # first guest who scans was stuck: asked for a code that existed
+            # nowhere. They join it now, and the code is minted so anyone
+            # scanning after them still needs it from someone at the table.
+            if await tables_repo.db_set_session_join_code(other_session["id"], _generate_join_code()):
+                log.info("diner_session.claimed_staff_sitting", org_id=org_id, table_id=table_id)
+            fresh = await tables_repo.db_get_active_session_on_table_by_other_phone(table_id, token)
+            code = (fresh or {}).get("join_code")
+            joined = await tables_repo.db_link_participant_session(
+                phone=token, org_id=org_id, table_id=table_id, table_name=table_name,
+                join_code=code, location_id=location_id_int,
+            ) if code else None
+            if joined:
+                await tables_repo.db_mark_session_verified(joined["id"])
+                turn = await _opening_turn(org_id, location_id, restaurant_name)
+                turn = await _with_memory(turn, org_id, location_id_int, profile, currency)
+                return {
+                    "token": token,
+                    "org_id": org_id,
+                    "location_id": location_id,
+                    "table_id": table_id,
+                    "table_name": table_name,
+                    "restaurant_name": restaurant_name,
+                    "currency": currency,
+                    "order_mode": "dine_in",
+                    "assistant": await plan_access.org_has_feature(org_id, plans.AI_ASSISTANT),
+                    "requires_join_code": False,
+                    "join_code": code,
+                    "remembered": profile is not None,
+                    "message": turn["message"],
+                    "blocks": turn["blocks"],
+                }
         if other_session:
             log.info(
                 "diner_session.join_code_required",
@@ -594,7 +717,8 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         await tables_repo.db_set_session_join_code(new_session["id"], join_code)
         await tables_repo.db_mark_session_verified(new_session["id"])
 
-        turn = await _opening_turn(org_id, location_id, restaurant_name, table_name)
+        turn = await _opening_turn(org_id, location_id, restaurant_name)
+        turn = await _with_memory(turn, org_id, location_id_int, profile, currency)
 
     log.info(
         "diner_session.opened",
@@ -615,6 +739,7 @@ async def create_diner_session(request: Request, body: DinerSessionRequest):
         "assistant": await plan_access.org_has_feature(org_id, plans.AI_ASSISTANT),
         "requires_join_code": False,
         "join_code": join_code,
+        "remembered": profile is not None,
         "message": turn["message"],
         "blocks": turn["blocks"],
     }
@@ -663,7 +788,7 @@ async def diner_join(request: Request, body: DinerJoinRequest):
             restaurant = await db.db_get_restaurant_by_org_id(org_id)
             restaurant_name = (restaurant or {}).get("name") or "nuestro restaurante"
             currency = _features_dict((restaurant or {}).get("features")).get("currency", "COP")
-            turn = await _opening_turn(org_id, location_id, restaurant_name, table_name)
+            turn = await _opening_turn(org_id, location_id, restaurant_name)
             return {**turn, "restaurant_name": restaurant_name, "currency": currency, "table_name": table_name,
                     "assistant": await plan_access.org_has_feature(org_id, plans.AI_ASSISTANT)}
 
@@ -700,7 +825,12 @@ async def diner_join(request: Request, body: DinerJoinRequest):
         restaurant = await db.db_get_restaurant_by_org_id(org_id)
         restaurant_name = (restaurant or {}).get("name") or "nuestro restaurante"
         currency = _features_dict((restaurant or {}).get("features")).get("currency", "COP")
-        turn = await _opening_turn(org_id, location_id, restaurant_name, table_name)
+        turn = await _opening_turn(org_id, location_id, restaurant_name)
+        profile_id = session.get("customer_profile_id")
+        profile = (
+            await customer_profiles_repo.get_profile_by_id(org_id, int(profile_id)) if profile_id else None
+        )
+        turn = await _with_memory(turn, org_id, location_id, profile, currency)
 
     log.info("diner_join.success", org_id=org_id, table_id=table_id, session_id=new_session.get("id"))
 
@@ -1124,6 +1254,9 @@ async def diner_order_send(request: Request, body: DinerOrderSendRequest):
             for i in cart_items
         ],
         "message": "Listo, tu pedido ya va para la cocina.",
+        # The diner chat offers "¿te recordamos para la próxima?" once an
+        # order went out — never to a diner who is already remembered.
+        "memory_offer": not session.get("customer_profile_id"),
     }
     await state_store.order_send_result_set(cache_key, response, ttl_seconds=_ORDER_SEND_CACHE_TTL)
 
@@ -1236,10 +1369,23 @@ def _checkout_amount_label(amount: Decimal, currency: str) -> str:
     return format_money_es(amount, currency)
 
 
+@router.get("/payment-options")
+async def diner_payment_options(token: str = Query(..., min_length=1, max_length=200)):
+    """How this diner can pay at their sede: [{key, label, kind, instructions}]
+    (app/services/payment_options.py). Same list for the table and /pedir."""
+    if not await state_store.rate_limit_check(f"diner_payment_options:{token}", max_requests=30, window_seconds=60):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+    session = await _resolve_session_or_404(token)
+    org_id = int(session["org_id"])
+    with tenant_scope(org_id):
+        methods = await payment_options.sede_methods(org_id, session.get("location_id"))
+    return {"methods": methods}
+
+
 @router.post("/checkout")
 async def diner_checkout(request: Request, body: DinerCheckoutRequest):
-    """Diner taps 'Pedir la cuenta' → chooses scope (mine/table) + method
-    (card/cash) [+ optional tip, name, phone] → we build a real check from
+    """Diner taps 'Pedir la cuenta' → chooses scope (mine/table) + one of the
+    sede's methods [+ optional tip, name, phone] → we build a real check from
     THIS diner's (or the table's remaining) actual `table_orders` items,
     attach a `web_chat` payment proposal, and fire a waiter_alerts hint.
     No gateway, no payment link — see module docstring above.
@@ -1273,6 +1419,20 @@ async def diner_checkout(request: Request, body: DinerCheckoutRequest):
         base_order_id = await tables_repo.db_get_base_order_id(table_id)
         if not base_order_id:
             raise HTTPException(status_code=422, detail="Todavía no has hecho ningún pedido en esta mesa.")
+
+        method_key = payment_options.LEGACY_KEYS.get(body.method, body.method)
+        sede_methods = {m["key"]: m for m in await payment_options.sede_methods(org_id, location_id)}
+        chosen = sede_methods.get(method_key)
+        if chosen is None:
+            raise HTTPException(status_code=422, detail="Este restaurante no recibe ese medio de pago. Elige otro.")
+        # A transfer is paid before the bill is asked for: the receipt must
+        # already be uploaded (POST /api/diner/delivery/payment-proof keeps it
+        # server-side by token — the client never sends a URL).
+        proof_url = None
+        if chosen["kind"] == "transfer":
+            proof_url = await state_store.delivery_proof_get(token)
+            if not proof_url:
+                raise HTTPException(status_code=422, detail="Sube el comprobante de la transferencia antes de pedir la cuenta.")
 
         currency = await _currency_for_org(org_id)
 
@@ -1382,15 +1542,18 @@ async def diner_checkout(request: Request, body: DinerCheckoutRequest):
                     detail="La mesa cambió justo ahora, por favor intenta de nuevo.",
                 )
 
-            method_label = _CHECKOUT_METHOD_LABELS[body.method]
+            method_label = method_key
             await tables_repo.db_attach_proposal(
                 check_id=new_check["id"],
                 proposed_payments=[{"method": method_label, "amount": float(subtotal_total)}],  # JSON boundary
                 proposed_tip=float(tip_d),  # JSON boundary
                 proposal_source="web_chat",
-                proposal_status="pending",
+                proposal_status="awaiting_proof" if proof_url else "pending",
                 customer_phone=token,
             )
+            if proof_url:
+                # → proof_received: Caja sees it in "Comprobantes" to verify.
+                await tables_repo.db_attach_proof(base_order_id, token, proof_url)
             if tip_d > ZERO:
                 await tables_repo.db_set_check_tip(new_check["id"], float(tip_d))  # JSON boundary
 
@@ -1406,7 +1569,8 @@ async def diner_checkout(request: Request, body: DinerCheckoutRequest):
             alert_message = (
                 f"Mesa {table_name}: cobrar {scope_label} — "
                 f"{_checkout_amount_label(total_to_collect, currency)} en "
-                f"{_CHECKOUT_METHOD_DISPLAY[body.method]}{extra_txt}."
+                f"{chosen['label']}{extra_txt}."
+                + (" Pagó por transferencia: revisa el comprobante en Caja › Comprobantes." if proof_url else "")
             )
             try:
                 await tables_repo.db_create_waiter_alert(
@@ -1421,6 +1585,17 @@ async def diner_checkout(request: Request, body: DinerCheckoutRequest):
         finally:
             await state_store.table_checkout_lock_release(base_order_id, lock_token)
 
+        # A remembered diner who typed their name is greeted by it next time;
+        # the phone is kept for the restaurant only (diner_memory docstring).
+        profile_id = session.get("customer_profile_id")
+        name_in = (body.customer_name or "").strip() or None
+        phone_in = (body.customer_phone or "").strip() or None
+        if profile_id and (name_in or phone_in):
+            try:
+                await customer_profiles_repo.set_contact(org_id, int(profile_id), name_in, phone_in)
+            except Exception:
+                log.exception("diner_checkout.profile_contact_failed", org_id=org_id)
+
     response = {
         "success": True,
         "check_id": new_check["id"],
@@ -1432,7 +1607,10 @@ async def diner_checkout(request: Request, body: DinerCheckoutRequest):
         "tip_amount": float(tip_d),  # JSON boundary
         "total": float(total_to_collect),  # JSON boundary
         "currency": currency,
-        "message": "Ya le avisamos al mesero, ya viene con tu cuenta.",
+        "message": (
+            "Recibimos tu comprobante. La caja lo revisa y el mesero te confirma."
+            if proof_url else "Ya le avisamos al mesero, ya viene con tu cuenta."
+        ),
     }
     log.info(
         "diner_checkout.success", org_id=org_id, table_id=table_id,

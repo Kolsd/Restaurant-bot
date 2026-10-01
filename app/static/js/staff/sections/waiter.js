@@ -34,13 +34,8 @@
         </button>
       </div>
       <!-- Zone filter tabs -->
-      <div class="m-zone-tabs" role="tablist">
-        <button class="m-zone-btn active" data-zone="all" role="tab" aria-selected="true">Todas</button>
-        <button class="m-zone-btn" data-zone="terraza" role="tab" aria-selected="false">Terraza</button>
-        <button class="m-zone-btn" data-zone="salon" role="tab" aria-selected="false">Salón</button>
-        <button class="m-zone-btn" data-zone="privado" role="tab" aria-selected="false">Privado</button>
-        <button class="m-zone-btn" data-zone="barra" role="tab" aria-selected="false">Barra</button>
-      </div>
+      <!-- Built from the restaurant's own zones in _renderZoneTabs(). -->
+      <div class="m-zone-tabs" id="m-zone-tabs" role="tablist"></div>
     </div>
 
     <!-- Legend row -->
@@ -141,6 +136,38 @@ function setZone(zone) {
   _applyZoneFilter();
 }
 
+// "Salón" and "Salon" are the same zone to a person.
+function _zoneKey(zone) {
+  return String(zone || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// One tab per zone the tables really have (they were hardcoded — Terraza,
+// Salón, Privado, Barra — and compared against the raw zone text, so a tab
+// never matched anything). Hidden when there is a single zone.
+function _renderZoneTabs(tables) {
+  const wrap = document.getElementById('m-zone-tabs');
+  if (!wrap) return;
+  const zones = [];
+  const seen = {};
+  tables.forEach(t => {
+    const key = _zoneKey(t.zone);
+    if (key && !seen[key]) { seen[key] = true; zones.push({ key: key, label: String(t.zone).trim() }); }
+  });
+  if (_currentZone !== 'all' && !seen[_currentZone]) _currentZone = 'all';
+  wrap.innerHTML = '';
+  wrap.hidden = zones.length < 2;
+  [{ key: 'all', label: 'Todas' }].concat(zones).forEach(z => {
+    const btn = document.createElement('button');
+    btn.className = 'm-zone-btn' + (z.key === _currentZone ? ' active' : '');
+    btn.dataset.zone = z.key;
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', z.key === _currentZone ? 'true' : 'false');
+    btn.textContent = z.label;
+    btn.addEventListener('click', () => setZone(z.key));
+    wrap.appendChild(btn);
+  });
+}
+
 function _applyZoneFilter() {
   document.querySelectorAll('.m-tbl').forEach(tile => {
     const z = tile.dataset.zone || '';
@@ -194,7 +221,7 @@ function _renderTables(tables) {
     const { cls, label } = _tableState(t);
     const name  = _esc(t.name || t.table_name || String(t.id));
     const cap   = _esc(String(t.capacity || ''));
-    const zone  = t.zone || '';
+    const zone  = _zoneKey(t.zone);
     const total = t.current_total != null ? mesioFmt(t.current_total) : '';
     const sinceStr = t.session_started_at ? _elapsed(t.session_started_at) : '';
     const alertLabel = (t.has_waiter_alert ?? false) ? '<div class="m-tbl-alert">Atenci\u00f3n</div>' : '';
@@ -256,25 +283,25 @@ async function openTable(t) {
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
   modal.setAttribute('aria-label', 'Pedidos de la mesa ' + (t.name || t.id));
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);display:flex;align-items:center;justify-content:center;z-index:9999;';
 
   const card = document.createElement('div');
-  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:320px;max-width:520px;width:92%;max-height:85vh;overflow-y:auto;';
+  card.style.cssText = 'background:var(--surface-2,var(--surface));border-radius:12px;padding:24px;min-width:320px;max-width:520px;width:92%;max-height:85vh;overflow-y:auto;';
 
   const title = document.createElement('h3');
-  title.style.cssText = 'margin:0 0 4px;font-size:18px;color:var(--text-1,#fff);';
+  title.style.cssText = 'margin:0 0 4px;font-size:18px;color:var(--text);';
   title.textContent = 'Mesa ' + (t.name || t.table_name || t.id);
   card.appendChild(title);
 
   const subtitle = document.createElement('div');
-  subtitle.style.cssText = 'margin:0 0 16px;font-size:12px;color:var(--text-3,#94a3b8);';
+  subtitle.style.cssText = 'margin:0 0 16px;font-size:12px;color:var(--text-3,var(--text-3));';
   if (t.session_started_at) subtitle.textContent = 'Sesión activa · ' + _elapsed(t.session_started_at);
   else if (t.waiter_name)   subtitle.textContent = 'Atiende: ' + t.waiter_name;
   card.appendChild(subtitle);
 
   const ordersDiv = document.createElement('div');
   ordersDiv.id = 'mesero-modal-orders';
-  ordersDiv.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">Cargando…</div>';
+  ordersDiv.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,var(--text-3));">Cargando…</div>';
   card.appendChild(ordersDiv);
 
   const footer = document.createElement('div');
@@ -317,18 +344,18 @@ async function _showCobrarServiceModal(table, parentModal) {
   modal.id = 'mesero-cobrar-modal';
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:10001;';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);display:flex;align-items:center;justify-content:center;z-index:10001;';
 
   const card = document.createElement('div');
-  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:320px;max-width:420px;width:92%;';
+  card.style.cssText = 'background:var(--surface-2,var(--surface));border-radius:12px;padding:24px;min-width:320px;max-width:420px;width:92%;';
 
   const title = document.createElement('h3');
-  title.style.cssText = 'margin:0 0 6px;font-size:17px;color:var(--text-1,#fff);';
+  title.style.cssText = 'margin:0 0 6px;font-size:17px;color:var(--text);';
   title.textContent = '¿Cobrar Mesa ' + (table.name || table.table_name || table.id) + '?';
   card.appendChild(title);
 
   const subtitle = document.createElement('div');
-  subtitle.style.cssText = 'margin:0 0 18px;font-size:12px;color:var(--text-3,#94a3b8);line-height:1.4;';
+  subtitle.style.cssText = 'margin:0 0 18px;font-size:12px;color:var(--text-3,var(--text-3));line-height:1.4;';
   subtitle.textContent = 'El pedido se envía a caja con el % de servicio que elijas. Caja confirma el cobro físico.';
   card.appendChild(subtitle);
 
@@ -345,7 +372,7 @@ async function _showCobrarServiceModal(table, parentModal) {
     optsDiv.querySelectorAll('[data-opt]').forEach(el => {
       const p = Number(el.dataset.opt);
       const isActive = p === chosenPct;
-      el.style.background  = isActive ? 'var(--brand-soft,#1f3d2f)' : 'var(--surface-3,#252d40)';
+      el.style.background  = isActive ? 'var(--brand-light)' : 'var(--surface-hover)';
       el.style.borderColor = isActive ? '#10b981' : 'transparent';
     });
   }
@@ -353,13 +380,13 @@ async function _showCobrarServiceModal(table, parentModal) {
     const row = document.createElement('button');
     row.type = 'button';
     row.dataset.opt = String(o.pct);
-    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-radius:8px;border:2px solid transparent;cursor:pointer;background:var(--surface-3,#252d40);color:var(--text-1,#fff);font-size:13px;font-family:inherit;';
+    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-radius:8px;border:2px solid transparent;cursor:pointer;background:var(--surface-3,var(--surface-hover));color:var(--text);font-size:13px;font-family:inherit;';
     const left = document.createElement('span');
     left.textContent = o.label;
     left.style.fontWeight = '600';
     const right = document.createElement('span');
     right.textContent = o.sub;
-    right.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);';
+    right.style.cssText = 'font-size:11px;color:var(--text-3,var(--text-3));';
     row.appendChild(left);
     row.appendChild(right);
     row.addEventListener('click', async () => {
@@ -454,11 +481,11 @@ async function _generateInvoiceForTable(tableId, servicePct) {
 const _ACTIVE_ORDER_STATUSES = ['recibido', 'en_preparacion', 'listo'];
 const _CLOSED_ORDER_STATUSES = ['factura_entregada', 'cancelado', 'closed'];
 const _STATUS_LABELS = {
-  recibido:        { txt: 'Recibido',     color: '#94a3b8', bg: '#1e2535' },
-  en_preparacion:  { txt: 'En cocina',    color: '#fbbf24', bg: '#3d2f1f' },
-  listo:           { txt: 'Listo',        color: '#10b981', bg: '#1f3d2f' },
-  entregado:       { txt: 'Entregado',    color: '#60a5fa', bg: '#1f2d3d' },
-  generar_factura: { txt: 'Cobrando',     color: '#a78bfa', bg: '#2d1f3d' },
+  recibido:        { txt: 'Recibido',     color: '#4B5563', bg: '#F3F4F6' },
+  en_preparacion:  { txt: 'En cocina',    color: '#92400E', bg: '#FEF3C7' },
+  listo:           { txt: 'Listo',        color: '#0F6E56', bg: '#E1F5EE' },
+  entregado:       { txt: 'Entregado',    color: '#1E40AF', bg: '#DBEAFE' },
+  generar_factura: { txt: 'Cobrando',     color: '#5B21B6', bg: '#EDE9FE' },
 };
 
 // ── Layer 3: Validation action helpers ────────────────────────────────────────
@@ -525,7 +552,7 @@ async function _loadTableOrders(tableId, container) {
     const orders = all.filter(o => !_CLOSED_ORDER_STATUSES.includes(o.status));
 
     if (!orders.length) {
-      container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">No hay pedidos activos en esta mesa.</div>';
+      container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,var(--text-3));">No hay pedidos activos en esta mesa.</div>';
       return;
     }
 
@@ -540,7 +567,7 @@ async function _loadTableOrders(tableId, container) {
 
       // Banner
       const banner = document.createElement('div');
-      banner.style.cssText = 'background:#92400e;border:1px solid #f59e0b;border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:#fef3c7;line-height:1.4;';
+      banner.style.cssText = 'background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:#92400E;line-height:1.4;';
       banner.textContent = 'Validacion pendiente — la mesa abrio sesion por QR pero no confirmaste fisicamente al cliente.'; // lint-allow: accents stripped for ascii safety
 
       // Geo badge (pull from the first pending order's geo_verified field if present)
@@ -568,7 +595,7 @@ async function _loadTableOrders(tableId, container) {
 
       const ghostBtn = document.createElement('button');
       ghostBtn.className = 'm-btn m-btn--sm';
-      ghostBtn.style.cssText = 'flex:1;background:#7f1d1d;color:#fca5a5;font-weight:700;border:none;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;';
+      ghostBtn.style.cssText = 'flex:1;background:#FEE2E2;color:#B91C1C;font-weight:700;border:none;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;';
       ghostBtn.textContent = 'Mesa fantasma';
       ghostBtn.addEventListener('click', () => _markTableGhost(tableId, parentModal));
       actionRow.appendChild(ghostBtn);
@@ -578,14 +605,14 @@ async function _loadTableOrders(tableId, container) {
 
     orders.forEach(o => {
       const orderCard = document.createElement('div');
-      orderCard.style.cssText = 'background:var(--surface-3,#252d40);border-radius:10px;padding:12px;margin-bottom:10px;';
+      orderCard.style.cssText = 'background:var(--surface-3,var(--surface-hover));border-radius:10px;padding:12px;margin-bottom:10px;';
 
       const head = document.createElement('div');
       head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;';
       const orderId = document.createElement('span');
-      orderId.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);font-family:monospace;';
+      orderId.style.cssText = 'font-size:11px;color:var(--text-3,var(--text-3));font-family:monospace;';
       orderId.textContent = '#' + String(o.id || '').slice(-6);
-      const statusInfo = _STATUS_LABELS[o.status] || { txt: o.status, color: '#94a3b8', bg: '#1e2535' };
+      const statusInfo = _STATUS_LABELS[o.status] || { txt: o.status, color: '#4B5563', bg: '#F3F4F6' };
       const statusBadge = document.createElement('span');
       statusBadge.style.cssText = 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:' + statusInfo.bg + ';color:' + statusInfo.color + ';';
       statusBadge.textContent = statusInfo.txt;
@@ -596,7 +623,7 @@ async function _loadTableOrders(tableId, container) {
       const items = Array.isArray(o.items) ? o.items : [];
       if (items.length) {
         const itemsList = document.createElement('ul');
-        itemsList.style.cssText = 'list-style:none;margin:0 0 10px;padding:0;font-size:13px;color:var(--text-2,#cbd5e1);';
+        itemsList.style.cssText = 'list-style:none;margin:0 0 10px;padding:0;font-size:13px;color:var(--text-2,var(--text-3));';
         items.forEach(it => {
           const li = document.createElement('li');
           li.style.cssText = 'padding:2px 0;';
@@ -608,7 +635,7 @@ async function _loadTableOrders(tableId, container) {
 
       if (o.total != null) {
         const totalRow = document.createElement('div');
-        totalRow.style.cssText = 'font-size:12px;color:var(--text-3,#94a3b8);margin-bottom:8px;';
+        totalRow.style.cssText = 'font-size:12px;color:var(--text-3,var(--text-3));margin-bottom:8px;';
         totalRow.textContent = 'Total: ' + mesioFmt(o.total);
         orderCard.appendChild(totalRow);
       }
@@ -723,7 +750,7 @@ async function _dismissAlert(alertId, li, modal) {
     const list = modal.querySelector('ul');
     if (list) {
       const empty = document.createElement('div');
-      empty.style.cssText = 'padding:16px;text-align:center;color:var(--text-3,#94a3b8);font-size:13px;';
+      empty.style.cssText = 'padding:16px;text-align:center;color:var(--text-3,var(--text-3));font-size:13px;';
       empty.textContent = 'Todas las alertas han sido atendidas.';
       list.replaceWith(empty);
     }
@@ -742,13 +769,13 @@ function _showAllAlerts(alerts) {
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
   modal.setAttribute('aria-label', 'Alertas de mesero');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);display:flex;align-items:center;justify-content:center;z-index:9999;';
 
   const card = document.createElement('div');
-  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:280px;max-width:400px;width:90%;';
+  card.style.cssText = 'background:var(--surface-2,var(--surface));border-radius:12px;padding:24px;min-width:280px;max-width:400px;width:90%;';
 
   const title = document.createElement('h3');
-  title.style.cssText = 'margin:0 0 16px;font-size:16px;color:var(--text-1,#fff);';
+  title.style.cssText = 'margin:0 0 16px;font-size:16px;color:var(--text);';
   title.textContent = `${alerts.length} alerta${alerts.length > 1 ? 's' : ''} activa${alerts.length > 1 ? 's' : ''}`;
   card.appendChild(title);
 
@@ -757,12 +784,12 @@ function _showAllAlerts(alerts) {
   alerts.forEach(a => {
     const li = document.createElement('li');
     li.dataset.alertId = String(a.id);
-    li.style.cssText = 'background:var(--surface-3,#252d40);border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:center;';
+    li.style.cssText = 'background:var(--surface-3,var(--surface-hover));border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:center;';
     const badge = document.createElement('span');
     badge.style.cssText = 'font-size:11px;font-weight:600;color:var(--warn,#f59e0b);white-space:nowrap;flex:1;';
     badge.textContent = _alertTableLabel(a);
     const type = document.createElement('span');
-    type.style.cssText = 'font-size:12px;color:var(--text-2,#94a3b8);flex:1;';
+    type.style.cssText = 'font-size:12px;color:var(--text-2,var(--text-3));flex:1;';
     type.textContent = a.message || a.alert_type || '';
     const resolveBtn = document.createElement('button');
     resolveBtn.className = 'm-btn m-btn--sm';
@@ -831,7 +858,9 @@ async function loadTables() {
     if (!res.ok) { if (res.status === 401) { window.location.href = '/login'; return; } throw new Error(); }
     const data = await res.json();
     const tables = data.tables || data || [];
+    _renderZoneTabs(tables);
     _renderTables(tables);
+    _applyZoneFilter();
     const subEl = document.getElementById('mesero-sub');
     if (subEl) {
       const n = tables.length;
@@ -856,19 +885,19 @@ async function openActiveOrdersModal() {
   modal.id = 'mesero-orders-modal';
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:40px 16px;';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:40px 16px;';
 
   const card = document.createElement('div');
-  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:320px;max-width:680px;width:100%;max-height:85vh;overflow-y:auto;';
+  card.style.cssText = 'background:var(--surface-2,var(--surface));border-radius:12px;padding:24px;min-width:320px;max-width:680px;width:100%;max-height:85vh;overflow-y:auto;';
 
   const title = document.createElement('h3');
-  title.style.cssText = 'margin:0 0 16px;font-size:18px;color:var(--text-1,#fff);display:flex;align-items:center;gap:8px;';
+  title.style.cssText = 'margin:0 0 16px;font-size:18px;color:var(--text);display:flex;align-items:center;gap:8px;';
   title.innerHTML = '📋 Pedidos activos';
   card.appendChild(title);
 
   const body = document.createElement('div');
   body.id = 'mesero-orders-modal-body';
-  body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">Cargando…</div>';
+  body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,var(--text-3));">Cargando…</div>';
   card.appendChild(body);
 
   const footer = document.createElement('div');
@@ -898,7 +927,7 @@ async function openActiveOrdersModal() {
     const all = data.orders || [];
     const orders = all.filter(o => !_CLOSED_ORDER_STATUSES.includes(o.status));
     if (!orders.length) {
-      body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">No hay pedidos activos en ninguna mesa.</div>';
+      body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,var(--text-3));">No hay pedidos activos en ninguna mesa.</div>';
       return;
     }
     // Group by table
@@ -914,11 +943,11 @@ async function openActiveOrdersModal() {
       const grpEl = document.createElement('div');
       grpEl.style.cssText = 'margin-bottom:14px;';
       const head = document.createElement('div');
-      head.style.cssText = 'font-size:13px;font-weight:600;color:var(--text-1,#fff);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;';
+      head.style.cssText = 'font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;';
       const name = document.createElement('span');
       name.textContent = 'Mesa ' + (grp.table_name || grp.table_id || '—');
       const count = document.createElement('span');
-      count.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);font-weight:500;';
+      count.style.cssText = 'font-size:11px;color:var(--text-3,var(--text-3));font-weight:500;';
       count.textContent = grp.orders.length + ' pedido' + (grp.orders.length === 1 ? '' : 's');
       head.appendChild(name);
       head.appendChild(count);
@@ -926,14 +955,14 @@ async function openActiveOrdersModal() {
 
       grp.orders.forEach(o => {
         const oCard = document.createElement('div');
-        oCard.style.cssText = 'background:var(--surface-3,#252d40);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;';
+        oCard.style.cssText = 'background:var(--surface-3,var(--surface-hover));border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;';
         const left = document.createElement('div');
         left.style.cssText = 'flex:1;min-width:0;';
         const idLine = document.createElement('div');
-        idLine.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);font-family:monospace;';
+        idLine.style.cssText = 'font-size:11px;color:var(--text-3,var(--text-3));font-family:monospace;';
         idLine.textContent = '#' + String(o.id || '').slice(-6);
         const itemsLine = document.createElement('div');
-        itemsLine.style.cssText = 'font-size:12px;color:var(--text-2,#cbd5e1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        itemsLine.style.cssText = 'font-size:12px;color:var(--text-2,var(--text-3));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
         const items = Array.isArray(o.items) ? o.items : [];
         itemsLine.textContent = items.length
           ? items.map(it => (it.qty || 1) + '× ' + (it.name || '?')).join(', ')
@@ -941,7 +970,7 @@ async function openActiveOrdersModal() {
         left.appendChild(idLine);
         left.appendChild(itemsLine);
         const right = document.createElement('div');
-        const statusInfo = _STATUS_LABELS[o.status] || { txt: o.status, color: '#94a3b8', bg: '#1e2535' };
+        const statusInfo = _STATUS_LABELS[o.status] || { txt: o.status, color: '#4B5563', bg: '#F3F4F6' };
         const badge = document.createElement('span');
         badge.style.cssText = 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:' + statusInfo.bg + ';color:' + statusInfo.color + ';';
         badge.textContent = statusInfo.txt;
@@ -972,20 +1001,20 @@ async function openChatsModal() {
   modal.id = 'mesero-chats-modal';
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:40px 16px;';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:40px 16px;';
 
   const card = document.createElement('div');
-  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:320px;max-width:580px;width:100%;max-height:85vh;display:flex;flex-direction:column;';
+  card.style.cssText = 'background:var(--surface-2,var(--surface));border-radius:12px;padding:24px;min-width:320px;max-width:580px;width:100%;max-height:85vh;display:flex;flex-direction:column;';
 
   const title = document.createElement('h3');
-  title.style.cssText = 'margin:0 0 16px;font-size:18px;color:var(--text-1,#fff);display:flex;align-items:center;gap:8px;';
+  title.style.cssText = 'margin:0 0 16px;font-size:18px;color:var(--text);display:flex;align-items:center;gap:8px;';
   title.innerHTML = '💬 Chats activos';
   card.appendChild(title);
 
   const body = document.createElement('div');
   body.id = 'mesero-chats-modal-body';
   body.style.cssText = 'flex:1;overflow-y:auto;';
-  body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">Cargando…</div>';
+  body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,var(--text-3));">Cargando…</div>';
   card.appendChild(body);
 
   const footer = document.createElement('div');
@@ -1014,25 +1043,25 @@ async function openChatsModal() {
     const data = await res.json();
     const convs = data.conversations || [];
     if (!convs.length) {
-      body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">No hay conversaciones recientes.</div>';
+      body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,var(--text-3));">No hay conversaciones recientes.</div>';
       return;
     }
     body.innerHTML = '';
     convs.forEach(c => {
       const row = document.createElement('div');
-      row.style.cssText = 'background:var(--surface-3,#252d40);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;';
+      row.style.cssText = 'background:var(--surface-3,var(--surface-hover));border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;';
       const left = document.createElement('div');
       left.style.cssText = 'flex:1;min-width:0;';
       const phoneEl = document.createElement('div');
-      phoneEl.style.cssText = 'font-size:13px;font-weight:600;color:var(--text-1,#fff);';
+      phoneEl.style.cssText = 'font-size:13px;font-weight:600;color:var(--text);';
       phoneEl.textContent = _maskPhone(c.phone);
       const previewEl = document.createElement('div');
-      previewEl.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;';
+      previewEl.style.cssText = 'font-size:11px;color:var(--text-3,var(--text-3));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;';
       previewEl.textContent = (c.last_message || c.preview || '').slice(0, 80) || '—';
       left.appendChild(phoneEl);
       left.appendChild(previewEl);
       const right = document.createElement('div');
-      right.style.cssText = 'font-size:10px;color:var(--text-3,#94a3b8);text-align:right;flex-shrink:0;';
+      right.style.cssText = 'font-size:10px;color:var(--text-3,var(--text-3));text-align:right;flex-shrink:0;';
       if (c.last_at || c.updated_at || c.last_updated) {
         const iso = (c.last_at || c.updated_at || c.last_updated);
         right.textContent = _elapsed(iso);
@@ -1062,15 +1091,15 @@ async function openChatHistoryModal(phone) {
   modal.id = 'mesero-chat-history-modal';
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:40px 16px;';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:40px 16px;';
 
   const card = document.createElement('div');
-  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:20px;min-width:320px;max-width:520px;width:100%;max-height:90vh;display:flex;flex-direction:column;';
+  card.style.cssText = 'background:var(--surface-2,var(--surface));border-radius:12px;padding:20px;min-width:320px;max-width:520px;width:100%;max-height:90vh;display:flex;flex-direction:column;';
 
   const head = document.createElement('div');
   head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0;';
   const title = document.createElement('h3');
-  title.style.cssText = 'margin:0;font-size:15px;color:var(--text-1,#fff);';
+  title.style.cssText = 'margin:0;font-size:15px;color:var(--text);';
   title.textContent = 'Chat ' + _maskPhone(phone);
   const xBtn = document.createElement('button');
   xBtn.className = 'm-btn m-btn--sm m-btn--ghost';
@@ -1082,8 +1111,8 @@ async function openChatHistoryModal(phone) {
   card.appendChild(head);
 
   const msgs = document.createElement('div');
-  msgs.style.cssText = 'flex:1;overflow-y:auto;background:#0e1117;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px;';
-  msgs.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:12px;font-size:12px;">Cargando historial…</div>';
+  msgs.style.cssText = 'flex:1;overflow-y:auto;background:var(--bg);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px;';
+  msgs.innerHTML = '<div style="color:var(--text-3);text-align:center;padding:12px;font-size:12px;">Cargando historial…</div>';
   card.appendChild(msgs);
 
   const foot = document.createElement('div');
@@ -1135,14 +1164,14 @@ async function openChatHistoryModal(phone) {
     const d = await res.json();
     const history = d.history || [];
     if (!history.length) {
-      msgs.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:12px;font-size:12px;">Sin mensajes.</div>';
+      msgs.innerHTML = '<div style="color:var(--text-3);text-align:center;padding:12px;font-size:12px;">Sin mensajes.</div>';
       return;
     }
     msgs.innerHTML = '';
     history.forEach(m => {
       const isUser = m.role === 'user';
       const bubble = document.createElement('div');
-      bubble.style.cssText = 'max-width:80%;padding:8px 12px;border-radius:10px;font-size:13px;line-height:1.4;word-wrap:break-word;align-self:' + (isUser ? 'flex-start' : 'flex-end') + ';background:' + (isUser ? '#252d40' : '#1f3d2f') + ';color:' + (isUser ? '#cbd5e1' : '#d1fae5') + ';';
+      bubble.style.cssText = 'max-width:80%;padding:8px 12px;border-radius:10px;font-size:13px;line-height:1.4;word-wrap:break-word;align-self:' + (isUser ? 'flex-start' : 'flex-end') + ';background:' + (isUser ? 'var(--surface-hover)' : 'var(--brand-light)') + ';color:' + (isUser ? 'var(--text)' : 'var(--brand-dark)') + ';';
       const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
       bubble.textContent = content;
       msgs.appendChild(bubble);
@@ -1158,10 +1187,6 @@ function mount(container) {
   container.innerHTML = TEMPLATE;
   _currentZone = 'all';
   _allTables = [];
-
-  document.querySelectorAll('.m-zone-btn').forEach(btn => {
-    btn.addEventListener('click', () => setZone(btn.dataset.zone || 'all'));
-  });
 
   const ordersBtn = document.getElementById('m-btn-orders');
   if (ordersBtn) ordersBtn.addEventListener('click', openActiveOrdersModal);

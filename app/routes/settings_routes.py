@@ -95,6 +95,41 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
     }
 
 
+async def _settings_sede(request: Request, org_id: int) -> dict | None:
+    """The sede whose address and hours Configuración shows and saves: the
+    one picked in the sidebar (owner/admin), the caller's own (gerente), or
+    the org's only sede. None for a multi-sede owner viewing every sede.
+    Must run inside tenant_scope(org_id)."""
+    from app.routes.staff_ops import resolve_ops_sede  # noqa: PLC0415
+    user = await get_current_user(request)
+    loc_id = await resolve_ops_sede(request, user, org_id)
+    if not loc_id:
+        return None
+    loc = await db.db_get_location_by_id(loc_id)
+    if not loc or int(loc.get("org_id") or -1) != org_id:
+        return None
+    return loc
+
+
+def _with_sede(payload: dict, sede: dict | None) -> dict:
+    """Address, coordinates and hours belong to a sede, never the org row."""
+    hours = (sede or {}).get("opening_hours")
+    if isinstance(hours, str):
+        try:
+            hours = json.loads(hours)
+        except (ValueError, TypeError):
+            hours = {}
+    payload.update({
+        "location_id":   (sede or {}).get("id"),
+        "location_name": (sede or {}).get("name") or "",
+        "address":       (sede or {}).get("address") or "",
+        "latitude":      (sede or {}).get("latitude"),
+        "longitude":     (sede or {}).get("longitude"),
+        "opening_hours": hours if isinstance(hours, dict) else {},
+    })
+    return payload
+
+
 @router.get("/api/settings")
 async def get_settings(request: Request):
     # P0 fix (2026-09): get_current_restaurant resolves ONLY through the
@@ -103,7 +138,9 @@ async def get_settings(request: Request):
     # which also had NO ownership check on the X-Branch-ID header value.
     restaurant = await get_current_restaurant(request)
     features = _parse_features(restaurant)
-    return _build_settings_response(restaurant, features)
+    with tenant_scope(restaurant["id"]):
+        sede = await _settings_sede(request, int(restaurant["id"]))
+    return _with_sede(_build_settings_response(restaurant, features), sede)
 
 
 @router.post("/api/settings")
@@ -194,10 +231,16 @@ async def save_settings(request: Request):
                 restaurant["id"], features_patch
             )
 
-        # 2. Location-level fields: name, address, opening_hours, lat/lon
-        _location_updates: dict = {}
+        # 2. The brand name is the organization's ("Arepas Juan"); each
+        #    sede keeps its own name ("Norte") — they are not the same field.
         if new_name is not None:
-            _location_updates["name"] = str(new_name).strip()
+            await restaurant_repo.db_update_organization(restaurant["id"], name=str(new_name).strip())
+
+        # 3. Address, coordinates and hours belong to ONE sede. This used to
+        #    call db_update_location(restaurant["id"]) — an ORG id used as a
+        #    location id, which rewrote whichever sede happened to share that
+        #    number, another customer's included.
+        _location_updates: dict = {}
         if "address" in body and body["address"] is not None:
             _location_updates["address"] = body["address"]
         if "opening_hours" in body and isinstance(body["opening_hours"], dict):
@@ -207,8 +250,17 @@ async def save_settings(request: Request):
         if lon is not None:
             _location_updates["longitude"] = lon
 
+        sede = await _settings_sede(request, int(restaurant["id"]))
         if _location_updates:
-            await restaurant_repo.db_update_location(restaurant["id"], **_location_updates)
+            if sede is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Elige una sede en el selector de la barra lateral para cambiar su dirección y horario.",
+                )
+            await restaurant_repo.db_update_location(
+                int(sede["id"]), org_id=int(restaurant["id"]), **_location_updates,
+            )
+            sede = await db.db_get_location_by_id(int(sede["id"]))
 
     # Re-fetch to return authoritative state. restaurant["id"] is already
     # normalized to org_id by get_current_restaurant.
@@ -216,7 +268,7 @@ async def save_settings(request: Request):
     if not updated:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
     final_features = _parse_features(updated)
-    return _build_settings_response(updated, final_features)
+    return _with_sede(_build_settings_response(updated, final_features), sede)
 
 
 # ── PAUSE / RESUME ───────────────────────────────────────────────────
@@ -877,7 +929,10 @@ class _ImageDeleteRequest(BaseModel):
 
 @router.post("/api/menu/image/sign")
 async def sign_image_upload(
-    body: _ImageSignRequest,
+    # Optional: the only field has a default, and a client that sends no body
+    # at all (the editor did) used to get a 422 whose list-shaped `detail`
+    # rendered as "[object Object]".
+    body: _ImageSignRequest = _ImageSignRequest(),
     restaurant: dict = Depends(get_current_restaurant),
 ):
     """

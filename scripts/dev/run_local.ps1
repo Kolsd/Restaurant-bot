@@ -59,4 +59,7 @@ Write-Host "Demo en vivo:  $Base/demo"
 Write-Host "Superadmin:    $Base/internal/superadmin  (clave: $($env:ADMIN_KEY))"
 Write-Host "Stop with Ctrl+C."
 Write-Host ""
-& $Python -m uvicorn app.main:app --reload --host $BindHost --port 8000
+# The staff app and the diner chat hold SSE streams open forever; without a
+# graceful-shutdown limit a code change makes --reload wait for them and the
+# server stops answering until those tabs are closed.
+& $Python -m uvicorn app.main:app --reload --timeout-graceful-shutdown 2 --host $BindHost --port 8000

@@ -57,7 +57,7 @@
           </div>
           <div>
             <div class="consolidated-val" id="consolidated-nps">&mdash;</div>
-            <div class="consolidated-sub">NPS promedio</div>
+            <div class="consolidated-sub">NPS · 30 días</div>
           </div>
           <div>
             <div class="consolidated-val" id="consolidated-staff">&mdash;</div>
@@ -107,7 +107,7 @@
 <!-- ── Delivery/pickup config modal (per-sede, docs/claude/delivery-web.md chunk 8) ── -->
 <div class="m-modal-overlay" id="deliveryConfigModal" role="dialog" aria-modal="true" aria-labelledby="deliveryConfigModalTitle">
   <div class="m-modal-box" id="deliveryConfigModalBox" style="max-width:520px;">
-    <h3 id="deliveryConfigModalTitle">Domicilios y recogida — <span id="dcSedeName"></span></h3>
+    <h3 id="deliveryConfigModalTitle">Sede <span id="dcSedeName"></span> · domicilios y pagos</h3>
 
     <div class="form-field">
       <label><input type="checkbox" id="dcDeliveryEnabled"> Domicilio activo</label>
@@ -140,7 +140,7 @@
     </div>
 
     <div class="form-field">
-      <label>Métodos de pago aceptados</label>
+      <label>Métodos de pago aceptados (en la mesa y en domicilios)</label>
       <div id="dcPaymentMethods" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:4px;">
         <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" class="dc-pm" value="efectivo"> Efectivo</label>
         <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" class="dc-pm" value="tarjeta"> Datáfono (tarjeta)</label>

@@ -249,8 +249,9 @@ async def login(username: str, password: str) -> dict:
         "success": True,
         "token": token,
         "role": role,
-        # Who is logged in (an owner has no display name on file — their login).
-        "name": username,
+        # Who is logged in: the name given at signup, else their login (accounts
+        # created before users.display_name have none).
+        "name": (user.get("display_name") or "").strip() or username,
         "restaurant": legacy_restaurant,  # legacy key — kept for backward compat
     }
     if org_shape is not None:

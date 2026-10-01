@@ -14,6 +14,8 @@
       const el = document.getElementById('tab-' + t);
       if (el) el.style.display = t === tab ? '' : 'none';
     });
+    // Coming back from "Carta de esta sede": show what was just changed there.
+    if (tab === 'disp' && typeof loadMenu === 'function') loadMenu();
   }
 
   document.querySelectorAll('[data-tab]').forEach(function (btn) {
@@ -80,6 +82,13 @@
         body: JSON.stringify({ dish_name: name.textContent.trim(), available: input.checked })
       });
       if (!res.ok) throw new Error('status ' + res.status);
+      var dishName = name.textContent.trim();
+      Object.keys(_rawCategories || {}).forEach(function (cat) {
+        (_rawCategories[cat] || []).forEach(function (d) {
+          if (d.name === dishName) d.available = input.checked;
+        });
+      });
+      _updateMenuCounter(_rawCategories);
     } catch (e) {
       input.checked = !input.checked;
       var dishEl = input.closest('.dish');
@@ -185,13 +194,34 @@
     return menuData;
   }
 
+  // "Agotado" is per sede, so this view is THIS sede's carta (base + its
+  // changes + its own dishes) with THIS sede's sold-out state. It used to show
+  // the base carta with no availability at all: a dish switched off looked
+  // available again on the next load, though the switch had saved.
   async function loadMenu() {
     try {
-      var res = await fetch('/api/dashboard/menu', { headers: mesioHeaders() });
-      if (!res.ok) return;
-      var data = await res.json();
-      var menuRaw = data.menu || data.categories || data;
+      var res = await fetch('/api/menu/sede', { headers: mesioHeaders() });
+      var menuRaw = null;
+      if (res.ok) {
+        menuRaw = (await res.json()).menu;
+      } else {
+        // No sede picked (owner viewing every sede): the base carta.
+        var baseRes = await fetch('/api/dashboard/menu', { headers: mesioHeaders() });
+        if (!baseRes.ok) return;
+        var baseData = await baseRes.json();
+        menuRaw = baseData.menu || baseData.categories || baseData;
+      }
+      var availability = {};
+      try {
+        var avRes = await fetch('/api/menu/availability', { headers: mesioHeaders() });
+        if (avRes.ok) availability = (await avRes.json()).availability || {};
+      } catch (e) { availability = {}; }
       _rawCategories = buildCategoriesFromMenu(menuRaw);
+      Object.keys(_rawCategories).forEach(function (cat) {
+        (_rawCategories[cat] || []).forEach(function (d) {
+          if (availability[d.name] === false) d.available = false;
+        });
+      });
       renderMenu(_rawCategories);
     } catch (e) {
       console.error('menu-admin: load menu error', e);
@@ -346,7 +376,7 @@
     selectEl.innerHTML = '';
     var placeholder = document.createElement('option');
     placeholder.value = '';
-    placeholder.textContent = 'Elegí una sede…';
+    placeholder.textContent = 'Elige una sede…';
     selectEl.appendChild(placeholder);
     _invSedes.forEach(function (sede) {
       if (excludeId != null && String(sede.id) === String(excludeId)) return;
@@ -423,7 +453,7 @@
     var sedeSel = document.getElementById('invModalSede');
     var sedeId = (!id && _mustPickSede()) ? (sedeSel ? sedeSel.value : '') : '';
     if (!id && _mustPickSede() && !sedeId) {
-      mesioToast('Elegí la sede a la que pertenece este producto', 'warn');
+      mesioToast('Elige la sede a la que pertenece este producto', 'warn');
       if (sedeSel) sedeSel.focus();
       return;
     }
@@ -716,7 +746,7 @@
     var qty = parseFloat(document.getElementById('invXferQty').value);
     var note = document.getElementById('invXferNote').value.trim();
 
-    if (!to) { mesioToast('Elegí la sede de destino', 'warn'); return; }
+    if (!to) { mesioToast('Elige la sede de destino', 'warn'); return; }
     if (!qty || qty <= 0) { mesioToast('Indicá una cantidad mayor que cero', 'warn'); return; }
 
     var btn = document.getElementById('invXferSave');
@@ -748,11 +778,37 @@
   var xferSaveBtn = document.getElementById('invXferSave');
   if (xferSaveBtn) xferSaveBtn.addEventListener('click', saveInvXfer);
 
+  // What to show instead of a list the plan doesn't include (403 carries the
+  // server's own "disponible desde el plan Pro" text) or a failed load.
+  async function _lockedOrErrorText(res, what) {
+    var detail = '';
+    try { detail = (await res.json()).detail || ''; } catch (e) { detail = ''; }
+    if (res.status === 403) {
+      return (typeof detail === 'string' && detail ? detail : 'Tu plan no incluye ' + what + '.') +
+        ' Escríbenos por soporte si quieres activarlo.';
+    }
+    return 'No pudimos cargar ' + what + '. Intenta de nuevo.';
+  }
+
+  function _showMessage(container, text) {
+    if (!container) return;
+    container.innerHTML = '';
+    var msg = document.createElement('div');
+    msg.style.cssText = 'padding:18px;color:var(--text-2);font-size:13px;';
+    msg.textContent = text;
+    container.appendChild(msg);
+  }
+
   async function loadInventory() {
     try {
       if (!_invSedes.length) await loadInvSedes();
       var res = await fetch('/api/inventory', { headers: mesioHeaders() });
-      if (!res.ok) { return; }
+      if (!res.ok) {
+        _showMessage(document.getElementById('inv-body'), await _lockedOrErrorText(res, 'el inventario'));
+        var addBtn = document.getElementById('btn-add-inventory');
+        if (addBtn && res.status === 403) addBtn.disabled = true;
+        return;
+      }
       var data = await res.json();
       var items = data.inventory || data.items || data;
       // The response says which sede it is scoped to: an int when the caller
@@ -887,10 +943,10 @@
     if (uploadBtn) { uploadBtn.disabled = true; uploadBtn.textContent = 'Subiendo…'; }
 
     try {
-      var signRes = await fetch('/api/menu/image/sign', { method: 'POST', headers: mesioHeaders() });
+      var signRes = await fetch('/api/menu/image/sign', { method: 'POST', headers: mesioHeaders(), body: '{}' });
       if (!signRes.ok) {
         var signErr = await signRes.json().catch(function () { return {}; });
-        throw new Error(signErr.detail || 'No se pudo firmar el upload');
+        throw new Error(_apiDetail(signErr.detail, 'No se pudo firmar el upload'));
       }
       var signData = await signRes.json();
       var formData = new FormData();
@@ -1034,7 +1090,8 @@
 
   var _importModal   = document.getElementById('importCartaModal');
   var _importFile    = document.getElementById('importCartaFile');
-  var _importText    = document.getElementById('importCartaText');
+  var _importDrop    = document.getElementById('importCartaDrop');
+  var _importDropTtl = document.getElementById('importCartaDropTitle');
   var _importStatus  = document.getElementById('importCartaStatus');
   var _importGo      = document.getElementById('importCartaGo');
   var _importDraft   = null;   // parsed menu, waiting for the owner to open it
@@ -1050,14 +1107,21 @@
     if (!_importModal) return;
     _importDraft = null;
     if (_importFile) _importFile.value = '';
-    if (_importText) _importText.value = '';
-    if (_importGo) { _importGo.textContent = 'Leer carta'; _importGo.disabled = false; }
+    if (_importGo) { _importGo.style.display = 'none'; _importGo.disabled = false; }
+    _importResetDrop();
     _importSetStatus('');
     _importModal.style.display = 'flex';
   }
 
   function _closeImportModal() {
     if (_importModal) _importModal.style.display = 'none';
+  }
+
+  var _IMPORT_DROP_DEFAULT = null;
+  function _importResetDrop() {
+    if (!_importDropTtl) return;
+    if (_IMPORT_DROP_DEFAULT === null) _IMPORT_DROP_DEFAULT = _importDropTtl.innerHTML;
+    _importDropTtl.innerHTML = _IMPORT_DROP_DEFAULT;
   }
 
   function _readFileAsBase64(file) {
@@ -1101,7 +1165,7 @@
       return false;
     }
     window.setMenuItems(items);
-    openMenuEditor();
+    openMenuEditor({ draft: true });
     return true;
   }
 
@@ -1127,57 +1191,48 @@
     return lines.join(' ');
   }
 
-  async function _runImport() {
-    if (!_importGo) return;
-
-    // Second press: the draft is ready and the owner wants to see it.
-    if (_importDraft) {
-      if (_draftIntoEditor(_importDraft.menu)) _closeImportModal();
+  // Choosing the photo starts the reading: a second "Leer carta" press was
+  // friction with nothing to decide. The draft still only opens in the editor
+  // when the owner asks for it.
+  async function _runImport(file) {
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+      _importSetStatus('Ese formato no se puede leer. Usa una foto JPG, PNG o WebP.', 'error');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      _importSetStatus('La foto pesa más de 5 MB. Tómala con menos resolución.', 'error');
       return;
     }
 
-    var file = _importFile && _importFile.files && _importFile.files[0];
-    var text = _importText ? _importText.value.trim() : '';
-    if (!file && !text) {
-      _importSetStatus('Sube una foto o pega el texto de la carta.', 'error');
-      return;
-    }
-    if (file && text) {
-      _importSetStatus('Usa una foto o el texto, no ambos.', 'error');
-      return;
-    }
-
-    _importGo.disabled = true;
+    _importDraft = null;
+    if (_importGo) _importGo.style.display = 'none';
+    if (_importDropTtl) _importDropTtl.textContent = file.name;
     _importSetStatus('Leyendo la carta… puede tardar unos segundos.');
 
     try {
-      var body;
-      if (file) {
-        body = { image_b64: await _readFileAsBase64(file), image_type: file.type };
-      } else {
-        body = { text: text };
-      }
       var res = await fetch('/api/menu/import', {
         method: 'POST',
-        headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
-        body: JSON.stringify(body),
+        headers: mesioHeaders(),
+        body: JSON.stringify({ image_b64: await _readFileAsBase64(file), image_type: file.type }),
       });
       var data = await res.json().catch(function () { return {}; });
       if (!res.ok) {
         // The reader failing is normal and survivable: the editor is
         // untouched and the owner can still type the carta by hand.
-        _importSetStatus(data.detail || 'No pude leer la carta. Puedes escribirla a mano.', 'error');
-        _importGo.disabled = false;
+        _importSetStatus(_apiDetail(data.detail, 'No pude leer la carta. Puedes escribirla a mano.'), 'error');
         return;
       }
       _importDraft = data;
       _importSetStatus(_describeDraft(data), 'ok');
-      _importGo.textContent = 'Abrir en el editor';
-      _importGo.disabled = false;
+      if (_importGo) { _importGo.textContent = 'Revisar en el editor'; _importGo.style.display = ''; _importGo.focus(); }
     } catch (e) {
       _importSetStatus('Error de conexión: ' + e.message, 'error');
-      _importGo.disabled = false;
     }
+  }
+
+  function _openImportedDraft() {
+    if (_importDraft && _draftIntoEditor(_importDraft.menu)) _closeImportModal();
   }
 
   var importBtn = document.getElementById('btn-import-carta');
@@ -1189,7 +1244,17 @@
   var importCancel = document.getElementById('importCartaCancel');
   if (importClose)  importClose.addEventListener('click', _closeImportModal);
   if (importCancel) importCancel.addEventListener('click', _closeImportModal);
-  if (_importGo)    _importGo.addEventListener('click', _runImport);
+  if (_importGo)    _importGo.addEventListener('click', _openImportedDraft);
+  if (_importFile)  _importFile.addEventListener('change', function () { _runImport(_importFile.files && _importFile.files[0]); });
+  if (_importDrop) {
+    _importDrop.addEventListener('dragover', function (e) { e.preventDefault(); _importDrop.classList.add('drag-over'); });
+    _importDrop.addEventListener('dragleave', function () { _importDrop.classList.remove('drag-over'); });
+    _importDrop.addEventListener('drop', function (e) {
+      e.preventDefault();
+      _importDrop.classList.remove('drag-over');
+      _runImport(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+  }
   if (_importModal) {
     _importModal.addEventListener('click', function (e) {
       if (e.target === _importModal) _closeImportModal();
@@ -1204,12 +1269,23 @@
     if (!container) return;
     try {
       var r = await fetch('/api/inventory/recipes', { headers: mesioHeaders() });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) {
+        _showMessage(container, await _lockedOrErrorText(r, 'los escandallos'));
+        return;
+      }
       var recipes = (await r.json()).recipes || [];
       renderRecipes(recipes);
     } catch (e) {
       container.innerHTML = '<div style="padding:18px;color:var(--text-3);font-size:13px;">Error al cargar escandallos: ' + _escHtml(e.message) + '</div>';
     }
+  }
+
+  function _salePriceOf(dishName) {
+    var found = 0;
+    Object.keys(_rawCategories || {}).forEach(function (cat) {
+      (_rawCategories[cat] || []).forEach(function (d) { if (d.name === dishName) found = d.price; });
+    });
+    return found;
   }
 
   function renderRecipes(recipes) {
@@ -1233,9 +1309,14 @@
     container.innerHTML = recipes.map(function (rec, idx) {
       var name       = rec.dish_name || rec.name || '—';
       var initial    = (name[0] || '?').toUpperCase();
-      var salePrice  = +(rec.sale_price || rec.price || 0);
+      // The list endpoint sends a summary (dish_name, ingredient_count,
+      // food_cost): the sale price comes from this sede's carta, the lines
+      // from "Editar". The card read fields the list never had and said
+      // "$0 · 0 ingredientes · Sin ingredientes registrados".
+      var salePrice  = +(rec.sale_price || rec.price || _salePriceOf(name) || 0);
       var foodCost   = +(rec.food_cost || rec.cost || 0);
       var lines      = Array.isArray(rec.lines) ? rec.lines : (rec.ingredients || []);
+      var nIngr      = lines.length || +(rec.ingredient_count || 0);
       var pct        = salePrice > 0 ? (foodCost / salePrice) * 100 : 0;
       var margin     = Math.max(0, salePrice - foodCost);
       var pctColor   = pct < 20 ? 'var(--brand)' : pct < 30 ? 'var(--warning-text)' : 'var(--danger)';
@@ -1257,13 +1338,13 @@
           '<div class="dish-thumb" style="background:' + gradients[idx % gradients.length] + ';">' + _escHtml(initial) + '</div>' +
           '<div>' +
             '<div style="font-size:14px;font-weight:600;">' + _escHtml(name) + '</div>' +
-            '<div style="font-size:11.5px;color:var(--text-3);">Precio venta ' + mesioFmt(salePrice) + ' · ' + lines.length + ' ingrediente' + (lines.length === 1 ? '' : 's') + '</div>' +
+            '<div style="font-size:11.5px;color:var(--text-3);">Precio venta ' + mesioFmt(salePrice) + ' · ' + nIngr + ' ingrediente' + (nIngr === 1 ? '' : 's') + '</div>' +
           '</div>' +
           '<button class="btn sm ghost" data-recipe-edit="' + _escHtml(name) + '" style="margin-left:auto;">Editar</button>' +
         '</div>' +
         (ingredientsHtml
           ? '<div style="display:flex;flex-direction:column;gap:6px;margin:12px 0;padding-top:12px;border-top:0.5px dashed var(--border);">' + ingredientsHtml + '</div>'
-          : '<div style="padding:12px 0;color:var(--text-3);font-size:12px;font-style:italic;">Sin ingredientes registrados.</div>'
+          : (nIngr ? '' : '<div style="padding:12px 0;color:var(--text-3);font-size:12px;font-style:italic;">Sin ingredientes registrados.</div>')
         ) +
         '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding-top:12px;border-top:0.5px dashed var(--border);">' +
           '<div><div style="font-size:10.5px;color:var(--text-3);">Food cost</div><div class="mono" style="font-weight:600;">' + mesioFmt(foodCost) + '</div></div>' +

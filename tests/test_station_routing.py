@@ -375,7 +375,8 @@ async def test_execute_action_without_bar_uses_station_all():
 
 @pytest.mark.asyncio
 async def test_execute_action_drinks_only_uses_bar():
-    """If all items are drinks (bar only), it creates ONE bar order with station='all'."""
+    """All drinks (bar only): ONE order with station='bar' — it used to be
+    'all', so a round of beers also showed up on the kitchen screen."""
     cart_drinks_only = {
         "items": [
             {"name": "Mojito",     "price": 25000, "quantity": 1, "subtotal": 25000, "category": "Bebidas"},
@@ -409,7 +410,6 @@ async def test_execute_action_drinks_only_uses_bar():
             session_state={"has_order": False, "order_delivered": False, "active": True},
         )
 
-    # Drinks only → kitchen_items empty → only the kitchen order with station='all' is created
-    # (has_split=False because kitchen_items is empty)
+    # Drinks only → kitchen_items empty → one ticket, and it belongs to the bar.
     assert len(saved_orders) == 1
-    assert saved_orders[0]["station"] == "all"
+    assert saved_orders[0]["station"] == "bar"

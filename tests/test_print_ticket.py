@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime
 
 import app.routes.tables as tables_routes
-from app.services.tenant_context import bypass_tenant_scope as _bypass
 
 
 def _make_tenant_mock_conn():
@@ -23,7 +22,8 @@ def _make_tenant_mock_conn():
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
-MOCK_USER = {"username": "cajero", "branch_id": 5, "role": "caja"}
+# The ticket is read in the caller's own org and sede (no bypass since 2026-10-01).
+MOCK_USER = {"username": "cajero", "org_id": 7, "location_id": 5, "role": "caja"}
 
 def _make_row(order_id, base_id, table_name, items, total, notes="", sub_number=1):
     """Creates an asyncpg Row-like object (dict wrapped in a MagicMock)."""
@@ -80,7 +80,6 @@ async def test_ticket_aggregates_suborders():
         patch.object(tables_routes.db, "get_pool", AsyncMock(return_value=mock_pool)),
         patch("app.routes.deps.get_current_user", AsyncMock(return_value=MOCK_USER)),
         patch("app.routes.tables.get_current_user", AsyncMock(return_value=MOCK_USER)),
-        _bypass("test: get_order_ticket direct call"),
     ):
         result = await tables_routes.get_order_ticket(mock_request, "BASE-001")
 
@@ -114,7 +113,6 @@ async def test_ticket_simple_order():
         patch.object(tables_routes.db, "get_pool", AsyncMock(return_value=mock_pool)),
         patch("app.routes.deps.get_current_user", AsyncMock(return_value=MOCK_USER)),
         patch("app.routes.tables.get_current_user", AsyncMock(return_value=MOCK_USER)),
-        _bypass("test: get_order_ticket direct call"),
     ):
         result = await tables_routes.get_order_ticket(mock_request, "ORD-XYZ")
 
@@ -143,7 +141,6 @@ async def test_ticket_order_not_found_returns_404():
         patch.object(tables_routes.db, "get_pool", AsyncMock(return_value=mock_pool)),
         patch("app.routes.deps.get_current_user", AsyncMock(return_value=MOCK_USER)),
         patch("app.routes.tables.get_current_user", AsyncMock(return_value=MOCK_USER)),
-        _bypass("test: get_order_ticket direct call"),
     ):
         with pytest.raises(HTTPException) as exc_info:
             await tables_routes.get_order_ticket(mock_request, "ID-INEXISTENTE")
@@ -193,7 +190,6 @@ async def test_ticket_includes_fiscal_if_exists():
         patch.object(tables_routes.db, "get_pool", AsyncMock(return_value=mock_pool)),
         patch("app.routes.deps.get_current_user", AsyncMock(return_value=MOCK_USER)),
         patch("app.routes.tables.get_current_user", AsyncMock(return_value=MOCK_USER)),
-        _bypass("test: get_order_ticket direct call"),
     ):
         result = await tables_routes.get_order_ticket(mock_request, "ORDER-FISCAL")
 

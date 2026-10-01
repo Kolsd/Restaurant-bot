@@ -299,7 +299,8 @@ async def diner_delivery_payment_proof(
     session = await diner_sessions_repo.get_by_token(token)
     if session is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada o expirada")
-    if session.get("order_mode") not in _VALID_MODES:
+    # A table pays by transfer too (diner.py diner_checkout, 2026-10-01).
+    if session.get("order_mode") not in (*_VALID_MODES, "dine_in"):
         raise HTTPException(status_code=422, detail="Esta sesión no admite comprobante de pago")
     org_id = int(session["org_id"])
 

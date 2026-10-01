@@ -80,3 +80,35 @@
   padding: 14px 18px;
   border-top: 1px solid var(--border, #e5e5e0);
 }
+
+/* ── Import a carta from a photo ─────────────────────────────────────── */
+.modal-overlay .import-modal { width: 100%; max-width: 520px; }
+.import-lead {
+  font-size: 13px; line-height: 1.5; color: var(--text-2, #55554f);
+  margin: 0 0 16px;
+}
+.import-drop {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 28px 16px; text-align: center; cursor: pointer;
+  border: 2px dashed var(--border, #e5e5e0); border-radius: 12px;
+  color: var(--text-3, #8a8a85); font-size: 13px;
+  transition: border-color .15s, background .15s;
+}
+.import-drop:hover, .import-drop.drag-over, .import-drop:focus-within {
+  border-color: var(--brand);
+  background: var(--brand-bg, #f0faf6);
+}
+.import-drop-icon { color: var(--brand); }
+.import-drop-title strong { color: var(--brand); }
+.import-drop-sub { font-size: 11px; color: var(--text-4, #a8a8a2); }
+/* The input covers the whole zone so a tap anywhere opens the picker, and
+   stays invisible: the browser's own "Choose File" button is what made this
+   look like unstyled HTML. */
+.import-drop input[type="file"] {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer;
+}
+.import-status {
+  min-height: 20px; margin-top: 12px; font-size: 13px; line-height: 1.5;
+}

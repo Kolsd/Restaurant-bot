@@ -5,34 +5,65 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Términos y Condiciones de Servicio - Mesio</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/landing.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/public.css">
 <style>
-  body { background: #fff; color: #333; padding-bottom: 100px; }
   .legal-container {
-    max-width: 800px; margin: 100px auto 50px; padding: 0 20px;
-    line-height: 1.7; font-family: 'Instrument Sans', sans-serif;
+    max-width: 780px; margin: clamp(40px, 7vw, 72px) auto 80px; padding-inline: var(--pad-x);
+    line-height: 1.7; color: var(--text-on-dark-dim);
   }
-  .legal-container h1 { font-family: 'Fraunces', serif; font-size: 2.5rem; margin-bottom: 8px; color: #111; }
-  .legal-container h2 { font-family: 'Fraunces', serif; font-size: 1.4rem; margin-top: 36px; margin-bottom: 12px; color: #222; border-bottom: 1px solid #eee; padding-bottom: 6px; }
-  .legal-container p, .legal-container ul, .legal-container ol { margin-bottom: 14px; font-size: 1rem; }
+  .legal-container h1 {
+    font-family: var(--font-display); font-weight: 600; font-size: clamp(30px, 5vw, 44px);
+    line-height: 1.12; letter-spacing: -.015em; color: var(--text-on-dark); margin-bottom: 20px;
+  }
+  .legal-container h2 {
+    font-family: var(--font-display); font-weight: 600; font-size: 22px; color: var(--text-on-dark);
+    margin: 40px 0 12px; padding-bottom: 8px; border-bottom: var(--rule);
+  }
+  .legal-container h3 { color: var(--text-on-dark); font-size: 17px; margin: 24px 0 8px; }
+  .legal-container strong { color: var(--text-on-dark); }
+  .legal-container p, .legal-container ul, .legal-container ol { margin-bottom: 14px; font-size: 16px; }
   .legal-container ul, .legal-container ol { padding-left: 22px; }
+  .legal-container ul { list-style: disc; }
   .legal-container li { margin-bottom: 6px; }
-  .legal-container a { color: var(--brand, #1D9E75); text-decoration: none; font-weight: 600; } /* lint-allow: legal page has no tokens.css, fallback needed */
+  .legal-container a { color: var(--accent); font-weight: 600; }
   .legal-container a:hover { text-decoration: underline; }
-  .legal-meta { background: #f9f9f9; border-left: 4px solid #1D9E75; padding: 12px 16px; margin-bottom: 28px; border-radius: 4px; font-size: 0.95rem; }
-  .legal-footer-note { margin-top: 48px; padding: 20px; background: #f9f9f9; border-radius: 8px; font-size: 0.95rem; }
-  .plan-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.95rem; }
-  .plan-table th { background: #111; color: #fff; padding: 10px 12px; text-align: left; }
-  .plan-table td { padding: 9px 12px; border-bottom: 1px solid #eee; }
+  .legal-meta {
+    background: var(--surface-dark); border: var(--rule); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin-bottom: 16px; border-radius: var(--radius-sm); font-size: 15px;
+  }
+  .legal-notice {
+    background: var(--surface-dark); border: var(--rule); border-left: 3px solid var(--warning);
+    padding: 12px 16px; margin-bottom: 28px; border-radius: var(--radius-sm); font-size: 15px;
+  }
+  .legal-footer-note {
+    margin-top: 48px; padding: 20px; background: var(--surface-dark); border: var(--rule);
+    border-radius: var(--radius); font-size: 15px;
+  }
+  .plan-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 15px; }
+  .plan-table th { background: var(--surface-dark-2); color: var(--text-on-dark); padding: 10px 12px; text-align: left; }
+  .plan-table td { padding: 9px 12px; border-bottom: var(--rule); }
   .plan-table tr:last-child td { border-bottom: none; }
+  @media (max-width: 560px) { .plan-table { display: block; overflow-x: auto; } }
 </style>
 </head>
 <body>
-<nav>
-  <div class="nav-logo" onclick="window.location.href='/'" style="cursor:pointer;">Mesio<span>.</span></div>
-  <div class="nav-links"><a href="/" class="nav-cta">Volver al inicio</a></div>
-</nav>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="/" aria-label="Mesio, inicio">
+      <img src="/static/img/logo.png" alt="" width="30" height="30">
+      Mesio
+    </a>
+    <div class="nav-right">
+      <a class="nav-login" href="/login">Iniciar sesión</a>
+      <a class="btn btn-ghost btn-sm" href="/">Volver al inicio</a>
+    </div>
+  </div>
+</header>
 
 <div class="legal-container">
   <h1>Términos y Condiciones de Servicio</h1>
@@ -42,7 +73,7 @@
     Aplica a todos los suscriptores activos e históricos de la plataforma Mesio.
   </div>
 
-  <div class="legal-notice" style="background: #fff3cd; border-left: 3px solid #f0c14b; padding: 12px 16px; border-radius: 6px; margin: 16px 0;">
+  <div class="legal-notice">
     <strong>Aviso de transparencia.</strong> Mesio es un producto en etapa temprana operado por su equipo fundador. La sociedad jurídica que respaldará formalmente el servicio se encuentra en proceso de constitución y se actualizará esta información en cuanto el registro mercantil sea efectivo. Si necesitas referencia legal o contractual antes de esa fecha, contáctanos directamente por WhatsApp al <strong>+57 314 491 4554</strong>.
   </div>
 
@@ -148,12 +179,16 @@
   </div>
 </div>
 
-<footer class="footer" style="background:#111; color:#aaa; padding: 24px 40px; text-align:center; font-size:0.9rem;">
-  <p>© 2026 Mesio · Bogotá, Colombia &nbsp;·&nbsp;
-  <a href="/terms" style="color:#1D9E75;">Términos y Condiciones</a> &nbsp;·&nbsp;
-  <a href="/privacy" style="color:#1D9E75;">Política de Privacidad</a> &nbsp;·&nbsp;
-  <a href="https://wa.me/573144914554" style="color:#1D9E75;">Soporte</a>
-  </p>
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <a class="brand" href="/" aria-label="Mesio, inicio"><img src="/static/img/logo.png" alt="" width="30" height="30">Mesio</a>
+    <span>© 2026 Mesio · Bogotá, Colombia</span>
+    <nav class="footer-links" aria-label="Enlaces legales">
+      <a href="/terms">Términos</a>
+      <a href="/privacy">Privacidad</a>
+      <a href="https://wa.me/573144914554" target="_blank" rel="noopener noreferrer">Soporte</a>
+    </nav>
+  </div>
 </footer>
 </body>
 </html>

@@ -28,8 +28,10 @@ Bypass rationale:
 from __future__ import annotations
 
 import json
+from datetime import timezone
+from decimal import Decimal
 
-from app.services.money import to_decimal, ZERO
+from app.services.money import quantize_money, to_decimal, ZERO
 from app.services.logging import get_logger
 from app.services.tenant_db import tenant_connection
 from app.services.tenant_context import bypass_tenant_scope
@@ -1678,6 +1680,17 @@ async def db_get_floor_plan(branch_id: int = None):
     `branch_id` column is a legacy alias post-migration 0057 and is no
     longer the canonical filter. Same fix as db_get_tables (commit 2fdc124).
 
+    Each table also carries what the Salón map shows (2026-10-01 — before it
+    the map read these fields but the API never sent them, so every table
+    said "Libre" with "Sin sesión activa" even mid-dinner):
+      status            free | seated | eating | billing
+      opened_at         when the first diner sat down (UTC ISO)
+      current_orders    the open bill's items, merged [{name, quantity, price}]
+      current_total     int pesos (JSON boundary)
+      current_order_id  newest open round
+      current_base_order_id  the open bill's group id, for "Ver ticket"
+    One row per table even with several diners (one session each).
+
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
@@ -1686,9 +1699,16 @@ async def db_get_floor_plan(branch_id: int = None):
                    s.id AS session_id,
                    s.phone AS session_phone,
                    s.status AS session_status,
-                   CASE WHEN s.id IS NOT NULL AND s.status = 'active' THEN TRUE ELSE FALSE END AS occupied
+                   s.started_at AS opened_at,
+                   (s.id IS NOT NULL) AS occupied
             FROM restaurant_tables t
-            LEFT JOIN table_sessions s ON s.table_id = t.id AND s.status = 'active'
+            LEFT JOIN LATERAL (
+                SELECT id, phone, status, started_at
+                  FROM table_sessions ts
+                 WHERE ts.table_id = t.id AND ts.status = 'active'
+                 ORDER BY ts.started_at NULLS LAST, ts.id
+                 LIMIT 1
+            ) s ON TRUE
             WHERE t.active = TRUE
         """
         params = []
@@ -1696,8 +1716,78 @@ async def db_get_floor_plan(branch_id: int = None):
             sql += " AND t.location_id = $1"
             params.append(branch_id)
         sql += " ORDER BY t.zone, t.number"
-        rows = await conn.fetch(sql, *params)
-        return [_serialize(dict(r)) for r in rows]
+        rows = [dict(r) for r in await conn.fetch(sql, *params)]
+        table_ids = [r["id"] for r in rows]
+        orders = await conn.fetch(
+            """SELECT table_id, base_order_id, id, items, total, created_at
+                 FROM table_orders
+                WHERE table_id = ANY($1::text[])
+                  AND status NOT IN ('cancelado', 'cancelled', 'factura_entregada')
+                ORDER BY created_at""",
+            table_ids,
+        ) if table_ids else []
+        billing_tables = {
+            r["table_id"] for r in await conn.fetch(
+                """SELECT DISTINCT table_id FROM waiter_alerts
+                    WHERE table_id = ANY($1::text[]) AND alert_type = 'bill'
+                      AND COALESCE(dismissed, FALSE) = FALSE""",
+                table_ids,
+            )
+        } if table_ids else set()
+
+    by_table: dict[str, list] = {}
+    for o in orders:
+        by_table.setdefault(o["table_id"], []).append(o)
+
+    out = []
+    for r in rows:
+        rounds = by_table.get(r["id"], [])
+        if rounds:
+            base = rounds[-1]["base_order_id"]
+            rounds = [o for o in rounds if o["base_order_id"] == base]
+        merged: dict[tuple, dict] = {}
+        total = Decimal("0")
+        for o in rounds:
+            total += to_decimal(o["total"])
+            items = o["items"]
+            if isinstance(items, str):
+                try:
+                    items = json.loads(items)
+                except (ValueError, TypeError):
+                    items = []
+            for it in items or []:
+                if not isinstance(it, dict) or not it.get("name"):
+                    continue
+                price = float(to_decimal(it.get("price") or it.get("unit_price") or 0))  # JSON boundary
+                key = (it["name"], price)
+                qty = int(it.get("quantity") or it.get("qty") or 1)
+                if key in merged:
+                    merged[key]["quantity"] += qty
+                else:
+                    merged[key] = {"name": it["name"], "quantity": qty, "price": price}
+        if r["id"] in billing_tables and (rounds or r["occupied"]):
+            status = "billing"
+        elif rounds:
+            status = "eating"
+        elif r["occupied"]:
+            status = "seated"
+        else:
+            status = "free"
+        opened = r.get("opened_at") or (rounds[0]["created_at"] if rounds else None)
+        if opened is not None and getattr(opened, "tzinfo", None) is None:
+            opened = opened.replace(tzinfo=timezone.utc)
+        row = _serialize(r)
+        row.update({
+            "status": status,
+            "opened_at": opened.isoformat() if opened else None,
+            "current_orders": list(merged.values()),
+            "current_total": int(quantize_money(total)),  # JSON boundary
+            "current_order_id": rounds[-1]["id"] if rounds else None,
+            # The ticket endpoint takes the group id (every round of the bill).
+            "current_base_order_id": rounds[-1]["base_order_id"] if rounds else None,
+        })
+        out.append(row)
+    return out
 
 
 async def db_get_session_phones_by_branch(branch_id: int, org_id: int) -> set:

@@ -259,3 +259,134 @@ def serialize_for_prompt(
         result = result[: max_chars - 1] + "…"
 
     return result
+
+
+# ── Diner memory (0104): a profile per remembered browser ─────────────────────
+#
+# A web diner's `phone` is a new `web:<uuid>` every visit, so a remembered
+# diner is keyed by `phone = 'device:<sha256 of a per-browser secret>'`
+# (app/services/diner_memory.py builds the key) and only exists once the
+# diner consented (`consent_at`). Each diner session from that browser points
+# at the profile through diner_sessions.customer_profile_id.
+
+# Orders that never reached the diner don't count as "what I usually order".
+_DEAD_ORDER_STATUSES = ("cancelled", "cancelado", "rechazado")
+
+
+async def get_profile_by_id(org_id: int, profile_id: int) -> Optional[dict]:
+    """# Requires active tenant_scope(org_id)."""
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, org_id, phone, display_name, preferences, last_order_summary, total_orders, total_spent, first_seen, last_seen, consent_at, contact_phone FROM customer_profiles WHERE org_id = $1 AND id = $2",
+            org_id, profile_id,
+        )
+    return dict(row) if row else None
+
+
+async def get_remembered_device(org_id: int, device_key: str) -> Optional[dict]:
+    """The consented profile for this browser key, or None.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT id, org_id, phone, display_name, preferences,
+                      last_order_summary, total_orders, total_spent,
+                      first_seen, last_seen, consent_at, contact_phone
+                  FROM customer_profiles
+                 WHERE org_id = $1 AND phone = $2 AND consent_at IS NOT NULL""",
+            org_id, device_key,
+        )
+    return dict(row) if row else None
+
+
+async def remember_device(org_id: int, device_key: str) -> dict:
+    """Create (or re-consent) the profile for this browser key. Idempotent.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO customer_profiles (org_id, phone, consent_at, last_seen)
+                VALUES ($1, $2, NOW(), NOW())
+                ON CONFLICT (org_id, phone) DO UPDATE
+                    SET consent_at = COALESCE(customer_profiles.consent_at, NOW()),
+                        last_seen  = NOW()
+                RETURNING id, org_id, phone, display_name, preferences,
+                      last_order_summary, total_orders, total_spent,
+                      first_seen, last_seen, consent_at, contact_phone""",
+            org_id, device_key,
+        )
+    return dict(row)
+
+
+async def delete_profile(org_id: int, profile_id: int) -> bool:
+    """"Olvidarme": the row goes; diner_sessions.customer_profile_id is SET
+    NULL by the FK, so no history stays linked. Returns True if a row was deleted.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        result = await conn.execute(
+            "DELETE FROM customer_profiles WHERE org_id = $1 AND id = $2",
+            org_id, profile_id,
+        )
+    return result.endswith(" 1")
+
+
+async def set_contact(
+    org_id: int, profile_id: int,
+    display_name: Optional[str] = None, contact_phone: Optional[str] = None,
+) -> None:
+    """Name/phone the diner typed at checkout. Only provided fields change.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        await conn.execute(
+            """UPDATE customer_profiles
+                  SET display_name  = COALESCE($3, display_name),
+                      contact_phone = COALESCE($4, contact_phone),
+                      last_seen     = NOW()
+                WHERE org_id = $1 AND id = $2""",
+            org_id, profile_id,
+            display_name[:MAX_VALUE_CHARS] if display_name else None,
+            contact_phone[:30] if contact_phone else None,
+        )
+
+
+async def get_profile_order_rows(org_id: int, profile_id: int, days: int = 365) -> list[dict]:
+    """Every live order (table rounds + delivery/pickup) of every diner
+    session linked to this profile, newest first, across ALL the org's sedes.
+
+    Returns [{"session_token", "created_at", "items"}]; `items` is the stored
+    JSONB list as the driver returns it.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            """
+            WITH tokens AS (
+                SELECT token FROM diner_sessions
+                 WHERE org_id = $1 AND customer_profile_id = $2
+            )
+            SELECT t.phone AS session_token, t.created_at, t.items
+              FROM table_orders t
+             WHERE t.org_id = $1
+               AND t.phone IN (SELECT token FROM tokens)
+               AND t.status <> ALL($3::text[])
+               AND t.created_at >= NOW() - make_interval(days => $4)
+            UNION ALL
+            SELECT o.phone AS session_token, o.created_at, o.items
+              FROM orders o
+             WHERE o.org_id = $1
+               AND o.phone IN (SELECT token FROM tokens)
+               AND o.status <> ALL($3::text[])
+               AND o.created_at >= NOW() - make_interval(days => $4)
+             ORDER BY created_at DESC
+             LIMIT 200
+            """,
+            org_id, profile_id, list(_DEAD_ORDER_STATUSES), days,
+        )
+    return [dict(r) for r in rows]

@@ -40,6 +40,16 @@ def _local_day(created_at: datetime, tz: str) -> date:
     return created_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz)).date()
 
 
+def _nps(promoters, detractors, total) -> int | None:
+    """Net Promoter Score on the 1-5 survey, the same rule the NPS page uses
+    (restaurant_repo: 5 = promoter, 4 = passive, 1-3 = detractor). The
+    branch screens used to show the star average (4.6) under "NPS"."""
+    total = int(total or 0)
+    if not total:
+        return None
+    return round((int(promoters or 0) - int(detractors or 0)) * 100 / total)
+
+
 def _tenant_connection():
     from app.services.tenant_db import tenant_connection  # noqa: PLC0415
     return tenant_connection()
@@ -508,25 +518,35 @@ async def db_live_orders(
     org_id: int,
     limit: int = 20,
     location_id: int | None = None,
+    tz: str = "America/Bogota",
 ) -> dict:
     """
     Returns a unified live feed of active delivery + table orders of one
     sede (`location_id`), or of every sede when None.
 
-    Delivery/pickup orders: status NOT IN ('entregado', 'cancelado')
-    Table orders: status NOT IN ('cancelado', 'factura_entregada')
+    Delivery/pickup orders: not delivered, cancelled or rejected.
+    Table orders: not cancelled (either spelling) or already billed.
+
+    `id` is what a human reads on screen, without the leading "#" (the
+    frontend adds it): the public code for a web order, the full round id
+    for a table ("MESA-3E7852-2"). It used to be the first 6 characters
+    with a "#" — every table round read "##MESA-7".
 
     Merges both lists, sorts by created_at DESC, caps at `limit`.
+
+    `delivery_today` counts today's web orders (restaurant-local day) for the
+    Pedidos page's domicilios monitor: received, preparing, on the way,
+    delivered.
     """
     limit = max(1, min(100, limit))
 
     async with _tenant_connection() as conn:
         # ── delivery + pickup orders ────────────────────────────────────────
         delivery_rows = await conn.fetch(
-            """SELECT id, phone, items, order_type, address, status,
+            """SELECT id, public_code, phone, items, order_type, address, status,
                       total, created_at, channel, notes
                FROM orders
-               WHERE status NOT IN ('entregado', 'cancelado')
+               WHERE status NOT IN ('entregado', 'cancelado', 'rechazado')
                  AND org_id = $2
                  AND ($3::bigint IS NULL OR location_id = $3)
                ORDER BY created_at DESC
@@ -535,6 +555,17 @@ async def db_live_orders(
         )
 
         # ── salon table orders ──────────────────────────────────────────────
+        today_start = _local_midnight_utc(datetime.now(ZoneInfo(tz)).date(), tz)
+        today_rows = await conn.fetch(
+            """SELECT status, COUNT(*) AS n
+               FROM orders
+               WHERE org_id = $1
+                 AND ($2::bigint IS NULL OR location_id = $2)
+                 AND created_at >= $3
+               GROUP BY status""",
+            org_id, location_id, today_start,
+        )
+
         table_rows = await conn.fetch(
             """SELECT to2.id, to2.table_id, to2.table_name, to2.phone,
                       to2.items, to2.status, to2.total, to2.created_at,
@@ -542,7 +573,7 @@ async def db_live_orders(
                       rt.capacity AS table_capacity
                FROM table_orders to2
                LEFT JOIN restaurant_tables rt ON rt.id = to2.table_id
-               WHERE to2.status NOT IN ('cancelado', 'factura_entregada')
+               WHERE to2.status NOT IN ('cancelado', 'cancelled', 'factura_entregada')
                  AND to2.org_id = $2
                  AND ($3::bigint IS NULL OR to2.location_id = $3)
                ORDER BY to2.created_at DESC
@@ -585,7 +616,7 @@ async def db_live_orders(
         source = "pickup" if ot == "recoger" else "delivery"
         phone = row["phone"] or ""
         unified.append({
-            "id":                 f"#{row['id'][:6].upper()}" if len(row["id"]) >= 6 else f"#{row['id']}",
+            "id":                 row["public_code"] or row["id"][:8].upper(),
             "source":             source,
             "customer":           phone[-4:] and f"···{phone[-4:]}",
             "customer_phone_last4": phone[-4:] if len(phone) >= 4 else phone,
@@ -600,7 +631,7 @@ async def db_live_orders(
 
     for row in table_rows:
         unified.append({
-            "id":           f"#{row['id'][:6].upper()}" if len(row["id"]) >= 6 else f"#{row['id']}",
+            "id":           row["id"],
             "source":       "table",
             "table_name":   row["table_name"],
             "party_size":   row["table_capacity"],
@@ -631,7 +662,15 @@ async def db_live_orders(
     for o in unified:
         o.pop("_created_at", None)
 
-    return {"orders": unified}
+    by_status = {r["status"]: int(r["n"]) for r in today_rows}
+    delivery_today = {
+        "total": sum(n for st, n in by_status.items() if st not in ("cancelado", "rechazado")),
+        "in_kitchen": by_status.get("pendiente_aceptacion", 0) + by_status.get("en_preparacion", 0)
+        + by_status.get("listo", 0),
+        "in_delivery": by_status.get("en_camino", 0) + by_status.get("en_puerta", 0),
+        "delivered": by_status.get("entregado", 0),
+    }
+    return {"orders": unified, "delivery_today": delivery_today}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -918,7 +957,7 @@ async def db_branches_consolidated(org_id: int, days: int = 7) -> dict:
       total_sales   — SUM(orders.total WHERE paid=TRUE) + SUM(table_orders.total)
                       for the last `days` days.
       total_tickets — COUNT of rows from both tables in the same window.
-      avg_nps       — AVG(score) from nps_responses in last 30 days. null if no data.
+      avg_nps       — NPS (-100..100, 5★ promoters, 1-3★ detractors), last 30 days. null if no data.
       total_staff   — COUNT(*) from staff WHERE active = true.
       growth_yoy    — (sales last 30d) / (sales in same 30d window 1 year ago).
                       null if the prior-year window has zero sales.
@@ -972,7 +1011,9 @@ async def db_branches_consolidated(org_id: int, days: int = 7) -> dict:
         # ── NPS average (last 30 days) ────────────────────────────────────────
         nps_row = await conn.fetchrow(
             """
-            SELECT AVG(score)::numeric AS avg_nps
+            SELECT COUNT(*) FILTER (WHERE score = 5)  AS promoters,
+                   COUNT(*) FILTER (WHERE score <= 3) AS detractors,
+                   COUNT(*)                           AS total
             FROM nps_responses
             WHERE org_id = $1
               AND created_at >= $2
@@ -1035,8 +1076,7 @@ async def db_branches_consolidated(org_id: int, days: int = 7) -> dict:
     )
     total_tickets = int(order_row["tickets"]) + int(table_row["tickets"])
 
-    avg_nps_val = nps_row["avg_nps"] if nps_row else None
-    avg_nps = round(float(avg_nps_val), 1) if avg_nps_val is not None else None
+    avg_nps = _nps(nps_row["promoters"], nps_row["detractors"], nps_row["total"]) if nps_row else None
 
     sales_now  = to_decimal(yoy_current_row["sales_now"])  if yoy_current_row  else Decimal("0")
     sales_prev = to_decimal(yoy_prior_row["sales_prev"])   if yoy_prior_row    else Decimal("0")
@@ -1148,7 +1188,9 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
             """
             SELECT
                 location_id,
-                AVG(score)::numeric AS avg_score
+                COUNT(*) FILTER (WHERE score = 5)  AS promoters,
+                COUNT(*) FILTER (WHERE score <= 3) AS detractors,
+                COUNT(*)                           AS total
             FROM nps_responses
             WHERE org_id = $1
               AND created_at >= $2
@@ -1232,7 +1274,7 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
         lid = r["location_id"]
         if lid is None:
             continue
-        nps_by_loc[lid] = round(float(r["avg_score"]), 1) if r["avg_score"] is not None else None
+        nps_by_loc[lid] = _nps(r["promoters"], r["detractors"], r["total"])
 
     res_by_loc: dict[int, dict] = {}
     for r in res_rows:
@@ -1377,3 +1419,113 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
         "locations": locations,
         "rows":      comparison_rows,
     }
+
+
+async def db_order_history(
+    org_id: int,
+    location_id: int | None,
+    since_utc: datetime,
+    limit: int = 500,
+) -> list[dict]:
+    """Every order of one sede (or every sede when None) since `since_utc`,
+    newest first: table rounds and web delivery/pickup orders in ONE list —
+    the Pedidos page's "Historial universal".
+
+    Each row: id (what a human reads), source (table | delivery | pickup),
+    channel (qr | pos | domicilio), who (table name or customer name, never
+    the diner's web token), items_summary, total (int pesos — JSON
+    boundary), status, created_at (naive UTC ISO).
+
+    # Requires active tenant_scope(org_id).
+    """
+    limit = max(1, min(1000, limit))
+    async with _tenant_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, 'table' AS source, channel, table_name AS who, items,
+                   total, status, created_at
+              FROM table_orders
+             WHERE org_id = $1
+               AND ($2::bigint IS NULL OR location_id = $2)
+               AND created_at >= $3
+            UNION ALL
+            SELECT COALESCE(public_code, id),
+                   CASE WHEN order_type = 'recoger' THEN 'pickup' ELSE 'delivery' END,
+                   channel, customer_name, items, total, status, created_at
+              FROM orders
+             WHERE org_id = $1
+               AND ($2::bigint IS NULL OR location_id = $2)
+               AND created_at >= $3
+             ORDER BY created_at DESC
+             LIMIT $4
+            """,
+            org_id, location_id, since_utc, limit,
+        )
+
+    def _summary(raw) -> str:
+        items = raw
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except (ValueError, TypeError):
+                return ""
+        if not isinstance(items, list):
+            return ""
+        parts = []
+        for it in items:
+            if isinstance(it, dict) and it.get("name"):
+                qty = it.get("quantity") or it.get("qty") or 1
+                parts.append(f"{qty}× {it['name']}")
+        return ", ".join(parts)
+
+    out = []
+    for r in rows:
+        source = r["source"]
+        if source == "table":
+            channel = "pos" if (r["channel"] or "") == "pos" else "qr"
+        else:
+            channel = "domicilio"
+        out.append({
+            "id": r["id"],
+            "source": source,
+            "channel": channel,
+            "who": r["who"] or "",
+            "items_summary": _summary(r["items"]),
+            "total": int(quantize_money(to_decimal(r["total"]))),  # JSON boundary
+            "status": r["status"],
+            # The columns are naive UTC; say so, or the browser reads it as local time.
+            "created_at": r["created_at"].replace(tzinfo=timezone.utc).isoformat() if r["created_at"] else None,
+        })
+    return out
+
+
+async def db_branch_card_stats(org_id: int) -> dict[int, dict]:
+    """{location_id: {"table_count", "nps"}} for the Sucursales cards: active
+    tables and the last 30 days' NPS of each sede.
+
+    # Requires active tenant_scope(org_id).
+    """
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    async with _tenant_connection() as conn:
+        tables = await conn.fetch(
+            """SELECT location_id, COUNT(*) AS n FROM restaurant_tables
+                WHERE org_id = $1 AND active = TRUE AND location_id IS NOT NULL
+                GROUP BY location_id""",
+            org_id,
+        )
+        nps = await conn.fetch(
+            """SELECT location_id,
+                      COUNT(*) FILTER (WHERE score = 5)  AS promoters,
+                      COUNT(*) FILTER (WHERE score <= 3) AS detractors,
+                      COUNT(*)                           AS total
+                 FROM nps_responses
+                WHERE org_id = $1 AND created_at >= $2 AND location_id IS NOT NULL
+                GROUP BY location_id""",
+            org_id, since,
+        )
+    out: dict[int, dict] = {}
+    for r in tables:
+        out.setdefault(int(r["location_id"]), {})["table_count"] = int(r["n"])
+    for r in nps:
+        out.setdefault(int(r["location_id"]), {})["nps"] = _nps(r["promoters"], r["detractors"], r["total"])
+    return out

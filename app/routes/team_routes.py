@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from app.services.auth import hash_password
 from app.services import database as db
-from app.repositories import restaurant_repo
+from app.repositories import restaurant_repo, stats_repo
 from app.routes.deps import get_current_user, may_span_locations, resolve_sede_filter
 from app.services.tenant_context import tenant_scope
 from app.services.logging import get_logger
@@ -41,9 +41,9 @@ class CreateBranchRequest(BaseModel):
 @router.get("/api/team/branches")
 async def list_team_branches(request: Request):
     user = await get_current_user(request)
-    roles_list = [r.strip() for r in (user.get("role") or "").split(",")]
-    if "owner" not in roles_list:
-        raise HTTPException(status_code=403, detail="Acceso restringido a dueños")
+    # owner and admin are one authorization level (PM 2026-09-20).
+    if not may_span_locations(user):
+        raise HTTPException(status_code=403, detail="Acceso restringido a dueños y administradores")
 
     # P0 fix (2026-09): db_get_branches expects an org_id (its docstring is
     # explicit about this) — the old user["branch_id"] is mixed-kind and,
@@ -55,7 +55,24 @@ async def list_team_branches(request: Request):
 
     with tenant_scope(int(org_id)):
         branches = await restaurant_repo.db_get_branches(int(org_id))
-    return {"branches": branches}
+        card_stats = await stats_repo.db_branch_card_stats(int(org_id))
+    # The cards show each sede's tables and NPS; the rows used to carry the
+    # whole carta and features instead, and no counts at all.
+    slim = []
+    for b in branches:
+        stats = card_stats.get(int(b.get("id") or 0), {})
+        slim.append({
+            "id": b.get("id"),
+            "name": b.get("name"),
+            "location_name": b.get("location_name"),
+            "display_name": b.get("display_name"),
+            "address": b.get("address"),
+            "latitude": b.get("latitude"),
+            "longitude": b.get("longitude"),
+            "table_count": stats.get("table_count", 0),
+            "nps": stats.get("nps"),
+        })
+    return {"branches": slim}
 
 
 @router.post("/api/team/branches")
@@ -72,9 +89,8 @@ async def create_branch(request: Request, body: CreateBranchRequest):
     """
     from app.routes.dashboard import geocode_address
     user = await get_current_user(request)
-    roles_list = [r.strip() for r in (user.get("role") or "").split(",")]
-    if "owner" not in roles_list:
-        raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
+    if not may_span_locations(user):
+        raise HTTPException(status_code=403, detail="Solo el dueño o un admin pueden crear sucursales")
 
     org_id = user.get("org_id")
     if not org_id:
@@ -103,9 +119,8 @@ async def create_branch(request: Request, body: CreateBranchRequest):
 @router.delete("/api/team/branches/{branch_id}")
 async def delete_branch(branch_id: int, request: Request):
     user = await get_current_user(request)
-    roles_list = [r.strip() for r in (user.get("role") or "").split(",")]
-    if "owner" not in roles_list:
-        raise HTTPException(status_code=403, detail="Solo el dueño puede eliminar sucursales")
+    if not may_span_locations(user):
+        raise HTTPException(status_code=403, detail="Solo el dueño o un admin pueden eliminar sucursales")
 
     # P0 fix (2026-09): resolve ownership via the explicit org_id directly —
     # no DB round-trip to guess it, and no risk of the old branch_id guess

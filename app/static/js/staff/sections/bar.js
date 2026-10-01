@@ -32,10 +32,10 @@
         <div class="bar-kstat-v" id="bar-stat-avg">—:—</div>
       </div>
       <div class="bar-clock" id="bar-clock">--:--</div>
-      <button id="kds-sound-toggle" type="button" aria-pressed="false" style="padding:5px 10px;font-size:11px;border:1px solid var(--b-border,#2d2a3e);border-radius:6px;background:var(--b-surface-2,#1a1727);color:var(--b-text-2,#a09bc0);font-family:inherit;cursor:pointer;">
+      <button id="kds-sound-toggle" type="button" aria-pressed="false" style="padding:5px 10px;font-size:11px;border:1px solid var(--b-border,var(--border));border-radius:6px;background:var(--b-surface-2,var(--surface));color:var(--b-text-2,#a09bc0);font-family:inherit;cursor:pointer;">
         🔈 Activar sonido
       </button>
-      <button id="kds-notify-optin" style="display:none;padding:5px 10px;font-size:11px;border:1px solid var(--b-border,#2d2a3e);border-radius:6px;background:var(--b-surface-2,#1a1727);color:var(--b-text-2,#a09bc0);font-family:inherit;cursor:pointer;" hidden>
+      <button id="kds-notify-optin" style="display:none;padding:5px 10px;font-size:11px;border:1px solid var(--b-border,var(--border));border-radius:6px;background:var(--b-surface-2,var(--surface));color:var(--b-text-2,#a09bc0);font-family:inherit;cursor:pointer;" hidden>
         Activar alertas
       </button>
     </div>

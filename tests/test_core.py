@@ -6,7 +6,7 @@ Covers:
   1. Login success — bcrypt verification → token issued
   2. Login wrong password → failure dict
   3. Login endpoint rate limit → 429 after _LOGIN_MAX attempts
-  4. require_module: flag absent (opt-out model) → 403 (feature not enabled)
+  4. require_module: flag absent (opt-out model) → 200 (on until the owner turns it off)
   5. require_module: flag explicitly True → 200
   6. require_module: flag explicitly False → 403
   7. db_check_module unit: True in JSONB → True
@@ -232,19 +232,19 @@ def test_login_rate_limit(client, monkeypatch):
 # 4–6. require_module dependency — HTTP-level 403 enforcement
 # ══════════════════════════════════════════════════════════════════════════════
 
-def test_require_module_absent_flag_returns_403(client, monkeypatch):
+def test_require_module_absent_flag_allows_access(client, monkeypatch):
     """
-    When features does not contain the module key, db_check_module returns False
-    and the endpoint must return 403. Reservations are the module-gated router
-    left after the 2026-09 cleanup (the staff_tips-gated shift routes are gone).
+    Opt-out model (2026-10-01): a module the owner never touched is ON — the
+    plan is the gate. Demanding an explicit True locked Pro customers out of
+    the reservations they paid for.
     """
-    patch_auth(monkeypatch, features={})  # module_reservations absent → False
-    monkeypatch.setattr("app.services.database.db_check_module",
-                        AsyncMock(return_value=False))
+    patch_auth(monkeypatch, features={})  # module_reservations absent → on
+    import app.services.database as db_mod
+    monkeypatch.setattr(db_mod, "db_get_reservations_range", AsyncMock(return_value=[]))
 
     r = client.get("/api/reservations", headers={"Authorization": "Bearer tok"})
-    assert r.status_code == 403
-    assert "module_reservations" in r.json()["detail"]
+    assert r.status_code == 200
+    assert r.json() == {"reservations": []}
 
 
 def test_require_module_flag_true_allows_access(client, monkeypatch):

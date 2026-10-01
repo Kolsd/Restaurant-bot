@@ -8,9 +8,9 @@
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/tokens.css">
-<link rel="stylesheet" href="/static/css/landing.css">
+<link rel="stylesheet" href="/static/css/public.css">
 <style>
 .signup-wrap {
   min-height: 100vh;
@@ -20,63 +20,79 @@
 .signup-main {
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 60px 16px;
+  padding: clamp(32px, 6vw, 64px) 16px;
 }
 .signup-card {
-  background: var(--surface);
+  background: var(--surface-dark);
   border: var(--rule);
-  border-radius: var(--radius-xl, 20px);
-  padding: 48px 40px;
+  border-radius: var(--radius-xl);
+  padding: 44px 40px;
   width: 100%;
-  max-width: 520px;
-  box-shadow: var(--shadow-card, 0 4px 24px rgba(0,0,0,.08));
+  max-width: 540px;
+  box-shadow: var(--shadow-hero);
 }
 .signup-card h1 {
-  font-family: var(--serif);
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--text-1);
-  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: clamp(28px, 4vw, 34px);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -.015em;
+  color: var(--text-on-dark);
+  margin: 0 0 10px;
 }
 .signup-card .sub {
-  color: var(--text-3);
-  font-size: 15px;
-  margin: 0 0 32px;
+  color: var(--text-on-dark-dim);
+  font-size: 15.5px;
+  margin: 0 0 30px;
 }
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 .form-group label {
   display: block;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-2);
-  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-on-dark-dim);
+  margin-bottom: 8px;
 }
 .form-group input,
 .form-group select {
   width: 100%;
-  padding: 10px 14px;
-  border: 1px solid var(--border, #ddd);
-  border-radius: var(--radius-md, 10px);
-  font-size: 15px;
-  font-family: var(--sans);
-  color: var(--text-1);
-  background: var(--surface-raised, #fff);
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--border-dark-strong);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 16px;
+  color: var(--text-on-dark);
+  background: var(--bg-dark);
   outline: none;
   transition: border-color .15s;
-  box-sizing: border-box;
 }
+.form-group input::placeholder { color: var(--text-on-dark-hint); }
+.form-group select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 40px;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-on-dark-mute) 50%),
+                    linear-gradient(135deg, var(--text-on-dark-mute) 50%, transparent 50%);
+  background-position: calc(100% - 20px) 21px, calc(100% - 15px) 21px;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+.form-group select:invalid { color: var(--text-on-dark-hint); }
+.form-group select option { background: var(--surface-dark); color: var(--text-on-dark); }
 .form-group input:focus,
 .form-group select:focus {
-  border-color: var(--brand);
+  border-color: var(--accent);
 }
 .form-group .field-hint {
-  font-size: 12px;
-  color: var(--text-3);
-  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-on-dark-mute);
+  margin-top: 8px;
 }
 .form-row {
   display: grid;
@@ -85,27 +101,25 @@
 }
 .signup-submit {
   width: 100%;
-  padding: 14px;
-  background: var(--brand);
+  min-height: 52px;
+  background: var(--accent);
   color: #fff;
-  border: none;
-  border-radius: var(--radius-md, 10px);
+  border-radius: var(--radius-pill);
   font-size: 16px;
-  font-weight: 700;
-  font-family: var(--sans);
-  cursor: pointer;
-  transition: opacity .15s;
-  margin-top: 8px;
+  font-weight: 600;
+  transition: background .15s;
+  margin-top: 10px;
 }
-.signup-submit:hover { opacity: .88; }
+.signup-submit:hover { background: var(--brand-dark); }
 .signup-submit:disabled { opacity: .55; cursor: not-allowed; }
 .signup-legal {
   text-align: center;
-  font-size: 12px;
-  color: var(--text-3);
+  font-size: 13px;
+  color: var(--text-on-dark-mute);
   margin-top: 16px;
 }
-.signup-legal a { color: var(--text-2); }
+.signup-legal a { color: var(--text-on-dark-dim); text-decoration: underline; }
+.signup-legal a:hover { color: var(--text-on-dark); }
 .signup-success {
   display: none;
   text-align: center;
@@ -116,22 +130,23 @@
   margin-bottom: 16px;
 }
 .signup-success h2 {
-  font-family: var(--serif);
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--text-1);
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-on-dark);
   margin: 0 0 12px;
 }
 .signup-success p {
-  color: var(--text-2);
+  color: var(--text-on-dark-dim);
   font-size: 15px;
   line-height: 1.6;
   margin: 0 0 24px;
 }
+.signup-success strong { color: var(--text-on-dark); }
 .field-error {
-  color: #d33;
-  font-size: 12px;
-  margin-top: 4px;
+  color: var(--danger);
+  font-size: 13px;
+  margin-top: 6px;
   display: none;
 }
 @media (max-width: 540px) {
@@ -144,12 +159,13 @@
 
 <header class="nav">
   <div class="wrap nav-inner">
-    <a class="brand" href="/">
-      <span class="brand-mark">M</span>
-      <span class="brand-word">Mesio<span class="dot">.</span></span>
+    <a class="brand" href="/" aria-label="Mesio, inicio">
+      <img src="/static/img/logo.png" alt="" width="30" height="30">
+      Mesio
     </a>
     <div class="nav-right">
-      <a class="btn btn-ghost btn-sm" href="/login">Iniciar sesión</a>
+      <a class="nav-login" href="/login">¿Ya tienes cuenta? Inicia sesión</a>
+      <a class="btn btn-ghost btn-sm" href="/">Volver al inicio</a>
     </div>
   </div>
 </header>
@@ -240,14 +256,12 @@
 </main>
 
 <footer class="footer">
-  <div class="wrap">
-    <div class="foot-bot">
-      <div>© 2026 Mesio · Bogotá, Colombia · NIT en trámite</div>
-      <div class="foot-legal">
-        <a href="/terms">Términos</a>
-        <a href="/privacy">Privacidad</a>
-      </div>
-    </div>
+  <div class="wrap footer-inner">
+    <span>© 2026 Mesio · Bogotá, Colombia</span>
+    <nav class="footer-links" aria-label="Enlaces legales">
+      <a href="/terms">Términos</a>
+      <a href="/privacy">Privacidad</a>
+    </nav>
   </div>
 </footer>
 

@@ -40,6 +40,20 @@
         : true;
       rev.style.display = visible ? '' : 'none';
     });
+    // Say so when the filter leaves nothing, instead of a blank card.
+    let empty = document.getElementById('reviews-feed-empty');
+    const anyVisible = [...feed.querySelectorAll('.review')].some(function (r) { return r.style.display !== 'none'; });
+    if (!anyVisible && feed.querySelector('.review')) {
+      if (!empty) {
+        empty = document.createElement('div');
+        empty.id = 'reviews-feed-empty';
+        empty.style.cssText = 'padding:24px;color:var(--text-3);';
+        empty.textContent = 'Ninguna respuesta con ese filtro en este período.';
+        feed.appendChild(empty);
+      }
+    } else if (empty) {
+      empty.remove();
+    }
   }
 
   // ── NPS stats render ──────────────────────────────────────────────

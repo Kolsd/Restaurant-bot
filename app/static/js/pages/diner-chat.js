@@ -59,6 +59,10 @@ var state = {
   // setBusy()). Browsing the menu / adding to cart is still allowed.
   joinCode: '',
   joined: true,
+  // Diner memory (app/services/diner_memory.py): orgId keys the "No,
+  // gracias" choice; remembered = this browser is a known diner here.
+  orgId: null,
+  remembered: false,
 
   // ── Delivery/pickup (docs/claude/delivery-web.md chunk 5) ──────────
   // orderMode stays 'dine_in' for the /chat/{table_id} entry point (the
@@ -370,10 +374,30 @@ function renderPaymentOptionsBlock(block) {
   return any ? wrap : null;
 }
 
+// Every "Tu pedido" card currently in the conversation. The card is a view of
+// THE cart, not a receipt of the moment it was added: before this, removing a
+// dish in the cart panel left the older chat cards still listing it (and still
+// offering "Enviar pedido" for an order that no longer existed).
+var liveCartCards = [];
+
 function renderCartSummaryBlock(block) {
-  var items = Array.isArray(block.items) ? block.items : [];
   var card = document.createElement('div');
   card.className = 'diner-cart-card';
+  fillCartCard(card, block);
+  liveCartCards.push(card);
+  return card;
+}
+
+// Re-draw every cart card already on screen from the current cart.
+function refreshCartCards() {
+  var current = state.cart || { items: [], subtotal: 0 };
+  liveCartCards = liveCartCards.filter(function (card) { return card.isConnected; });
+  liveCartCards.forEach(function (card) { fillCartCard(card, current); });
+}
+
+function fillCartCard(card, block) {
+  var items = Array.isArray(block.items) ? block.items : [];
+  card.textContent = '';
 
   var title = document.createElement('p');
   title.className = 'diner-cart-card-title';
@@ -440,8 +464,6 @@ function renderCartSummaryBlock(block) {
   }
 
   card.appendChild(actionsRow);
-
-  return card;
 }
 
 function renderWaiterAckBlock(block) {
@@ -549,6 +571,142 @@ function renderCheckoutStatusBlock(status) {
   return card;
 }
 
+/* ── Diner memory ("lo de siempre") ──────────────────────────────────
+ * memory_actions comes in a remembered diner's greeting: repeat the last
+ * order (POST /api/diner/memory/repeat — the server re-prices and skips what
+ * this sede doesn't serve today) or forget this phone. The consent offer is
+ * shown once an order went to the kitchen (see SendSheet.confirmSend).
+ * ════════════════════════════════════════════════════════════════════ */
+
+function renderMemoryActionsBlock(block) {
+  var wrap = document.createElement('div');
+  wrap.className = 'diner-memory';
+  var unavailable = Array.isArray(block.unavailable) ? block.unavailable : [];
+  if (block.can_repeat) {
+    var row = document.createElement('div');
+    row.className = 'diner-chip-row';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'diner-chip';
+    btn.textContent = block.repeat_label ? String(block.repeat_label) : 'Repetir mi último pedido';
+    btn.addEventListener('click', function () { repeatLastOrder(btn); });
+    row.appendChild(btn);
+    wrap.appendChild(row);
+  }
+  if (unavailable.length) {
+    var note = document.createElement('p');
+    note.className = 'diner-memory-note';
+    note.textContent = 'Hoy aquí no tenemos: ' + unavailable.map(String).join(', ') + '.';
+    wrap.appendChild(note);
+  }
+  var forget = document.createElement('button');
+  forget.type = 'button';
+  forget.className = 'diner-memory-forget';
+  forget.textContent = '¿No eres tú? Olvidar este celular';
+  forget.addEventListener('click', function () { forgetThisPhone(forget); });
+  wrap.appendChild(forget);
+  return wrap;
+}
+
+async function repeatLastOrder(btn) {
+  if (!state.token) return;
+  btn.disabled = true;
+  try {
+    var data = await DinerSession.fetch('/api/diner/memory/repeat', 'POST', {}, getToken());
+    applyCartResult(data);
+    var bubble = createBotBubble();
+    bubble.appendChild(createTextNode((data && data.message) || 'Agregamos tu último pedido.'));
+    appendBubble(bubble);
+  } catch (e) {
+    btn.disabled = false;
+    mesioToast((e && e.message) || 'No pudimos repetir tu pedido. Intenta de nuevo.', 'error', 4000);
+  }
+}
+
+async function forgetThisPhone(btn) {
+  var key = DinerSession.getMemoryKey(false);
+  btn.disabled = true;
+  try {
+    if (key && state.token) {
+      await DinerSession.fetch('/api/diner/memory/forget', 'POST', { memory_key: key }, getToken());
+    }
+    DinerSession.forgetMemoryKey();
+    state.remembered = false;
+    saveMemoryState();
+    var bubble = createBotBubble();
+    bubble.appendChild(createTextNode('Listo, olvidamos tus pedidos en este celular.'));
+    appendBubble(bubble);
+  } catch (e) {
+    btn.disabled = false;
+    mesioToast((e && e.message) || 'No pudimos completar la acción. Intenta de nuevo.', 'error', 4000);
+  }
+}
+
+function saveMemoryState() {
+  var saved = DinerSession.load();
+  if (!saved) return;
+  saved.orgId = state.orgId;
+  saved.remembered = state.remembered;
+  DinerSession.save(saved);
+}
+
+function maybeOfferMemory(orderResult) {
+  if (!orderResult || !orderResult.memory_offer || state.remembered) return;
+  if (state.orgId == null || DinerSession.memoryDeclined(state.orgId)) return;
+  var bubble = createBotBubble();
+  bubble.appendChild(createTextNode(
+    '¿Quieres que ' + (state.restaurantName || 'el restaurante') +
+    ' recuerde tus pedidos en este celular? La próxima vez, en cualquiera de sus sedes, ' +
+    'te saludamos con lo de siempre.'
+  ));
+  var row = document.createElement('div');
+  row.className = 'diner-chip-row';
+  var yes = document.createElement('button');
+  yes.type = 'button';
+  yes.className = 'diner-chip';
+  yes.textContent = 'Sí, recuérdame';
+  var no = document.createElement('button');
+  no.type = 'button';
+  no.className = 'diner-chip diner-chip--quiet';
+  no.textContent = 'No, gracias';
+  row.appendChild(yes);
+  row.appendChild(no);
+  bubble.appendChild(row);
+  var fine = document.createElement('p');
+  fine.className = 'diner-memory-note';
+  fine.textContent = 'Solo guardamos lo que pides aquí. Puedes pedir que lo olvidemos cuando quieras.';
+  bubble.appendChild(fine);
+  appendBubble(bubble);
+
+  function done(text) {
+    row.hidden = true;
+    bubble.insertBefore(createTextNode(text), fine);
+  }
+  yes.addEventListener('click', async function () {
+    var key = DinerSession.getMemoryKey(true);
+    if (!key) {
+      done('Este navegador no nos deja guardar datos, así que no podemos recordarte aquí.');
+      return;
+    }
+    yes.disabled = true;
+    no.disabled = true;
+    try {
+      var data = await DinerSession.fetch('/api/diner/memory/consent', 'POST', { memory_key: key }, getToken());
+      state.remembered = true;
+      saveMemoryState();
+      done((data && data.message) || 'Listo, te recordaremos.');
+    } catch (e) {
+      yes.disabled = false;
+      no.disabled = false;
+      mesioToast((e && e.message) || 'No pudimos guardar tu preferencia. Intenta de nuevo.', 'error', 4000);
+    }
+  });
+  no.addEventListener('click', function () {
+    DinerSession.setMemoryDeclined(state.orgId);
+    done('Entendido, no guardamos nada.');
+  });
+}
+
 function renderBlock(block) {
   if (!block || typeof block.type !== 'string') return null;
   switch (block.type) {
@@ -559,6 +717,7 @@ function renderBlock(block) {
     case 'payment_options': return renderPaymentOptionsBlock(block);
     case 'waiter_ack': return renderWaiterAckBlock(block);
     case 'nps_prompt': return renderNpsPromptBlock(block);
+    case 'memory_actions': return renderMemoryActionsBlock(block);
     default: return null; // forward-compat: unrecognised block types are skipped, never crash
   }
 }
@@ -765,6 +924,8 @@ async function restoreSavedSession(tableId) {
   state.currency = saved.currency || 'COP';
   state.locale = saved.locale || 'es-CO';
   state.joinCode = saved.joinCode || '';
+  state.orgId = saved.orgId != null ? saved.orgId : null;
+  state.remembered = !!saved.remembered;
   applyAssistant(saved.assistant);
   connectDinerRealtime();
 
@@ -872,16 +1033,50 @@ async function startDineInSession(tableId) {
     // app/routes/diner.py::DinerSessionRequest. No token exists yet at
     // this point (minting one is the whole point of this call), so the
     // 4th arg to DinerSession.fetch is null.
-    var data = await DinerSession.fetch('/api/diner/session', 'POST', { table_id: tableId }, null);
+    // A phone that already sat at this table (browser closed, new tab) asks
+    // for its seat back; the server decides whether it is still valid.
+    var seat = DinerSession.loadSeat(tableId);
+    var sessionBody = { table_id: tableId };
+    if (seat) sessionBody.resume_token = seat.token;
+    var memoryKey = DinerSession.getMemoryKey(false);
+    if (memoryKey) sessionBody.memory_key = memoryKey;
+    var data = await DinerSession.fetch('/api/diner/session', 'POST', sessionBody, null);
     hideTyping();
     state.token = data.token || '';
     state.restaurantName = data.restaurant_name || '';
     state.tableLabel = data.table_name || '';
     state.currency = data.currency || 'COP';
     state.locale = data.locale || 'es-CO';
+    state.orgId = data.org_id != null ? data.org_id : null;
+    state.remembered = !!data.remembered;
     applyAssistant(data.assistant);
     if (!state.token) throw new Error('missing session token');
     connectDinerRealtime();
+
+    if (data.resumed) {
+      // Same diner, same table: no code, no greeting from scratch — their
+      // cart is still there under this token.
+      state.joinCode = data.join_code || '';
+      state.joined = true;
+      DinerSession.save({
+        token: state.token,
+        tableId: tableId,
+        orgId: state.orgId,
+        remembered: state.remembered,
+        restaurantName: state.restaurantName,
+        tableLabel: state.tableLabel,
+        currency: state.currency,
+        locale: state.locale,
+        assistant: state.assistant,
+        joinCode: state.joinCode,
+        needsJoin: false,
+      });
+      try { applyCartResult(await cartLoad()); } catch (e) { /* empty cart is fine */ }
+      renderHeader();
+      setBusy(false);
+      renderWelcomeBack();
+      return;
+    }
 
     if (data.requires_join_code) {
       // Table occupied — never show the greeting/carta (PM decision). Save
@@ -890,6 +1085,8 @@ async function startDineInSession(tableId) {
       DinerSession.save({
         token: state.token,
         tableId: tableId,
+        orgId: state.orgId,
+        remembered: state.remembered,
         restaurantName: state.restaurantName,
         tableLabel: state.tableLabel,
         currency: state.currency,
@@ -907,6 +1104,8 @@ async function startDineInSession(tableId) {
     DinerSession.save({
       token: state.token,
       tableId: tableId,
+      orgId: state.orgId,
+      remembered: state.remembered,
       restaurantName: state.restaurantName,
       tableLabel: state.tableLabel,
       currency: state.currency,
@@ -1260,8 +1459,12 @@ async function openDeliverySession(slug, locationId, orderMode) {
   try {
     var body = { order_mode: orderMode, slug: slug, location_id: locationId };
     if (state.turnstileSessionToken) body.turnstile_token = state.turnstileSessionToken;
+    var deliveryMemoryKey = DinerSession.getMemoryKey(false);
+    if (deliveryMemoryKey) body.memory_key = deliveryMemoryKey;
     var data = await DinerSession.fetch('/api/diner/session', 'POST', body, null);
     state.token = data.token || '';
+    state.orgId = data.org_id != null ? data.org_id : null;
+    state.remembered = !!data.remembered;
     if (!state.token) throw new Error('missing session token');
     state.orderMode = data.order_mode || orderMode;
     state.restaurantName = data.restaurant_name || state.restaurantName;
@@ -1279,6 +1482,8 @@ async function openDeliverySession(slug, locationId, orderMode) {
     DinerSession.save({
       token: state.token,
       entryMode: 'pedir',
+      orgId: state.orgId,
+      remembered: state.remembered,
       slug: slug,
       orderMode: state.orderMode,
       restaurantName: state.restaurantName,
@@ -1893,6 +2098,7 @@ var CartPanel = (function () {
 })();
 
 function updateCartChip() {
+  refreshCartCards();
   var chip = dinerEl('cart-chip');
   var label = dinerEl('cart-chip-label');
   if (!chip || !label) return;
@@ -2176,6 +2382,7 @@ var SendOrderSheet = (function () {
       appendBubble(bubble);
       mesioToast('Pedido enviado a cocina', 'success', 3000);
       TablePanel.refresh();
+      maybeOfferMemory(data);
     } catch (e) {
       mesioToast((e && e.message) || 'No pudimos enviar tu pedido. Intenta de nuevo.', 'error', 4500);
     } finally {
@@ -2199,9 +2406,13 @@ var CheckoutSheet = (function () {
   var box = null;
   var trap = null;
   var scope = 'mine';
-  var method = 'card';
+  var method = 'tarjeta';
+  var methods = [];          // [{key,label,kind,instructions}] — GET /api/diner/payment-options
+  var proofReady = false;    // transfer receipt uploaded for this open()
   var scopeBtns = [];
-  var methodBtns = [];
+  var methodRow = null;
+  var transferBox = null;
+  var hintEl = null;
   var tipInput = null;
   var nameInput = null;
   var phoneInput = null;
@@ -2258,13 +2469,13 @@ var CheckoutSheet = (function () {
     methodLabel.className = 'diner-sheet-note-label';
     methodLabel.textContent = '¿Cómo vas a pagar?';
     box.appendChild(methodLabel);
-    var methodToggle = makeToggleRow(
-      [{ value: 'card', label: 'Tarjeta' }, { value: 'cash', label: 'Efectivo' }],
-      method,
-      function (v) { method = v; }
-    );
-    methodBtns = methodToggle.btns;
-    box.appendChild(methodToggle.row);
+    // Filled on open() with the methods THIS sede accepts.
+    methodRow = document.createElement('div');
+    box.appendChild(methodRow);
+    transferBox = document.createElement('div');
+    transferBox.className = 'diner-sheet-field';
+    transferBox.hidden = true;
+    box.appendChild(transferBox);
 
     var tipField = document.createElement('div');
     tipField.className = 'diner-sheet-field';
@@ -2309,10 +2520,9 @@ var CheckoutSheet = (function () {
     phoneField.appendChild(phoneInput);
     box.appendChild(phoneField);
 
-    var hint = document.createElement('p');
-    hint.className = 'diner-sheet-hint';
-    hint.textContent = 'El mesero te cobra en el datáfono del restaurante o en efectivo. Nunca vas a ingresar datos de tu tarjeta aquí.';
-    box.appendChild(hint);
+    hintEl = document.createElement('p');
+    hintEl.className = 'diner-sheet-hint';
+    box.appendChild(hintEl);
 
     var actions = document.createElement('div');
     actions.className = 'diner-sheet-actions';
@@ -2338,12 +2548,103 @@ var CheckoutSheet = (function () {
     document.body.appendChild(overlay);
   }
 
+  function chosenMethod() {
+    for (var i = 0; i < methods.length; i++) if (methods[i].key === method) return methods[i];
+    return null;
+  }
+
+  function renderHint() {
+    var m = chosenMethod();
+    hintEl.textContent = (m && m.kind === 'transfer')
+      ? 'Transfiere desde tu app y sube el comprobante. La caja lo revisa y el mesero te confirma.'
+      : 'El mesero te cobra en el datáfono del restaurante o en efectivo. Nunca vas a ingresar datos de tu tarjeta aquí.';
+  }
+
+  /* Where to send the money (the restaurant's own text) + the receipt upload. */
+  function renderTransfer() {
+    var m = chosenMethod();
+    transferBox.textContent = '';
+    proofReady = false;
+    if (!m || m.kind !== 'transfer') { transferBox.hidden = true; renderHint(); return; }
+    transferBox.hidden = false;
+    var where = document.createElement('p');
+    where.className = 'diner-transfer-instructions';
+    where.textContent = m.instructions
+      ? m.instructions
+      : 'Pídele al mesero los datos para transferir por ' + m.label + '.';
+    transferBox.appendChild(where);
+    var label = document.createElement('label');
+    label.className = 'diner-sheet-note-label';
+    label.textContent = 'Comprobante de pago (foto o captura)';
+    transferBox.appendChild(label);
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.className = 'diner-checkout-file-input';
+    input.setAttribute('aria-label', 'Comprobante de pago (foto o captura)');
+    transferBox.appendChild(input);
+    var status = document.createElement('p');
+    status.className = 'diner-checkout-upload-status';
+    status.textContent = 'Sube una foto clara de la transferencia.';
+    transferBox.appendChild(status);
+    input.addEventListener('change', async function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      proofReady = false;
+      confirmBtn.disabled = true;
+      status.textContent = 'Subiendo comprobante...';
+      try {
+        var res = await DinerSession.uploadProof(getToken(), file);
+        proofReady = !!(res && res.proof_url);
+        status.textContent = proofReady ? 'Comprobante subido ✓' : 'No pudimos confirmar la subida.';
+      } catch (e) {
+        status.textContent = (e && e.message) || 'No pudimos subir el comprobante. Intenta con otra imagen.';
+      } finally {
+        confirmBtn.disabled = false;
+      }
+    });
+    renderHint();
+  }
+
+  function renderMethods() {
+    methodRow.textContent = '';
+    var toggle = makeToggleRow(
+      methods.map(function (m) { return { value: m.key, label: m.label }; }),
+      method,
+      function (v) { method = v; renderTransfer(); }
+    );
+    methodRow.appendChild(toggle.row);
+    renderTransfer();
+  }
+
+  async function loadMethods() {
+    try {
+      var data = await DinerSession.fetch('/api/diner/payment-options', 'GET', null, getToken());
+      methods = (data && Array.isArray(data.methods) && data.methods.length) ? data.methods : [];
+    } catch (e) {
+      methods = [];
+    }
+    if (!methods.length) {
+      // Same as the server's default for a sede that chose none.
+      methods = [
+        { key: 'tarjeta', label: 'Tarjeta (datáfono)', kind: 'card', instructions: '' },
+        { key: 'efectivo', label: 'Efectivo', kind: 'cash', instructions: '' },
+      ];
+    }
+    method = methods[0].key;
+    renderMethods();
+  }
+
   function open() {
     ensureBuilt();
     scope = 'mine';
-    method = 'card';
+    methods = [];
+    method = '';
+    methodRow.textContent = '';
+    transferBox.hidden = true;
+    renderHint();
+    loadMethods();
     scopeBtns.forEach(function (b, idx) { b.classList.toggle('diner-toggle-btn--active', idx === 0); });
-    methodBtns.forEach(function (b, idx) { b.classList.toggle('diner-toggle-btn--active', idx === 0); });
     tipInput.value = '';
     nameInput.value = '';
     phoneInput.value = '';
@@ -2359,6 +2660,12 @@ var CheckoutSheet = (function () {
   }
 
   async function confirmCheckout() {
+    var m = chosenMethod();
+    if (!m) { mesioToast('Elige cómo vas a pagar.', 'warning', 3000); return; }
+    if (m.kind === 'transfer' && !proofReady) {
+      mesioToast('Sube el comprobante de la transferencia.', 'warning', 3500);
+      return;
+    }
     confirmBtn.disabled = true;
     try {
       var tipRaw = tipInput.value.trim();
@@ -2381,7 +2688,8 @@ var CheckoutSheet = (function () {
       }
       bubble.appendChild(renderCheckoutStatusBlock({ status: data.status }));
       appendBubble(bubble);
-      mesioToast('Ya avisamos al mesero', 'success', 4000);
+      if (m.kind === 'transfer' && data.message) bubble.appendChild(createTextNode(data.message));
+      mesioToast(m.kind === 'transfer' ? 'Comprobante enviado' : 'Ya avisamos al mesero', 'success', 4000);
       lastCheckoutStatus = data.status;
       TablePanel.refresh();
     } catch (e) {
@@ -2574,6 +2882,22 @@ var DeliveryCheckoutSheet = (function () {
     } else if (isTransferPaymentMethod(selectedMethod)) {
       var uploadWrap = document.createElement('div');
       uploadWrap.className = 'diner-sheet-field';
+      // Where to send the money — the transfer screen used to ask for a
+      // receipt without ever saying which account to pay.
+      var whereEl = document.createElement('p');
+      whereEl.className = 'diner-transfer-instructions';
+      whereEl.textContent = 'Cargando los datos para transferir...';
+      uploadWrap.appendChild(whereEl);
+      var methodForWhere = selectedMethod;
+      DinerSession.fetch('/api/diner/payment-options', 'GET', null, getToken()).then(function (data) {
+        var list = (data && Array.isArray(data.methods)) ? data.methods : [];
+        var hit = list.filter(function (x) { return x.key === methodForWhere; })[0];
+        whereEl.textContent = (hit && hit.instructions)
+          ? hit.instructions
+          : 'Llama al restaurante para pedir los datos de ' + paymentMethodLabel(methodForWhere) + '.';
+      }).catch(function () {
+        whereEl.textContent = 'Llama al restaurante para pedir los datos de ' + paymentMethodLabel(methodForWhere) + '.';
+      });
       var uploadLabel = document.createElement('label');
       uploadLabel.className = 'diner-sheet-note-label';
       uploadLabel.textContent = 'Comprobante de pago (foto o captura)';

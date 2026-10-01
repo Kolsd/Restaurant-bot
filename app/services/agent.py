@@ -1334,18 +1334,24 @@ async def execute_action(parsed: dict, phone: str, org_id: int,
     # ── Early: remember_customer_preference (no cart, no DB transaction) ──
     if action == "remember":
         # Persist the preference. On any failure, we just skip (log) — never block the reply.
+        # Only a diner who asked to be remembered has a profile to write to
+        # (app/services/diner_memory.py); a stranger's preference is not kept.
+        # Keyed by org_id: restaurant_obj["id"] may be a sede id after a
+        # branch override, and customer_profiles is per organization.
         try:
-            from app.repositories.customer_profiles_repo import update_preference  # noqa: PLC0415
+            from app.repositories.customer_profiles_repo import get_profile_by_id, update_preference  # noqa: PLC0415
+            from app.services.diner_memory import profile_id_for_session  # noqa: PLC0415
             pref = parsed.get("preference", {})
-            restaurant_id = (restaurant_obj or {}).get("id")
-            if restaurant_id and pref.get("key") and pref.get("value"):
+            profile_id = await profile_id_for_session(phone, org_id)
+            profile = await get_profile_by_id(org_id, profile_id) if profile_id else None
+            if profile and pref.get("key") and pref.get("value"):
                 await update_preference(
-                    restaurant_id=restaurant_id,
-                    phone=phone,
+                    restaurant_id=org_id,
+                    phone=profile["phone"],
                     key=pref["key"],
                     value=pref["value"],
                 )
-                log.info("customer.preference_saved", phone=_obfuscate_phone(phone), restaurant_id=restaurant_id, key=pref["key"])
+                log.info("customer.preference_saved", org_id=org_id, profile_id=profile_id, key=pref["key"])
         except Exception:
             log.exception("customer.preference_save_failed", phone=_obfuscate_phone(phone))
         return reply   # Reply flows through unchanged
@@ -1835,8 +1841,6 @@ async def _load_restaurant_context(
 
     restaurant_name = restaurant_obj.get("name", "nuestro restaurante")
     feats = _parse_features(restaurant_obj.get("features", {}))
-    payment_methods = feats.get("payment_methods", [])
-    payment_methods_text = "\n".join(f"• {m}" for m in payment_methods) if payment_methods else ""
 
     # Override with branch-specific data when the client is sitting at a table.
     # P0 fix (2026-09): table_context["branch_id"] is a LOCATION id
@@ -1857,8 +1861,21 @@ async def _load_restaurant_context(
             restaurant_obj = r
             restaurant_name = r.get("name", restaurant_name)
             feats = _parse_features(r.get("features", {}))
-            payment_methods = feats.get("payment_methods", [])
-            payment_methods_text = "\n".join(f"• {m}" for m in payment_methods) if payment_methods else ""
+
+    # What the bot tells a diner about paying = what the payment sheet offers
+    # at this sede (app/services/payment_options.py). It read the old org
+    # toggles (`features.payment_methods`, a dict), so it could list methods
+    # that were switched off, by their internal keys.
+    payment_methods_text = ""
+    try:
+        from app.services import payment_options  # noqa: PLC0415
+        methods = await payment_options.sede_methods(org_id, sede_id)
+        payment_methods_text = "\n".join(
+            f"• {m['label']}" + (f": {m['instructions']}" if m.get("instructions") else "")
+            for m in methods
+        )
+    except Exception:
+        log.exception("agent.payment_methods_failed", org_id=org_id, location_id=sede_id)
 
     return {
         "restaurant_obj": restaurant_obj,
@@ -2032,34 +2049,19 @@ async def _call_llm_and_execute(
     messages.append({"role": "user", "content": enriched})
 
     # Load customer memory (read-only; failure never blocks the chat)
+    # Customer memory + "lo de siempre" (read-only; failure never blocks the
+    # chat, Regla 8). Only for a diner who asked to be remembered: their
+    # profile spans every visit and every sede of the org
+    # (app/services/diner_memory.py). Until 0104 this upserted a profile per
+    # `web:<uuid>` — one row per visit that nothing could ever match again.
     customer_ctx = ""
-    try:
-        from app.repositories.customer_profiles_repo import get_profile, serialize_for_prompt, upsert_profile_from_message  # noqa: PLC0415
-        restaurant_id = restaurant_obj.get("id")
-        if restaurant_id:
-            # Upsert first so last_seen is always fresh (creates row for new customers)
-            await upsert_profile_from_message(restaurant_id=restaurant_id, phone=user_phone)
-            profile = await get_profile(restaurant_id, user_phone)
-            customer_ctx = serialize_for_prompt(profile)
-    except Exception:
-        log.exception("customer.profile_load_failed", phone=_obfuscate_phone(user_phone))
-        customer_ctx = ""  # Graceful fallback — chat proceeds without memory
-
-    # Load order history for personalized recommendations (Fase 5a)
-    # Only for recurring customers — db_get_customer_order_history returns [] for <2 orders.
-    # Failure must never block the chat (Regla 8).
     order_history: list = []
     try:
-        from app.repositories.conversations_repo import db_get_customer_order_history  # noqa: PLC0415
-        _rid = restaurant_obj.get("id")
-        if _rid:
-            order_history = await db_get_customer_order_history(
-                phone=user_phone,
-                restaurant_id=_rid,
-            )
+        from app.services.diner_memory import prompt_context  # noqa: PLC0415
+        customer_ctx, order_history = await prompt_context(user_phone, org_id)
     except Exception:
-        log.exception("customer.order_history_load_failed", phone=_obfuscate_phone(user_phone))
-        order_history = []  # Graceful fallback — chat proceeds without history block
+        log.exception("customer.profile_load_failed", phone=_obfuscate_phone(user_phone))
+        customer_ctx, order_history = "", []
 
     sys_prompt = await build_system_prompt(
         feats,

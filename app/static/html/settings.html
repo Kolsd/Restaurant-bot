@@ -43,11 +43,9 @@
           <a class="set-nav-item active" href="#restaurante">🏠 Restaurante</a>
           <a class="set-nav-item" href="#horarios">🕒 Horarios</a>
           <div class="set-nav-sub">Operación</div>
-          <a class="set-nav-item" href="#pagos">💳 Pagos</a>
+          <a class="set-nav-item" href="#pagos">💳 Transferencias</a>
           <a class="set-nav-item" href="#dian">📄 DIAN / Facturación</a>
-          <a class="set-nav-item" href="#notif">🔔 Notificaciones</a>
           <div class="set-nav-sub">Plataforma</div>
-          <a class="set-nav-item" href="#seguridad">🛡️ Seguridad</a>
           <a class="set-nav-item danger" href="#peligro">⚠️ Zona peligrosa</a>
         </nav>
 
@@ -174,96 +172,23 @@
 
           <!-- Payments -->
           <section id="pagos" class="card set-sec">
-            <h2>Métodos de pago</h2>
-            <div class="s-sub">Los métodos activos aparecen en Caja y en el chat de la mesa. Para los métodos digitales, escribí las instrucciones que el bot enviará al cliente para que pueda pagar (cuenta Nequi, número Bancolombia, etc.).</div>
+            <h2>Pagos por transferencia</h2>
+            <div class="s-sub">Qué medios de pago acepta cada sede (efectivo, datáfono, Nequi, Bancolombia) se elige en <a href="/locations">Sucursales</a> → ⚙ de la sede. Aquí escribes a dónde transfiere el cliente: lo ve en el chat al pagar la cuenta o al pedir a domicilio, y luego sube el comprobante para que la caja lo revise.</div>
 
-            <div class="integ-row">
-              <div class="integ-logo" style="background:#E1F5EE;">💵</div>
-              <div class="integ-info">
-                <div class="integ-name">Efectivo</div>
-                <div class="integ-desc">Conciliación al cierre de caja</div>
-              </div>
-              <button class="switch on" id="pay-sw-cash" data-toggleable aria-label="Efectivo activado"></button>
-            </div>
-
-            <div class="integ-row">
-              <div class="integ-logo" style="background:#DBEAFE;">💳</div>
-              <div class="integ-info">
-                <div class="integ-name">Wompi</div>
-                <div class="integ-desc">Link de pago para el anticipo de reservas · comisión según tu contrato Wompi</div>
-              </div>
-              <span class="badge" id="wompi-status-badge">Sin configurar</span>
-              <button class="switch" id="pay-sw-wompi" data-toggleable aria-label="Wompi activado"></button>
-            </div>
-            <div class="field-group" id="wompi-credentials" style="display:none;">
-              <div>
-                <div class="fg-label">Credenciales Wompi</div>
-                <div class="fg-hint">Obtené las llaves desde tu dashboard Wompi → Configuración → Llaves API. Llave pública empieza con <code>pub_test_</code> o <code>pub_prod_</code>. La integrity secret se guarda cifrada y no se muestra de nuevo.</div>
-              </div>
-              <div style="display:grid;gap:8px;">
-                <label class="fg-label sr-only" for="wompiPublicKey">Llave pública Wompi</label>
-                <input id="wompiPublicKey" class="input mono" type="text" placeholder="pub_test_... o pub_prod_..." autocomplete="off" />
-                <label class="fg-label sr-only" for="wompiIntegritySecret">Integrity Secret Wompi</label>
-                <input id="wompiIntegritySecret" class="input mono" type="password" placeholder="Integrity Secret" autocomplete="off" />
-                <div id="wompi-secret-hint" style="font-size:12px;color:var(--text-3);"></div>
-              </div>
-            </div>
-
-            <div class="integ-row">
-              <div class="integ-logo" style="background:#FECACA;">📱</div>
-              <div class="integ-info">
-                <div class="integ-name">Nequi</div>
-                <div class="integ-desc">El cliente paga con tus instrucciones · sin comisión</div>
-              </div>
-              <button class="switch" id="pay-sw-nequi" data-toggleable aria-label="Nequi activado"></button>
-            </div>
             <div class="field-group" id="pay-inst-row-nequi">
               <div>
-                <label class="fg-label" for="pay-inst-nequi">Instrucciones para pagar con Nequi</label>
-                <div class="fg-hint">El bot le enviará este texto al cliente cuando elija Nequi.</div>
+                <label class="fg-label" for="pay-inst-nequi">Nequi</label>
+                <div class="fg-hint">Número y a nombre de quién.</div>
               </div>
-              <textarea id="pay-inst-nequi" class="input" rows="3" placeholder="Ej: Envía a Nequi 300 123 4567 a nombre de [Restaurante]. Incluí tu número de pedido en la descripción."></textarea>
+              <textarea id="pay-inst-nequi" class="input" rows="3" placeholder="Ej: Nequi 300 123 4567 a nombre de Arepas Juan."></textarea>
             </div>
 
-            <div class="integ-row">
-              <div class="integ-logo" style="background:#FFE4B5;">📲</div>
-              <div class="integ-info">
-                <div class="integ-name">Daviplata</div>
-                <div class="integ-desc">Transferencia desde la app · sin comisión</div>
-              </div>
-              <button class="switch" id="pay-sw-daviplata" data-toggleable aria-label="Daviplata activado"></button>
-            </div>
-            <div class="field-group" id="pay-inst-row-daviplata">
-              <div>
-                <label class="fg-label" for="pay-inst-daviplata">Instrucciones para pagar con Daviplata</label>
-                <div class="fg-hint">El bot le enviará este texto al cliente cuando elija Daviplata.</div>
-              </div>
-              <textarea id="pay-inst-daviplata" class="input" rows="3" placeholder="Ej: Envía a Daviplata 300 123 4567 a nombre de [Restaurante]."></textarea>
-            </div>
-
-            <div class="integ-row">
-              <div class="integ-logo" style="background:#FEF3C7;">🏦</div>
-              <div class="integ-info">
-                <div class="integ-name">Transferencia Bancolombia</div>
-                <div class="integ-desc">Conciliación manual por el admin</div>
-              </div>
-              <button class="switch" id="pay-sw-bancolombia" data-toggleable aria-label="Bancolombia activado"></button>
-            </div>
             <div class="field-group" id="pay-inst-row-bancolombia">
               <div>
-                <label class="fg-label" for="pay-inst-bancolombia">Instrucciones para Transferencia Bancolombia</label>
-                <div class="fg-hint">El bot le enviará este texto al cliente cuando elija Bancolombia.</div>
+                <label class="fg-label" for="pay-inst-bancolombia">Bancolombia</label>
+                <div class="fg-hint">Tipo y número de cuenta, titular y NIT o cédula.</div>
               </div>
-              <textarea id="pay-inst-bancolombia" class="input" rows="3" placeholder="Ej: Cuenta de Ahorros Bancolombia 12345678 a nombre de [Empresa] NIT 900123456-7."></textarea>
-            </div>
-
-            <div class="integ-row">
-              <div class="integ-logo" style="background:#EDE9FE;">💸</div>
-              <div class="integ-info">
-                <div class="integ-name">Bold</div>
-                <div class="integ-desc">Datáfono o link de Bold · la caja confirma el pago</div>
-              </div>
-              <button class="switch" id="pay-sw-bold" data-toggleable aria-label="Bold activado"></button>
+              <textarea id="pay-inst-bancolombia" class="input" rows="3" placeholder="Ej: Cuenta de Ahorros Bancolombia 12345678 a nombre de Arepas Juan SAS, NIT 900123456-7."></textarea>
             </div>
           </section>
 
@@ -286,68 +211,6 @@
                 <div class="fg-hint">Configura en el módulo de Facturación.</div>
               </div>
             </div>
-
-            <div class="field-group">
-              <div>
-                <div class="fg-label">Generar factura automática</div>
-                <div class="fg-hint">Si está desactivado, solo se genera con botón "Facturar".</div>
-              </div>
-              <div>
-                <button class="switch on" id="dianAutoSwitch" data-toggleable aria-label="Factura automática"></button>
-              </div>
-            </div>
-          </section>
-
-          <!-- Notifications -->
-          <section id="notif" class="card set-sec">
-            <h2>Notificaciones</h2>
-            <div class="s-sub">Qué alertas mandar y a quién. Los meseros solo ven alertas de sus mesas.</div>
-
-            <div class="field-group">
-              <div>
-                <div class="fg-label">Llamada de mesa (QR)</div>
-                <div class="fg-hint">Cliente toca "Llamar mesero" en el QR.</div>
-              </div>
-              <div class="tog">
-                <button class="switch on" id="notif-sw-waiter_call" data-toggleable aria-label="Llamada de mesa"></button>
-                <span class="text-mute">push + sonido</span>
-              </div>
-            </div>
-
-            <div class="field-group">
-              <div><div class="fg-label">Pedido retrasado &gt; 15 min</div></div>
-              <div class="tog">
-                <button class="switch on" id="notif-sw-late_order" data-toggleable aria-label="Pedido retrasado"></button>
-                <span class="text-mute">admin + chef</span>
-              </div>
-            </div>
-
-            <div class="field-group">
-              <div>
-                <div class="fg-label">Stock crítico ingrediente</div>
-                <div class="fg-hint">Quedan &lt; 10% del par.</div>
-              </div>
-              <div class="tog">
-                <button class="switch on" id="notif-sw-low_stock" data-toggleable aria-label="Stock crítico"></button>
-                <span class="text-mute">admin</span>
-              </div>
-            </div>
-
-            <div class="field-group">
-              <div><div class="fg-label">NPS negativo (&lt; 7)</div></div>
-              <div class="tog">
-                <button class="switch on" id="notif-sw-nps_negative" data-toggleable aria-label="NPS negativo"></button>
-                <span class="text-mute">admin</span>
-              </div>
-            </div>
-
-            <div class="field-group">
-              <div><div class="fg-label">Reparto de propinas listo</div></div>
-              <div class="tog">
-                <button class="switch" id="notif-sw-tips_ready" data-toggleable aria-label="Propinas listas"></button>
-                <span class="text-mute">equipo completo</span>
-              </div>
-            </div>
           </section>
 
           <!-- Commerce features -->
@@ -358,7 +221,7 @@
             <div class="field-group">
               <div>
                 <div class="fg-label">Facturación electrónica DIAN</div>
-                <div class="fg-hint">Genera facturas DIAN automáticamente en /cashier al cobrar. Requiere folio DIAN comprado y configurado por Mesio.</div>
+                <div class="fg-hint">Genera la factura electrónica al cobrar en Caja. Requiere el plan Pro y un rango de numeración DIAN configurado con Mesio.</div>
               </div>
               <div class="tog">
                 <button class="switch" id="commerce-sw-dian" data-toggleable aria-label="Facturación electrónica DIAN activada"></button>
@@ -368,69 +231,10 @@
 
           </section>
 
-          <!-- Security: phone blocklist -->
-          <section id="seguridad" class="card set-sec">
-            <h2>Seguridad &middot; Teléfonos bloqueados</h2>
-            <div class="s-sub">Bloqueá manualmente teléfonos que están haciendo abuso del bot (spam, suplantación, mesas fantasma). Los bloqueos automáticos por mesas marcadas como "fantasma" también aparecen acá. Cada bloqueo expira y se desbloquea solo.</div>
-
-            <div class="field-group">
-              <div>
-                <label class="fg-label" for="bl-phone">Bloquear teléfono</label>
-                <div class="fg-hint">Solo dígitos, formato internacional sin '+'. Ej: 573001234567.</div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                <input id="bl-phone" class="input mono" type="tel" inputmode="numeric" placeholder="573001234567" autocomplete="off" />
-                <select id="bl-hours" class="sel" aria-label="Duración del bloqueo">
-                  <option value="1">1 hora</option>
-                  <option value="6">6 horas</option>
-                  <option value="24" selected>24 horas</option>
-                  <option value="72">3 días</option>
-                  <option value="168">7 días</option>
-                  <option value="720">30 días</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="field-group">
-              <div>
-                <label class="fg-label" for="bl-reason">Razón</label>
-                <div class="fg-hint">Para que el equipo entienda por qué se bloqueó.</div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:start;">
-                <textarea id="bl-reason" class="input" rows="2" placeholder="Ej: spam reiterado, mesa fantasma confirmada, intento de fraude" maxlength="200"></textarea>
-                <button class="btn brand" id="bl-block-btn" type="button">Bloquear</button>
-              </div>
-            </div>
-
-            <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                <div>
-                  <div class="fg-label">Bloqueos activos</div>
-                  <div class="fg-hint" id="bl-count">&mdash;</div>
-                </div>
-                <button class="btn sm" id="bl-refresh-btn" type="button">Actualizar</button>
-              </div>
-              <div id="bl-list" role="list" aria-label="Lista de teléfonos bloqueados">
-                <div style="padding:14px;color:var(--text-3);font-size:13px;">Cargando&hellip;</div>
-              </div>
-            </div>
-          </section>
-
           <!-- Danger zone -->
           <section id="peligro" class="card set-sec danger-zone">
             <h2>Zona peligrosa</h2>
-            <div class="s-sub">Estas acciones son irreversibles. Solo el owner puede ejecutarlas.</div>
-
-            <div class="field-group">
-              <div>
-                <div class="fg-label">Transferir propiedad</div>
-                <div class="fg-hint">Ceder el control total a otro usuario.</div>
-              </div>
-              <div>
-                <button class="btn" id="btnTransfer" disabled>Transferir titular (próximamente)</button>
-              </div>
-            </div>
-
+            <div class="s-sub">Solo el dueño puede ejecutar estas acciones.</div>
             <div class="field-group">
               <div>
                 <div class="fg-label">Pausar restaurante</div>
@@ -438,18 +242,6 @@
               </div>
               <div>
                 <button class="btn" id="btnPause">Pausar</button>
-              </div>
-            </div>
-
-            <div class="field-group">
-              <div>
-                <div class="fg-label">Eliminar restaurante</div>
-                <div class="fg-hint">Borra todo: menú, pedidos, clientes, equipo. No se puede deshacer.</div>
-              </div>
-              <div>
-                <button class="btn" id="btnDelete" disabled style="background:#FEE2E2;color:#991B1B;border-color:#FCA5A5;opacity:0.6;cursor:not-allowed;">
-                  Eliminar restaurante (próximamente)
-                </button>
               </div>
             </div>
           </section>

@@ -101,12 +101,15 @@ async def get_config(request: Request):
     restaurant_id = await _get_restaurant_id(user)
     with tenant_scope(restaurant_id):
         config = await get_billing_config(restaurant_id)
+        # The page shows the accounting setup only when the plan has DIAN
+        # (Pro and up); saving/emitting are already refused without it.
+        dian_in_plan = await plan_access.org_has_feature(restaurant_id, plans.DIAN)
     if not config:
-        return {"configured": False}
+        return {"configured": False, "dian_in_plan": dian_in_plan}
     # Ocultar secretos en la respuesta
     safe = {k: ("***" if "key" in k.lower() or "token" in k.lower() or "password" in k.lower() or "secret" in k.lower() else v)
             for k, v in config.items()}
-    return {"configured": True, "config": safe}
+    return {"configured": True, "config": safe, "dian_in_plan": dian_in_plan}
 
 
 @router.post("/config")

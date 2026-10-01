@@ -168,7 +168,7 @@ async def get_menu_availability(request: Request):
     if not isinstance(sede, int):
         raise HTTPException(
             status_code=400,
-            detail="Elegí una sede para ver qué platos están agotados",
+            detail="Elige una sede para ver qué platos están agotados",
         )
 
     with tenant_scope(org_id):
@@ -192,7 +192,7 @@ async def set_dish_availability(request: Request):
     if not isinstance(sede, int):
         raise HTTPException(
             status_code=400,
-            detail="Elegí la sede en la que se agotó este plato",
+            detail="Elige la sede en la que se agotó este plato",
         )
 
     with tenant_scope(org_id):
@@ -459,7 +459,28 @@ async def get_live_orders(
             org_id=org_id,
             limit=limit,
             location_id=sede,
+            tz=get_tz(restaurant),
         )
+
+
+@router.get("/api/stats/order-history")
+async def get_order_history(
+    request: Request,
+    days: int = Query(7, ge=1, le=90),
+):
+    """Pedidos › Histórico: table rounds + web orders of the caller's sede for
+    the last `days` restaurant-local days (today counts as one)."""
+    user = await get_current_user(request)
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+    sede = resolve_sede_filter(request, user)
+    tz = get_tz(restaurant)
+    first_day = datetime.now(ZoneInfo(tz)).date() - timedelta(days=days - 1)
+    since = stats_repo._local_midnight_utc(first_day, tz)
+
+    with tenant_scope(org_id):
+        orders = await stats_repo.db_order_history(org_id, sede, since)
+    return {"orders": orders, "days": days}
 
 
 # ── DASHBOARD ANALYTICS — TIER 3 ─────────────────────────────────────────────

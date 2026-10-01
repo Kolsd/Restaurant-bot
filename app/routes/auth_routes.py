@@ -14,6 +14,9 @@ from app.services import realtime
 from app.routes.deps import get_current_user
 from app.services.logging import get_logger
 from app.services.staff_sections import sections_for_roles
+from app.services import ops_config, plan_access, plans
+from app.services.tenant_context import tenant_scope
+from app.routes.staff_ops import can_configure, resolve_ops_sede
 
 log = get_logger(__name__)
 
@@ -295,7 +298,27 @@ async def staff_visible_sections(request: Request):
     roles = [r.strip() for r in (user.get("role") or "").split(",") if r.strip()]
     sections = sections_for_roles(roles)
 
-    return {"ok": True, "roles": roles, "sections": sections}
+    # What the sede said it uses (migration 0105, app/services/ops_config.py)
+    # and what the plan unlocks narrow the role's sections further.
+    needs_setup = False
+    loc = None
+    configurable = can_configure(user)
+    org_id = int(user.get("org_id") or 0)
+    if org_id and sections:
+        with tenant_scope(org_id):
+            if not await plan_access.org_has_feature(org_id, plans.DELIVERY):
+                sections = [s for s in sections if s not in ("delivery", "courier")]
+            loc = await resolve_ops_sede(request, user, org_id)
+            if loc:
+                cfg = await ops_config.get_for_sede(org_id, loc)
+                sections = ops_config.visible_sections(sections, cfg)
+                needs_setup = configurable and not cfg["configured"]
+    configurable = configurable and bool(loc)
+
+    return {
+        "ok": True, "roles": roles, "sections": sections,
+        "needs_setup": needs_setup, "can_configure": configurable,
+    }
 
 
 @router.get("/api/staff/stream")

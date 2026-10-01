@@ -53,13 +53,6 @@
     en_puerta: 'El repartidor está muy cerca',
   };
 
-  function statusIndex(status) {
-    for (var i = 0; i < TIMELINE_STEPS.length; i++) {
-      if (TIMELINE_STEPS[i].key === status) return i;
-    }
-    return -1;
-  }
-
   function el(tag, cls) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -121,11 +114,21 @@
 
   // ── Render ───────────────────────────────────────────────────────────
 
-  function buildTimeline(status) {
+  // A pickup is never "En camino": the customer comes for it.
+  function stepsFor(orderType) {
+    if (orderType !== 'recoger') return TIMELINE_STEPS;
+    return TIMELINE_STEPS
+      .filter(function (s) { return s.key !== 'en_camino'; })
+      .map(function (s) { return s.key === 'listo' ? { key: s.key, label: 'Listo para recoger' } : s; });
+  }
+
+  function buildTimeline(status, orderType) {
     var list = el('ul', 'pedido-timeline');
     if (status === 'rechazado' || status === 'cancelado') return list;
-    var idx = statusIndex(status);
-    TIMELINE_STEPS.forEach(function (step, i) {
+    var steps = stepsFor(orderType);
+    var idx = -1;
+    for (var k = 0; k < steps.length; k++) { if (steps[k].key === status) idx = k; }
+    steps.forEach(function (step, i) {
       var cls = 'pedido-timeline-step';
       if (i < idx) cls += ' is-done';
       else if (i === idx) cls += ' is-current';
@@ -162,7 +165,7 @@
       }
     }
 
-    card.appendChild(buildTimeline(status));
+    card.appendChild(buildTimeline(status, data.order_type));
     return card;
   }
 

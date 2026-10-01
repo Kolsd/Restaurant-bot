@@ -129,6 +129,7 @@ async def create_tenant(
     username: str | None = None,
     password: str | None = None,
     owner_email: str | None = None,
+    owner_name: str | None = None,
     plan_code: str = "restaurante",
     trial_days: int = DEFAULT_TRIAL_DAYS,
     features: dict | None = None,
@@ -252,6 +253,7 @@ async def create_tenant(
             role="owner",
             branch_id=org_id,
             org_id=org_id,
+            display_name=owner_name,
         )
         if not user_created:
             if not allow_username_suffix:
@@ -269,6 +271,7 @@ async def create_tenant(
                 role="owner",
                 branch_id=org_id,
                 org_id=org_id,
+                display_name=owner_name,
             )
     except TenantAlreadyExists:
         raise

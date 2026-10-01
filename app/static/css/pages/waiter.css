@@ -24,7 +24,7 @@
 
 /* ── Dark rail ── */
 .m-rail {
-  background: #0a0c10;
+  background: var(--bg);
   padding: 14px 0;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
 }
@@ -35,10 +35,10 @@
   text-decoration: none; border: none; background: transparent; cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.m-rail-link:hover { background: #14171f; color: #E8EAEE; }
+.m-rail-link:hover { background: var(--surface); color: var(--text); }
 .m-rail-link.active { background: rgba(29,158,117,0.14); color: var(--brand); }
 .m-rail-link svg { width: 20px; height: 20px; }
-.m-rail-sep { width: 28px; height: 1px; background: #1a1d26; margin: 6px 0; }
+.m-rail-sep { width: 28px; height: 1px; background: var(--border); margin: 6px 0; }
 .m-rail-bottom { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .m-rail-avatar {
   width: 36px; height: 36px; border-radius: 50%;

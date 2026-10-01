@@ -828,10 +828,18 @@ async def get_order_ticket(request: Request, order_id: str):
     """
     import json as _json
     user = await get_current_user(request)
-    branch_id = user.get("branch_id")
+    # The caller's own org and sede — it used to read under
+    # bypass_tenant_scope filtered by the legacy `branch_id`, so any login
+    # could fetch another organization's ticket by guessing its id.
+    org_id = int(user.get("org_id") or 0)
+    if not org_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    sede = resolve_sede_filter(request, user)
 
-    with bypass_tenant_scope("get_order_ticket: ticket lookup by order_id across branches"):
-        rows = await tr.db_get_table_orders_by_base_id(order_id, branch_id)
+    with tenant_scope(org_id):
+        rows = await tr.db_get_table_orders_by_base_id(order_id, sede)
+    # A cancelled round is not on the bill.
+    rows = [r for r in rows if r.get("status") not in ("cancelado", "cancelled")]
 
     if not rows:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
@@ -855,24 +863,22 @@ async def get_order_ticket(request: Request, order_id: str):
         if row.get("notes"):
             notes_parts.append(row["notes"])
 
-    # Fiscal data: last invoice issued for this order (deferred to billing layer).
-    # Use tenant_connection so the lookup inherits the active bypass_tenant_scope
-    # set above (admins legitimately view tickets across branches). Raw pool.acquire
-    # would create a new connection without the GUC — RLS-blocked under mesio_app
-    # in prod, accidentally cross-tenant under postgres in test.
+    # Fiscal data: last invoice issued for this order (deferred to billing layer),
+    # read under the caller's own tenant scope.
     fiscal = None
     try:
         from app.services.tenant_db import tenant_connection as _tc  # noqa: PLC0415
-        async with _tc() as conn:
-            fiscal_row = await conn.fetchrow(
-                """SELECT cufe, qr_data, invoice_number, issue_date,
-                          tax_regime, tax_pct, dian_status, uuid_dian
-                   FROM fiscal_invoices
-                   WHERE order_id = $1
-                   ORDER BY created_at DESC LIMIT 1""",
-                order_id)
-            if fiscal_row:
-                fiscal = dict(fiscal_row)
+        with tenant_scope(org_id):
+            async with _tc() as conn:
+                fiscal_row = await conn.fetchrow(
+                    """SELECT cufe, qr_data, invoice_number, issue_date,
+                              tax_regime, tax_pct, dian_status, uuid_dian
+                       FROM fiscal_invoices
+                       WHERE order_id = $1
+                       ORDER BY created_at DESC LIMIT 1""",
+                    order_id)
+        if fiscal_row:
+            fiscal = dict(fiscal_row)
     except Exception:
         # Don't crash the ticket endpoint if billing config is missing or DIAN
         # tables aren't provisioned. But DO log — silent except hid real RLS

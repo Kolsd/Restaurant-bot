@@ -30,7 +30,7 @@
       icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6a4 4 0 018 0v2H4V6z"/><path d="M3 8h10v6H3z"/><path d="M6 11h4"/></svg>' },
     bar:     { label: 'Bar',        jsFile: 'bar.js',
       icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2h6l2 5H3L5 2z"/><path d="M3 7v7h10V7"/><path d="M7 10v4M9 10v4"/></svg>' },
-    courier: { label: 'Repartos',   jsFile: 'courier.js',
+    courier: { label: 'Mis entregas',   jsFile: 'courier.js',
       icon: '<svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><path d="M1 3h2l2 7h6l2-5H5"/></svg>' },
   };
   // Mirrors app.services.staff_sections.ALL_SECTIONS ordering exactly
@@ -296,12 +296,14 @@
     }
 
     var sections;
+    var opsInfo = { needs_setup: false, can_configure: false };
     try {
       const res = await fetch('/api/staff/sections', { headers: mesioHeaders() });
       if (res.status === 401) { localStorage.clear(); window.location.href = '/login'; return; }
       if (!res.ok) throw new Error('status ' + res.status);
       const data = await res.json();
       sections = Array.isArray(data.sections) ? data.sections : [];
+      opsInfo = { needs_setup: !!data.needs_setup, can_configure: !!data.can_configure };
     } catch (e) {
       console.error('staff-shell: /api/staff/sections failed', e);
       sections = [];
@@ -321,6 +323,7 @@
 
     _allowedSectionsCache = sections;
     _renderSidebarNav(sections);
+    _initOpsSetup(opsInfo);
 
     var initial = _readInitialSection(sections);
     switchSection(initial, sections);
@@ -336,6 +339,26 @@
     if (sections.indexOf('delivery') !== -1) {
       _watchDeliveryBadge();
     }
+  }
+
+  /* "Configurar operación" (ops-setup.js): asked once per sede the first time
+   * an owner/admin/gerente opens Operación, and reachable from the sidebar
+   * after. Saving reloads so the sidebar shows only the screens kept. */
+  function _initOpsSetup(info) {
+    if (!info.can_configure || !window.MesioOpsSetup) return;
+    var onSaved = function () { window.location.reload(); };
+    var bottom = document.querySelector('.sb-bottom');
+    if (bottom && !document.getElementById('staff-btn-ops-setup')) {
+      var btn = document.createElement('button');
+      btn.id = 'staff-btn-ops-setup';
+      btn.type = 'button';
+      btn.className = 'btn sm ghost';
+      btn.style.cssText = 'width:100%;margin-bottom:8px;';
+      btn.textContent = 'Configurar operación';
+      btn.addEventListener('click', function () { MesioOpsSetup.open({ onSaved: onSaved }); });
+      bottom.insertBefore(btn, bottom.firstChild);
+    }
+    if (info.needs_setup) MesioOpsSetup.open({ onSaved: onSaved });
   }
 
   function _watchDeliveryBadge() {

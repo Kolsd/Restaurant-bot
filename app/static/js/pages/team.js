@@ -145,7 +145,8 @@ function renderMembersTable() {
     avName.textContent = s.name || s.username || '';
     var avRole = document.createElement('div');
     avRole.className = 'av-role';
-    avRole.textContent = s.username ? s.username + '@' : (s.email || '');
+    // The username is what they type at the staff login — not an email.
+    avRole.textContent = s.username ? 'Usuario: ' + s.username : (s.email || '');
     meta.appendChild(avName);
     meta.appendChild(avRole);
     avRow.appendChild(av);
@@ -177,7 +178,7 @@ function renderMembersTable() {
     // Status
     var tdStatus = document.createElement('td');
     var badge = document.createElement('span');
-    if (s.status === 'inactive') {
+    if (s.active === false || s.status === 'inactive') {
       badge.className = 'badge';
       badge.textContent = 'Inactivo';
     } else {
@@ -269,6 +270,9 @@ function openEditStaffModal(staff) {
   if (roleEl) roleEl.value = staff.role || 'mesero';
   if (activeEl) activeEl.checked = staff.status !== 'inactive' && staff.active !== false;
   if (locationEl && staff.location_id) { locationEl.value = String(staff.location_id); }
+  var pwdEl = document.getElementById('editStaffPassword');
+  if (pwdEl) pwdEl.value = '';
+  _editingStaffName = staff.name || staff.username || '';
 
   var modal = document.getElementById('editStaffModal');
   if (modal) { modal.classList.add('open'); }
@@ -287,10 +291,17 @@ async function submitEditStaff() {
   var activeEl = document.getElementById('editStaffActive');
   var locationEl = document.getElementById('editStaffLocation');
 
+  var pwdEl = document.getElementById('editStaffPassword');
+  var newPwd = pwdEl ? pwdEl.value.trim() : '';
+  if (newPwd && newPwd.length < 4) {
+    mesioToast('El PIN debe tener al menos 4 caracteres', 'warning');
+    return;
+  }
   var payload = {
     name: nameEl ? nameEl.value.trim() : undefined,
     role: roleEl ? roleEl.value : undefined,
-    active: activeEl ? activeEl.checked : undefined
+    active: activeEl ? activeEl.checked : undefined,
+    password: newPwd || undefined
   };
   if (_multiSede && locationEl && locationEl.value) {
     payload.location_id = parseInt(locationEl.value, 10);
@@ -310,6 +321,31 @@ async function submitEditStaff() {
       throw new Error(err.detail || 'HTTP ' + res.status);
     }
     mesioToast('Miembro actualizado', 'success');
+    closeEditStaffModal();
+    loadAll();
+  } catch (e) {
+    mesioToast('Error: ' + e.message, 'error');
+  }
+}
+
+var _editingStaffName = '';
+
+async function deleteEditingStaff() {
+  if (!_editingStaffId) return;
+  var ok = typeof mesioConfirm === 'function'
+    ? await mesioConfirm('¿Eliminar a ' + (_editingStaffName || 'este miembro') + ' del equipo? Ya no podrá entrar.', { confirmText: 'Eliminar', danger: true })
+    : window.confirm('¿Eliminar a ' + (_editingStaffName || 'este miembro') + ' del equipo?');
+  if (!ok) return;
+  try {
+    var res = await fetch('/api/staff/' + encodeURIComponent(_editingStaffId), {
+      method: 'DELETE',
+      headers: mesioHeaders()
+    });
+    if (!res.ok) {
+      var err = await res.json().catch(function () { return {}; });
+      throw new Error(err.detail || 'HTTP ' + res.status);
+    }
+    mesioToast('Miembro eliminado', 'success');
     closeEditStaffModal();
     loadAll();
   } catch (e) {
@@ -362,6 +398,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // Edit member modal
   var editClose = document.getElementById('editStaffModalClose');
+  var editDelete = document.getElementById('editStaffModalDelete');
+  if (editDelete) editDelete.addEventListener('click', deleteEditingStaff);
   var editCancel = document.getElementById('editStaffModalCancel');
   var editSubmit = document.getElementById('editStaffModalSubmit');
   var editOverlay = document.getElementById('editStaffModal');

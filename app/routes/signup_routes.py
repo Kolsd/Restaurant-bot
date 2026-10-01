@@ -159,6 +159,7 @@ async def create_signup(payload: SignupPayload, request: Request):
             username=payload.email,
             password=payload.password,
             owner_email=payload.email,
+            owner_name=payload.nombre,
             plan_code=payload.plan.lower(),
             trial_days=DEFAULT_TRIAL_DAYS,
             # A person who typed their own password must be able to log in

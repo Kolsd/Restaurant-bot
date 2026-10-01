@@ -76,6 +76,7 @@
       cancelled: '<span class="badge danger">Cancelada</span>',
       no_show: '<span class="badge danger">No-show</span>',
       completed: '<span class="badge">Completada</span>',
+      seated: '<span class="badge success">En la mesa</span>',
     };
     return map[status] || ('<span class="badge">' + _escHtml(status || '') + '</span>');
   }
@@ -134,10 +135,13 @@
 
     timeline.innerHTML = times.map(function (time) {
       const cards = groups[time].map(function (r) {
-        const name = _escHtml(r.customer_name || r.guest_name || 'Sin nombre');
+        const name = _escHtml(r.customer_name || r.name || r.guest_name || 'Sin nombre');
         const pax = r.guests || r.party_size || 1;
         const phone = r.phone || r.customer_phone || '';
-        const table = r.table_name || (r.table_id ? 'Mesa ' + r.table_id : 'sin mesa');
+        // The table's own name ("2"), never its internal id ("table-4-2").
+        const known = r.table_id ? _tables.find(function (t) { return String(t.id) === String(r.table_id); }) : null;
+        const tName = r.table_name || (known && known.name) || '';
+        const table = r.table_id ? ('Mesa ' + (tName || '—')) : 'sin mesa';
         const cls = r.status === 'confirmed' ? 'confirmed' : r.status === 'cancelled' ? 'cancelled' : 'pending';
         return '<div class="res-card ' + cls + '" data-res-id="' + r.id + '">' +
           '<div class="res-name">' + name + ' · ' + pax + ' pax</div>' +
@@ -182,6 +186,9 @@
     if (vals[1]) vals[1].textContent = confirmed;
     if (vals[2]) vals[2].textContent = pending;
     if (vals[3]) vals[3].textContent = cancelled;
+    const pct = function (n) { return total ? (Math.round((n / total) * 1000) / 10) + '%' : ''; };
+    if (vals[1] && vals[1].nextElementSibling) vals[1].nextElementSibling.textContent = pct(confirmed);
+    if (vals[3] && vals[3].nextElementSibling) vals[3].nextElementSibling.textContent = pct(cancelled);
   }
 
   // ── API calls ──────────────────────────────────────────────────
@@ -192,11 +199,35 @@
       const d = isoDate(currentDate);
       const res = await fetch('/api/reservations?date_from=' + d + '&date_to=' + d, { headers });
       if (!res.ok) {
-        console.error('reservaciones: fetch failed', res.status);
+        // 403 = the plan doesn't include reservations: say it instead of
+        // "Cargando reservas…" forever.
+        let detail = '';
+        try { detail = (await res.json()).detail || ''; } catch (e) { detail = ''; }
+        const timeline = document.querySelector('.timeline');
+        if (timeline) {
+          timeline.innerHTML = '';
+          const msg = document.createElement('div');
+          msg.style.cssText = 'padding:24px;color:var(--text-2);font-size:13px;grid-column:1 / -1;';
+          msg.textContent = res.status === 403
+            ? (typeof detail === 'string' && detail ? detail : 'Tu plan no incluye reservas.') + ' Escríbenos por soporte si quieres activarlas.'
+            : 'No pudimos cargar las reservas. Intenta de nuevo.';
+          timeline.appendChild(msg);
+        }
+        const newBtn = document.querySelector('.page-head .btn.primary');
+        if (newBtn && res.status === 403) newBtn.disabled = true;
         return;
       }
       const data = await res.json();
       const reservations = data.reservations || data;
+      if (!_tables.length) {
+        try {
+          const tr = await fetch('/api/tables/floor-plan', { headers });
+          if (tr.ok) {
+            const td = await tr.json();
+            _tables = (td.tables || td || []).filter(function (t) { return t.id; });
+          }
+        } catch (e) { /* names fall back to "—" */ }
+      }
       // Cache for action handlers (seatReservation needs reservation.table_id)
       window._lastReservations = Array.isArray(reservations) ? reservations : [];
       renderReservations(window._lastReservations);
@@ -271,6 +302,53 @@
     }
   }
 
+  // One button per table; resolves to the table's real id, or null.
+  function pickTable(title) {
+    return new Promise(function (resolve) {
+      var backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop';
+      backdrop.setAttribute('role', 'dialog');
+      backdrop.setAttribute('aria-modal', 'true');
+      var card = document.createElement('div');
+      card.className = 'modal-card';
+      card.style.maxWidth = '420px';
+      var head = document.createElement('div');
+      head.className = 'modal-header';
+      var h = document.createElement('h3');
+      h.textContent = title;
+      head.appendChild(h);
+      card.appendChild(head);
+      var body = document.createElement('div');
+      body.className = 'modal-body';
+      body.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;';
+      var done = function (val) { backdrop.remove(); resolve(val); };
+      _tables.forEach(function (t) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn';
+        var label = String(t.name || t.table_number || t.number || '');
+        b.textContent = (/^\d+$/.test(label) ? 'Mesa ' + label : label) +
+          (t.capacity ? ' · ' + t.capacity + ' pers.' : '') + (t.zone ? ' · ' + t.zone : '');
+        b.addEventListener('click', function () { done(String(t.id)); });
+        body.appendChild(b);
+      });
+      card.appendChild(body);
+      var foot = document.createElement('div');
+      foot.className = 'modal-footer';
+      foot.style.cssText = 'display:flex;justify-content:flex-end;';
+      var cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn ghost';
+      cancel.textContent = 'Cancelar';
+      cancel.addEventListener('click', function () { done(null); });
+      foot.appendChild(cancel);
+      card.appendChild(foot);
+      backdrop.appendChild(card);
+      backdrop.addEventListener('click', function (e) { if (e.target === backdrop) done(null); });
+      document.body.appendChild(backdrop);
+    });
+  }
+
   async function assignTable(id) {
     // Load tables if not cached
     if (!_tables.length) {
@@ -291,26 +369,8 @@
       return;
     }
 
-    // Build prompt with table list as hint text
-    const options = _tables.map(function (t) {
-      return (t.table_number || t.name || 'Mesa ' + t.id) + ' (cap. ' + (t.capacity || '?') + ')';
-    }).join(' · ');
-    const choice = await mesioPrompt('Mesas disponibles: ' + options, {
-      title: 'Asignar mesa',
-      type: 'number',
-      placeholder: 'ID de mesa',
-      validator: function (v) {
-        if (!v || !v.trim()) return 'Ingresá el ID de la mesa';
-        if (isNaN(parseInt(v, 10))) return 'Debe ser un número';
-        return null;
-      },
-    });
-    if (!choice) return;
-    const tableId = parseInt(choice, 10);
-    if (!tableId) {
-      if (typeof mesioToast === 'function') mesioToast('ID de mesa inválido', 'warning');
-      return;
-    }
+    const tableId = await pickTable('Asignar mesa');
+    if (!tableId) return;
     try {
       const headers = Object.assign({ 'Content-Type': 'application/json' },
         typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token });
@@ -350,21 +410,9 @@
         if (typeof mesioToast === 'function') mesioToast('No hay mesas — primero asigna una', 'warning');
         return;
       }
-      const opts = _tables.map(function (t) {
-        return (t.table_number || t.name || 'Mesa') + ' [' + t.id + '] (cap. ' + (t.capacity || '?') + ')';
-      }).join(' · ');
-      const choice = await mesioPrompt('Mesas disponibles: ' + opts, {
-        title: 'Sentar al cliente — elegir mesa',
-        type: 'number',
-        placeholder: 'ID de mesa',
-        validator: function (v) {
-          if (!v || !v.trim()) return 'Ingresá el ID de la mesa';
-          if (isNaN(parseInt(v, 10))) return 'Debe ser un número';
-          return null;
-        },
-      });
+      const choice = await pickTable('Sentar al cliente — elige la mesa');
       if (!choice) return;
-      tableId = String(choice).trim();
+      tableId = choice;
     }
 
     try {
@@ -396,9 +444,12 @@
   // ── New reservation modal ───────────────────────────────────────────
 
   function _buildModalHtml() {
-    var tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    var minDate = isoDate(tomorrow);
+    // Same-day bookings are the common case: the minimum is today (it was
+    // tomorrow), and the form starts on the day the agenda is showing.
+    var today = isoDate(new Date());
+    var minDate = today;
+    var shown = isoDate(currentDate);
+    var defaultDate = shown >= today ? shown : today;
     return '<div id="newResModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="newResTitle">' +
       '<div class="modal-card" style="max-width:420px;">' +
         '<div class="modal-header"><h3 id="newResTitle">Nueva reserva</h3>' +
@@ -407,7 +458,7 @@
           '<label>Nombre del cliente *<input id="nrName" class="inp" type="text" autocomplete="off"></label>' +
           '<label>Teléfono<input id="nrPhone" class="inp" type="tel" autocomplete="off"></label>' +
           '<label>Personas (1-20) *<input id="nrPax" class="inp" type="number" min="1" max="20" value="2"></label>' +
-          '<label>Fecha *<input id="nrDate" class="inp" type="date" min="' + minDate + '"></label>' +
+          '<label>Fecha *<input id="nrDate" class="inp" type="date" min="' + minDate + '" value="' + defaultDate + '"></label>' +
           '<label>Hora *<input id="nrTime" class="inp" type="time" value="19:00"></label>' +
           '<label>Notas<textarea id="nrNotes" class="inp" rows="2"></textarea></label>' +
         '</div>' +

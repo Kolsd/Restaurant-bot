@@ -239,7 +239,7 @@ async def set_location_delivery_config(
     with tenant_scope(org_id):
         updated = await delivery_repo.db_set_location_delivery_config(org_id, location_id, config)
         if updated and phone != (location.get("phone") or ""):
-            await restaurant_repo.db_update_location(location_id, phone=phone)
+            await restaurant_repo.db_update_location(location_id, org_id=org_id, phone=phone)
 
     if not updated:
         raise HTTPException(status_code=404, detail="Sede no encontrada")

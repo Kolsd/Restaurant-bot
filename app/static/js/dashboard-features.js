@@ -219,6 +219,15 @@ const DISH_LABELS = {
   },
 };
 
+// A price as it is shown inside the input: grouped for the restaurant's own
+// locale ("25.000" in es-CO), without the currency symbol.
+function _fmtPriceInput(n) {
+  let locale = 'es-CO';
+  try { locale = JSON.parse(localStorage.getItem('rb_restaurant') || '{}').locale || locale; } catch (e) { /* corrupt key */ }
+  try { return Number(n).toLocaleString(locale, { maximumFractionDigits: 2 }); }
+  catch (e) { return String(n); }
+}
+
 function _dishLabel(group, slug) {
   return (DISH_LABELS[group] && DISH_LABELS[group][slug]) || slug;
 }
@@ -298,8 +307,29 @@ function _normalizeDish(d) {
 let _dishModalState = null; // { catIndex, dishIndex, dish }
 let _dishModalUploading = false;
 
+// What the editor looked like when it opened (or was last saved), as JSON.
+// null = a draft nobody has saved yet (an imported carta), which is always
+// "unsaved" no matter what the owner has or hasn't touched since.
+let _editorSavedSnapshot = null;
+
+function _editorSnapshot() {
+  return JSON.stringify(_buildFinalMenu());
+}
+
+function _editorHasUnsavedChanges() {
+  const el = document.getElementById('full-menu-editor');
+  if (!el || el.style.display === 'none') return false;
+  return _editorSavedSnapshot === null || _editorSnapshot() !== _editorSavedSnapshot;
+}
+
+// Closing the tab or reloading with an unsaved carta would lose it silently.
+window.addEventListener('beforeunload', (e) => {
+  if (_editorHasUnsavedChanges()) { e.preventDefault(); e.returnValue = ''; }
+});
+
 // ── Open menu editor ─────────────────────────────────────────────────
-function openMenuEditor() {
+// opts.draft: the dishes came from a photo import and exist nowhere else.
+function openMenuEditor(opts) {
   editorMenuState = [];
   const catMap = {};
 
@@ -333,6 +363,7 @@ function openMenuEditor() {
   _ensureDishModalDOM();
 
   renderMenuEditor();
+  _editorSavedSnapshot = (opts && opts.draft) ? null : _editorSnapshot();
 
   document.body.style.overflow = 'hidden';
   document.getElementById('full-menu-editor').style.display = 'block';
@@ -341,6 +372,18 @@ function openMenuEditor() {
 function closeMenuEditor() {
   document.getElementById('full-menu-editor').style.display = 'none';
   document.body.style.overflow = '';
+}
+
+// The "Cerrar" button: ask before throwing away work that was never saved.
+async function requestCloseMenuEditor() {
+  if (_editorHasUnsavedChanges()) {
+    const leave = await mesioConfirm(
+      'Tienes cambios sin guardar en la carta. Si sales ahora se pierden.',
+      { confirmText: 'Salir sin guardar', cancelText: 'Seguir editando', danger: true }
+    );
+    if (!leave) return;
+  }
+  closeMenuEditor();
 }
 
 function toggleEditorCat(index) {
@@ -647,6 +690,7 @@ async function _autoSaveMenuReorder() {
       body: JSON.stringify({ menu: finalMenu })
     });
     if (r.ok) {
+      _editorSavedSnapshot = _editorSnapshot();
       mesioToast('Orden guardado', 'success', 1500);
     }
   } catch (e) {
@@ -656,9 +700,12 @@ async function _autoSaveMenuReorder() {
 
 // ── Category actions ─────────────────────────────────────────────────
 async function addMenuEditorCategory() {
-  const input = document.createElement('input');
-  // Use mesioConfirm-style prompt via a simple inline approach
-  const name = prompt('Nombre de la nueva categoría:');
+  const name = await mesioPrompt('¿Cómo se llama la categoría?', {
+    title: 'Nueva categoría',
+    placeholder: 'Ej: Entradas, Platos fuertes, Bebidas',
+    confirmLabel: 'Crear',
+    validator: (v) => (v.trim() ? null : 'Escribe un nombre para la categoría'),
+  });
   if (!name || !name.trim()) return;
   editorMenuState.forEach(c => c.isOpen = false);
   editorMenuState.push({ catName: name.trim(), isOpen: true, dishes: [] });
@@ -682,7 +729,7 @@ function addMenuEditorDish(catIndex) {
   const newDish = _normalizeDish({ name: '', price: '', description: '' });
   editorMenuState[catIndex].dishes.push(newDish);
   // Open modal for new dish immediately
-  openDishModal(catIndex, editorMenuState[catIndex].dishes.length - 1);
+  openDishModal(catIndex, editorMenuState[catIndex].dishes.length - 1, { isNew: true });
 }
 
 async function removeMenuEditorDish(catIndex, dishIndex) {
@@ -743,22 +790,27 @@ function _ensureDishModalDOM() {
 
   // Close on overlay background click
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) closeDishModal();
+    if (e.target === overlay) requestCloseDishModal();
   });
-  document.getElementById('dish-modal-close').addEventListener('click', closeDishModal);
-  document.getElementById('dish-modal-cancel').addEventListener('click', closeDishModal);
+  document.getElementById('dish-modal-close').addEventListener('click', requestCloseDishModal);
+  document.getElementById('dish-modal-cancel').addEventListener('click', requestCloseDishModal);
   document.getElementById('dish-modal-save').addEventListener('click', saveDishModal);
 
   // Trap focus inside modal (accessibility)
   overlay.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeDishModal();
+    if (e.key === 'Escape') requestCloseDishModal();
   });
 }
 
-function openDishModal(catIndex, dishIndex) {
+function openDishModal(catIndex, dishIndex, opts) {
   _ensureDishModalDOM();
   const dish = editorMenuState[catIndex].dishes[dishIndex];
-  _dishModalState = { catIndex, dishIndex, dish: JSON.parse(JSON.stringify(dish)) }; // deep clone
+  _dishModalState = {
+    catIndex, dishIndex,
+    dish: JSON.parse(JSON.stringify(dish)),   // deep clone
+    isNew: !!(opts && opts.isNew),            // a placeholder pushed by "Añadir plato"
+    original: JSON.stringify(dish),           // to tell whether anything was typed
+  };
 
   document.getElementById('dish-modal-title').textContent =
     dish.name ? `Editar: ${dish.name}` : 'Nuevo plato';
@@ -778,6 +830,29 @@ function closeDishModal() {
   const overlay = document.getElementById('dish-modal-overlay');
   if (overlay) overlay.classList.remove('open');
   _dishModalState = null;
+}
+
+// Cancel / X / Escape / click outside: leave WITHOUT saving the dish. Asks
+// first when something was typed, and a dish that was only just added is
+// taken back out of the list — before this, cancelling "Añadir plato" left a
+// blank card behind.
+async function requestCloseDishModal() {
+  const st = _dishModalState;
+  if (!st) return;
+  if (_dishModalUploading) return;
+  if (JSON.stringify(st.dish) !== st.original) {
+    const discard = await mesioConfirm(
+      'Hiciste cambios en este plato. Si cierras ahora se pierden.',
+      { confirmText: 'Descartar cambios', cancelText: 'Seguir editando', danger: true }
+    );
+    if (!discard) return;
+  }
+  if (_dishModalState !== st) return;   // saved or closed while the question was open
+  if (st.isNew) {
+    editorMenuState[st.catIndex].dishes.splice(st.dishIndex, 1);
+    renderMenuEditor();
+  }
+  closeDishModal();
 }
 
 function _renderDishModalBody(dish) {
@@ -845,10 +920,23 @@ function _renderDishModalBody(dish) {
     document.getElementById('dish-modal-title').textContent = dish.name ? `Editar: ${dish.name}` : 'Nuevo plato';
   });
 
-  const priceField = _makeField('Precio *', 'number', dish.price !== null && dish.price !== '' ? dish.price : '', 'Ej: 25000');
-  priceField.querySelector('input').id = 'dish-input-price';
-  priceField.querySelector('input').min = '0';
-  priceField.querySelector('input').addEventListener('input', (e) => { dish.price = parseFloat(e.target.value) || 0; });
+  // A text box, not type="number": a number input only understands the
+  // browser's own decimal convention, so "25.000" could be read as 25 and
+  // the spinner arrows have no place on a price. mesioParsePrice reads the
+  // way restaurants actually write it, and the box tidies itself on blur.
+  const priceField = _makeField('Precio *', 'text', dish.price ? _fmtPriceInput(dish.price) : '', 'Ej: 25.000');
+  const priceInp = priceField.querySelector('input');
+  priceInp.id = 'dish-input-price';
+  priceInp.inputMode = 'decimal';
+  priceInp.autocomplete = 'off';
+  priceInp.addEventListener('input', (e) => {
+    const n = mesioParsePrice(e.target.value);
+    dish.price = isNaN(n) ? 0 : n;
+  });
+  priceInp.addEventListener('blur', () => {
+    const n = mesioParsePrice(priceInp.value);
+    if (!isNaN(n)) priceInp.value = _fmtPriceInput(n);
+  });
 
   const nameRow = document.createElement('div');
   nameRow.className = 'dish-field-row';
@@ -1019,13 +1107,16 @@ async function _handleImageFile(file, zone, dish) {
 
   try {
     // 1. Get signed upload params from backend
+    // The endpoint wants a JSON body even when it is empty: without one it
+    // answers 422 and the toast used to read "[object Object]".
     const signRes = await fetch('/api/menu/image/sign', {
       method: 'POST',
-      headers: { ...mesioHeaders() }
+      headers: { ...mesioHeaders() },
+      body: '{}'
     });
     if (!signRes.ok) {
       const err = await signRes.json().catch(() => ({}));
-      throw new Error(err.detail || 'No se pudo firmar el upload');
+      throw new Error(_apiDetail(err.detail, 'No se pudo firmar el upload'));
     }
     const { signature, timestamp, api_key, cloud_name, folder, public_id_prefix } = await signRes.json();
 
@@ -1220,9 +1311,9 @@ function saveDishModal() {
   }
 
   const priceRaw = priceInput ? priceInput.value : String(dish.price);
-  const numPrice = parseFloat(priceRaw);
+  const numPrice = mesioParsePrice(priceRaw);
   if (isNaN(numPrice) || numPrice < 0) {
-    mesioToast('El precio es inválido', 'error');
+    mesioToast('Escribe el precio del plato (por ejemplo 25.000)', 'error');
     if (priceInput) priceInput.focus();
     return;
   }
@@ -1294,6 +1385,7 @@ async function saveMenuEditor() {
     });
 
     if (r.ok) {
+      _editorSavedSnapshot = _editorSnapshot();
       mesioToast('Carta guardada', 'success');
       closeMenuEditor();
       loadMenu();
@@ -1301,7 +1393,7 @@ async function saveMenuEditor() {
       document.dispatchEvent(new CustomEvent('mesio:menu-saved'));
     } else {
       const e = await r.json().catch(() => ({}));
-      mesioToast('Error al guardar: ' + (e.detail || 'Fallo desconocido'), 'error');
+      mesioToast('Error al guardar: ' + _apiDetail(e.detail), 'error');
     }
   } catch (e) {
     mesioToast('Error de conexión al guardar', 'error');

@@ -205,8 +205,9 @@ def build_salon_prompt(restrictions: str = "", table_context: dict | None = None
         else:
             greeting_block = (
                 f"\nIMPORTANTE (primer mensaje del comensal en esta mesa):\n"
-                f"El comensal acaba de sentarse en {table_name}. Empieza tu respuesta con un saludo cálido y breve "
-                f"que confirme la mesa por su nombre (ej: \"¡Hola! Bienvenido a {table_name} 🍽️\"). "
+                f"El comensal acaba de sentarse en la mesa {table_name}. Empieza tu respuesta con un saludo cálido y breve "
+                f"(ej: \"¡Hola! Bienvenido 🍽️\"). El nombre de la mesa NO es el nombre del comensal: nunca lo "
+                f"saludes como \"Bienvenido, {table_name}\". "
                 f"Si conoces su nombre del perfil, úsalo. No agregues el saludo en mensajes siguientes de esta misma sesión."
             )
         blocks.append({"type": "text", "text": greeting_block})

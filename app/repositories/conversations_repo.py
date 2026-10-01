@@ -216,7 +216,8 @@ async def db_save_nps_response(
         #    used for per-mesero NPS aggregation (via table_sessions.assigned_staff_id).
         #    NULLs are fine for delivery/pickup NPS (no session).
         row = await conn.fetchrow("""
-            SELECT ts.id AS session_id, rt.branch_id AS branch_id
+            SELECT ts.id AS session_id, rt.branch_id AS branch_id,
+                   rt.location_id AS table_location_id
             FROM table_sessions ts
             JOIN restaurant_tables rt ON ts.table_id = rt.id
             WHERE ts.phone = $1 AND ts.started_at > NOW() - INTERVAL '24 hours'
@@ -224,6 +225,10 @@ async def db_save_nps_response(
         """, phone)
         session_id = row["session_id"] if row else None
         branch_id  = row["branch_id"]  if row else None
+        # The sede the per-sede NPS reads. A table answer used to leave it
+        # NULL, so "NPS por sede" was always empty for dine-in.
+        if location_id is None and row is not None:
+            location_id = row["table_location_id"]
         if location_id is not None:
             # The caller knows exactly which sede served this order — that
             # beats inferring it from a table session (there is none).
@@ -250,7 +255,8 @@ async def db_save_nps_pending(phone: str, org_id: int, score: int) -> int:
         # Capture the session + branch at score time (not at comment time) — the
         # session is the customer's last sitting, which is what the NPS refers to.
         attrib = await conn.fetchrow("""
-            SELECT ts.id AS session_id, rt.branch_id AS branch_id
+            SELECT ts.id AS session_id, rt.branch_id AS branch_id,
+                   rt.location_id AS table_location_id
             FROM table_sessions ts
             JOIN restaurant_tables rt ON ts.table_id = rt.id
             WHERE ts.phone = $1 AND ts.started_at > NOW() - INTERVAL '24 hours'
@@ -258,13 +264,14 @@ async def db_save_nps_pending(phone: str, org_id: int, score: int) -> int:
         """, phone)
         session_id = attrib["session_id"] if attrib else None
         branch_id  = attrib["branch_id"]  if attrib else None
+        location_id = attrib["table_location_id"] if attrib else None
 
         row = await conn.fetchrow(
             """INSERT INTO nps_responses
-                   (phone, org_id, score, comment, branch_id, table_session_id)
-               VALUES ($1, $2, $3, '__pending__', $4, $5)
+                   (phone, org_id, score, comment, branch_id, table_session_id, location_id)
+               VALUES ($1, $2, $3, '__pending__', $4, $5, $6)
                RETURNING id""",
-            phone, org_id, score, branch_id, session_id
+            phone, org_id, score, branch_id, session_id, location_id
         )
         return row["id"] if row else 0
 
@@ -363,86 +370,3 @@ async def db_update_restaurant_features(restaurant_id: int, features: dict) -> N
             "UPDATE organizations SET features = $1::jsonb WHERE id = $2",
             _json.dumps(features), restaurant_id,
         )
-
-
-# ── WAM DEDUPLICATION ─────────────────────────────────────────────────
-
-
-# ── Customer order history (Fase 5a — personalized recommendations) ───────────
-
-async def db_get_customer_order_history(
-    phone: str,
-    restaurant_id: int,
-    limit: int = 10,
-) -> list[dict[str, Any]]:
-    """Return the top dishes ordered by this customer at this restaurant (last 90 days).
-
-    Aggregates items from the ``orders`` table (delivery/pickup) of this org.
-
-    Returns a list sorted by frequency descending, e.g.:
-        [{"name": "Bandeja Paisa", "count": 3, "last_ordered": "2026-04-10T14:00:00"}]
-
-    Rules:
-    - Only considers orders in the last 90 days.
-    - Returns ``[]`` if the customer has fewer than 2 distinct orders in that window
-      (not enough signal to make a "lo de siempre" recommendation).
-    - Returns at most 3 items (the top 3 by count, tie-broken by most recent).
-    - Never raises — caller must handle exceptions.
-    """
-    async with _tenant_connection() as conn:
-        # Step 1: count distinct orders (JSONB arrays) for this customer in the window
-        _raw_count = await conn.fetchval(
-            """
-            SELECT COUNT(*)
-              FROM orders o
-             WHERE o.phone        = $1
-               AND o.org_id       = $2
-               AND o.created_at  >= NOW() - INTERVAL '90 days'
-            """,
-            phone,
-            restaurant_id,
-        )
-        # asyncpg returns a numeric type; guard against unexpected mock values in tests
-        try:
-            order_count: int = int(_raw_count) if _raw_count is not None else 0
-        except (TypeError, ValueError):
-            order_count = 0
-        if order_count < 2:
-            return []
-
-        # Step 2: explode JSONB item arrays and aggregate by dish name
-        rows = await conn.fetch(
-            """
-            WITH raw_items AS (
-                SELECT
-                    item->>'name'  AS dish_name,
-                    o.created_at   AS ordered_at
-                FROM orders o,
-                LATERAL jsonb_array_elements(o.items) AS item
-               WHERE o.phone        = $1
-                 AND o.org_id       = $2
-                 AND o.created_at  >= NOW() - INTERVAL '90 days'
-                 AND item->>'name' IS NOT NULL
-            )
-            SELECT
-                dish_name                                  AS name,
-                COUNT(*)                                   AS count,
-                MAX(ordered_at)                            AS last_ordered
-              FROM raw_items
-             GROUP BY dish_name
-             ORDER BY count DESC, last_ordered DESC
-             LIMIT $3
-            """,
-            phone,
-            restaurant_id,
-            min(limit, 3),
-        )
-
-    return [
-        {
-            "name":         row["name"],
-            "count":        int(row["count"]),
-            "last_ordered": row["last_ordered"].isoformat() if row["last_ordered"] else None,
-        }
-        for row in rows
-    ]

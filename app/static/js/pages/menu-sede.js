@@ -49,7 +49,7 @@
     try {
       _state = await api('GET', '/api/menu/sede');
     } catch (e) {
-      if (e.status === 400) message('Elegí una sede en el selector de la barra lateral para ver y cambiar su carta.');
+      if (e.status === 400) message('Elige una sede en el selector de la barra lateral para ver y cambiar su carta.');
       else if (e.status === 403) message('Solo el dueño, un admin o el gerente de la sede pueden cambiar la carta.');
       else message('No se pudo cargar la carta de la sede: ' + e.message);
       return;

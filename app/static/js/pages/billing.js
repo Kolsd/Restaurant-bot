@@ -34,43 +34,7 @@
   }
 
   async function init() {
-    await Promise.all([loadProviders(), loadCurrentConfig(), loadPlanUsage()]);
-  }
-
-  async function loadPlanUsage() {
-    try {
-      const r = await fetch('/api/subscription/usage', { headers: hdr });
-      if (!r.ok) return;
-      const d = await r.json();
-      const card = document.getElementById('plan-usage-card');
-      if (!card) return;
-      const planLabel = document.getElementById('plan-usage-name');
-      if (planLabel) planLabel.textContent = d.plan ? '· Plan ' + d.plan : '';
-      const limits = d.limits || {};
-      const today  = (d.usage && d.usage.today)  || {};
-      const month  = (d.usage && d.usage.month)  || {};
-      _renderUsageRow(card, 'tokens',   today.tokens_used   || 0, limits.daily_tokens);
-      _renderUsageRow(card, 'invoices', today.invoices_used || 0, limits.daily_invoices);
-      _renderUsageRow(card, 'orders',   month.orders_count  || 0, limits.monthly_orders);
-    } catch (e) { console.error('plan usage load failed', e); mesioToast('No se pudo cargar la información de plan', 'error'); }
-  }
-
-  function _renderUsageRow(card, rowKey, used, limit) {
-    const row = card.querySelector('[data-row="' + rowKey + '"]');
-    if (!row) return;
-    const valEl = row.querySelector('[data-val]');
-    const barEl = row.querySelector('[data-bar]');
-    if (limit === -1 || limit === undefined || limit === null) {
-      valEl.textContent = used.toLocaleString() + ' · Ilimitado';
-      barEl.style.width = '0%';
-      return;
-    }
-    valEl.textContent = used.toLocaleString() + ' / ' + Number(limit).toLocaleString();
-    const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
-    barEl.style.width = pct.toFixed(1) + '%';
-    if (pct >= 90)      barEl.style.background = 'var(--m-danger, #d33)';
-    else if (pct >= 70) barEl.style.background = 'var(--m-warning, #e67e22)';
-    else                barEl.style.background = 'var(--m-brand, #1D9E75)';
+    await Promise.all([loadProviders(), loadCurrentConfig()]);
   }
 
   async function loadProviders() {
@@ -86,6 +50,23 @@
       const r = await fetch('/api/billing/config', { headers: hdr });
       if (!r.ok) return;
       const d = await r.json();
+      if (d.dian_in_plan === false) {
+        // Electronic invoicing is a Pro feature: say so instead of a setup
+        // wizard whose every save would be refused.
+        document.querySelectorAll('.billing-tabs, .tab-section').forEach(function (el) { el.style.display = 'none'; });
+        const title = [...document.querySelectorAll('.page-head .page-title')]
+          .find(function (h) { return h.textContent.trim() === 'Facturación Contable'; });
+        const head = title && title.closest('.page-head');
+        if (head && !document.getElementById('dian-locked-note')) {
+          const note = document.createElement('div');
+          note.id = 'dian-locked-note';
+          note.className = 'card';
+          note.style.cssText = 'padding:16px 18px;margin-top:12px;font-size:13px;color:var(--text-2);';
+          note.textContent = 'La factura electrónica DIAN está en el plan Pro. Escríbenos por soporte si quieres activarla.';
+          head.insertAdjacentElement('afterend', note);
+        }
+        return;
+      }
       if (d.configured && d.config) {
         existingConfig = d.config;
         const prov = d.config.provider;

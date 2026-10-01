@@ -9,6 +9,57 @@ function _escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── API error text ───────────────────────────────
+/**
+ * FastAPI's `detail` is a string for an HTTPException but a LIST of objects for
+ * a validation error (422). `new Error(detail)` on the list renders as
+ * "[object Object]" in a toast, which is what an owner saw on a failed photo
+ * upload. Always turn it into text before showing it.
+ */
+function _apiDetail(detail, fallback) {
+  if (typeof detail === 'string' && detail) return detail;
+  if (Array.isArray(detail) && detail.length) {
+    var first = detail[0];
+    var msg = first && (first.msg || first.message);
+    if (msg) return String(msg);
+  }
+  return fallback || 'Fallo desconocido';
+}
+
+// ── Price typed by a person ──────────────────────
+/**
+ * Read a price however the restaurant writes it: "25000", "25.000", "25,000",
+ * "$ 25.000", "1.250.000", "25,50", "25.5", "25.000,50". A separator followed
+ * by exactly three digits is a thousands separator ("25.000" is twenty-five
+ * thousand, never twenty-five); one followed by 1-2 digits is the decimal
+ * point. Returns NaN when there is no number to read.
+ */
+function mesioParsePrice(raw) {
+  var t = String(raw == null ? '' : raw).replace(/[^\d.,]/g, '');
+  if (!/\d/.test(t)) return NaN;
+  var lastDot = t.lastIndexOf('.');
+  var lastComma = t.lastIndexOf(',');
+  var dec = '';
+  if (lastDot >= 0 && lastComma >= 0) {
+    dec = lastDot > lastComma ? '.' : ',';        // the later one is the decimal point
+  } else {
+    var sep = lastDot >= 0 ? '.' : (lastComma >= 0 ? ',' : '');
+    if (sep) {
+      var occurrences = t.split(sep).length - 1;
+      var tail = t.length - t.lastIndexOf(sep) - 1;
+      if (occurrences === 1 && tail !== 3) dec = sep;
+    }
+  }
+  var intPart = t, decPart = '';
+  if (dec) {
+    var at = t.lastIndexOf(dec);
+    intPart = t.slice(0, at);
+    decPart = t.slice(at + 1);
+  }
+  var n = parseFloat(intPart.replace(/[.,]/g, '') + (decPart ? '.' + decPart.replace(/[.,]/g, '') : ''));
+  return isNaN(n) ? NaN : n;
+}
+
 // ── Org/Location storage keys (Wave 1 S5) ────────
 var MESIO_ORG_KEY              = 'rb_org';
 var MESIO_LOCATIONS_KEY        = 'rb_locations';
@@ -295,7 +346,7 @@ function mesioPrompt(message, opts = {}) {
     input.placeholder = placeholder;
     input.value = defaultValue;
     input.setAttribute('aria-label', message);
-    input.style.cssText = 'width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid var(--border,#334155);background:var(--surface-3,#1e293b);color:var(--text-1,#f1f5f9);font-size:14px;font-family:inherit;margin-bottom:4px;';
+    input.style.cssText = 'width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid var(--border,#334155);background:var(--surface-3,var(--surface,#1e293b));color:var(--text-1,var(--text,#f1f5f9));font-size:14px;font-family:inherit;margin-bottom:4px;';
     box.appendChild(input);
 
     const errorEl = document.createElement('p');

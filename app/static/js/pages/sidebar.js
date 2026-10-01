@@ -99,6 +99,10 @@
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1"/><path d="M2 7h12M5 10h2M9 10h2"/></svg>
         Caja
       </a>
+      <a class="sb-item" data-key="ops-domicilios" href="/staff?section=delivery" style="display:none;">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h7v6H2z"/><path d="M9 7h3l2 2.5V10h-5z"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="12.5" r="1.5"/></svg>
+        Domicilios
+      </a>
       <a class="sb-item" data-key="ops-mesero" href="/staff?section=waiter" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>
         Mesero
@@ -113,7 +117,7 @@
       </a>
       <a class="sb-item" data-key="ops-domiciliario" href="/staff?section=courier" style="display:none;">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><path d="M1 3h2l2 7h6l2-5H5"/></svg>
-        Repartos
+        Mis entregas
       </a>
     </div>
 
@@ -280,12 +284,28 @@
       // owner / admin / gerente run the floor too (a small restaurant has no
       // one else): without these links the kitchen screen was only reachable
       // by typing /staff.
+      // Which screens: the same answer the Staff App gets (role + plan +
+      // the sede's "Configurar operación"), so a sede without a bar has no
+      // Bar link here either.
       const opsGroup = sb.querySelector('#sb-ops-group');
       if (opsGroup) {
-        opsGroup.style.display = '';
         const label = opsGroup.querySelector('.sb-group-label');
         if (label) label.textContent = 'Operación';
-        opsGroup.querySelectorAll('.sb-item').forEach(function (el) { el.style.display = ''; });
+        const sectionToKey = {
+          cashier: 'ops-caja', delivery: 'ops-domicilios', waiter: 'ops-mesero',
+          kitchen: 'ops-cocina', bar: 'ops-bar', courier: 'ops-domiciliario',
+        };
+        fetch('/api/staff/sections', { headers: (typeof mesioHeaders === 'function') ? mesioHeaders() : {} })
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (data) {
+            const sections = (data && Array.isArray(data.sections)) ? data.sections : [];
+            sections.forEach(function (sec) {
+              const el = sectionToKey[sec] && sb.querySelector('[data-key="' + sectionToKey[sec] + '"]');
+              if (el) el.style.display = '';
+            });
+            if (sections.length) opsGroup.style.display = '';
+          })
+          .catch(function () { /* the dashboard works without the shortcuts */ });
       }
     }
 
@@ -320,6 +340,23 @@
 
     let popover = null;
     let isOpen = false;
+
+    // Say which sede the dashboard is showing — the switcher only ever
+    // showed the organization's name, so after picking "Norte" nothing on
+    // screen said the numbers were Norte's.
+    (async function labelCurrentSede() {
+      const subEl = sb.querySelector('#sb-org-sub');
+      if (!subEl) return;
+      const current = localStorage.getItem('rb_branch_id');
+      if (!current || current === 'matriz') {
+        const all = await fetchBranches();
+        if (all.length > 1) subEl.textContent = 'Todas las sedes';
+        return;
+      }
+      const branches = await fetchBranches();
+      const hit = branches.find(function (b) { return String(b.id) === String(current); });
+      if (hit) subEl.textContent = 'Sede ' + (hit.location_name || hit.name || hit.id);
+    })();
 
     function close() {
       if (popover) { popover.remove(); popover = null; }
@@ -395,7 +432,7 @@
       // location_name in the dropdown so the user can distinguish locations — falling
       // back to name if the VIEW doesn't carry location_name (older VIEW snapshots).
       const items = [
-        { value: 'matriz', name: 'Casa Matriz', sub: 'Todas las sucursales' }
+        { value: 'matriz', name: 'Todas las sedes', sub: 'Vista de toda la organización' }
       ].concat(
         branches.map(b => {
           const locationName = b.location_name || b.name || ('Sede ' + b.id);

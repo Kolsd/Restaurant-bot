@@ -250,8 +250,9 @@ def test_session_seeds_correct_greeting_and_category_chips(client, seed_org):
     assert data["restaurant_name"].startswith("Diner Test Org")
     assert data["currency"] == "COP"
     assert seed_org["table_id"] == data["table_id"]
-    assert data["table_name"] in data["message"]
-    assert data["restaurant_name"] in data["message"]
+    # The table is in the header, never in the greeting: "Bienvenido a X, 12"
+    # read as if 12 were the diner's name.
+    assert data["message"] == f"¡Hola! Bienvenido a {data['restaurant_name']}. Esto es lo que tenemos hoy:"
 
     assert len(data["blocks"]) == 1
     chip_block = data["blocks"][0]
@@ -621,3 +622,92 @@ def test_a_trial_that_ended_unpaid_pauses_the_qr_and_the_chat(client, seed_org, 
     _run(_set_dates_async(seed_org_2["org_id"], comp_until=now - timedelta(hours=1),
                           paid_until=now + timedelta(days=30)))
     assert _open_session(client, seed_org_2["table_id"])["token"]
+
+
+# ── Coming back to your own table (resume_token) ─────────────────────────────
+
+async def _close_table_session_async(org_id: int, token: str) -> None:
+    conn = await asyncpg.connect(TEST_DB_URL)
+    try:
+        await _scope(conn, org_id)
+        await conn.execute(
+            "UPDATE table_sessions SET status='closed', closed_at=NOW() "
+            "WHERE org_id=$1 AND phone=$2",
+            org_id, token,
+        )
+    finally:
+        await conn.close()
+
+
+async def _add_table_async(org_id: int, location_id: int) -> str:
+    table_id = f"t2-{uuid.uuid4().hex[:10]}"
+    conn = await asyncpg.connect(TEST_DB_URL)
+    try:
+        await _scope(conn, org_id)
+        await conn.execute(
+            "INSERT INTO restaurant_tables (id, number, name, branch_id, location_id, org_id, active) "
+            "VALUES ($1, 6, 'Mesa otra', $2, $3, $4, TRUE)",
+            table_id, location_id, location_id, org_id,
+        )
+    finally:
+        await conn.close()
+    return table_id
+
+
+def test_a_stranger_scanning_an_occupied_table_still_needs_the_code(client, seed_org):
+    """The join code is not weakened: no resume token, no seat."""
+    _open_session(client, seed_org["table_id"])
+    second = _open_session(client, seed_org["table_id"])
+    assert second["requires_join_code"] is True
+
+
+def test_the_host_who_closed_the_browser_gets_their_table_back(client, seed_org):
+    """They scan again from a fresh tab. Their phone remembers the token it
+    held; the server sees it still has the active session and gives the same
+    seat back — same token (so the same cart), the code to invite others, no
+    code prompt."""
+    first = _open_session(client, seed_org["table_id"])
+
+    again = _post(client, "/api/diner/session", json={
+        "table_id": seed_org["table_id"], "resume_token": first["token"],
+    })
+    assert again.status_code == 200, again.text
+    data = again.json()
+    assert data["resumed"] is True
+    assert data["requires_join_code"] is False
+    assert data["token"] == first["token"]
+    assert data["join_code"] == first["join_code"]
+    assert data["table_id"] == seed_org["table_id"]
+
+
+def test_a_token_from_another_table_does_not_resume(client, seed_org):
+    """The token proves a seat at ITS table only."""
+    other_table = _run(_add_table_async(seed_org["org_id"], seed_org["location_id"]))
+    first = _open_session(client, other_table)
+
+    data = _post(client, "/api/diner/session", json={
+        "table_id": seed_org["table_id"], "resume_token": first["token"],
+    }).json()
+    assert data.get("resumed") is not True
+    assert data["token"] != first["token"]
+
+
+def test_a_token_from_a_finished_dinner_does_not_resume(client, seed_org):
+    """Yesterday's token is not a seat at tonight's table."""
+    first = _open_session(client, seed_org["table_id"])
+    _run(_close_table_session_async(seed_org["org_id"], first["token"]))
+
+    data = _post(client, "/api/diner/session", json={
+        "table_id": seed_org["table_id"], "resume_token": first["token"],
+    }).json()
+    assert data.get("resumed") is not True
+    assert data["token"] != first["token"]
+    assert data["requires_join_code"] is False  # the table is free again
+
+
+def test_an_invented_resume_token_is_just_a_normal_scan(client, seed_org):
+    data = _post(client, "/api/diner/session", json={
+        "table_id": seed_org["table_id"], "resume_token": "web:" + str(uuid.uuid4()),
+    }).json()
+    assert data.get("resumed") is not True
+    assert data["token"].startswith("web:")

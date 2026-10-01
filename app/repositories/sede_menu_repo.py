@@ -151,7 +151,7 @@ async def db_save_own_dish(
     changes a base dish through an override, not by shadowing it."""
     category = (category or "").strip()
     if not category:
-        raise SedeMenuError("Elegí una categoría")
+        raise SedeMenuError("Elige una categoría")
     if not isinstance(dish, dict) or not (dish.get("name") or "").strip():
         raise SedeMenuError("Falta el nombre del plato")
     if not validate_dish_image_ownership(dish, org_id):

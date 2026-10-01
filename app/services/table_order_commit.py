@@ -33,6 +33,7 @@ import uuid
 from decimal import Decimal
 
 from app.services import database as db
+from app.services import ops_config
 from app.services.logging import get_logger
 from app.services.money import money_mul, money_sum, to_decimal
 from app.services.tenant_db import tenant_connection
@@ -47,9 +48,11 @@ def resolve_station_split(cart_items: list, features: dict | None) -> dict:
     long-standing agent_salon.py routing rule verbatim.
 
     Returns {"kitchen_items", "bar_items", "has_split", "kitchen_station"}.
-    `kitchen_station` is "kitchen" when there IS a bar split (so the KDS
-    filters correctly), else "all" (single-station restaurant — every
-    screen shows it).
+    `kitchen_station` is the station of the FIRST ticket of the round: with a
+    bar configured it is "kitchen", or "bar" when the round is drinks only
+    (it used to be "all", so a round of beers also showed in the kitchen);
+    without a bar it is "all" (single-station restaurant — every screen
+    shows it).
     """
     features = features or {}
     bar_enabled = bool(features.get("bar_enabled", False))
@@ -63,11 +66,17 @@ def resolve_station_split(cart_items: list, features: dict | None) -> dict:
         bar_items = []
 
     has_split = bool(kitchen_items) and bool(bar_items)
+    if not (bar_enabled and bar_categories):
+        first_station = "all"
+    elif kitchen_items:
+        first_station = "kitchen"
+    else:
+        first_station = "bar"
     return {
         "kitchen_items": kitchen_items,
         "bar_items": bar_items,
         "has_split": has_split,
-        "kitchen_station": "kitchen" if has_split else "all",
+        "kitchen_station": first_station,
     }
 
 
@@ -173,7 +182,18 @@ async def save_table_order_round(
     are cancelled so neither reaches a screen half-committed):
       {"success": False, "error": "bar_order_failed"}
     """
-    split = resolve_station_split(cart_items, features)
+    # The sede's own answer (bar yes/no + its categories, migration 0105)
+    # decides the split; the org-level features are only the legacy fallback.
+    # A failed read must never stop the order reaching the kitchen: fall back
+    # to the unconfigured shape (every screen, legacy split).
+    sede_org = table_context.get("org_id") or (restaurant_obj or {}).get("org_id")
+    sede_loc = table_context.get("branch_id") or table_context.get("location_id")
+    try:
+        sede_cfg = await ops_config.get_for_sede(int(sede_org), sede_loc) if sede_org else ops_config.normalize({})
+    except Exception:
+        log.exception("table_order_commit.ops_config_failed", org_id=sede_org, location_id=sede_loc)
+        sede_cfg = ops_config.normalize({})
+    split = resolve_station_split(cart_items, ops_config.station_features(features, sede_cfg))
     kitchen_items = split["kitchen_items"]
     bar_items = split["bar_items"]
     has_split = split["has_split"]

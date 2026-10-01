@@ -61,35 +61,33 @@
           <button class="btn" id="btn-edit-carta"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>Editar carta</button>
         </div>
 
-        <!-- Import a carta from a photo or pasted text. It produces a DRAFT:
-             the result opens in the same editor as "Editar carta" and is only
-             saved when the owner saves there. Nothing here writes a menu. -->
+        <!-- Import a carta from a photo. It produces a DRAFT: the result opens
+             in the same editor as "Editar carta" and is only saved when the
+             owner saves there. Nothing here writes a menu. Choosing the photo
+             starts the reading right away; there is no second button to press. -->
         <div class="modal-overlay" id="importCartaModal" style="display:none;">
-          <div class="modal" style="max-width:560px;">
+          <div class="modal import-modal">
             <div class="modal-head">
-              <h3 class="modal-title">Importar carta</h3>
-              <button class="modal-close" id="importCartaClose" type="button">&times;</button>
+              <h3 class="modal-title">Importar carta desde una foto</h3>
+              <button class="modal-close" id="importCartaClose" type="button" aria-label="Cerrar">&times;</button>
             </div>
             <div class="modal-body">
-              <p style="font-size:13px;color:var(--text-2);margin:0 0 14px;">
-                Sube una foto de tu carta o pega el texto. Mesio la lee y te deja los platos
-                listos en el editor para que los revises. <strong>No se guarda nada</strong>
-                hasta que tú le des guardar.
+              <p class="import-lead">
+                Toma una foto de tu carta. Mesio lee los platos y los deja listos en el
+                editor para que los revises. <strong>No se guarda nada</strong> hasta que
+                tú le des guardar.
               </p>
-              <div class="form-group">
-                <label for="importCartaFile">Foto de la carta</label>
+              <label class="import-drop" id="importCartaDrop" for="importCartaFile">
+                <svg class="import-drop-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8a2 2 0 0 1 2-2h1.5l1.2-1.6A1 1 0 0 1 9.5 4h5a1 1 0 0 1 .8.4L16.5 6H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="12.5" r="3.5"/></svg>
+                <span class="import-drop-title" id="importCartaDropTitle"><strong>Toca para elegir la foto</strong> o arrástrala aquí</span>
+                <span class="import-drop-sub">JPG, PNG o WebP · Máx. 5 MB</span>
                 <input type="file" id="importCartaFile" accept="image/jpeg,image/png,image/webp">
-              </div>
-              <div style="text-align:center;font-size:12px;color:var(--text-3);margin:10px 0;">o</div>
-              <div class="form-group">
-                <label for="importCartaText">Pega el texto de la carta</label>
-                <textarea id="importCartaText" rows="8" placeholder="Ajiaco santafereño — 28.000&#10;Bandeja paisa — 32.000"></textarea>
-              </div>
-              <div id="importCartaStatus" style="font-size:13px;margin-top:10px;"></div>
+              </label>
+              <div id="importCartaStatus" class="import-status" role="status" aria-live="polite"></div>
             </div>
             <div class="modal-foot">
               <button class="btn ghost" id="importCartaCancel" type="button">Cancelar</button>
-              <button class="btn primary" id="importCartaGo" type="button">Leer carta</button>
+              <button class="btn primary" id="importCartaGo" type="button" style="display:none;">Revisar en el editor</button>
             </div>
           </div>
         </div>
@@ -186,7 +184,7 @@
       <div id="invModalSedeRow" style="display:none;">
         <label class="form-label" for="invModalSede">Sede</label>
         <select class="input" id="invModalSede">
-          <option value="">Elegí una sede…</option>
+          <option value="">Elige una sede…</option>
         </select>
       </div>
       <div>
@@ -234,7 +232,7 @@
       <div>
         <label class="form-label" for="invXferTo">Sede de destino</label>
         <select class="input" id="invXferTo">
-          <option value="">Elegí una sede…</option>
+          <option value="">Elige una sede…</option>
         </select>
       </div>
       <div>
@@ -287,17 +285,17 @@
 <!-- ─── Full menu editor modal ─────────────────────────────────── -->
 <!-- Powered by dashboard-features.js (openMenuEditor / renderMenuEditor / -->
 <!-- addMenuEditorCategory / saveMenuEditor / closeMenuEditor).            -->
-<div id="full-menu-editor" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;overflow-y:auto;">
-  <div style="background:#f9f9f5;max-width:960px;margin:32px auto;border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);">
+<div id="full-menu-editor" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;overflow-y:auto;padding:32px 16px;box-sizing:border-box;">
+  <div style="background:#f9f9f5;width:100%;max-width:960px;margin:0 auto;border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 24px;background:#fff;border-bottom:1px solid #e0e0d8;">
       <div>
         <div style="font-size:18px;font-weight:700;">Editar carta</div>
-        <div style="font-size:12px;color:#6b7280;margin-top:2px;">Categorías, platos, fotos y atributos (catálogo v2)</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:2px;">Categorías, platos, fotos y atributos. Es la carta general: todas las sedes la heredan.</div>
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn" onclick="addMenuEditorCategory()">+ Categoría</button>
         <button class="btn primary" id="btn-save-menu-editor" onclick="saveMenuEditor()">Guardar</button>
-        <button class="btn" onclick="closeMenuEditor()">Cerrar</button>
+        <button class="btn" onclick="requestCloseMenuEditor()">Cerrar</button>
       </div>
     </div>
     <div id="menu-editor-canvas" style="padding:20px;"></div>

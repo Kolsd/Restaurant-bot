@@ -160,12 +160,20 @@
     </div>
 
     <div class="form-field">
+      <label for="editStaffPassword">Nuevo PIN / contraseña (opcional)</label>
+      <input id="editStaffPassword" class="form-input" type="password" autocomplete="new-password" placeholder="Déjalo vacío para no cambiarlo" />
+    </div>
+
+    <div class="form-field">
       <label><input type="checkbox" id="editStaffActive" /> Miembro activo</label>
     </div>
 
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
-      <button class="btn" id="editStaffModalCancel">Cancelar</button>
-      <button class="btn brand" id="editStaffModalSubmit">Guardar cambios</button>
+    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:20px;">
+      <button class="btn" id="editStaffModalDelete" style="color:var(--danger,#dc2626);">Eliminar</button>
+      <div style="display:flex;gap:10px;">
+        <button class="btn" id="editStaffModalCancel">Cancelar</button>
+        <button class="btn brand" id="editStaffModalSubmit">Guardar cambios</button>
+      </div>
     </div>
     <button class="icon-btn" id="editStaffModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">✕</button>
   </div>

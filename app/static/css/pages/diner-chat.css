@@ -815,3 +815,31 @@ body.diner-no-assistant .diner-waiter-fab { bottom: max(var(--s-4), env(safe-are
 }
 .diner-checkout-status-link { width: 100%; }
 .diner-checkout-status-card--paid { background: var(--surface); border: 1px solid var(--brand); }
+
+/* ── Diner memory ("lo de siempre", app/services/diner_memory.py) ── */
+.diner-memory { display: flex; flex-direction: column; gap: var(--s-2); align-items: flex-start; }
+.diner-memory-note { margin: 0; font-size: var(--body-sm); color: var(--text-3); }
+.diner-memory-forget {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--body-sm);
+  color: var(--text-3);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.diner-memory-forget:disabled { opacity: 0.5; cursor: default; }
+.diner-chip--quiet { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+.diner-chip--quiet:hover { background: var(--surface-hover); }
+
+/* Where to transfer (table + /pedir checkout sheets) */
+.diner-transfer-instructions {
+  margin: 0 0 var(--s-2);
+  padding: var(--s-3);
+  background: var(--brand-light);
+  color: var(--brand-dark);
+  border-radius: var(--radius);
+  font-size: var(--body-sm);
+  white-space: pre-line;
+}

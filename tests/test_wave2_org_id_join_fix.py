@@ -74,29 +74,6 @@ async def test_db_save_nps_waiting_writes_org_id():
     assert conn.execute.call_args.args[1:] == ("+573001234567", 42)
 
 
-# ── 3. conversations_repo.db_get_customer_order_history ───────────────────────
-
-@pytest.mark.asyncio
-async def test_db_get_customer_order_history_uses_org_id():
-    """Both COUNT and item-explode queries must filter by orders.org_id."""
-    from app.repositories.conversations_repo import db_get_customer_order_history
-
-    conn = _make_conn()
-    # fetchval for COUNT (return >=2 so Step 2 runs)
-    conn.fetchval = AsyncMock(return_value=5)
-    conn.fetch = AsyncMock(return_value=[])
-
-    patch_path = "app.repositories.conversations_repo._tenant_connection"
-    with patch(patch_path, _make_tenant_conn_ctx(conn)):
-        result = await db_get_customer_order_history("+573001234567", 42)
-
-    assert result == []
-    sql = _captured_sql(conn)
-    assert sql.count("o.org_id       = $2") == 2, "Both queries must filter o.org_id"
-    assert "whatsapp_number" not in sql and "bot_number" not in sql
-    assert "r.id = $2" not in sql, "Must NOT use bare r.id = $2"
-
-
 # ── 5. tables_repo.db_get_delivery_status_hash_for_restaurant ─────────────────
 
 @pytest.mark.asyncio

@@ -383,11 +383,17 @@ def require_module(module_name: str) -> Callable:
 
     Reads features directly from the already-loaded restaurant dict to avoid
     a second DB round-trip and normalisation mismatches in db_check_module.
-    Accepts both boolean True and the string "true" as enabled values.
+
+    Opt-out (2026-10-01): a module is OFF only when the owner switched it off
+    (False / "false"). It used to demand an explicit True, which no
+    organization created since the plans existed has — Pro customers paid
+    for reservations and got "módulo no activo". The plan is the real gate
+    (require_plan_feature); this only honours an owner who turned it off,
+    the same reading the bot and the sidebar already used.
 
     Raises:
         401 — if the Bearer token is missing or invalid (via get_current_restaurant).
-        403 — if the restaurant exists but does not have the module enabled.
+        403 — if the owner switched the module off.
     """
     import json as _json
 
@@ -403,8 +409,8 @@ def require_module(module_name: str) -> Callable:
         if not isinstance(features, dict):
             features = {}
         val = features.get(module_name)
-        has_module = val is True or str(val).lower() == "true"
-        if not has_module:
+        switched_off = val is False or str(val).lower() == "false"
+        if switched_off:
             raise HTTPException(
                 status_code=403,
                 detail=f"El restaurante no tiene activo el módulo: {module_name}",

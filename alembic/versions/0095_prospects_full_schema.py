@@ -59,10 +59,23 @@ def upgrade() -> None:
 
     # On a stub-built database `name` holds whatever the prospect was
     # called; that is the CRM's restaurant_name and nothing else carries it.
+    # Production never had the stub (prospects predates 0012 there, created
+    # with the full body and no `name`), so the backfill must only run where
+    # the column exists — referencing it unconditionally crashed the deploy.
     op.execute("""
-        UPDATE prospects
-           SET restaurant_name = COALESCE(NULLIF(name, ''), restaurant_name)
-         WHERE restaurant_name = ''
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'prospects'
+                   AND column_name = 'name'
+            ) THEN
+                UPDATE prospects
+                   SET restaurant_name = COALESCE(NULLIF(name, ''), restaurant_name)
+                 WHERE restaurant_name = '';
+            END IF;
+        END $$;
     """)
 
     # The CRM lists by stage and by last touch; without these every board

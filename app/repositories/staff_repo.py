@@ -101,9 +101,13 @@ async def _generate_username(name: str, exclude_id: str | None = None) -> str:
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute("SET LOCAL ROLE mesio_superadmin")
+            # The employee being edited doesn't collide with themselves: without
+            # this, every save of the Team form renamed their login
+            # (juan.perez → juan.perez1 → ...) and locked them out.
             rows = await conn.fetch(
-                "SELECT username FROM staff WHERE username LIKE $1 || '%'",
-                base,
+                "SELECT username FROM staff WHERE username LIKE $1 || '%' "
+                "AND ($2::uuid IS NULL OR id <> $2::uuid)",
+                base, exclude_id,
             )
     existing = {r['username'] for r in rows}
 

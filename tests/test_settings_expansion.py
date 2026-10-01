@@ -5,9 +5,9 @@ Unit tests for the expanded POST /api/settings handler (Sprint A — Theme 4).
 
 Covers:
   1. GET /api/settings returns nit, city, cuisine_type fields from features
-  2. POST saves name via db_update_location
+  2. POST saves the brand name on the organization (db_update_organization)
   3. POST saves address via db_update_location
-  4. POST saves opening_hours via db_update_location
+  4. POST saves opening_hours on the caller's sede (db_update_location + org_id)
   5. POST saves nit, city, cuisine_type, notifications via db_merge_restaurant_features
   6. POST rejects empty name (400)
   7. POST returns updated settings shape including all new fields
@@ -79,6 +79,12 @@ def _auth_patches(monkeypatch, restaurant: dict | None = None):
                         AsyncMock(return_value=restaurant))
     monkeypatch.setattr(db, "db_check_module",
                         AsyncMock(return_value=False))
+    # Address and hours are the SEDE's (2026-10-01): the caller's own sede.
+    monkeypatch.setattr(db, "db_get_location_by_id", AsyncMock(return_value={
+        "id": restaurant["location_id"], "org_id": restaurant["org_id"], "name": "Centro",
+        "address": restaurant.get("address"), "opening_hours": {},
+        "latitude": restaurant.get("latitude"), "longitude": restaurant.get("longitude"),
+    }))
     return restaurant
 
 
@@ -138,7 +144,9 @@ def test_get_settings_defaults_for_new_fields(monkeypatch):
 # ── POST /api/settings — name ─────────────────────────────────────────────────
 
 def test_post_settings_saves_name(monkeypatch):
-    """POST /api/settings with name must call db_update_location with name."""
+    """The brand name goes to the ORGANIZATION (2026-10-01) — it used to be
+    written onto a sede through db_update_location(org_id), i.e. onto
+    whichever sede had that number."""
     restaurant = _make_restaurant()
     _auth_patches(monkeypatch, restaurant)
 
@@ -151,8 +159,10 @@ def test_post_settings_saves_name(monkeypatch):
     _set_restaurant_sequence(monkeypatch, [restaurant, updated])
     merge_mock = AsyncMock(return_value=updated["features"])
     loc_mock = AsyncMock(return_value=None)
+    org_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
     monkeypatch.setattr(restaurant_repo, "db_update_location", loc_mock)
+    monkeypatch.setattr(restaurant_repo, "db_update_organization", org_mock)
 
     client = TestClient(app)
     resp = client.post(
@@ -161,10 +171,8 @@ def test_post_settings_saves_name(monkeypatch):
         headers={"Authorization": "Bearer faketoken"},
     )
     assert resp.status_code == 200
-    # db_update_location must have been called with name kwarg
-    loc_mock.assert_awaited_once()
-    call_kwargs = loc_mock.call_args[1]
-    assert call_kwargs.get("name") == "La Nueva Sede"
+    org_mock.assert_awaited_once_with(RESTAURANT_ID, name="La Nueva Sede")
+    loc_mock.assert_not_awaited()
 
 
 def test_post_settings_rejects_empty_name(monkeypatch):
@@ -284,7 +292,10 @@ def test_post_settings_saves_opening_hours(monkeypatch):
     # Verify loc_mock was called with opening_hours
     assert resp.status_code == 200
     loc_mock.assert_awaited_once()
+    # The caller's sede, and only within their org.
+    assert loc_mock.call_args[0][0] == RESTAURANT_ID
     call_kwargs = loc_mock.call_args[1]
+    assert call_kwargs.get("org_id") == RESTAURANT_ID
     assert call_kwargs.get("opening_hours") == hours
 
 
@@ -365,6 +376,12 @@ def _pause_auth_patches(monkeypatch, role: str = "owner", features: dict | None 
                         AsyncMock(return_value=restaurant))
     monkeypatch.setattr(db, "db_check_module",
                         AsyncMock(return_value=False))
+    # Address and hours are the SEDE's (2026-10-01): the caller's own sede.
+    monkeypatch.setattr(db, "db_get_location_by_id", AsyncMock(return_value={
+        "id": restaurant["location_id"], "org_id": restaurant["org_id"], "name": "Centro",
+        "address": restaurant.get("address"), "opening_hours": {},
+        "latitude": restaurant.get("latitude"), "longitude": restaurant.get("longitude"),
+    }))
     return restaurant
 
 

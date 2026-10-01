@@ -15,8 +15,9 @@ from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 
 from app.routes.deps import (
-    get_current_restaurant_scoped, get_current_user, resolve_sede_filter,
+    get_current_restaurant_scoped, get_current_user, may_span_locations, resolve_sede_filter,
 )
+from app.services.staff_sections import ADMIN_ROLES, normalize_role
 from app.services import database as db
 from app.services import plan_access, state_store
 from app.repositories import sessions_repo
@@ -127,6 +128,52 @@ async def _resolve_new_staff_location(org_id: int, requested: int | None) -> int
     return None
 
 
+# Roles the Team page can hand out. "owner" is the account itself (users
+# table), never a staff role.
+_ASSIGNABLE_ROLES: frozenset[str] = frozenset(
+    {"mesero", "cocina", "bar", "caja", "domiciliario", "gerente", "admin", "otro"}
+)
+_ADMIN_GRANTS: frozenset[str] = frozenset({"gerente", "admin", "owner"})
+
+
+def _manager_sede(user: dict) -> int | None:
+    """Who may manage the roster, and where (PM 2026-09-20).
+
+    owner/admin: any sede (None). gerente: only their own sede. Anyone else
+    — a waiter's PIN session included — is refused: until 2026-10-01 these
+    routes checked no role, so any logged-in employee could create an admin
+    or promote themselves.
+    """
+    roles = {normalize_role(r) for r in (user.get("role") or "").split(",") if r.strip()}
+    if not roles & ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Solo el dueño, un admin o el gerente gestionan el equipo.")
+    if may_span_locations(user):
+        return None
+    own = user.get("location_id")
+    if not own:
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene una sede asignada")
+    return int(own)
+
+
+def _check_assignable(roles: list[str], manager_sede: int | None) -> None:
+    unknown = [r for r in roles if r not in _ASSIGNABLE_ROLES]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Rol no válido: {', '.join(unknown)}")
+    if manager_sede is not None and set(roles) & _ADMIN_GRANTS:
+        raise HTTPException(status_code=403, detail="Un gerente no puede dar roles de gerente o admin.")
+
+
+async def _target_in_scope(org_id: int, staff_id: str, manager_sede: int | None) -> None:
+    """A gerente only touches employees of their own sede."""
+    if manager_sede is None:
+        return
+    with tenant_scope(org_id):
+        roster = await db.db_get_staff(org_id, manager_sede)
+    target = next((m for m in roster if str(m.get("id")) == str(staff_id)), None)
+    if target is None or target.get("location_id") not in (manager_sede, None):
+        raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+
+
 async def _enforce_staff_cap(org_id: int) -> None:
     """Esencial allows 5 active staff users per sede (pricing 2026-09-30);
     the other plans, and every trial, have no cap."""
@@ -153,6 +200,7 @@ async def create_staff(
     request: Request,
     body: StaffCreate,
     restaurant: dict = Depends(get_current_restaurant_scoped),
+    user: dict = Depends(get_current_user),
 ):
     """Creates a staff member in the authenticated user's organization.
 
@@ -166,12 +214,17 @@ async def create_staff(
     avoid introducing an unsupported parameter.
     """
     org_id = restaurant["id"]
+    manager_sede = _manager_sede(user)
 
     pin_hash = _pwd_ctx.hash(body.password)
     roles = [r.strip().lower() for r in body.roles if r.strip()] if body.roles else [body.role.strip().lower()]
+    _check_assignable(roles, manager_sede)
     full_name = f"{body.name.strip()} {body.last_name.strip()}".strip() if body.last_name else body.name.strip()
 
-    location_id = await _resolve_new_staff_location(org_id, body.location_id)
+    if manager_sede is not None and body.location_id not in (None, manager_sede):
+        raise HTTPException(status_code=403, detail="Solo puedes agregar personal a tu propia sede.")
+    requested_sede = manager_sede if manager_sede is not None else body.location_id
+    location_id = await _resolve_new_staff_location(org_id, requested_sede)
     await _enforce_staff_cap(org_id)
 
     member = await db.db_create_staff(
@@ -305,9 +358,17 @@ async def update_staff(
     staff_id: str,
     body: StaffUpdate,
     restaurant: dict = Depends(get_current_restaurant_scoped),
+    user: dict = Depends(get_current_user),
 ):
     """Update mutable staff fields. PIN is re-hashed if provided."""
+    manager_sede = _manager_sede(user)
+    await _target_in_scope(restaurant["id"], staff_id, manager_sede)
     patch = body.model_dump(exclude_none=True)
+    granted = list(patch.get("roles") or []) + ([patch["role"]] if patch.get("role") else [])
+    if granted:
+        _check_assignable([r.strip().lower() for r in granted if r.strip()], manager_sede)
+    if manager_sede is not None and patch.get("location_id") not in (None, manager_sede):
+        raise HTTPException(status_code=403, detail="Solo puedes asignar personal a tu propia sede.")
 
     if "password" in patch:
         patch["pin"] = _pwd_ctx.hash(patch.pop("password"))
@@ -339,8 +400,11 @@ async def update_staff(
 async def delete_staff(
     staff_id: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
+    user: dict = Depends(get_current_user),
 ):
     """Permanently deletes a staff member from the roster."""
+    manager_sede = _manager_sede(user)
+    await _target_in_scope(restaurant["id"], staff_id, manager_sede)
     deleted = await db.db_delete_staff(staff_id, restaurant["id"])
     if not deleted:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")

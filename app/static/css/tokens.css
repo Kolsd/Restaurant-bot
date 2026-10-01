@@ -185,6 +185,24 @@
 }
 .m-modal-box h3 { font-size: 16px; font-weight: 600; margin-bottom: var(--s-4); }
 
+/* Form fields — shared by every admin modal. They lived only in team.css
+   and floorplan.css, so the same markup elsewhere (the sede settings modal
+   in Sucursales) rendered as a bare, cramped form. */
+.form-field { margin-bottom: 14px; }
+.form-field > label { display: block; font-size: 12px; font-weight: 500; color: var(--text-2); margin-bottom: 5px; }
+.form-field > label:has(> input[type="checkbox"]) {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 2px;
+}
+.form-input {
+  width: 100%; padding: 8px 12px;
+  border: 0.5px solid var(--border); border-radius: 7px;
+  font-size: 13px; font-family: inherit; color: var(--text);
+  background: var(--surface); box-sizing: border-box;
+}
+.form-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(29,158,117,0.1); }
+.dc-inherited { display: block; font-size: 11px; color: var(--text-3); margin-top: 3px; }
+.dc-inherited:empty { display: none; }
+
 /* ── Unified confirm dialog (replaces window.confirm) ── */
 .m-confirm-overlay {
   position: fixed; inset: 0;

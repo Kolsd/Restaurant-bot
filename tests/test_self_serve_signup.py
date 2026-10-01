@@ -233,6 +233,53 @@ def test_signup_creates_a_tenant_the_owner_can_log_into(client, unique, cleanup)
     assert not verify_password("otraClaveCualquiera", user["password_hash"])
 
 
+def test_owner_is_greeted_by_the_name_typed_at_signup(client, unique, cleanup):
+    """The signup form asks for the owner's name; the dashboard greeted them
+    with their email because the name only ever reached the CRM."""
+    orgs, usernames, phones = cleanup
+    body = _payload(unique)
+
+    signup = client.post("/api/signup", json=body)
+    assert signup.status_code == 200, signup.text
+    data = signup.json()
+    orgs.append(data["org_id"])
+    usernames.append(data["username"])
+    phones.append(body["telefono"])
+
+    stored = _run(_query(
+        "SELECT display_name FROM users WHERE username = $1", data["username"].lower()
+    ))
+    assert stored["display_name"] == "María García"
+
+    login = client.post(
+        "/api/auth/login", json={"username": body["email"], "password": _PASSWORD}
+    )
+    assert login.status_code == 200, login.text
+    assert login.json()["name"] == "María García"
+
+
+def test_account_without_a_stored_name_still_logs_in_as_its_login(client, unique, cleanup):
+    """Accounts created before users.display_name have none: login falls back
+    to the username instead of returning an empty name."""
+    orgs, usernames, phones = cleanup
+    body = _payload(unique)
+
+    data = client.post("/api/signup", json=body).json()
+    orgs.append(data["org_id"])
+    usernames.append(data["username"])
+    phones.append(body["telefono"])
+
+    _run(_query(
+        "UPDATE users SET display_name = NULL WHERE username = $1",
+        data["username"].lower(), fetch="none",
+    ))
+    login = client.post(
+        "/api/auth/login", json={"username": body["email"], "password": _PASSWORD}
+    )
+    assert login.status_code == 200, login.text
+    assert login.json()["name"] == body["email"]
+
+
 def test_same_phone_can_register_a_second_restaurant(client, unique, cleanup):
     """The phone is a sales contact. It once landed on a UNIQUE WhatsApp
     column, which made a second restaurant by the same owner impossible to

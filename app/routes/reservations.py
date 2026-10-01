@@ -3,6 +3,7 @@ Reservations API router.
 Provides CRUD + status management + availability + stats for restaurant reservations.
 """
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
@@ -27,7 +28,7 @@ class CreateReservationBody(BaseModel):
     date: str        # YYYY-MM-DD
     time: str        # HH:MM
     notes: Optional[str] = None
-    table_id: Optional[int] = None
+    table_id: Optional[str] = None   # restaurant_tables.id is text ("table-4-2")
     source: str = "manual"
 
     @field_validator("customer_name")
@@ -72,6 +73,7 @@ router = APIRouter(
         Depends(require_auth),
         # The plan first: "your plan does not include it" beats "module off".
         Depends(require_plan_feature(plans.RESERVATIONS)),
+        # Owner opt-out only: off when explicitly False (see require_module).
         Depends(require_module("module_reservations")),
     ],
 )
@@ -102,23 +104,19 @@ async def create_reservation(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Create a new reservation. Status defaults to 'pending'."""
-    # Validate that the reservation datetime is in the future
+    # The date and time are the restaurant's wall clock. They used to be
+    # read as UTC, so in Bogotá (UTC-5) a booking for 8 p.m. made at 6 p.m.
+    # was refused as "in the past" — every evening booking after 2 p.m.
+    from app.routes.stats import get_tz  # noqa: PLC0415
     try:
         reservation_dt = datetime.strptime(
             f"{body.date} {body.time}", "%Y-%m-%d %H:%M"
-        ).replace(tzinfo=timezone.utc)
+        ).replace(tzinfo=ZoneInfo(get_tz(restaurant)))
     except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot parse reservation date/time",
-        )
+        raise HTTPException(status_code=400, detail="La fecha u hora de la reserva no es válida.")
 
-    now_utc = datetime.now(tz=timezone.utc)
-    if reservation_dt <= now_utc:
-        raise HTTPException(
-            status_code=400,
-            detail="Reservation date/time must be in the future",
-        )
+    if reservation_dt <= datetime.now(tz=timezone.utc):
+        raise HTTPException(status_code=400, detail="La reserva tiene que ser para una fecha y hora futuras.")
 
     sede = await _sede_param(request)
     location_id = int(sede) if sede and str(sede).isdigit() else restaurant.get("location_id")

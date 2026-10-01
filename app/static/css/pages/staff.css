@@ -49,3 +49,39 @@ html, body { height: 100%; }
 @media (max-width: 768px) {
   .main { height: 100vh; }
 }
+
+/* ── "Configurar operación" (js/staff/ops-setup.js) ── */
+.ops-overlay {
+  position: fixed; inset: 0; z-index: 4000;
+  background: rgba(17, 24, 39, 0.45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.ops-box {
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  width: 560px; max-width: 100%; max-height: 92vh; overflow-y: auto;
+  padding: 24px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18);
+}
+.ops-title { margin: 0 0 6px; font-size: 18px; font-weight: 700; }
+.ops-lead { margin: 0 0 18px; font-size: 13px; color: var(--text-3); line-height: 1.5; }
+.ops-q {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 0; border-top: 1px solid var(--border);
+}
+.ops-q[hidden] { display: none; }
+.ops-q-title { font-size: 14px; font-weight: 600; }
+.ops-q-hint { font-size: 12px; color: var(--text-3); margin-top: 2px; line-height: 1.4; }
+.ops-pills { display: flex; gap: 6px; flex-shrink: 0; }
+.ops-pill, .ops-cat {
+  min-height: 36px; padding: 0 14px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.ops-pill.on, .ops-cat.on { background: var(--brand-light); border-color: var(--brand); color: var(--brand-dark); }
+.ops-cats { padding: 0 0 14px; }
+.ops-cats[hidden] { display: none; }
+.ops-cat-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ops-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
+@media (max-width: 480px) {
+  .ops-q { flex-direction: column; align-items: flex-start; }
+}

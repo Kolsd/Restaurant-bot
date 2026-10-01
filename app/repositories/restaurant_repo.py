@@ -455,13 +455,19 @@ async def db_update_restaurant_timezone(
 
 
 async def db_merge_restaurant_features(
-    restaurant_id: int,
+    org_id: int,
     patch: dict,
 ) -> dict:
-    """Shallow-merge *patch* into the restaurant's features JSONB and return the result.
+    """Shallow-merge *patch* into the ORGANIZATION's features JSONB and return the result.
 
     Uses the Postgres || operator so only the provided keys are overwritten —
     existing keys not in *patch* are preserved.  Returns the final features dict.
+
+    Keyed by org id. Until 2026-10-01 it looked the org up through a
+    LOCATION id (`WHERE id = (SELECT org_id FROM locations WHERE id = $1)`)
+    while both callers — Configuración and the pause button — passed an org
+    id: every save and every pause landed on whichever organization owned
+    the sede with that number, another customer's included.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -470,10 +476,10 @@ async def db_merge_restaurant_features(
             """
             UPDATE organizations
                SET features = COALESCE(features, '{}'::jsonb) || $2::jsonb
-             WHERE id = (SELECT org_id FROM locations WHERE id = $1)
+             WHERE id = $1
             RETURNING features
             """,
-            restaurant_id,
+            org_id,
             _json.dumps(patch),
         )
     if row is None:
@@ -763,7 +769,8 @@ async def db_update_user_password(username: str, password_hash: str) -> bool:
 
 async def db_create_user(username: str, password_hash: str, restaurant_name: str,
                           role: str = "owner", branch_id: int = None, parent_user: str = None,
-                          org_id: int = None, location_id: int = None):
+                          org_id: int = None, location_id: int = None,
+                          display_name: str | None = None):
     """Create an admin/owner user row.
 
     P0 fix (2026-09): `branch_id` is a legacy column with NO fixed id-kind
@@ -779,9 +786,10 @@ async def db_create_user(username: str, password_hash: str, restaurant_name: str
     async with pool.acquire() as conn:
         try:
             await conn.execute("""
-                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id, parent_user, org_id, location_id)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-            """, username.lower().strip(), password_hash, restaurant_name, role, branch_id, parent_user, org_id, location_id)
+                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id, parent_user, org_id, location_id, display_name)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            """, username.lower().strip(), password_hash, restaurant_name, role, branch_id, parent_user, org_id, location_id,
+                (display_name or "").strip() or None)
             return True
         except asyncpg.UniqueViolationError:
             return False
@@ -1919,11 +1927,16 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
     return d
 
 
-async def db_update_location(location_id: int, **fields) -> dict | None:
+async def db_update_location(location_id: int, org_id: int | None = None, **fields) -> dict | None:
     """Update Location fields.  Returns the updated row or None if not found.
 
     Accepted fields: name, code, address, phone, latitude, longitude,
     active, opening_hours, timezone.
+
+    `org_id`, when given, is part of the WHERE: `locations` has no RLS, and
+    a caller that mixed up an org id with a location id (Configuración did,
+    until 2026-10-01) would otherwise rewrite another organization's sede.
+    Every tenant-facing caller passes it; only superadmin tools omit it.
     """
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
@@ -1952,10 +1965,14 @@ async def db_update_location(location_id: int, **fields) -> dict | None:
         idx += 1
     set_clauses.append("updated_at = NOW()")
     params.append(location_id)
+    org_clause = ""
+    if org_id is not None:
+        params.append(org_id)
+        org_clause = f" AND org_id = ${idx + 1}"
 
     sql = (
         f"UPDATE locations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted
-        f"WHERE id = ${idx} RETURNING id, org_id, name, code, address, phone, "
+        f"WHERE id = ${idx}{org_clause} RETURNING id, org_id, name, code, address, phone, "
         f"latitude, longitude, "
         f"active, timezone, "
         f"opening_hours, created_at, updated_at"
