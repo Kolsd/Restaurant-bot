@@ -38,25 +38,26 @@ async def test_login_success():
         "username":        "owner",
         "restaurant_name": "El Bistro",
         "branch_id":       1,
+        "org_id":          1,
         "role":            "owner",
         "password_hash":   hashed,
     }
-    mock_restaurant = {"id": 1, "whatsapp_number": "+57300", "name": "El Bistro", "features": {}}
+    mock_restaurant = {"id": 1, "name": "El Bistro", "features": {}}
     fake_token = "a" * 64
 
     mock_location = {
         "id": 1, "org_id": 1, "name": "El Bistro",
-        "is_primary": True, "whatsapp_number": "+57300", "active": True,
+        "is_primary": True, "active": True,
     }
     mock_org = {
-        "id": 1, "name": "El Bistro", "whatsapp_number": "+57300",
+        "id": 1, "name": "El Bistro",
         "features": {}, "subscription_plan": "free",
     }
     mock_org_locations = [mock_location]
 
     with (
         patch.object(auth.db, "db_get_user",           AsyncMock(return_value=mock_user)),
-        patch.object(auth.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant)),
+        patch.object(auth.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=mock_restaurant)),
         patch("app.repositories.sessions_repo.create_session", AsyncMock(return_value=fake_token)),
         patch("app.repositories.restaurant_repo.db_get_location_by_id", AsyncMock(return_value=mock_location)),
         patch("app.repositories.restaurant_repo.db_get_org_by_id",      AsyncMock(return_value=mock_org)),
@@ -115,17 +116,18 @@ async def test_login_legacy_sha256_triggers_bcrypt_upgrade():
         "username":        "owner",
         "restaurant_name": "El Bistro",
         "branch_id":       1,
+        "org_id":          1,
         "role":            "owner",
         "password_hash":   legacy_hash,
     }
-    mock_restaurant = {"id": 1, "whatsapp_number": "+57300", "name": "El Bistro", "features": {}}
-    mock_location = {"id": 1, "org_id": 1, "name": "El Bistro", "is_primary": True, "whatsapp_number": "+57300", "active": True}
-    mock_org = {"id": 1, "name": "El Bistro", "whatsapp_number": "+57300", "features": {}, "subscription_plan": "free"}
+    mock_restaurant = {"id": 1, "name": "El Bistro", "features": {}}
+    mock_location = {"id": 1, "org_id": 1, "name": "El Bistro", "is_primary": True, "active": True}
+    mock_org = {"id": 1, "name": "El Bistro", "features": {}, "subscription_plan": "free"}
     update_mock = AsyncMock(return_value=True)
 
     with (
         patch.object(auth.db, "db_get_user", AsyncMock(return_value=mock_user)),
-        patch.object(auth.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant)),
+        patch.object(auth.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=mock_restaurant)),
         patch.object(auth.db, "db_update_user_password", update_mock),
         patch("app.repositories.sessions_repo.create_session", AsyncMock(return_value="t" * 64)),
         patch("app.repositories.restaurant_repo.db_get_location_by_id", AsyncMock(return_value=mock_location)),
@@ -150,17 +152,18 @@ async def test_login_bcrypt_user_no_upgrade():
         "username":        "owner",
         "restaurant_name": "El Bistro",
         "branch_id":       1,
+        "org_id":          1,
         "role":            "owner",
         "password_hash":   hash_password("supersecreta"),
     }
-    mock_restaurant = {"id": 1, "whatsapp_number": "+57300", "name": "El Bistro", "features": {}}
-    mock_location = {"id": 1, "org_id": 1, "name": "El Bistro", "is_primary": True, "whatsapp_number": "+57300", "active": True}
-    mock_org = {"id": 1, "name": "El Bistro", "whatsapp_number": "+57300", "features": {}, "subscription_plan": "free"}
+    mock_restaurant = {"id": 1, "name": "El Bistro", "features": {}}
+    mock_location = {"id": 1, "org_id": 1, "name": "El Bistro", "is_primary": True, "active": True}
+    mock_org = {"id": 1, "name": "El Bistro", "features": {}, "subscription_plan": "free"}
     update_mock = AsyncMock(return_value=True)
 
     with (
         patch.object(auth.db, "db_get_user", AsyncMock(return_value=mock_user)),
-        patch.object(auth.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant)),
+        patch.object(auth.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=mock_restaurant)),
         patch.object(auth.db, "db_update_user_password", update_mock),
         patch("app.repositories.sessions_repo.create_session", AsyncMock(return_value="t" * 64)),
         patch("app.repositories.restaurant_repo.db_get_location_by_id", AsyncMock(return_value=mock_location)),
@@ -232,43 +235,44 @@ def test_login_rate_limit(client, monkeypatch):
 def test_require_module_absent_flag_returns_403(client, monkeypatch):
     """
     When features does not contain the module key, db_check_module returns False
-    and the endpoint must return 403.
+    and the endpoint must return 403. Reservations are the module-gated router
+    left after the 2026-09 cleanup (the staff_tips-gated shift routes are gone).
     """
-    patch_auth(monkeypatch, features={})  # staff_tips absent → False
+    patch_auth(monkeypatch, features={})  # module_reservations absent → False
     monkeypatch.setattr("app.services.database.db_check_module",
                         AsyncMock(return_value=False))
 
-    r = client.get("/api/staff", headers={"Authorization": "Bearer tok"})
+    r = client.get("/api/reservations", headers={"Authorization": "Bearer tok"})
     assert r.status_code == 403
-    assert "staff_tips" in r.json()["detail"]
+    assert "module_reservations" in r.json()["detail"]
 
 
 def test_require_module_flag_true_allows_access(client, monkeypatch):
     """
-    When features.staff_tips = true, db_check_module returns True and the
-    endpoint proceeds (200, not 403).
+    When features.module_reservations = true, db_check_module returns True and
+    the endpoint runs its own handler.
     """
-    patch_auth(monkeypatch, features={"staff_tips": True})
+    patch_auth(monkeypatch, features={"module_reservations": True})
     monkeypatch.setattr("app.services.database.db_check_module",
                         AsyncMock(return_value=True))
-
-    # Also mock the DB call inside the endpoint itself
     import app.services.database as db_mod
-    monkeypatch.setattr(db_mod, "db_get_staff", AsyncMock(return_value=[]))
+    monkeypatch.setattr(db_mod, "db_get_reservations_range",
+                        AsyncMock(return_value=[{"id": 7, "customer_name": "Ana"}]))
 
-    r = client.get("/api/staff", headers={"Authorization": "Bearer tok"})
+    r = client.get("/api/reservations", headers={"Authorization": "Bearer tok"})
     assert r.status_code == 200
+    assert r.json() == {"reservations": [{"id": 7, "customer_name": "Ana"}]}
 
 
 def test_require_module_flag_false_returns_403(client, monkeypatch):
     """
-    When features.staff_tips is explicitly False, the endpoint must return 403.
+    When features.module_reservations is explicitly False, the endpoint must return 403.
     """
-    patch_auth(monkeypatch, features={"staff_tips": False})
+    patch_auth(monkeypatch, features={"module_reservations": False})
     monkeypatch.setattr("app.services.database.db_check_module",
                         AsyncMock(return_value=False))
 
-    r = client.get("/api/staff", headers={"Authorization": "Bearer tok"})
+    r = client.get("/api/reservations", headers={"Authorization": "Bearer tok"})
     assert r.status_code == 403
 
 

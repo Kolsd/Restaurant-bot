@@ -9,11 +9,10 @@ emitted at most once per 60 seconds per key family.
 
 Key schemas
 -----------
-  mesio:nps:{phone}:{bot_number}           → NPS flow state dict
-  mesio:nps_done:{phone}:{bot_number}      → "1" flag (12h TTL) — NPS already completed/skipped
-  mesio:checkout:{phone}:{bot_number}      → checkout state machine dict
-  mesio:cooldown:table:{table_id}:{bot}    → "1" (SET NX, atomic cooldown flag)
-  mesio:cart_lock:{phone}:{bot_number}     → "1" (SET NX EX, distributed mutex for cart ops)
+  mesio:nps:{phone}:{org_id}           → NPS flow state dict
+  mesio:nps_done:{phone}:{org_id}      → "1" flag (12h TTL) — NPS already completed/skipped
+  mesio:checkout:{phone}:{org_id}      → checkout state machine dict
+  mesio:cart_lock:{phone}:{org_id}     → "1" (SET NX EX, distributed mutex for cart ops)
 
 Fallback in-process dict entries are tuples of (expire_at: float, value: Any).
 """
@@ -37,8 +36,10 @@ _fb_nps: dict[str, tuple[float, Any]] = {}
 _fb_nps_done: dict[str, float] = {}  # key → expire_at_monotonic (12h guard)
 _fb_checkout: dict[str, tuple[float, Any]] = {}
 _fb_cooldown: dict[str, float] = {}  # key → expire_at_monotonic
-_fb_cart_locks: dict[str, asyncio.Lock] = {}  # phone:bot_number → asyncio.Lock (fallback only)
+_fb_cart_locks: dict[str, asyncio.Lock] = {}  # phone:org_id → asyncio.Lock (fallback only)
 _fb_cart_lock_tokens: dict[str, str] = {}  # key → owner token (fallback only)
+_fb_checkout_locks: dict[str, asyncio.Lock] = {}  # base_order_id → asyncio.Lock (fallback only)
+_fb_checkout_lock_tokens: dict[str, str] = {}  # key → owner token (fallback only)
 _fb_nps_transition_locks: dict[str, asyncio.Lock] = {}  # nps_lock key → asyncio.Lock (fallback only)
 _fb_nps_transition_owner: dict[str, str] = {}  # nps_lock key → owner token (fallback only)
 
@@ -101,12 +102,12 @@ def _fb_delete(store: dict, key: str) -> None:
 
 # ── NPS ───────────────────────────────────────────────────────────────────────
 
-def _nps_redis_key(phone: str, bot_number: str) -> str:
-    return f"mesio:nps:{phone}:{bot_number}"
+def _nps_redis_key(phone: str, org_id: int) -> str:
+    return f"mesio:nps:{phone}:{org_id}"
 
 
-async def nps_get(phone: str, bot_number: str) -> dict | None:
-    key = _nps_redis_key(phone, bot_number)
+async def nps_get(phone: str, org_id: int) -> dict | None:
+    key = _nps_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         raw = await r.get(key)
@@ -117,8 +118,8 @@ async def nps_get(phone: str, bot_number: str) -> dict | None:
     return copy.deepcopy(value) if isinstance(value, dict) else value
 
 
-async def nps_set(phone: str, bot_number: str, state: dict, ttl_seconds: int = 86400) -> None:
-    key = _nps_redis_key(phone, bot_number)
+async def nps_set(phone: str, org_id: int, state: dict, ttl_seconds: int = 86400) -> None:
+    key = _nps_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         await r.set(key, _rc.encode(state), ex=ttl_seconds)
@@ -127,8 +128,8 @@ async def nps_set(phone: str, bot_number: str, state: dict, ttl_seconds: int = 8
     _fb_set(_fb_nps, key, state, ttl_seconds, family="nps")
 
 
-async def nps_delete(phone: str, bot_number: str) -> None:
-    key = _nps_redis_key(phone, bot_number)
+async def nps_delete(phone: str, org_id: int) -> None:
+    key = _nps_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         await r.delete(key)
@@ -142,13 +143,13 @@ async def nps_delete(phone: str, bot_number: str) -> None:
 _NPS_DONE_TTL = 43200  # 12 hours
 
 
-def _nps_done_redis_key(phone: str, bot_number: str) -> str:
-    return f"mesio:nps_done:{phone}:{bot_number}"
+def _nps_done_redis_key(phone: str, org_id: int) -> str:
+    return f"mesio:nps_done:{phone}:{org_id}"
 
 
-async def nps_mark_done(phone: str, bot_number: str) -> None:
+async def nps_mark_done(phone: str, org_id: int) -> None:
     """Mark NPS as completed/skipped for this phone+bot. Blocks re-triggering for 12h."""
-    key = _nps_done_redis_key(phone, bot_number)
+    key = _nps_done_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         await r.set(key, "1", ex=_NPS_DONE_TTL)
@@ -169,9 +170,9 @@ async def nps_mark_done(phone: str, bot_number: str) -> None:
     _fb_nps_done[key] = now + _NPS_DONE_TTL
 
 
-async def nps_is_done(phone: str, bot_number: str) -> bool:
+async def nps_is_done(phone: str, org_id: int) -> bool:
     """Returns True if NPS was already completed/skipped within the last 12h."""
-    key = _nps_done_redis_key(phone, bot_number)
+    key = _nps_done_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         return await r.exists(key) == 1
@@ -181,12 +182,12 @@ async def nps_is_done(phone: str, bot_number: str) -> bool:
 
 # ── Checkout ──────────────────────────────────────────────────────────────────
 
-def _checkout_redis_key(phone: str, bot_number: str) -> str:
-    return f"mesio:checkout:{phone}:{bot_number}"
+def _checkout_redis_key(phone: str, org_id: int) -> str:
+    return f"mesio:checkout:{phone}:{org_id}"
 
 
-async def checkout_get(phone: str, bot_number: str) -> dict | None:
-    key = _checkout_redis_key(phone, bot_number)
+async def checkout_get(phone: str, org_id: int) -> dict | None:
+    key = _checkout_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         raw = await r.get(key)
@@ -197,8 +198,8 @@ async def checkout_get(phone: str, bot_number: str) -> dict | None:
     return copy.deepcopy(value) if isinstance(value, dict) else value
 
 
-async def checkout_set(phone: str, bot_number: str, state: dict, ttl_seconds: int = 1800) -> None:
-    key = _checkout_redis_key(phone, bot_number)
+async def checkout_set(phone: str, org_id: int, state: dict, ttl_seconds: int = 1800) -> None:
+    key = _checkout_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         await r.set(key, _rc.encode(state), ex=ttl_seconds)
@@ -207,8 +208,8 @@ async def checkout_set(phone: str, bot_number: str, state: dict, ttl_seconds: in
     _fb_set(_fb_checkout, key, state, ttl_seconds, family="checkout")
 
 
-async def checkout_delete(phone: str, bot_number: str) -> None:
-    key = _checkout_redis_key(phone, bot_number)
+async def checkout_delete(phone: str, org_id: int) -> None:
+    key = _checkout_redis_key(phone, org_id)
     r = await _rc.get_redis()
     if r is not None:
         await r.delete(key)
@@ -217,74 +218,109 @@ async def checkout_delete(phone: str, bot_number: str) -> None:
     _fb_delete(_fb_checkout, key)
 
 
-# ── Table confirm cooldown ─────────────────────────────────────────────────────
+# ── Diner order-send idempotency ────────────────────────────────────────────
+# Keyed by (diner token, client-generated idempotency_key) — a double tap, a
+# retry, or a flaky-network resend of the SAME send-order action must return
+# the SAME cached result instead of committing a second table_order round.
+# Values are plain JSON-serializable dicts (Rule #1 — never Decimal).
 
-def _cooldown_redis_key(table_id: str, bot_number: str) -> str:
-    return f"mesio:cooldown:table:{table_id}:{bot_number}"
+_fb_order_send: dict[str, tuple[float, Any]] = {}
 
 
-async def table_cooldown_acquire(
-    table_id: str, bot_number: str, base_order_id: str = "", ttl_seconds: int = 300
-) -> bool:
-    """
-    Acquire a cooldown lock for the given table+bot combination.
+def _order_send_redis_key(cache_key: str) -> str:
+    return f"mesio:diner_order_sent:{cache_key}"
 
-    Stores the base_order_id as the lock value so that a NEW session at the same
-    table (different base_order_id) always notifies, even if the previous session's
-    cooldown is still active.
 
-    Returns True  → caller should send the WhatsApp confirmation.
-    Returns False → same session, cooldown active → suppress duplicate notification.
-
-    Redis path: GET then SET (or SET NX + compare).
-    Fallback path: in-process dict with (base_order_id, expire_at) tuples.
-    """
-    key = _cooldown_redis_key(table_id, bot_number)
+async def order_send_result_get(cache_key: str) -> dict | None:
+    key = _order_send_redis_key(cache_key)
     r = await _rc.get_redis()
     if r is not None:
-        current = await r.get(key)
-        if current is None:
-            # No cooldown active — acquire for this session
-            await r.set(key, base_order_id or "1", ex=ttl_seconds)
-            return True
-        stored_id = current
-        if base_order_id and stored_id != base_order_id:
-            # Different session at the same table — override cooldown and notify
-            await r.set(key, base_order_id, ex=ttl_seconds)
-            return True
-        # Same session cooldown is active
-        return False
-    _maybe_warn("cooldown")
-    now = time.monotonic()
-    if len(_fb_cooldown) >= _FB_MAX_SIZE:
-        expired = [
-            k for k, v in _fb_cooldown.items()
-            if now >= (v[1] if isinstance(v, tuple) else v)
-        ]
-        for k in expired:
-            _fb_cooldown.pop(k, None)
-        if len(_fb_cooldown) >= _FB_MAX_SIZE:
-            _maybe_warn("cooldown_cap")
-            log.warning("state_store.fallback_capacity_exceeded",
-                        family="cooldown", current_size=len(_fb_cooldown), max_size=_FB_MAX_SIZE)
-            drop = sorted(_fb_cooldown.items(), key=lambda x: x[1][1] if isinstance(x[1], tuple) else x[1])
-            for k, _ in drop[: len(_fb_cooldown) // 2]:
-                _fb_cooldown.pop(k, None)
-    stored = _fb_cooldown.get(key)  # (base_order_id, expire_at) or float (legacy)
-    if stored is None or (isinstance(stored, tuple) and now >= stored[1]):
-        _fb_cooldown[key] = (base_order_id, now + ttl_seconds)
-        return True
-    if isinstance(stored, tuple):
-        stored_id, expire_at = stored
-        if base_order_id and stored_id != base_order_id:
-            _fb_cooldown[key] = (base_order_id, now + ttl_seconds)
-            return True
-        return False  # same session, cooldown active
-    # Legacy float entry
-    if now >= stored:
-        _fb_cooldown[key] = (base_order_id, now + ttl_seconds)
-        return True
-    return False
+        raw = await r.get(key)
+        return _rc.decode(raw)
+    _maybe_warn("order_send")
+    value = _fb_get(_fb_order_send, key)
+    return copy.deepcopy(value) if isinstance(value, dict) else value
+
+
+async def order_send_result_set(cache_key: str, result: dict, ttl_seconds: int = 300) -> None:
+    key = _order_send_redis_key(cache_key)
+    r = await _rc.get_redis()
+    if r is not None:
+        await r.set(key, _rc.encode(result), ex=ttl_seconds)
+        return
+    _maybe_warn("order_send")
+    _fb_set(_fb_order_send, key, result, ttl_seconds, family="order_send")
+
+
+# ── Delivery/pickup checkout idempotency (chunk 3) ──────────────────────────
+# Same pattern as order_send_result_get/set above, kept as its own key
+# family (never reused across the two flows) — keyed by (diner token,
+# client-generated idempotency_key).
+
+_fb_delivery_checkout: dict[str, tuple[float, Any]] = {}
+
+
+def _delivery_checkout_redis_key(cache_key: str) -> str:
+    return f"mesio:delivery_checkout_result:{cache_key}"
+
+
+async def delivery_checkout_result_get(cache_key: str) -> dict | None:
+    key = _delivery_checkout_redis_key(cache_key)
+    r = await _rc.get_redis()
+    if r is not None:
+        raw = await r.get(key)
+        return _rc.decode(raw)
+    _maybe_warn("delivery_checkout")
+    value = _fb_get(_fb_delivery_checkout, key)
+    return copy.deepcopy(value) if isinstance(value, dict) else value
+
+
+async def delivery_checkout_result_set(cache_key: str, result: dict, ttl_seconds: int = 300) -> None:
+    key = _delivery_checkout_redis_key(cache_key)
+    r = await _rc.get_redis()
+    if r is not None:
+        await r.set(key, _rc.encode(result), ex=ttl_seconds)
+        return
+    _maybe_warn("delivery_checkout")
+    _fb_set(_fb_delivery_checkout, key, result, ttl_seconds, family="delivery_checkout")
+
+
+# ── Delivery/pickup payment-proof binding (chunk 3) ─────────────────────────
+# A diner uploads a proof screenshot BEFORE checkout via
+# POST /api/diner/delivery/payment-proof, which returns a Cloudinary URL.
+# That URL is cached here keyed by the diner's OWN token so the checkout
+# endpoint can attach it to the new order WITHOUT ever trusting a
+# client-supplied proof_url value directly — the checkout request body has
+# no such field at all. The only way a URL reaches an order is by having
+# been uploaded, moments earlier, through this same token's own session
+# (docs/claude/delivery-web.md chunk 3: "the returned URL must only ever be
+# attachable to that session's own order").
+
+_fb_delivery_proof: dict[str, tuple[float, Any]] = {}
+_DELIVERY_PROOF_TTL = 1800  # 30 min — long enough to finish checkout
+
+
+def _delivery_proof_redis_key(token: str) -> str:
+    return f"mesio:delivery_proof:{token}"
+
+
+async def delivery_proof_set(token: str, url: str, ttl_seconds: int = _DELIVERY_PROOF_TTL) -> None:
+    key = _delivery_proof_redis_key(token)
+    r = await _rc.get_redis()
+    if r is not None:
+        await r.set(key, url, ex=ttl_seconds)
+        return
+    _maybe_warn("delivery_proof")
+    _fb_set(_fb_delivery_proof, key, url, ttl_seconds, family="delivery_proof")
+
+
+async def delivery_proof_get(token: str) -> str | None:
+    key = _delivery_proof_redis_key(token)
+    r = await _rc.get_redis()
+    if r is not None:
+        return await r.get(key)
+    _maybe_warn("delivery_proof")
+    return _fb_get(_fb_delivery_proof, key)
 
 
 # ── Cart distributed mutex ────────────────────────────────────────────────────
@@ -292,13 +328,13 @@ async def table_cooldown_acquire(
 # Redis path: SET key "1" NX EX ttl (atomic, multi-worker-safe).
 # Fallback path: per-key asyncio.Lock (single-worker only, no cross-worker guarantee).
 
-def _cart_lock_redis_key(phone: str, bot_number: str) -> str:
-    return f"mesio:cart_lock:{phone}:{bot_number}"
+def _cart_lock_redis_key(phone: str, org_id: int) -> str:
+    return f"mesio:cart_lock:{phone}:{org_id}"
 
 
-async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) -> str | None:
+async def cart_lock_acquire(phone: str, org_id: int, ttl_seconds: int = 30) -> str | None:
     """
-    Acquire a distributed lock for cart operations on (phone, bot_number).
+    Acquire a distributed lock for cart operations on (phone, org_id).
 
     Redis path: SET key <token> NX EX ttl — atomic, multi-worker-safe.
     Returns the lock token (str) if acquired, None if already held.
@@ -307,7 +343,7 @@ async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) 
     Fallback (Redis unavailable): acquires an asyncio.Lock instead and returns
     a token for ownership tracking within a single worker.
     """
-    key = _cart_lock_redis_key(phone, bot_number)
+    key = _cart_lock_redis_key(phone, org_id)
     token = str(uuid.uuid4())
     r = await _rc.get_redis()
     if r is not None:
@@ -326,14 +362,14 @@ async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) 
         return None
 
 
-async def cart_lock_release(phone: str, bot_number: str, token: str | None = None) -> None:
+async def cart_lock_release(phone: str, org_id: int, token: str | None = None) -> None:
     """
     Release a previously acquired cart lock.
 
     Redis path: only DEL if the stored token matches (ownership check).
     Fallback path: release the asyncio.Lock only if this token is the holder.
     """
-    key = _cart_lock_redis_key(phone, bot_number)
+    key = _cart_lock_redis_key(phone, org_id)
     if token is None:
         log.error("cart_lock.release_without_token", key=key)
         return
@@ -360,17 +396,81 @@ async def cart_lock_release(phone: str, bot_number: str, token: str | None = Non
         _fb_cart_lock_tokens.pop(key, None)
 
 
+# ── Table checkout distributed mutex ─────────────────────────────────────────
+# Serializes the diner web-checkout critical section (read existing checks,
+# figure out which table_orders rows are still unbilled, insert one new
+# check) per base_order_id — a WHOLE TABLE, not one diner's cart. Two diners
+# tapping "pagar" at the same instant (one "mine", one "toda la mesa") must
+# never both read the same "unbilled" snapshot and each create a check that
+# claims the same items. Same Redis SET-NX-EX primitive as cart_lock_*, just
+# keyed by base_order_id instead of (phone, org_id).
+
+def _checkout_lock_redis_key(base_order_id: str) -> str:
+    return f"mesio:table_checkout_lock:{base_order_id}"
+
+
+async def table_checkout_lock_acquire(base_order_id: str, ttl_seconds: int = 15) -> str | None:
+    """Acquire a distributed lock for the checkout critical section on one
+    base_order_id (one table's whole ticket). Returns the lock token if
+    acquired, None if already held by another request.
+    """
+    key = _checkout_lock_redis_key(base_order_id)
+    token = str(uuid.uuid4())
+    r = await _rc.get_redis()
+    if r is not None:
+        result = await r.set(key, token, nx=True, ex=ttl_seconds)
+        return token if result is not None else None
+    _maybe_warn("table_checkout_lock")
+    if key not in _fb_checkout_locks:
+        _fb_checkout_locks[key] = asyncio.Lock()
+    lock = _fb_checkout_locks[key]
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=5.0)
+        _fb_checkout_lock_tokens[key] = token
+        return token
+    except asyncio.TimeoutError:
+        return None
+
+
+async def table_checkout_lock_release(base_order_id: str, token: str | None = None) -> None:
+    """Release a previously acquired table checkout lock (ownership-checked)."""
+    key = _checkout_lock_redis_key(base_order_id)
+    if token is None:
+        log.error("table_checkout_lock.release_without_token", key=key)
+        return
+    r = await _rc.get_redis()
+    if r is not None:
+        stored = await r.get(key)
+        if stored != token:
+            log.warning("table_checkout_lock.release_ownership_mismatch", key=key)
+            return
+        await r.delete(key)
+        return
+    _maybe_warn("table_checkout_lock")
+    if _fb_checkout_lock_tokens.get(key) != token:
+        log.warning("table_checkout_lock.release_ownership_mismatch_fallback", key=key)
+        return
+    _fb_checkout_lock_tokens.pop(key, None)
+    lock = _fb_checkout_locks.get(key)
+    if lock is not None and lock.locked():
+        lock.release()
+    lock = _fb_checkout_locks.get(key)
+    if lock is not None and not lock.locked():
+        _fb_checkout_locks.pop(key, None)
+        _fb_checkout_lock_tokens.pop(key, None)
+
+
 # ── NPS transition distributed lock ──────────────────────────────────────────
 
 
-async def nps_transition_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 10) -> str | None:
+async def nps_transition_lock_acquire(phone: str, org_id: int, ttl_seconds: int = 10) -> str | None:
     """Acquire atomic lock for NPS state transition. Returns token or None.
 
     Redis path: SET NX — only one worker acquires; others get None.
     Fallback path: asyncio.Lock per key (same as cart_lock_acquire) — prevents
     double-fire within a single worker. Returns None on timeout (5s cap).
     """
-    key = f"mesio:nps_lock:{phone}:{bot_number}"
+    key = f"mesio:nps_lock:{phone}:{org_id}"
     token = str(uuid.uuid4())
     r = await _rc.get_redis()
     if r is not None:
@@ -394,12 +494,12 @@ async def nps_transition_lock_acquire(phone: str, bot_number: str, ttl_seconds: 
         return None
 
 
-async def nps_transition_lock_release(phone: str, bot_number: str, token: str) -> bool:
+async def nps_transition_lock_release(phone: str, org_id: int, token: str) -> bool:
     """Release a previously acquired NPS transition lock. Ownership-safe via Lua.
 
     Fallback path mirrors cart_lock_release: verifies token before releasing.
     """
-    key = f"mesio:nps_lock:{phone}:{bot_number}"
+    key = f"mesio:nps_lock:{phone}:{org_id}"
     r = await _rc.get_redis()
     if r is not None:
         try:
@@ -543,57 +643,6 @@ async def scheduler_leader_renew(token: str, ttl_seconds: int = 90) -> bool:
             return True
     # No Redis reachable — same as fallback token, no race.
     return True
-
-
-# ── Join-code pending (Capa 2 — multi-participant table join) ────────────────
-# State shape: {"table_id": "...", "table_name": "...", "attempts": 0,
-#               "org_id": int, "location_id": int | None}
-# Key: mesio:join_code_pending:{phone}:{bot_number}
-# TTL: 600 seconds (10 min — long enough for the group to share the code)
-
-_fb_join_code_pending: dict[str, tuple[float, Any]] = {}
-_JOIN_CODE_PENDING_TTL = 600  # 10 minutes
-
-
-def _join_code_pending_redis_key(phone: str, bot_number: str) -> str:
-    return f"mesio:join_code_pending:{phone}:{bot_number}"
-
-
-async def join_code_pending_get(phone: str, bot_number: str) -> dict | None:
-    """Return the pending join-code state for this phone+bot, or None."""
-    key = _join_code_pending_redis_key(phone, bot_number)
-    r = await _rc.get_redis()
-    if r is not None:
-        raw = await r.get(key)
-        return _rc.decode(raw)
-    _maybe_warn("join_code_pending")
-    value = _fb_get(_fb_join_code_pending, key)
-    return copy.deepcopy(value) if isinstance(value, dict) else value
-
-
-async def join_code_pending_set(
-    phone: str, bot_number: str, state: dict, ttl_seconds: int = _JOIN_CODE_PENDING_TTL
-) -> None:
-    """Persist the pending join-code state (overwrites existing). state MUST NOT
-    contain Decimal values — use plain int/str/None (Rule #1)."""
-    key = _join_code_pending_redis_key(phone, bot_number)
-    r = await _rc.get_redis()
-    if r is not None:
-        await r.set(key, _rc.encode(state), ex=ttl_seconds)
-        return
-    _maybe_warn("join_code_pending")
-    _fb_set(_fb_join_code_pending, key, state, ttl_seconds, family="join_code_pending")
-
-
-async def join_code_pending_delete(phone: str, bot_number: str) -> None:
-    """Clear the pending join-code state for this phone+bot."""
-    key = _join_code_pending_redis_key(phone, bot_number)
-    r = await _rc.get_redis()
-    if r is not None:
-        await r.delete(key)
-        return
-    _maybe_warn("join_code_pending")
-    _fb_delete(_fb_join_code_pending, key)
 
 
 # ── Scheduler heartbeat ───────────────────────────────────────────────────────

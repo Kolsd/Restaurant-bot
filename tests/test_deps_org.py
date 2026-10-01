@@ -23,11 +23,11 @@ def _make_request(headers: dict | None = None, state_attrs: dict | None = None):
     """Build a minimal Request-like object for dep testing."""
     req = MagicMock()
     req.headers = {**(headers or {})}
-    state = MagicMock()
     state_attrs = state_attrs or {}
-    # getattr(req.state, "mesio_org", None) should return None unless preset
-    state.mesio_org = state_attrs.get("mesio_org", None)
-    req.state = state
+    # The per-request caches live in the ASGI scope (see deps.get_current_user).
+    req.scope = {}
+    if state_attrs.get("mesio_org") is not None:
+        req.scope["mesio.org"] = state_attrs["mesio_org"]
     return req
 
 
@@ -62,7 +62,6 @@ class _FakeRecord(dict):
 _ORG = {
     "id": 1,
     "name": "Test Org",
-    "whatsapp_number": "573001234567",
     "features": {"locale": "es-CO", "currency": "COP"},
     "subscription_plan": "pro",
     "subscription_status": "active",
@@ -73,7 +72,6 @@ _LOC_PRIMARY = {
     "org_id": 1,
     "name": "Principal",
     "is_primary": True,
-    "whatsapp_number": None,
     "active": True,
 }
 
@@ -82,7 +80,6 @@ _LOC_OTHER_ORG = {
     "org_id": 999,  # different org!
     "name": "Otro Restaurante",
     "is_primary": True,
-    "whatsapp_number": None,
     "active": True,
 }
 
@@ -90,6 +87,7 @@ _USER_ADMIN = {
     "username": "owner@test.com",
     "restaurant_id": 1,
     "branch_id": 1,
+    "org_id": 1,
     "role": "owner",
 }
 
@@ -97,6 +95,9 @@ _USER_STAFF_BRANCH = {
     "username": "staff:uuid-abc",
     "restaurant_id": 20,
     "branch_id": 20,
+    # P0 fix (2026-09): _resolve_org_id_for_user now reads ONLY the explicit
+    # org_id field (staff.org_id, mapped here to the parent org).
+    "org_id": 1,
     "role": "mesero",
 }
 
@@ -129,15 +130,15 @@ async def test_get_current_org_resolves_org_for_matriz_user():
 
     assert org["id"] == 1
     assert org["name"] == "Test Org"
-    # Result should be cached on request.state
-    assert request.state.mesio_org is not None
+    # Result should be cached for the rest of the request
+    assert request.scope["mesio.org"] is not None
 
 
-# ── test_get_current_org_resolves_org_for_sucursal_user ──────────────────────
+# ── test_get_current_org_resolves_org_for_branch_user ──────────────────────
 
 
-async def test_get_current_org_resolves_org_for_sucursal_user():
-    """For a Sucursal staff user (restaurant_id = 20, mapped to org_id = 1),
+async def test_get_current_org_resolves_org_for_branch_user():
+    """For a Branch staff user (restaurant_id = 20, mapped to org_id = 1),
     get_current_org correctly returns the parent Org."""
     conn = _make_conn()
     # Mapping lookup returns org_id=1 for restaurant_id=20
@@ -238,7 +239,6 @@ async def test_get_current_restaurant_legacy_still_returns_data():
     _restaurant = {
         "id": 1,
         "name": "Test Restaurant",
-        "whatsapp_number": "573001234567",
         "features": {"locale": "es-CO", "currency": "COP"},
     }
 
@@ -252,12 +252,13 @@ async def test_get_current_restaurant_legacy_still_returns_data():
                     "username": "owner@test.com",
                     "branch_id": 1,
                     "restaurant_id": 1,
+                    "org_id": 1,
                     "role": "owner",
                 }
             ),
         ),
         patch(
-            "app.routes.deps.db.db_get_restaurant_by_id",
+            "app.routes.deps.db.db_get_restaurant_by_org_id",
             AsyncMock(return_value=_restaurant),
         ),
     ):
@@ -268,7 +269,6 @@ async def test_get_current_restaurant_legacy_still_returns_data():
     assert restaurant is not None
     assert restaurant["id"] == 1
     assert restaurant["name"] == "Test Restaurant"
-    assert "whatsapp_number" in restaurant
 
 
 # ── test_require_location_raises_when_none ───────────────────────────────────

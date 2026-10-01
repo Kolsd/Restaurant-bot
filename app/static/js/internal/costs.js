@@ -200,7 +200,7 @@ function planClass(plan) {
   if (p === 'cadena')      return 'plan-cadena';
   if (p === 'pro')         return 'plan-pro';
   if (p === 'restaurante') return 'plan-restaurante';
-  if (p === 'pulso')       return 'plan-pulso';
+  if (p === 'esencial')    return 'plan-esencial';
   if (p === 'comp')        return 'plan-comp';
   return 'plan-free';
 }

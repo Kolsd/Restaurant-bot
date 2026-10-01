@@ -26,10 +26,6 @@
         <button class="nav-item active" data-view="dashboard" onclick="showView('dashboard',this)">
           <span class="ni">▦</span> Dashboard
         </button>
-        <button class="nav-item" data-view="inbox" onclick="showView('inbox',this)">
-          <span class="ni">💬</span> Inbox
-          <span class="nav-badge" id="inbox-badge" style="display:none">0</span>
-        </button>
         <div class="nav-label">Ventas</div>
         <button class="nav-item" data-view="pipeline" onclick="showView('pipeline',this)">
           <span class="ni">⬛</span> Pipeline
@@ -38,9 +34,6 @@
           <span class="ni">☰</span> Contactos
         </button>
         <div class="nav-label">Herramientas</div>
-        <button class="nav-item" onclick="openTemplateManager()">
-          <span class="ni">📝</span> Templates
-        </button>
         <button class="nav-item" onclick="document.getElementById('csv-input').click()">
           <span class="ni">📁</span> Importar CSV
         </button>
@@ -149,36 +142,6 @@
         </div>
       </section>
 
-      <!-- INBOX -->
-      <section class="view" id="view-inbox">
-        <div class="inbox-wrap">
-          <div class="inbox-list-pane" id="inbox-list-pane">
-            <div class="inbox-pane-hd">
-              <span>Conversaciones</span>
-              <span class="hd-badge" id="inbox-total">0</span>
-            </div>
-            <div id="inbox-list"></div>
-          </div>
-          <div class="inbox-chat-pane" id="inbox-chat-pane">
-            <div class="inbox-placeholder" id="inbox-placeholder">
-              <div style="font-size:2.5rem;margin-bottom:.5rem">💬</div>
-              <div style="color:#888;font-size:13px">Selecciona una conversación</div>
-            </div>
-            <div class="chat-container" id="chat-container" style="display:none">
-              <div class="chat-hd" id="chat-hd"></div>
-              <div class="chat-messages" id="chat-messages"></div>
-              <div class="chat-footer">
-                <textarea id="chat-input" placeholder="Escribe un mensaje…" onkeydown="chatKeydown(event)" oninput="autoResizeChatInput(this)" onpaste="chatInputPaste(event)"></textarea>
-                <div class="chat-footer-btns">
-                  <button class="btn-ghost btn-sm" onclick="openQuickTemplate()">📤 Template</button>
-                  <button class="btn-primary btn-sm" onclick="sendMessage()">Enviar →</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- PIPELINE -->
       <section class="view" id="view-pipeline">
         <div class="kanban-board" id="kanban-board"></div>
@@ -240,14 +203,12 @@
         <option value="medium">🟡 Media</option>
         <option value="low">⚪ Baja</option>
       </select>
-      <button class="btn-icon-sm" onclick="dpSendTemplate()" title="Enviar template">📤</button>
       <button class="btn-dp-arch" id="btn-dp-arch" onclick="dpArchive()">Archivar</button>
       <button class="btn-icon-sm" onclick="openConvertModal(S.activeId)" title="Convertir a restaurante" style="background:#E1F5EE;color:#0F6E56;font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid #b2dfdb;font-weight:600;">🏪 Convertir</button>
     </div>
     <div class="dp-tabs">
       <button class="dp-tab active" onclick="dpSwitchTab('overview',this)">Resumen</button>
       <button class="dp-tab" onclick="dpSwitchTab('timeline',this)">Timeline</button>
-      <button class="dp-tab" onclick="dpSwitchTab('messages',this)">Mensajes</button>
       <button class="dp-tab" onclick="dpSwitchTab('notes',this)">Notas</button>
     </div>
     <div class="dp-body" id="dp-body"></div>
@@ -258,13 +219,12 @@
 <!-- ── BULK BAR ── -->
 <div class="bulk-bar" id="bulk-bar" style="display:none">
   <span class="bulk-count" id="bulk-count">0 seleccionados</span>
-  <button class="bulk-btn" onclick="bulkSendTemplate()">📤 Template</button>
   <button class="bulk-btn" onclick="openBulkStage()">↻ Etapa</button>
   <button class="bulk-btn bulk-danger" onclick="bulkArchive()">Archivar</button>
   <button class="bulk-btn bulk-ghost" onclick="clearSelection()">✕</button>
 </div>
 
-<!-- MODAL: NUEVO PROSPECTO -->
+<!-- MODAL: NEW PROSPECT -->
 <div class="modal-ov" id="modal-add" onclick="closeModalBg(event,'modal-add')">
   <div class="modal-box">
     <div class="modal-hd"><span class="modal-title">Nuevo Prospecto</span><button class="modal-close" onclick="closeModal('modal-add')">✕</button></div>
@@ -299,48 +259,6 @@
     <div class="modal-ft">
       <button class="btn-secondary" onclick="closeModal('modal-add')">Cancelar</button>
       <button class="btn-primary" onclick="saveProspect()">Crear Prospecto</button>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL: ENVIAR TEMPLATE -->
-<div class="modal-ov" id="modal-tpl-send" onclick="closeModalBg(event,'modal-tpl-send')">
-  <div class="modal-box modal-lg">
-    <div class="modal-hd">
-      <span class="modal-title">Enviar Template <span class="hd-badge" id="tpl-send-count">0</span></span>
-      <button class="modal-close" onclick="closeModal('modal-tpl-send')">✕</button>
-    </div>
-    <div class="modal-bd">
-      <div class="fg" style="margin-bottom:1rem">
-        <label>Template</label>
-        <select id="tpl-send-sel" onchange="onTplSendSelect()"><option value="">— Elegir —</option></select>
-      </div>
-      <div id="tpl-send-preview" style="display:none">
-        <div class="tpl-preview-box" id="tpl-preview-body"></div>
-        <div id="tpl-params-wrap"></div>
-      </div>
-    </div>
-    <div class="modal-ft">
-      <button class="btn-secondary" onclick="closeModal('modal-tpl-send')">Cancelar</button>
-      <button class="btn-primary" onclick="doSendTemplate()">Enviar</button>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL: TEMPLATE MANAGER -->
-<div class="modal-ov" id="modal-tpl-mgr" onclick="closeModalBg(event,'modal-tpl-mgr')">
-  <div class="modal-box modal-lg">
-    <div class="modal-hd"><span class="modal-title">Gestión de Templates</span><button class="modal-close" onclick="closeModal('modal-tpl-mgr')">✕</button></div>
-    <div class="modal-bd">
-      <div class="form-grid" style="margin-bottom:1rem">
-        <div class="fg"><label>Nombre interno</label><input type="text" id="tpl-name" placeholder="Nombre display"></div>
-        <div class="fg"><label>Nombre en Meta (wa_name)</label><input type="text" id="tpl-wa-name" placeholder="nombre_template_meta"></div>
-        <div class="fg"><label>Idioma Meta</label><input type="text" id="tpl-language" placeholder="es_CO" value="es_CO"></div>
-        <div class="fg fg-full"><label>Cuerpo del template</label><textarea id="tpl-body" rows="3" placeholder="Hola {{1}}, somos Mesio…"></textarea></div>
-        <div class="fg fg-full"><label>Parámetros (separados por coma)</label><input type="text" id="tpl-params" placeholder="nombre_restaurante,ciudad"></div>
-      </div>
-      <button class="btn-primary btn-sm" onclick="saveTemplate()">+ Agregar</button>
-      <div id="tpl-mgr-list" style="margin-top:1.25rem"></div>
     </div>
   </div>
 </div>

@@ -138,7 +138,7 @@ input:checked+.slider:before{transform:translateX(18px);}
 /* ── PLAN BADGES ── */
 .plan-free{background:#f0f0e8;color:#555;}
 .plan-basic{background:#f0f0e8;color:#555;}
-.plan-pulso{background:#E6F1FB;color:#185FA5;}
+.plan-esencial{background:#E6F1FB;color:#185FA5;}
 .plan-restaurante{background:#E1F5EE;color:#0F6E56;}
 .plan-pro{background:#EEE8FD;color:#5B21B6;}
 .plan-cadena{background:#FEF3C7;color:#92400E;}
@@ -196,7 +196,6 @@ input:checked+.slider:before{transform:translateX(18px);}
 
     <div class="nav-group-label">Clientes (legacy)</div>
     <button class="nav-item" id="nav-restaurantes" onclick="showSection('restaurantes',this)">🍽️ Restaurantes</button>
-    <button class="nav-item" id="nav-nuevo" onclick="showSection('nuevo',this)">➕ Nuevo cliente</button>
     <button class="nav-item" id="nav-usuarios" onclick="showSection('usuarios',this)">👥 Usuarios</button>
 
     <div class="nav-group-label">Org + Sedes</div>
@@ -204,7 +203,6 @@ input:checked+.slider:before{transform:translateX(18px);}
 
     <div class="nav-group-label">Herramientas</div>
     <a class="nav-item" href="/crm" target="_blank" style="text-decoration:none;">📊 CRM Mesio ↗</a>
-    <a class="nav-item" href="/internal/analytics" target="_blank" style="text-decoration:none;">📈 Analytics ↗</a>
     <a class="nav-item" href="/internal/monitoring" target="_blank" style="text-decoration:none;">🖥️ Monitoring ↗</a>
 
     <div class="nav-group-label">Financiero</div>
@@ -244,7 +242,7 @@ input:checked+.slider:before{transform:translateX(18px);}
       </div>
     </div>
 
-    <!-- ══ RESTAURANTES ═════════════════════════════════════════════════ -->
+    <!-- ══ RESTAURANTS ═════════════════════════════════════════════════ -->
     <div id="restaurantes" class="section">
       <!-- Detail panel (shown when a restaurant is selected) -->
       <div id="detail-panel">
@@ -261,9 +259,7 @@ input:checked+.slider:before{transform:translateX(18px);}
         <!-- Quick actions -->
         <div class="quick-actions" id="dp-quick-actions">
           <button class="btn-ghost" onclick="openPlanModal()">🏷️ Cambiar plan</button>
-          <button class="btn-ghost" id="dp-analytics-btn" onclick="">📈 Ver analytics →</button>
           <button class="btn-ghost" id="dp-costs-btn" onclick="">💰 Ver costos →</button>
-          <button class="btn-ghost" id="dp-whatsapp-btn" onclick="" target="_blank">💬 Abrir WhatsApp →</button>
         </div>
 
         <!-- Mini stats -->
@@ -276,7 +272,6 @@ input:checked+.slider:before{transform:translateX(18px);}
           <div class="detail-tab active" onclick="switchDetailTab('info',this)">Info</div>
           <div class="detail-tab" onclick="switchDetailTab('plan',this)">Plan</div>
           <div class="detail-tab" onclick="switchDetailTab('modulos',this)">Módulos</div>
-          <div class="detail-tab" onclick="switchDetailTab('credenciales',this)">Meta / WA</div>
           <div class="detail-tab" onclick="switchDetailTab('peligroso',this)">Peligroso</div>
           <div class="detail-tab" onclick="switchDetailTab('auditlog',this);loadAuditLog()">Audit log</div>
           <div class="detail-tab" onclick="switchDetailTab('onboarding',this);loadOnboarding()">Onboarding</div>
@@ -287,8 +282,7 @@ input:checked+.slider:before{transform:translateX(18px);}
           <div id="dtab-info" class="detail-tab-panel active">
             <div class="form-grid">
               <div><label class="field-label">Nombre del restaurante</label><input id="dp-name-input" class="field-input" placeholder="Nombre"></div>
-              <div><label class="field-label">Número WhatsApp (bot)</label><input id="dp-wa-input" class="field-input" placeholder="+57300..."></div>
-              <div class="form-full"><label class="field-label">Dirección</label><input id="dp-addr-input" class="field-input" placeholder="Dirección completa"></div>
+              <div class="form-full" style="font-size:11px;color:#999;">La dirección es un dato por sede — se administra desde el panel del propio restaurante (Sucursales), no aquí.</div>
               <div>
                 <label class="field-label">Zona horaria</label>
                 <select id="dp-timezone" class="field-input">
@@ -335,9 +329,26 @@ input:checked+.slider:before{transform:translateX(18px);}
                 <span id="dp-plan-badge" class="badge badge-chip">—</span>
               </div>
               <div>
-                <div style="font-size:12px;color:#888;margin-bottom:4px;">Comp hasta</div>
+                <div style="font-size:12px;color:#888;margin-bottom:4px;">Gratis hasta</div>
                 <span id="dp-comp-until-display" style="font-size:13px;">—</span>
               </div>
+              <div>
+                <div style="font-size:12px;color:#888;margin-bottom:4px;">Precio fundador (por sede)</div>
+                <span id="dp-founder-display" style="font-size:13px;">—</span>
+              </div>
+              <div>
+                <div style="font-size:12px;color:#888;margin-bottom:4px;">Estado</div>
+                <span id="dp-billing-status" style="font-size:13px;">—</span>
+              </div>
+              <div>
+                <div style="font-size:12px;color:#888;margin-bottom:4px;">Pagado hasta</div>
+                <span id="dp-paid-until-display" style="font-size:13px;">—</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:1.25rem;">
+              <button class="btn btn-secondary btn-sm" onclick="recordPayment(1)">Registrar pago mensual</button>
+              <button class="btn btn-secondary btn-sm" onclick="recordPayment(12)">Registrar pago anual</button>
+              <div class="feedback-msg" id="payment-feedback"></div>
             </div>
             <div style="display:flex;flex-direction:column;gap:10px;">
               <div style="padding:12px;background:#f5f5f0;border-radius:10px;">
@@ -345,20 +356,21 @@ input:checked+.slider:before{transform:translateX(18px);}
                 <div class="form-grid" style="margin-bottom:10px;">
                   <div>
                     <label class="field-label">Nuevo plan</label>
-                    <select id="dp-new-plan" class="field-input" onchange="onPlanSelectChange()">
-                      <option value="free">Free / Demo</option>
-                      <option value="pulso">Pulso ($149K/mes)</option>
-                      <option value="restaurante">Restaurante ($299K/mes)</option>
-                      <option value="pro">Pro ($549K/mes)</option>
-                      <option value="cadena">Cadena ($899K/mes)</option>
-                      <option value="comp">Comp (gratis)</option>
+                    <select id="dp-new-plan" class="field-input">
+                      <option value="esencial">Esencial ($119K/sede)</option>
+                      <option value="restaurante">Restaurante ($249K/sede)</option>
+                      <option value="pro">Pro ($349K/sede)</option>
+                      <option value="cadena">Cadena ($299K/sede)</option>
                     </select>
                   </div>
-                  <div id="dp-comp-until-wrap" style="display:none;">
-                    <label class="field-label">Comp hasta (fecha)</label>
+                  <div>
+                    <label class="field-label">Gratis hasta (vacío = se cobra)</label>
                     <input type="date" id="dp-comp-until-input" class="field-input">
                   </div>
                 </div>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px;">
+                  <input type="checkbox" id="dp-founder-input"> Programa fundador (40% menos, congelado de por vida)
+                </label>
                 <div style="display:flex;gap:8px;align-items:center;">
                   <button class="btn btn-primary btn-sm" onclick="savePlanChange()">Guardar plan</button>
                   <div class="feedback-msg" id="plan-feedback"></div>
@@ -367,28 +379,13 @@ input:checked+.slider:before{transform:translateX(18px);}
             </div>
           </div>
 
-          <!-- Tab: Módulos -->
+          <!-- Tab: Modules -->
           <div id="dtab-modulos" class="detail-tab-panel">
             <div style="font-size:12px;color:#888;margin-bottom:1rem;">Los cambios se aplican inmediatamente. El restaurante ve los módulos activos en su dashboard.</div>
             <div id="dp-modules-list"></div>
             <div style="display:flex;gap:8px;align-items:center;margin-top:1rem;">
               <button class="btn btn-primary" onclick="saveModules()">💾 Guardar módulos</button>
               <div class="feedback-msg" id="modules-feedback"></div>
-            </div>
-          </div>
-
-          <!-- Tab: Credenciales Meta / WA -->
-          <div id="dtab-credenciales" class="detail-tab-panel">
-            <div style="background:#FFF8E6;border:1px solid #F0A500;border-radius:8px;padding:10px 14px;font-size:12px;color:#7A4F00;margin-bottom:1rem;">
-              ⚠️ Estas credenciales se guardan en la DB. Cámbialas solo si el cliente actualizó su token de Meta.
-            </div>
-            <div class="form-grid">
-              <div><label class="field-label">WA Phone Number ID</label><input id="dp-phoneid-input" class="field-input" placeholder="ID del número de teléfono"></div>
-              <div><label class="field-label">Meta Access Token</label><input id="dp-token-input" class="field-input" type="password" placeholder="EAA..."></div>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <button class="btn btn-primary" onclick="saveCredentials()">💾 Actualizar credenciales</button>
-              <div class="feedback-msg" id="creds-feedback"></div>
             </div>
           </div>
 
@@ -430,14 +427,13 @@ input:checked+.slider:before{transform:translateX(18px);}
             <div style="margin-top:1.25rem;padding-top:1rem;border-top:0.5px solid #e0e0d8;">
               <div style="font-size:11px;color:#888;font-weight:600;margin-bottom:10px;">ACCIONES</div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button class="btn btn-secondary btn-sm" onclick="obResendCredentials()">📲 Reenviar credenciales por WA</button>
                 <button class="btn btn-secondary btn-sm" onclick="obMarkComplete()">✅ Marcar onboarding completo</button>
               </div>
               <div id="ob-action-feedback" style="font-size:12px;color:#888;margin-top:8px;"></div>
             </div>
           </div>
 
-          <!-- Tab: Peligroso -->
+          <!-- Tab: Danger Zone -->
           <div id="dtab-peligroso" class="detail-tab-panel">
             <div style="background:#FDE8E8;border:1px solid #f5b7b1;border-radius:8px;padding:12px 14px;margin-bottom:1.25rem;">
               <div style="font-size:13px;font-weight:600;color:#C0392B;margin-bottom:6px;">⚠️ Zona peligrosa</div>
@@ -464,14 +460,13 @@ input:checked+.slider:before{transform:translateX(18px);}
           <button class="filter-btn active" onclick="setRestFilter('all',this)">Todos</button>
           <button class="filter-btn" onclick="setRestFilter('active',this)">Activos</button>
           <button class="filter-btn" onclick="setRestFilter('suspended',this)">Suspendidos</button>
-          <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="showSection('nuevo',document.getElementById('nav-nuevo'))">+ Nuevo</button>
         </div>
         <div class="card" style="padding:0;overflow:hidden;">
           <table>
             <thead>
               <tr>
                 <th>Restaurante</th>
-                <th>WhatsApp</th>
+                <th>Enlace</th>
                 <th>Módulos</th>
                 <th>Estado</th>
                 <th>ID</th>
@@ -486,122 +481,7 @@ input:checked+.slider:before{transform:translateX(18px);}
       </div>
     </div>
 
-    <!-- ══ NUEVO ═════════════════════════════════════════════════════════ -->
-    <div id="nuevo" class="section">
-      <div class="card">
-        <div class="card-title">Datos del restaurante</div>
-        <div class="form-grid">
-          <div><label class="field-label">Nombre del restaurante *</label><input id="r_name" class="field-input" placeholder="Nombre del negocio"></div>
-          <div><label class="field-label">Número WhatsApp *</label><input id="r_wa" class="field-input" placeholder="+57300..."></div>
-          <div class="form-full"><label class="field-label">Dirección completa *</label><input id="r_addr" class="field-input" placeholder="Calle 93 #15-32, Bogotá"></div>
-          <div><label class="field-label">Ciudad</label><input id="r_city" class="field-input" placeholder="Bogotá"></div>
-          <div>
-            <label class="field-label">Zona horaria</label>
-            <select id="r_tz" class="field-input">
-              <option value="America/Bogota">América/Bogotá</option>
-              <option value="America/Mexico_City">América/México</option>
-              <option value="America/Lima">América/Lima</option>
-              <option value="America/Santiago">América/Santiago</option>
-              <option value="America/Buenos_Aires">América/Buenos Aires</option>
-              <option value="UTC">UTC</option>
-            </select>
-          </div>
-          <div>
-            <label class="field-label">Moneda</label>
-            <select id="r_currency" class="field-input">
-              <option value="COP">COP — Peso colombiano</option>
-              <option value="MXN">MXN — Peso mexicano</option>
-              <option value="PEN">PEN — Sol peruano</option>
-              <option value="CLP">CLP — Peso chileno</option>
-              <option value="USD">USD — Dólar</option>
-            </select>
-          </div>
-          <div>
-            <label class="field-label">Locale</label>
-            <select id="r_locale" class="field-input">
-              <option value="es-CO">es-CO (Colombia)</option>
-              <option value="es-MX">es-MX (México)</option>
-              <option value="es-PE">es-PE (Perú)</option>
-              <option value="es-CL">es-CL (Chile)</option>
-              <option value="en-US">en-US (English)</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Credenciales Meta (opcional)</div>
-        <div class="form-grid">
-          <div><label class="field-label">WA Phone Number ID</label><input id="r_wa_phone_id" class="field-input" placeholder="ID del número"></div>
-          <div><label class="field-label">Meta Access Token</label><input id="r_wa_access_token" class="field-input" type="password" placeholder="EAA..."></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Módulos activos</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
-          <div class="module-row" style="padding-right:1rem;">
-            <div><div class="module-name">🛵 Pedidos WhatsApp</div><div class="module-desc">Domicilios y para llevar por WA</div></div>
-            <label class="switch"><input type="checkbox" id="feat_orders" checked><span class="slider"></span></label>
-          </div>
-          <div class="module-row" style="padding-left:1rem;">
-            <div><div class="module-name">🪑 Mesas & QR</div><div class="module-desc">Órdenes desde mesa vía QR</div></div>
-            <label class="switch"><input type="checkbox" id="feat_tables" checked><span class="slider"></span></label>
-          </div>
-          <div class="module-row" style="padding-right:1rem;">
-            <div><div class="module-name">📅 Reservaciones</div><div class="module-desc">Reservas por WhatsApp</div></div>
-            <label class="switch"><input type="checkbox" id="feat_reservations" checked><span class="slider"></span></label>
-          </div>
-          <div class="module-row" style="padding-left:1rem;">
-            <div><div class="module-name">🤖 POS + IA</div><div class="module-desc">Dashboard analítico con IA</div></div>
-            <label class="switch"><input type="checkbox" id="feat_pos" checked><span class="slider"></span></label>
-          </div>
-          <div class="module-row" style="padding-right:1rem;">
-            <div><div class="module-name">⭐ NPS</div><div class="module-desc">Encuestas de satisfacción WA</div></div>
-            <label class="switch"><input type="checkbox" id="feat_nps"><span class="slider"></span></label>
-          </div>
-          <div class="module-row" style="padding-left:1rem;">
-            <div><div class="module-name">📦 Inventario</div><div class="module-desc">Control de stock vinculado al menú</div></div>
-            <label class="switch"><input type="checkbox" id="feat_inventory"><span class="slider"></span></label>
-          </div>
-          <div class="module-row" style="padding-right:1rem;">
-            <div><div class="module-name">💳 Pagos Wompi</div><div class="module-desc">Pagos en línea integrados</div></div>
-            <label class="switch"><input type="checkbox" id="feat_wompi"><span class="slider"></span></label>
-          </div>
-          <div class="module-row" style="padding-left:1rem;">
-            <div><div class="module-name">👤 Staff & Propinas</div><div class="module-desc">Turnos y corte de propinas</div></div>
-            <label class="switch"><input type="checkbox" id="feat_staff_tips"><span class="slider"></span></label>
-          </div>
-          <div class="module-row" style="padding-right:1rem;">
-            <div><div class="module-name">🎁 Fidelización</div><div class="module-desc">Programa de puntos</div></div>
-            <label class="switch"><input type="checkbox" id="feat_loyalty"><span class="slider"></span></label>
-          </div>
-          <div class="module-row" style="padding-left:1rem;">
-            <div><div class="module-name">📑 DIAN (Factura electrónica)</div><div class="module-desc">Integración con MATIAS API</div></div>
-            <label class="switch"><input type="checkbox" id="feat_dian"><span class="slider"></span></label>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">
-          Menú JSON
-          <div style="display:flex;gap:8px;align-items:center;">
-            <input type="file" id="menu_file" accept=".pdf,.png,.jpg,.jpeg" style="font-size:12px;">
-            <button class="btn btn-secondary btn-sm" onclick="parseMenuFile()" id="btn_parse">✨ Extraer con IA</button>
-          </div>
-        </div>
-        <textarea id="r_menu" class="field-input" placeholder='{"Pizzas":[{"name":"Margarita","price":25000,"description":"Clásica italiana"}]}'></textarea>
-      </div>
-
-      <div style="display:flex;gap:10px;align-items:center;">
-        <button class="btn btn-primary" onclick="createRestaurant()">Crear e implementar restaurante →</button>
-        <button class="btn btn-secondary" onclick="clearNewForm()">Limpiar</button>
-        <div class="feedback-msg" id="nuevo-feedback"></div>
-      </div>
-    </div>
-
-    <!-- ══ USUARIOS ══════════════════════════════════════════════════════ -->
+    <!-- ══ USERS ══════════════════════════════════════════════════════ -->
     <div id="usuarios" class="section">
       <div style="display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start;">
         <d<div class="card">
@@ -632,7 +512,7 @@ input:checked+.slider:before{transform:translateX(18px);}
       </div>
     </div>
 
-    <!-- ══ DIAN & FOLIOS ══════════════════════════════════════════════════ -->
+    <!-- ══ DIAN & INVOICE FOLIOS ══════════════════════════════════════════════════ -->
     <div id="dian" class="section">
       <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
         <div class="metric"><div class="metric-label">📄 Folios totales emitidos</div><div class="metric-value" id="dian-total">—</div><div class="metric-sub">histórico</div></div>
@@ -662,7 +542,7 @@ input:checked+.slider:before{transform:translateX(18px);}
       </div>
     </div>
 
-    <!-- ══ ORG + SEDES ══════════════════════════════════════════════════════ -->
+    <!-- ══ ORG + LOCATIONS ══════════════════════════════════════════════════════ -->
     <div id="orgloc" class="section">
 
       <!-- Tab bar -->
@@ -679,7 +559,7 @@ input:checked+.slider:before{transform:translateX(18px);}
         </button>
       </div>
 
-      <!-- ── Tab: Organizaciones ── -->
+      <!-- ── Tab: Organizations ── -->
       <div id="orgtab-orgs" class="org-tab-panel">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
           <span style="font-size:14px;font-weight:600;">Todas las organizaciones</span>
@@ -689,7 +569,7 @@ input:checked+.slider:before{transform:translateX(18px);}
           <table>
             <thead>
               <tr>
-                <th>ID</th><th>Nombre</th><th>Slug</th><th>WhatsApp</th>
+                <th>ID</th><th>Nombre</th><th>Slug</th>
                 <th>Plan</th><th>Sedes</th><th>Estado</th><th>Creado</th><th>Acciones</th>
               </tr>
             </thead>
@@ -700,13 +580,13 @@ input:checked+.slider:before{transform:translateX(18px);}
         </div>
       </div>
 
-      <!-- ── Tab: Sedes ── -->
+      <!-- ── Tab: Locations ── -->
       <div id="orgtab-sedes" class="org-tab-panel" style="display:none;">
         <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:10px;">
             <label style="font-size:12px;color:#888;font-weight:600;">Organización:</label>
             <select id="sedes-org-filter" class="field-input" style="width:220px;"
-                    onchange="onSedesOrgFilterChange()">
+                    onchange="onLocationsOrgFilterChange()">
               <option value="">Todas las organizaciones</option>
             </select>
           </div>
@@ -717,11 +597,11 @@ input:checked+.slider:before{transform:translateX(18px);}
             <thead>
               <tr>
                 <th>ID</th><th>Organización</th><th>Nombre</th><th>Código</th>
-                <th>Dirección</th><th>WhatsApp</th><th>Principal</th><th>Activa</th><th>Acciones</th>
+                <th>Dirección</th><th>Principal</th><th>Activa</th><th>Acciones</th>
               </tr>
             </thead>
             <tbody id="sedes-tbody">
-              <tr><td colspan="9" class="empty-state">Cargando...</td></tr>
+              <tr><td colspan="8" class="empty-state">Cargando...</td></tr>
             </tbody>
           </table>
         </div>
@@ -732,7 +612,7 @@ input:checked+.slider:before{transform:translateX(18px);}
   </div><!-- /main -->
 </div><!-- /app -->
 
-<!-- ══ MODAL: Organización ══════════════════════════════════════════════════ -->
+<!-- ══ MODAL: Organization ══════════════════════════════════════════════════ -->
 <div id="org-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:16px;padding:2rem;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
@@ -750,26 +630,12 @@ input:checked+.slider:before{transform:translateX(18px);}
         <input id="om-slug" class="field-input" placeholder="burger-house">
       </div>
       <div>
-        <label class="field-label">WhatsApp default</label>
-        <input id="om-whatsapp" class="field-input" placeholder="+57300...">
-      </div>
-      <div>
-        <label class="field-label">WA Phone Number ID</label>
-        <input id="om-wa-phone-id" class="field-input" placeholder="ID del número">
-      </div>
-      <div>
-        <label class="field-label">Meta Access Token</label>
-        <input id="om-wa-token" class="field-input" type="password" placeholder="EAA...">
-      </div>
-      <div>
         <label class="field-label">Plan</label>
         <select id="om-plan" class="field-input">
-          <option value="free">Free / Demo</option>
-          <option value="pulso">Pulso ($149K/mes)</option>
-          <option value="restaurante" selected>Restaurante ($299K/mes)</option>
-          <option value="pro">Pro ($549K/mes)</option>
-          <option value="cadena">Cadena ($899K/mes)</option>
-          <option value="comp">Comp (gratis)</option>
+          <option value="esencial">Esencial ($119K/sede)</option>
+          <option value="restaurante" selected>Restaurante ($249K/sede)</option>
+          <option value="pro">Pro ($349K/sede)</option>
+          <option value="cadena">Cadena ($299K/sede)</option>
         </select>
       </div>
     </div>
@@ -781,7 +647,7 @@ input:checked+.slider:before{transform:translateX(18px);}
   </div>
 </div>
 
-<!-- ══ MODAL: Sede ══════════════════════════════════════════════════════════ -->
+<!-- ══ MODAL: Location ══════════════════════════════════════════════════════════ -->
 <div id="loc-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:16px;padding:2rem;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
@@ -818,18 +684,6 @@ input:checked+.slider:before{transform:translateX(18px);}
         <input id="lm-lon" class="field-input" type="number" step="any" placeholder="-74.0817">
       </div>
       <div>
-        <label class="field-label">WhatsApp (override)</label>
-        <input id="lm-whatsapp" class="field-input" placeholder="+57300... (deja vacío para heredar)">
-      </div>
-      <div>
-        <label class="field-label">WA Phone Number ID</label>
-        <input id="lm-wa-phone-id" class="field-input" placeholder="ID override">
-      </div>
-      <div>
-        <label class="field-label">Meta Token override</label>
-        <input id="lm-wa-token" class="field-input" type="password" placeholder="EAA...">
-      </div>
-      <div>
         <label class="field-label">Zona horaria</label>
         <select id="lm-timezone" class="field-input">
           <option value="America/Bogota">América/Bogotá (COT)</option>
@@ -856,22 +710,20 @@ input:checked+.slider:before{transform:translateX(18px);}
 <script src="/static/js/internal/superadmin.js"></script>
 
 <script>
-// ── Estado global ──────────────────────────────────────────────────────
+// ── Global state ──────────────────────────────────────────────────────
 // ADMIN_KEY is never stored in browser storage — we use a session token instead
 let ALL_RESTAURANTS = [];
 let _currentRestFilter = 'all';
 let _currentDetailId = null;
 
 const MODULES_CONFIG = [
-  { key:'module_orders',      label:'🛵 Pedidos WhatsApp',     desc:'Domicilios y para llevar por WA', defaultOn:true },
+  { key:'module_orders',      label:'🛵 Domicilios',            desc:'Pedidos a domicilio y para recoger (web)', defaultOn:true },
   { key:'module_tables',      label:'🪑 Mesas & QR',            desc:'Órdenes desde mesa vía QR',       defaultOn:true },
-  { key:'module_reservations',label:'📅 Reservaciones',         desc:'Reservas por WhatsApp',           defaultOn:true },
+  { key:'module_reservations',label:'📅 Reservaciones',         desc:'Reservas que toma el bot',        defaultOn:true },
   { key:'module_pos',         label:'🤖 POS + IA',              desc:'Dashboard analítico con IA',      defaultOn:true },
   { key:'module_nps',         label:'⭐ NPS',                   desc:'Encuestas de satisfacción',       defaultOn:false },
   { key:'module_inventory',   label:'📦 Inventario',            desc:'Control de stock',                defaultOn:false },
   { key:'wompi_active',       label:'💳 Pagos Wompi',           desc:'Pagos en línea integrados',       defaultOn:false },
-  { key:'staff_tips',         label:'👤 Staff & Propinas',      desc:'Turnos y corte de propinas',      defaultOn:false },
-  { key:'loyalty',            label:'🎁 Fidelización',          desc:'Programa de puntos',              defaultOn:false },
   { key:'dian_active',        label:'📑 DIAN (Factura electrónica)', desc:'Integración MATIAS API',    defaultOn:false },
 ];
 
@@ -948,7 +800,7 @@ async function doLogout() {
   location.reload();
 }
 
-// Auto-login si hay sesión guardada
+// Auto-login if a saved session exists
 window.addEventListener('DOMContentLoaded', async () => {
   const saved = _getToken();
   if(saved) {
@@ -970,7 +822,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-// ── Sección / nav ──────────────────────────────────────────────────
+// ── Section / nav ──────────────────────────────────────────────────
 const SECTION_TITLES = {
   resumen:'Resumen',restaurantes:'Restaurantes',nuevo:'Nuevo cliente',
   usuarios:'Usuarios',dian:'DIAN & Folios',
@@ -1008,7 +860,7 @@ function renderKPIs(data) {
   $('kpi-active-sub').textContent = `${data.active_restaurants} activos`;
 }
 
-// ── Restaurantes ──────────────────────────────────────────────────
+// ── Restaurants ──────────────────────────────────────────────────
 async function loadRestaurants() {
   try {
     const r = await _hqFetch('/api/internal/admin/restaurants');
@@ -1021,7 +873,7 @@ async function loadRestaurants() {
   } catch(e){}
 }
 
-// Actualizamos el llenado de la lista para que sea un SELECT
+// Update the list population to use a SELECT
 function populateRestaurantDatalist() {
   const select = $('u_rest_id');
   if(!select) return;
@@ -1035,7 +887,7 @@ function getFeatures(r) {
 }
 
 function renderModuleChips(feats) {
-  const labels = {module_orders:'WA',module_tables:'QR',module_pos:'POS',module_nps:'NPS',module_inventory:'Inv',wompi_active:'Wompi',staff_tips:'Staff',loyalty:'Fid',dian_active:'DIAN'};
+  const labels = {module_orders:'Dom',module_tables:'QR',module_pos:'POS',module_nps:'NPS',module_inventory:'Inv',wompi_active:'Wompi',dian_active:'DIAN'};
   return Object.entries(labels).filter(([k])=>feats[k]===true||(feats[k]!==false&&['module_orders','module_tables','module_pos','module_reservations'].includes(k)))
     .map(([k,v])=>`<span class="badge-chip">${v}</span>`).join('');
 }
@@ -1045,7 +897,7 @@ function renderRestaurantsTable(list) {
   const filtered = list.filter(r=>{
     const matchFilter = _currentRestFilter==='all' || r.subscription_status===_currentRestFilter ||
       (_currentRestFilter==='suspended' && r.subscription_status!=='active');
-    const matchSearch = !q || r.name.toLowerCase().includes(q) || (r.whatsapp_number||'').includes(q);
+    const matchSearch = !q || r.name.toLowerCase().includes(q) || (r.slug||'').includes(q);
     return matchFilter && matchSearch;
   });
   const tbody = $('restaurants-tbody');
@@ -1055,7 +907,7 @@ function renderRestaurantsTable(list) {
     const active = r.subscription_status==='active';
     return `<tr class="tr-link" onclick="openDetail(${r.id})">
       <td><strong>${escHtml(r.name)}</strong></td>
-      <td style="font-size:12px;color:#888;">${escHtml(r.whatsapp_number||'—')}</td>
+      <td style="font-size:12px;color:#888;">${escHtml(r.slug ? '/pedir/' + r.slug : '—')}</td>
       <td>${renderModuleChips(feats)}</td>
       <td><span class="badge ${active?'badge-active':'badge-suspended'}">${active?'Activo':'Suspendido'}</span></td>
       <td style="color:#aaa;font-size:12px;">#${r.id}</td>
@@ -1082,7 +934,7 @@ function renderResumenRestaurants() {
     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid #f0f0e8;">
       <div style="display:flex;align-items:center;gap:10px;">
         <div style="width:30px;height:30px;border-radius:8px;background:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:13px;">🍽️</div>
-        <div><div style="font-size:13px;font-weight:500;">${escHtml(r.name)}</div><div style="font-size:11px;color:#888;">${escHtml(r.whatsapp_number||'—')}</div></div>
+        <div><div style="font-size:13px;font-weight:500;">${escHtml(r.name)}</div><div style="font-size:11px;color:#888;">${escHtml(r.slug ? '/pedir/' + r.slug : '—')}</div></div>
       </div>
       <span class="badge ${active?'badge-active':'badge-suspended'}">${active?'●&nbsp;Activo':'Suspendido'}</span>
     </div>`;
@@ -1107,20 +959,16 @@ async function openDetail(id) {
 
   // Header
   $('dp-name').textContent = r.name;
-  $('dp-sub').textContent  = r.whatsapp_number || 'Sin número WA';
+  $('dp-sub').textContent  = r.slug ? '/pedir/' + r.slug : 'Sin enlace de pedidos';
   $('dp-status-badge').textContent  = active ? '● Activo' : 'Suspendido';
   $('dp-status-badge').className    = 'badge ' + (active?'badge-active':'badge-suspended');
   $('dp-current-status').textContent = r.subscription_status;
 
   // Info tab
   $('dp-name-input').value    = r.name||'';
-  $('dp-wa-input').value      = r.whatsapp_number||'';
-  $('dp-addr-input').value    = r.address||'';
   $('dp-timezone').value      = feats.timezone||'America/Bogota';
   $('dp-currency').value      = feats.currency||'COP';
   $('dp-locale').value        = feats.locale||'es-CO';
-  $('dp-phoneid-input').value = r.wa_phone_id||'';
-  $('dp-token-input').value   = '';
 
   // Modules tab
   renderDetailModules(feats);
@@ -1153,7 +1001,7 @@ async function openDetail(id) {
         {label:'Folios DIAN', value:fmtNum(s.invoices_all)},
         {label:'Usuarios', value:fmtNum(s.users)},
       ].map(x=>`<div class="stat-mini-item"><div class="stat-mini-label">${x.label}</div><div class="stat-mini-value">${x.value}</div></div>`).join('');
-      if(s.last_order) $('dp-sub').textContent = `${r.whatsapp_number||'—'} · último pedido ${timeSince(s.last_order)}`;
+      if(s.last_order) $('dp-sub').textContent = `${r.slug ? '/pedir/' + r.slug : '—'} · último pedido ${timeSince(s.last_order)}`;
     }
   } catch(e){}
 }
@@ -1264,13 +1112,6 @@ async function loadOnboarding() {
   }
 }
 
-async function obResendCredentials() {
-  if(!_currentDetailId) return;
-  const fb = $('ob-action-feedback');
-  fb.textContent = 'Función en construcción — por ahora usar "Resetear contraseña" en la sección Usuarios.';
-  fb.style.color = '#888';
-}
-
 async function obMarkComplete() {
   if(!_currentDetailId) return;
   const fb = $('ob-action-feedback');
@@ -1305,22 +1146,26 @@ function renderDetailModules(feats) {
 }
 
 // ── Save detail ────────────────────────────────────────────────────
+// All saves below hit PATCH /api/internal/admin/organizations/{org_id} —
+// _currentDetailId IS an org id (ALL_RESTAURANTS comes from db_get_all_orgs).
+// The legacy POST /update-restaurant and /set-subscription endpoints were
+// REMOVED 2026-09-12: they resolved that same org id as though it were a
+// LOCATION id and could silently write to a completely different tenant
+// whenever the two ids collided. Address editing was removed from this
+// screen entirely (address is per-location, managed by each restaurant).
 async function saveRestaurantInfo() {
   if(!_currentDetailId) return;
   const feats = { timezone: $('dp-timezone').value, currency: $('dp-currency').value, locale: $('dp-locale').value };
   const body = {
-    restaurant_id: _currentDetailId,
     name:    $('dp-name-input').value.trim() || undefined,
-    address: $('dp-addr-input').value.trim() || undefined,
-    whatsapp_number: $('dp-wa-input').value.trim() || undefined,
     features: feats,
   };
-  const r = await _hqFetch('/api/internal/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   if(r.ok) {
     const d = await r.json();
     // Update local cache
     const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
-    if(idx>=0) ALL_RESTAURANTS[idx] = d.restaurant;
+    if(idx>=0) ALL_RESTAURANTS[idx] = d.data.org;
     renderRestaurantsTable(ALL_RESTAURANTS);
     showFeedback('info-feedback','✅ Guardado correctamente', true);
   } else {
@@ -1333,88 +1178,27 @@ async function saveModules() {
   if(!_currentDetailId) return;
   const features = {};
   MODULES_CONFIG.forEach(m=>{ features[m.key] = $('mod-'+m.key)?.checked; });
-  const r = await _hqFetch('/api/internal/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({restaurant_id:_currentDetailId, features})});
+  const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}`, {method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({features})});
   if(r.ok) {
     const d = await r.json();
     const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
-    if(idx>=0) ALL_RESTAURANTS[idx] = d.restaurant;
+    if(idx>=0) ALL_RESTAURANTS[idx] = d.data.org;
     renderRestaurantsTable(ALL_RESTAURANTS);
     showFeedback('modules-feedback','✅ Módulos actualizados', true);
   } else showFeedback('modules-feedback','❌ Error al guardar', false);
 }
 
-async function saveCredentials() {
-  if(!_currentDetailId) return;
-  const body = {
-    restaurant_id: _currentDetailId,
-    wa_phone_id:     $('dp-phoneid-input').value.trim() || undefined,
-    wa_access_token: $('dp-token-input').value.trim()   || undefined,
-  };
-  if(!body.wa_phone_id && !body.wa_access_token) { showFeedback('creds-feedback','Sin cambios', true); return; }
-  const r = await _hqFetch('/api/internal/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  if(r.ok) showFeedback('creds-feedback','✅ Credenciales actualizadas', true);
-  else showFeedback('creds-feedback','❌ Error', false);
-}
-
 async function setSubStatus(status) {
   if(!_currentDetailId) return;
-  const r = await _hqFetch('/api/internal/admin/set-subscription', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({restaurant_id:_currentDetailId, status})});
+  const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}`, {method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({subscription_status: status})});
   if(r.ok) {
     const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
     if(idx>=0) ALL_RESTAURANTS[idx].subscription_status = status;
     await openDetail(_currentDetailId);
     renderRestaurantsTable(ALL_RESTAURANTS);
   }
-}
-
-// ── Nuevo restaurante ─────────────────────────────────────────────
-async function createRestaurant() {
-  const name  = $('r_name').value.trim();
-  const wa    = $('r_wa').value.trim();
-  const addr  = $('r_addr').value.trim();
-  const menuRaw = $('r_menu').value.trim();
-  if(!name||!wa||!addr) { showFeedback('nuevo-feedback','❌ Nombre, WA y dirección son requeridos', false); return; }
-  let menuJson = '{}';
-  if(menuRaw) { try { JSON.parse(menuRaw); menuJson = menuRaw; } catch(e){ showFeedback('nuevo-feedback','❌ El JSON del menú tiene errores', false); return; } }
-
-  const features = {
-    module_orders:        $('feat_orders').checked,
-    module_tables:        $('feat_tables').checked,
-    module_reservations:  $('feat_reservations').checked,
-    module_pos:           $('feat_pos').checked,
-    module_nps:           $('feat_nps').checked,
-    module_inventory:     $('feat_inventory').checked,
-    wompi_active:         $('feat_wompi').checked,
-    staff_tips:           $('feat_staff_tips').checked,
-    loyalty:              $('feat_loyalty').checked,
-    dian_active:          $('feat_dian').checked,
-    timezone:             $('r_tz').value,
-    currency:             $('r_currency').value,
-    locale:               $('r_locale').value,
-  };
-
-  const body = { name, whatsapp_number:wa, address:addr, menu:menuJson, features,
-    wa_phone_id:$('r_wa_phone_id').value.trim(), wa_access_token:$('r_wa_access_token').value.trim() };
-
-  try {
-    const r = await _hqFetch('/api/internal/admin/create-restaurant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(r.ok) {
-      showFeedback('nuevo-feedback','✅ Restaurante creado exitosamente', true);
-      clearNewForm();
-      await loadRestaurants();
-    } else {
-      const e = await r.json().catch(()=>({detail:'Error'}));
-      showFeedback('nuevo-feedback','❌ '+(e.detail||'Error'), false);
-    }
-  } catch(e){ showFeedback('nuevo-feedback','❌ Error de conexión', false); }
-}
-
-function clearNewForm() {
-  ['r_name','r_wa','r_addr','r_city','r_menu','r_wa_phone_id','r_wa_access_token'].forEach(id=>{const el=$(id);if(el)el.value='';});
-  ['feat_orders','feat_tables','feat_reservations','feat_pos'].forEach(id=>{const el=$(id);if(el)el.checked=true;});
-  ['feat_nps','feat_inventory','feat_wompi','feat_staff_tips','feat_loyalty','feat_dian'].forEach(id=>{const el=$(id);if(el)el.checked=false;});
 }
 
 async function parseMenuFile() {
@@ -1433,7 +1217,7 @@ async function parseMenuFile() {
   btn.textContent = '✨ Extraer con IA'; btn.disabled = false;
 }
 
-// ── Usuarios ──────────────────────────────────────────────────────
+// ── Users ──────────────────────────────────────────────────────────
 async function loadUsers() {
   try {
     const r = await _hqFetch('/api/internal/admin/users');
@@ -1445,7 +1229,7 @@ async function loadUsers() {
   } catch(e){}
 }
 
-// Actualizamos la tabla para añadir los botones Reset y Eliminar
+// Update the table to add the Reset and Delete buttons
 function renderUsersTable(users) {
   const tbody = $('users-tbody');
   if(!users.length){ tbody.innerHTML=`<tr><td colspan="5" class="empty-state">Sin usuarios</td></tr>`; return; }
@@ -1461,7 +1245,7 @@ function renderUsersTable(users) {
   </tr>`).join('');
 }
 
-// Modificamos la creación para enviar el ID
+// Update creation to send the ID
 async function createUser() {
   const restId = $('u_rest_id').value;
   const email  = $('u_email').value.trim();
@@ -1492,15 +1276,15 @@ async function createUser() {
       $('u_email').value=''; $('u_pass').value=''; 
       loadUsers(); 
     } else { 
-      // 🛡️ Lógica mejorada para evitar el [object Object]
+      // 🛡️ Improved logic to avoid [object Object]
       let errorMsg = 'Error del servidor';
       
       if (data.detail) {
         if (Array.isArray(data.detail)) {
-          // Es un error de validación 422 (Pydantic)
+          // It's a 422 validation error (Pydantic)
           errorMsg = data.detail.map(e => `${e.loc[1]}: ${e.msg}`).join(', ');
         } else {
-          // Es un error común (HTTPException)
+          // It's a common error (HTTPException)
           errorMsg = data.detail;
         }
       }
@@ -1512,7 +1296,7 @@ async function createUser() {
   }
 }
 
-// ── DIAN & Folios ─────────────────────────────────────────────────
+// ── DIAN & Invoice Folios ─────────────────────────────────────────────────
 async function loadDIAN() {
   try {
     const r = await _hqFetch('/api/internal/admin/billing-stats');
@@ -1549,19 +1333,6 @@ function renderDIAN(stats) {
 }
 
 // ── Plan change ───────────────────────────────────────────────────
-function onPlanSelectChange() {
-  const plan = $('dp-new-plan').value;
-  const wrap = $('dp-comp-until-wrap');
-  if(wrap) wrap.style.display = plan === 'comp' ? 'block' : 'none';
-  if(plan === 'comp') {
-    const inp = $('dp-comp-until-input');
-    if(inp && !inp.value) {
-      const d = new Date(); d.setDate(d.getDate()+30);
-      inp.value = d.toISOString().slice(0,10);
-    }
-  }
-}
-
 // Called from "Cambiar plan" quick-action button
 function openPlanModal() {
   switchDetailTab('plan', null);
@@ -1570,41 +1341,76 @@ function openPlanModal() {
   tabs.forEach(t => { if(t.textContent.trim() === 'Plan') t.click(); });
 }
 
+// Plan, free days and founder program are three endpoints; each one only
+// runs when its value actually changed.
+let _currentPlanRow = null;
 async function savePlanChange() {
   if(!_currentDetailId) return;
+  const r = _currentPlanRow || {};
   const plan = $('dp-new-plan').value;
-  if(!plan) return;
-  const body = { plan_code: plan };
-  if(plan === 'comp') {
-    const compUntil = $('dp-comp-until-input').value;
-    if(compUntil) body.comp_until = compUntil;
-  }
+  const compUntil = $('dp-comp-until-input').value || null;
+  const founder = $('dp-founder-input').checked;
+  const base = `/api/internal/admin/organizations/${_currentDetailId}`;
+  const calls = [];
+  if(plan && plan !== r.plan_code) calls.push([base + '/plan', { plan_code: plan }]);
+  if(compUntil !== (r.comp_until ? r.comp_until.slice(0,10) : null)) calls.push([base + '/comp', { comp_until: compUntil }]);
+  if(founder !== (r.founder_price_cop != null)) calls.push([base + '/founder', { founder: founder }]);
+  if(!calls.length) { showFeedback('plan-feedback', 'Sin cambios', true); return; }
   try {
-    const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}/plan`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if(r.ok) {
-      const d = await r.json();
-      showFeedback('plan-feedback', '✅ Plan actualizado a ' + plan, true);
-      // Refresh plan display
-      $('dp-plan-badge').textContent = plan;
-      $('dp-plan-badge').className = 'badge badge-chip plan-' + plan;
-      $('dp-comp-until-display').textContent = d.data && d.data.comp_until ? d.data.comp_until : '—';
-      await loadRestaurants();
-    } else {
-      const e = await r.json().catch(()=>({}));
-      showFeedback('plan-feedback', '❌ ' + (e.detail || 'Error'), false);
+    for(const [url, body] of calls) {
+      const res = await _hqFetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if(!res.ok) {
+        const e = await res.json().catch(()=>({}));
+        showFeedback('plan-feedback', '❌ ' + (e.detail || 'Error'), false);
+        return;
+      }
     }
+    showFeedback('plan-feedback', '✅ Plan actualizado', true);
+    await loadRestaurants();
+    const fresh = ALL_RESTAURANTS.find(x => x.id === _currentDetailId);
+    if(fresh) _populatePlanTab(fresh);
   } catch(e) {
     showFeedback('plan-feedback', '❌ Error de conexión', false);
   }
 }
 
+// A payment received outside the product moves paid_until 1 or 12 months
+// forward from where the org's coverage ends (and re-opens a paused account).
+async function recordPayment(months) {
+  if(!_currentDetailId) return;
+  const label = months === 12 ? 'anual' : 'mensual';
+  if(!confirm('¿Registrar un pago ' + label + ' para esta organización?')) return;
+  try {
+    const res = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}/payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ months: months }),
+    });
+    if(!res.ok) {
+      const e = await res.json().catch(()=>({}));
+      showFeedback('payment-feedback', '❌ ' + (e.detail || 'Error'), false);
+      return;
+    }
+    const d = await res.json();
+    showFeedback('payment-feedback', '✅ Pagado hasta ' + d.data.paid_until.slice(0,10), true);
+    await loadRestaurants();
+    const fresh = ALL_RESTAURANTS.find(x => x.id === _currentDetailId);
+    if(fresh) _populatePlanTab(fresh);
+  } catch(e) {
+    showFeedback('payment-feedback', '❌ Error de conexión', false);
+  }
+}
+
+const BILLING_STATUS_LABELS = { trial: 'En prueba', activo: 'Activo', vencido: 'Pago vencido', suspendido: 'Pausada' };
+
 // Populate plan tab when opening detail
 function _populatePlanTab(r) {
-  const plan = r.plan_code || r.subscription_plan || 'free';
+  _currentPlanRow = r;
+  const plan = r.plan_code || 'esencial';
   const badge = $('dp-plan-badge');
   if(badge) {
     badge.textContent = plan;
@@ -1612,24 +1418,24 @@ function _populatePlanTab(r) {
   }
   const compDisplay = $('dp-comp-until-display');
   if(compDisplay) compDisplay.textContent = r.comp_until ? r.comp_until.slice(0,10) : '—';
+  const statusDisplay = $('dp-billing-status');
+  if(statusDisplay) statusDisplay.textContent = BILLING_STATUS_LABELS[r.billing_status] || '—';
+  const paidDisplay = $('dp-paid-until-display');
+  if(paidDisplay) paidDisplay.textContent = r.paid_until ? r.paid_until.slice(0,10) : '—';
+  const founderDisplay = $('dp-founder-display');
+  if(founderDisplay) founderDisplay.textContent = r.founder_price_cop != null ? fmtCOP(r.founder_price_cop) : '—';
   const sel = $('dp-new-plan');
   if(sel) sel.value = plan;
-  onPlanSelectChange();
+  const comp = $('dp-comp-until-input');
+  if(comp) comp.value = r.comp_until ? r.comp_until.slice(0,10) : '';
+  const founder = $('dp-founder-input');
+  if(founder) founder.checked = r.founder_price_cop != null;
 }
 
 // ── Deep-link wiring ──────────────────────────────────────────────
 function _wireDeepLinks(r) {
-  const analyticsBtn = $('dp-analytics-btn');
-  if(analyticsBtn) analyticsBtn.onclick = () => window.open('/internal/analytics?org_id=' + r.id, '_blank');
   const costsBtn = $('dp-costs-btn');
   if(costsBtn) costsBtn.onclick = () => window.open('/internal/costs?org_id=' + r.id, '_blank');
-  const waBtn = $('dp-whatsapp-btn');
-  if(waBtn) {
-    const wa = (r.whatsapp_number||'').replace(/\D/g,'');
-    waBtn.onclick = wa ? () => window.open('https://wa.me/' + wa, '_blank') : null;
-    waBtn.style.opacity = wa ? '1' : '0.4';
-    waBtn.disabled = !wa;
-  }
 }
 
 // ── Reset password modal ──────────────────────────────────────────
@@ -1671,7 +1477,7 @@ async function submitResetPw() {
   }
 }
 
-// Nueva función para borrar usuarios
+// New function to delete users
 async function deleteGlobalUser(username) {
   if(!confirm(`¿Estás seguro de eliminar permanentemente al usuario ${username}?`)) return;
   
@@ -1692,7 +1498,7 @@ async function deleteGlobalUser(username) {
 </script>
 <script src="/static/js/internal/hq-shell.js" defer></script>
 
-<!-- ══ MODAL: Reset contraseña ════════════════════════════════════════════════ -->
+<!-- ══ MODAL: Reset Password ════════════════════════════════════════════════ -->
 <div id="reset-pw-modal" class="hq-modal-overlay" style="display:none;">
   <div class="hq-modal-box">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">

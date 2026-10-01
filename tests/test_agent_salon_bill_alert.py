@@ -62,7 +62,7 @@ async def _run_bill_action(parsed, table_context, alert_mock, alert_side_effect=
         return await execute_salon_action(
             parsed=parsed,
             phone="+573000000001",
-            bot_number="573001112222",
+            org_id=4242,
             table_context=table_context,
             session_state={},
             full_history=[],
@@ -87,7 +87,7 @@ async def test_bill_action_fires_waiter_alert(base_table_context, parsed_bill):
     assert kwargs["alert_type"] == "bill"
     assert kwargs["table_id"] == "table-uuid-1"
     assert kwargs["table_name"] == "Mesa 5"
-    assert kwargs["bot_number"] == "573001112222"
+    assert kwargs["org_id"] == 4242
     assert "Mesa 5" in kwargs["message"], "Alert message must mention the table by name"
     assert reply  # checkout flow returned something to send to the customer
 

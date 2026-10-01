@@ -2,8 +2,8 @@
 tests/test_internal_admin_plan_reset.py
 
 Unit tests for the 3 new superadmin endpoint handlers:
-  1. change_org_plan   — PATCH /organizations/{id}/plan
-  2. set_org_comp      — PATCH /organizations/{id}/comp
+  1. change_org_plan   — PATCH /organizations/{id}/plan (validation + 404 only)
+  2. set_org_comp      — PATCH /organizations/{id}/comp (404 only)
   3. reset_user_password — POST /users/{username}/reset-password
 
 Tests call the handler coroutines directly (bypassing HTTP layer) to avoid
@@ -11,33 +11,11 @@ the DB-URL-required pool initialisation that TestClient triggers.
 All DB/repo calls are mocked.
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import Request
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
-
-def _make_conn():
-    conn = AsyncMock()
-    conn.fetchrow = AsyncMock(return_value=None)
-    conn.fetchval = AsyncMock(return_value=None)
-    conn.fetch    = AsyncMock(return_value=[])
-    conn.execute  = AsyncMock(return_value="UPDATE 1")
-    txn = MagicMock()
-    txn.__aenter__ = AsyncMock(return_value=txn)
-    txn.__aexit__  = AsyncMock(return_value=False)
-    conn.transaction = MagicMock(return_value=txn)
-    return conn
-
-
-def _make_pool(conn):
-    acquire_cm = MagicMock()
-    acquire_cm.__aenter__ = AsyncMock(return_value=conn)
-    acquire_cm.__aexit__  = AsyncMock(return_value=False)
-    pool = AsyncMock()
-    pool.acquire = MagicMock(return_value=acquire_cm)
-    return pool
-
 
 def _make_request(headers=None):
     """Minimal mock of fastapi.Request."""
@@ -53,14 +31,11 @@ _FAKE_ORG = {
     "id": 42,
     "name": "Test Org",
     "slug": "test-org",
-    "whatsapp_number": "+573001234567",
-    "wa_phone_id": None,
-    "wa_access_token": None,
     "menu": [],
     "features": {},
-    "subscription_plan": "free",
+    "subscription_plan": "esencial",
     "subscription_status": "active",
-    "plan_code": "free",
+    "plan_code": "esencial",
     "comp_until": None,
     "created_at": None,
     "updated_at": None,
@@ -78,121 +53,27 @@ _FAKE_USER = {
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Feature 1 — Pydantic validation on ChangePlanRequest
+# (plan/comp/founder behaviour runs against the real DB in test_pricing_plans.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_change_plan_request_valid_plans():
-    """All Pricing v1 plan codes pass validation."""
+    """The four plans of the 2026-09-30 price list pass validation."""
     from app.routes.internal.admin import ChangePlanRequest
 
-    for plan in ("pulso", "restaurante", "pro", "cadena", "comp", "free"):
+    for plan in ("esencial", "restaurante", "pro", "cadena"):
         req = ChangePlanRequest(plan_code=plan)
         assert req.plan_code == plan
 
 
 def test_change_plan_request_invalid_raises():
-    """Stale plan codes (basic, premium, legacy) are rejected."""
+    """Retired or unknown codes are rejected — 'comp' and 'free' have no
+    plan_limits row, so writing them would violate fk_orgs_plan_code."""
     from app.routes.internal.admin import ChangePlanRequest
     from pydantic import ValidationError
 
-    for bad in ("basic", "premium", "legacy_pro", "starter"):
+    for bad in ("pulso", "comp", "free", "basic", "premium", "starter"):
         with pytest.raises(ValidationError):
             ChangePlanRequest(plan_code=bad)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Feature 1 — change_org_plan handler
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@pytest.mark.asyncio
-async def test_change_plan_success():
-    """Handler returns _ok payload with old/new plan."""
-    from app.routes.internal.admin import change_org_plan, ChangePlanRequest
-
-    conn = _make_conn()
-    pool = _make_pool(conn)
-    req  = _make_request()
-
-    with patch("app.repositories.restaurant_repo.db_get_org_by_id", AsyncMock(return_value=_FAKE_ORG)), \
-         patch("app.services.database.get_pool", AsyncMock(return_value=pool)), \
-         patch("app.services.tenant_context.bypass_tenant_scope") as mock_bp, \
-         patch("app.repositories.internal.audit_log_repo.db_log_audit_event", AsyncMock(return_value=1)):
-
-        mock_bp.return_value.__enter__ = MagicMock(return_value=None)
-        mock_bp.return_value.__exit__  = MagicMock(return_value=False)
-
-        result = await change_org_plan(
-            org_id=42,
-            body=ChangePlanRequest(plan_code="restaurante"),
-            request=req,
-        )
-
-    assert result["success"] is True
-    assert result["data"]["new_plan"] == "restaurante"
-    assert result["data"]["old_plan"] == "free"
-    assert result["data"]["org_id"] == 42
-    # comp_until should be None when switching to a paying plan
-    assert result["data"]["comp_until"] is None
-
-
-@pytest.mark.asyncio
-async def test_change_plan_comp_sets_comp_until_default():
-    """Switching to 'comp' without explicit comp_until defaults to today+30d."""
-    from app.routes.internal.admin import change_org_plan, ChangePlanRequest
-    from datetime import datetime, timezone
-
-    conn = _make_conn()
-    pool = _make_pool(conn)
-    req  = _make_request()
-
-    with patch("app.repositories.restaurant_repo.db_get_org_by_id", AsyncMock(return_value=_FAKE_ORG)), \
-         patch("app.services.database.get_pool", AsyncMock(return_value=pool)), \
-         patch("app.services.tenant_context.bypass_tenant_scope") as mock_bp, \
-         patch("app.repositories.internal.audit_log_repo.db_log_audit_event", AsyncMock(return_value=1)):
-
-        mock_bp.return_value.__enter__ = MagicMock(return_value=None)
-        mock_bp.return_value.__exit__  = MagicMock(return_value=False)
-
-        result = await change_org_plan(
-            org_id=42,
-            body=ChangePlanRequest(plan_code="comp"),
-            request=req,
-        )
-
-    assert result["data"]["new_plan"] == "comp"
-    comp_until = result["data"]["comp_until"]
-    assert comp_until is not None
-    # Should be a future date (roughly today + 30 days)
-    from datetime import date, timedelta
-    parsed = date.fromisoformat(comp_until)
-    today = date.today()
-    assert parsed > today
-    assert parsed <= today + timedelta(days=32)
-
-
-@pytest.mark.asyncio
-async def test_change_plan_comp_explicit_comp_until():
-    """Switching to 'comp' with explicit comp_until uses that date."""
-    from app.routes.internal.admin import change_org_plan, ChangePlanRequest
-
-    conn = _make_conn()
-    pool = _make_pool(conn)
-    req  = _make_request()
-
-    with patch("app.repositories.restaurant_repo.db_get_org_by_id", AsyncMock(return_value=_FAKE_ORG)), \
-         patch("app.services.database.get_pool", AsyncMock(return_value=pool)), \
-         patch("app.services.tenant_context.bypass_tenant_scope") as mock_bp, \
-         patch("app.repositories.internal.audit_log_repo.db_log_audit_event", AsyncMock(return_value=1)):
-
-        mock_bp.return_value.__enter__ = MagicMock(return_value=None)
-        mock_bp.return_value.__exit__  = MagicMock(return_value=False)
-
-        result = await change_org_plan(
-            org_id=42,
-            body=ChangePlanRequest(plan_code="comp", comp_until="2026-12-31"),
-            request=req,
-        )
-
-    assert result["data"]["comp_until"] == "2026-12-31"
 
 
 @pytest.mark.asyncio
@@ -207,7 +88,7 @@ async def test_change_plan_org_not_found_raises_404():
         with pytest.raises(HTTPException) as exc_info:
             await change_org_plan(
                 org_id=9999,
-                body=ChangePlanRequest(plan_code="pulso"),
+                body=ChangePlanRequest(plan_code="esencial"),
                 request=req,
             )
     assert exc_info.value.status_code == 404
@@ -216,62 +97,6 @@ async def test_change_plan_org_not_found_raises_404():
 # ═══════════════════════════════════════════════════════════════════════════════
 # Feature 2 — set_org_comp handler
 # ═══════════════════════════════════════════════════════════════════════════════
-
-@pytest.mark.asyncio
-async def test_set_comp_with_date_sets_plan_to_comp():
-    """Passing a date in comp_until sets plan_code = 'comp'."""
-    from app.routes.internal.admin import set_org_comp, SetCompRequest
-
-    conn = _make_conn()
-    pool = _make_pool(conn)
-    req  = _make_request()
-
-    with patch("app.repositories.restaurant_repo.db_get_org_by_id", AsyncMock(return_value=_FAKE_ORG)), \
-         patch("app.services.database.get_pool", AsyncMock(return_value=pool)), \
-         patch("app.services.tenant_context.bypass_tenant_scope") as mock_bp, \
-         patch("app.repositories.internal.audit_log_repo.db_log_audit_event", AsyncMock(return_value=1)):
-
-        mock_bp.return_value.__enter__ = MagicMock(return_value=None)
-        mock_bp.return_value.__exit__  = MagicMock(return_value=False)
-
-        result = await set_org_comp(
-            org_id=42,
-            body=SetCompRequest(comp_until="2027-06-30"),
-            request=req,
-        )
-
-    assert result["data"]["new_plan"] == "comp"
-    assert result["data"]["comp_until"] == "2027-06-30"
-
-
-@pytest.mark.asyncio
-async def test_clear_comp_reverts_to_free():
-    """Passing comp_until=None clears comp and reverts plan to 'free'."""
-    from app.routes.internal.admin import set_org_comp, SetCompRequest
-
-    conn = _make_conn()
-    pool = _make_pool(conn)
-    req  = _make_request()
-
-    comp_org = dict(_FAKE_ORG, plan_code="comp", comp_until="2026-12-31")
-
-    with patch("app.repositories.restaurant_repo.db_get_org_by_id", AsyncMock(return_value=comp_org)), \
-         patch("app.services.database.get_pool", AsyncMock(return_value=pool)), \
-         patch("app.services.tenant_context.bypass_tenant_scope") as mock_bp, \
-         patch("app.repositories.internal.audit_log_repo.db_log_audit_event", AsyncMock(return_value=1)):
-
-        mock_bp.return_value.__enter__ = MagicMock(return_value=None)
-        mock_bp.return_value.__exit__  = MagicMock(return_value=False)
-
-        result = await set_org_comp(
-            org_id=42,
-            body=SetCompRequest(comp_until=None),
-            request=req,
-        )
-
-    assert result["data"]["comp_until"] is None
-    assert result["data"]["new_plan"] == "free"
-
 
 @pytest.mark.asyncio
 async def test_set_comp_org_not_found_raises_404():

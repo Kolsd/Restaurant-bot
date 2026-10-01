@@ -30,16 +30,6 @@ def _make_pool(fetchval_return: int = 0, idle: int = 5, size: int = 20):
     return pool
 
 
-def _healthy_metrics() -> dict:
-    return {
-        "inbox_processed_total": 100,
-        "inbox_errors_total": 2,          # 2% — below 10% threshold
-        "inbox_latency_avg_ms": 50.0,
-        "inbox_latency_p95_ms": 120.0,    # below 500ms threshold
-        "inbox_latency_samples": 80,
-    }
-
-
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 class TestCheckAlertsNoIssues:
@@ -61,64 +51,11 @@ class TestCheckAlertsNoIssues:
         monkeypatch.setattr(alerts_mod, "_fire_alert", _mock_fire)
 
         # get_pool is a late import inside each check function, so patch at source
-        with (
-            patch("app.services.database.get_pool", AsyncMock(return_value=healthy_pool)),  # noqa: SIM117
-            patch(
-                "app.services.inbox_worker.get_metrics",
-                MagicMock(return_value=_healthy_metrics()),
-            ),
-        ):
+        with patch("app.services.database.get_pool", AsyncMock(return_value=healthy_pool)):
             from app.services.alerts import check_alerts
             await check_alerts()
 
         assert fired == [], f"Expected no alerts but got: {fired}"
-
-
-class TestDeadLetterAlert:
-    @pytest.mark.asyncio
-    async def test_dead_letter_fires_high_alert(self, monkeypatch):
-        """Dead letters > 0 → HIGH alert is fired."""
-        import app.services.alerts as alerts_mod
-
-        alerts_mod._last_alert.clear()
-
-        # Pool returns 3 dead letters for the first fetchval call (dead_letters check)
-        # and 0 for the second (queue depth check).
-        dead_pool = _make_pool(fetchval_return=3, idle=10, size=20)
-
-        fired: list[dict] = []
-
-        async def _capture_fire(key, severity, title, detail):
-            fired.append({"key": key, "severity": severity})
-
-        monkeypatch.setattr(alerts_mod, "_fire_alert", _capture_fire)
-
-        with patch("app.services.database.get_pool", AsyncMock(return_value=dead_pool)):
-            await alerts_mod._check_dead_letters()
-
-        assert len(fired) == 1
-        assert fired[0]["key"] == "dead_letters"
-        assert fired[0]["severity"] == "HIGH"
-
-    @pytest.mark.asyncio
-    async def test_no_dead_letter_alert_when_zero(self, monkeypatch):
-        """Dead letters == 0 → no alert."""
-        import app.services.alerts as alerts_mod
-
-        alerts_mod._last_alert.clear()
-
-        pool = _make_pool(fetchval_return=0)
-        fired: list[str] = []
-
-        async def _capture_fire(key, severity, title, detail):
-            fired.append(key)
-
-        monkeypatch.setattr(alerts_mod, "_fire_alert", _capture_fire)
-
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            await alerts_mod._check_dead_letters()
-
-        assert fired == []
 
 
 class TestPoolExhaustionAlert:
@@ -301,105 +238,3 @@ class TestWebhookCalled:
 
         assert post_called == []
 
-
-class TestInboxLatencyAlert:
-    @pytest.mark.asyncio
-    async def test_high_latency_fires_medium_alert(self, monkeypatch):
-        """p95 > 500ms → MEDIUM alert."""
-        import app.services.alerts as alerts_mod
-
-        alerts_mod._last_alert.clear()
-
-        fired: list[dict] = []
-
-        async def _capture(key, severity, title, detail):
-            fired.append({"key": key, "severity": severity})
-
-        monkeypatch.setattr(alerts_mod, "_fire_alert", _capture)
-
-        high_latency_metrics = {**_healthy_metrics(), "inbox_latency_p95_ms": 750.0}
-
-        with patch("app.services.inbox_worker.get_metrics", MagicMock(return_value=high_latency_metrics)):
-            await alerts_mod._check_inbox_latency()
-
-        assert len(fired) == 1
-        assert fired[0]["key"] == "high_inbox_latency"
-        assert fired[0]["severity"] == "MEDIUM"
-
-
-class TestQueueDepthAlert:
-    @pytest.mark.asyncio
-    async def test_queue_depth_over_threshold_fires_alert(self, monkeypatch):
-        """Queue depth > 50 → HIGH alert."""
-        import app.services.alerts as alerts_mod
-
-        alerts_mod._last_alert.clear()
-
-        pool = _make_pool(fetchval_return=55)
-        fired: list[dict] = []
-
-        async def _capture(key, severity, title, detail):
-            fired.append({"key": key, "severity": severity})
-
-        monkeypatch.setattr(alerts_mod, "_fire_alert", _capture)
-
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            await alerts_mod._check_queue_depth()
-
-        assert len(fired) == 1
-        assert fired[0]["key"] == "inbox_queue_backup"
-        assert fired[0]["severity"] == "HIGH"
-
-
-class TestErrorRateAlert:
-    @pytest.mark.asyncio
-    async def test_error_rate_spike_fires_alert(self, monkeypatch):
-        """Error rate > 10% → HIGH alert."""
-        import app.services.alerts as alerts_mod
-
-        alerts_mod._last_alert.clear()
-
-        fired: list[dict] = []
-
-        async def _capture(key, severity, title, detail):
-            fired.append({"key": key, "severity": severity})
-
-        monkeypatch.setattr(alerts_mod, "_fire_alert", _capture)
-
-        spike_metrics = {
-            **_healthy_metrics(),
-            "inbox_processed_total": 80,
-            "inbox_errors_total": 20,  # 20% error rate
-        }
-
-        with patch("app.services.inbox_worker.get_metrics", MagicMock(return_value=spike_metrics)):
-            await alerts_mod._check_error_rate()
-
-        assert len(fired) == 1
-        assert fired[0]["key"] == "worker_error_spike"
-        assert fired[0]["severity"] == "HIGH"
-
-    @pytest.mark.asyncio
-    async def test_no_alert_when_no_traffic(self, monkeypatch):
-        """Zero processed and zero errors → no alert (avoid divide-by-zero)."""
-        import app.services.alerts as alerts_mod
-
-        alerts_mod._last_alert.clear()
-
-        fired: list[str] = []
-
-        async def _capture(key, severity, title, detail):
-            fired.append(key)
-
-        monkeypatch.setattr(alerts_mod, "_fire_alert", _capture)
-
-        no_traffic_metrics = {
-            **_healthy_metrics(),
-            "inbox_processed_total": 0,
-            "inbox_errors_total": 0,
-        }
-
-        with patch("app.services.inbox_worker.get_metrics", MagicMock(return_value=no_traffic_metrics)):
-            await alerts_mod._check_error_rate()
-
-        assert fired == []

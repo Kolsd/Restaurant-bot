@@ -6,9 +6,10 @@ Covers (single test function):
 
 What this exercises:
   - Real Postgres with RLS active (TEST_DATABASE_URL)
-  - Real inbox_worker claim-then-ack dispatch loop (via conftest.drain_inbox)
+  - Real agent.chat() per diner turn (conftest.send_diner_message, the same
+    call POST /api/diner/chat makes)
   - Mocked Anthropic API (MockAnthropicScript) — ordered canned responses per turn
-  - Mocked Meta outbound HTTP (conftest.wa_capture) — intercepts send_text calls
+  - The bot's replies collected by conftest.bot_replies
   - Real agent.py, agent_salon.py, orders.py, tables_repo.py, conversations_repo.py
   - Tenant isolation: sibling org sees zero data from the main org
 
@@ -18,7 +19,7 @@ is fully mocked. The test only needs TEST_DATABASE_URL.
 Flow assertions per step:
   Step 0: Seed org + table → Row exists in restaurant_tables
   Step 1: "hola [table_id:M1]" → table_sessions row created, conversations row created
-  Step 2: "qué tienen?" → bot replies with menu info (WA captured)
+  Step 2: "qué tienen?" → bot replies with menu info
   Step 3: "una bandeja paisa y una limonada" → carts row has correct items/total
   Step 4: place_order fires → table_orders row created, cart cleared
   Step 5: Kitchen marks entregado via API → table_orders.status == 'entregado'
@@ -27,10 +28,6 @@ Flow assertions per step:
   Step 8: NPS flow → nps_responses row created with score=5 (Mesio uses 1-5 scale)
   Isolation: sibling org queries return zero rows
 
-Architecture note:
-  The inbox_worker does not expose a `_dispatch_for_test()` helper — tests must drive
-  it via conftest.drain_inbox() which replicates the 3-phase claim-then-ack loop.
-  This is intentional: it tests the real production dispatch path.
 """
 from __future__ import annotations
 
@@ -48,11 +45,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
-    drain_inbox,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
     _ensure_dotenv_loaded,
@@ -115,17 +111,11 @@ async def test_pool():
         url = "postgresql://" + url[len("postgres://"):]
 
     os.environ["DATABASE_URL"] = url
-    os.environ["DISABLE_EMBEDDED_WORKER"] = "1"
-    os.environ["DISABLE_META_SIGNATURE_VERIFY"] = "1"
     os.environ.setdefault("BOT_MAX_TOKENS", "512")
 
     async def _jsonb_init(conn):
-        await conn.set_type_codec(
-            "jsonb",
-            encoder=_json.dumps,
-            decoder=_json.loads,
-            schema="pg_catalog",
-        )
+        from app.services.database import init_connection  # same jsonb codec as the app pool
+        await init_connection(conn)
 
     pool = await asyncpg.create_pool(
         url,
@@ -222,7 +212,12 @@ class _FakeAnthropicMessage:
         self.model = "claude-haiku-fake"
         self.stop_reason = "end_turn" if tool_name is None else "tool_use"
         self.stop_sequence = None
-        self.usage = MagicMock(input_tokens=10, output_tokens=20)
+        # Every field the real anthropic Usage has — a bare MagicMock attribute
+        # is truthy and slipped past `or 0` into the token counters.
+        self.usage = MagicMock(
+            input_tokens=10, output_tokens=20,
+            cache_read_input_tokens=0, cache_creation_input_tokens=0,
+        )
 
         content_blocks = []
 
@@ -292,10 +287,10 @@ class MockAnthropicScript:
 # ── App fixture ───────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture, monkeypatch):
+async def e2e_app(bot_replies, monkeypatch):
     """Yields an httpx AsyncClient against the FastAPI app.
 
-    ORDERING NOTE: wa_capture patches httpx.AsyncClient at class-level.
+    ORDERING NOTE: bot_replies patches httpx.AsyncClient at class-level.
     Sentry's HttpxIntegration.setup_once() introspects AsyncClient.send during
     app startup, which fails if the fake client is in place. To prevent this,
     we unset SENTRY_DSN before starting the app (Sentry becomes a no-op).
@@ -353,23 +348,22 @@ async def _seed_table(
 async def test_happy_path_qr_order_pay_kitchen_nps(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
     monkeypatch: pytest.MonkeyPatch,
 ):
     """
     Full bot happy-path: QR scan → greet → order → kitchen → bill → pay → NPS.
 
-    Each WhatsApp inbound triggers the real inbox_worker dispatch (mocked Anthropic).
+    Each diner turn runs the real agent.chat() (mocked Anthropic).
     All DB assertions verify the real schema post-Wave-2 (org_id columns, RLS active).
     """
     pool = test_pool
-    monkeypatch.setenv("META_ACCESS_TOKEN", "e2e_dummy_token_happy")
 
     # ── STEP 0: Seed org + sibling + table ───────────────────────────────────
     restaurant = await seed_restaurant(
         pool,
         name="E2E Happy Restaurant",
-        bot_number_raw=BOT_NUMBER_RAW,
+        key=BOT_NUMBER_RAW,
         menu=MENU,
         num_branches=1,
         features_override={
@@ -377,23 +371,14 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
         },
     )
     org_id: int = restaurant["id"]
-    bot_number: str = restaurant["whatsapp_number"]
-    # location_id: the principal location (whatsapp_number=None) was created by seed_restaurant.
-    # We need its ID to create the table.
-    with bypass_tenant_scope("e2e_happy_get_principal_loc"):
-        async with pool.acquire() as conn:
-            loc_row = await conn.fetchrow(
-                "SELECT id FROM locations WHERE org_id=$1 AND whatsapp_number IS NULL ORDER BY id ASC LIMIT 1",
-                org_id,
-            )
-    assert loc_row, "Principal location must exist after seed_restaurant"
-    principal_location_id: int = loc_row["id"]
+    # The principal location was created by seed_restaurant; the table goes there.
+    principal_location_id: int = restaurant["principal_location_id"]
 
     # Sibling org for isolation check
     sibling = await seed_restaurant(
         pool,
         name="E2E Sibling Restaurant",
-        bot_number_raw=SIBLING_BOT_RAW,
+        key=SIBLING_BOT_RAW,
         num_branches=1,
     )
     sibling_org_id: int = sibling["id"]
@@ -474,11 +459,11 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
 
     async def _send(text: str, phone: str = CUSTOMER_PHONE_RAW) -> int:
         """Helper: send inbound WhatsApp message, drain inbox, return processed count."""
-        return await simulate_whatsapp_inbound(
+        return await send_diner_message(
             e2e_app, pool,
             phone=phone,
             text=text,
-            bot_number=bot_number,
+            org_id=org_id,
         )
 
     with script.patch():
@@ -508,11 +493,11 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
             f"Session should be 'active', got {session_row['status']!r}"
         )
 
-        # Assert: conversations row created (no `id` column — natural key is phone+bot_number)
+        # Assert: conversations row created (no `id` column — natural key is phone+org_id)
         with bypass_tenant_scope("e2e_happy_verify_conv_step1"):
             async with pool.acquire() as conn:
                 conv_row = await conn.fetchrow(
-                    "SELECT phone, bot_number, org_id FROM conversations "
+                    "SELECT phone, org_id FROM conversations "
                     "WHERE org_id=$1 AND phone=$2 LIMIT 1",
                     org_id, CUSTOMER_PHONE,
                 )
@@ -520,29 +505,27 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
             "STEP 1 FAILED: No conversations row found after greeting. "
             "db_save_history did not persist the conversation."
         )
-        assert conv_row["bot_number"] == bot_number, (
-            f"Conversation bot_number mismatch: expected {bot_number!r}, got {conv_row['bot_number']!r}"
-        )
+        assert conv_row["org_id"] == org_id
 
         # Assert: bot replied to the customer
-        greet_texts = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+        greet_texts = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
         assert greet_texts, "STEP 1 FAILED: No WA reply captured for greeting turn"
         assert any("mesa" in t.lower() or "bienvenid" in t.lower() for t in greet_texts), (
             f"STEP 1 FAILED: Greeting reply doesn't mention 'mesa' or 'bienvenid': {greet_texts}"
         )
-        wa_capture.messages.clear()  # reset for next step
+        bot_replies.messages.clear()  # reset for next step
 
         # ── STEP 2: Customer asks for menu ────────────────────────────────────
         processed = await _send("qué tienen?")
         assert processed >= 1, "Turn 2: inbox must process at least 1 item"
 
-        menu_texts = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+        menu_texts = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
         assert menu_texts, "STEP 2 FAILED: No WA reply captured for menu question"
         menu_reply = " ".join(menu_texts).lower()
         assert "bandeja" in menu_reply or "limonada" in menu_reply or "menú" in menu_reply or "menu" in menu_reply, (
             f"STEP 2 FAILED: Menu reply should mention dishes or 'menú': {menu_texts}"
         )
-        wa_capture.messages.clear()
+        bot_replies.messages.clear()
 
         # ── STEP 3: Customer orders (bot asks for confirmation) ──────────────
         # The mocked LLM fires place_order on turn 3, but the confirmation guard
@@ -554,13 +537,13 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
         assert processed >= 1, "Turn 3: inbox must process at least 1 item"
 
         # Assert: bot asks for confirmation (the guard's reply, not the LLM's text)
-        turn3_texts = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+        turn3_texts = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
         assert turn3_texts, "STEP 3 FAILED: No WA reply after order request"
         turn3_reply = " ".join(turn3_texts).lower()
         assert "confirma" in turn3_reply or "pedido" in turn3_reply, (
             f"STEP 3 FAILED: Bot should ask for confirmation after order request. Got: {turn3_texts}"
         )
-        wa_capture.messages.clear()
+        bot_replies.messages.clear()
 
         # ── STEP 4: Customer confirms → order committed ────────────────────────
         # Customer says "si" (a confirmation word in _CONFIRM_WORDS).
@@ -596,12 +579,12 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
         table_order_id: str = order_row["id"]
 
         # Assert: cart is cleared after order placed (or empty)
-        # carts schema: (phone, bot_number, cart_data JSONB, org_id, ...) — no 'id' column.
+        # carts schema: (phone, org_id, cart_data JSONB, ...) — no 'id' column.
         with bypass_tenant_scope("e2e_happy_verify_step4_cart"):
             async with pool.acquire() as conn:
                 cart_row = await conn.fetchrow(
-                    "SELECT cart_data FROM carts WHERE org_id=$1 AND phone=$2 AND bot_number=$3",
-                    org_id, CUSTOMER_PHONE, bot_number,
+                    "SELECT cart_data FROM carts WHERE org_id=$1 AND phone=$2",
+                    org_id, CUSTOMER_PHONE,
                 )
         # After place_order, the cart should either not exist or have empty items list.
         # Production code in orders.py / agent_salon.py clears the cart post-order.
@@ -616,7 +599,7 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
                 "orders.clear_cart() did not fire post-order."
             )
 
-        wa_capture.messages.clear()
+        bot_replies.messages.clear()
 
         # ── STEP 5: Kitchen marks order as 'entregado' via API ───────────────
         owner_email = restaurant["owner_email"]
@@ -658,11 +641,11 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
             async with pool.acquire() as conn:
                 await conn.execute(
                     "UPDATE table_sessions SET order_delivered=TRUE, last_activity=NOW() "
-                    "WHERE org_id=$1 AND phone=$2 AND bot_number=$3 AND status='active'",
-                    org_id, CUSTOMER_PHONE, bot_number,
+                    "WHERE org_id=$1 AND phone=$2 AND status='active'",
+                    org_id, CUSTOMER_PHONE,
                 )
 
-        wa_capture.messages.clear()
+        bot_replies.messages.clear()
 
         # ── STEP 6: Customer requests bill ────────────────────────────────────
         # The mocked LLM fires request_bill → execute_salon_action → db_create_waiter_alert.
@@ -687,7 +670,7 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
         assert alert_row["table_id"] == table_id, (
             f"Alert table_id mismatch: expected {table_id!r}, got {alert_row['table_id']!r}"
         )
-        wa_capture.messages.clear()
+        bot_replies.messages.clear()
 
         # ── STEP 7: Caja pays the table (single-check payment) ───────────────
         # Use POST /api/table-orders/{base_order_id}/checks/single/pay
@@ -741,7 +724,7 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
         # Check that NPS state was set (waiting_score) in state_store.
         # We query state_store directly — it handles Redis-or-fallback transparently.
         from app.services import state_store as _ss
-        nps_state = await _ss.nps_get(CUSTOMER_PHONE, bot_number)
+        nps_state = await _ss.nps_get(CUSTOMER_PHONE, org_id)
         # NPS may be in waiting_score OR already in cooldown (if the test is re-run quickly).
         # Either way, it should not be None at this point unless something went wrong.
         # We accept None here with a BLOCKER note (see deliverable notes below).
@@ -756,7 +739,7 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
                 ),
             )
 
-        wa_capture.messages.clear()
+        bot_replies.messages.clear()
 
         # Turn 7: customer types "5" (top score on Mesio's 1-5 scale).
         # _handle_nps_guard / _try_nps_active_flow in agent.py intercept this turn
@@ -787,11 +770,11 @@ async def test_happy_path_qr_order_pay_kitchen_nps(
             "out-of-range numbers and accepts valid 1-5 input."
         )
 
-        wa_capture.messages.clear()
+        bot_replies.messages.clear()
 
     # ── Tenant isolation check ────────────────────────────────────────────────
     # All queries above used org_id for the main restaurant.
-    # Verify that the sibling org (different bot_number) sees ZERO rows.
+    # Verify that the sibling org sees ZERO rows.
     with bypass_tenant_scope("e2e_happy_isolation_check"):
         async with pool.acquire() as conn:
             sib_orders = await conn.fetchval(

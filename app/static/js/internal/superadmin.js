@@ -81,11 +81,11 @@
   window.loadOrganizations = async function () {
     const tbody = $("orgs-tbody");
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Cargando...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Cargando...</td></tr>';
     try {
       const r = await hqFetch("/organizations");
       if (!r.ok) {
-        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Error al cargar</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Error al cargar</td></tr>';
         return;
       }
       const d = await r.json();
@@ -118,14 +118,14 @@
           ).join("");
       }
     } catch (e) {
-      tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Error de conexión</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Error de conexión</td></tr>';
     }
   };
 
   function renderOrgsTable(orgs) {
     const tbody = $("orgs-tbody");
     if (!orgs.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Sin organizaciones</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Sin organizaciones</td></tr>';
       return;
     }
     const rows = orgs.map((o) => {
@@ -135,9 +135,9 @@
         : '<span class="badge badge-suspended">' + escHtml(o.subscription_status || "—") + "</span>";
       const planBadge =
         '<span class="badge badge-chip plan-' +
-        escHtml(o.subscription_plan || "free") +
+        escHtml(o.plan_code || "esencial") +
         '">' +
-        escHtml(o.subscription_plan || "free") +
+        escHtml(o.plan_code || "esencial") +
         "</span>";
       const tr = document.createElement("tr");
       // ID
@@ -153,25 +153,21 @@
       const tdSlug = document.createElement("td");
       tdSlug.style.cssText = "font-size:12px;color:#888;";
       tdSlug.textContent = o.slug || "—";
-      // WhatsApp
-      const tdWa = document.createElement("td");
-      tdWa.style.cssText = "font-size:12px;color:#888;";
-      tdWa.textContent = o.whatsapp_number || "—";
       // Plan
       const tdPlan = document.createElement("td");
       tdPlan.innerHTML = planBadge;
       // Sedes
-      const tdSedes = document.createElement("td");
-      const sedesBtn = document.createElement("button");
-      sedesBtn.className = "btn btn-secondary btn-sm";
-      sedesBtn.textContent = (o.location_count || 0) + " sede(s)";
-      sedesBtn.onclick = function () {
+      const tdLocations = document.createElement("td");
+      const locationsBtn = document.createElement("button");
+      locationsBtn.className = "btn btn-secondary btn-sm";
+      locationsBtn.textContent = (o.location_count || 0) + " sede(s)";
+      locationsBtn.onclick = function () {
         _locOrgFilter = o.id;
         switchOrgTab("sedes");
         const sel = $("sedes-org-filter");
         if (sel) sel.value = String(o.id);
       };
-      tdSedes.appendChild(sedesBtn);
+      tdLocations.appendChild(locationsBtn);
       // Status
       const tdStatus = document.createElement("td");
       tdStatus.innerHTML = statusBadge;
@@ -207,9 +203,8 @@
       tr.appendChild(tdId);
       tr.appendChild(tdName);
       tr.appendChild(tdSlug);
-      tr.appendChild(tdWa);
       tr.appendChild(tdPlan);
-      tr.appendChild(tdSedes);
+      tr.appendChild(tdLocations);
       tr.appendChild(tdStatus);
       tr.appendChild(tdCreated);
       tr.appendChild(tdActions);
@@ -224,14 +219,14 @@
     _locOrgFilter = orgId || null;
     const tbody = $("sedes-tbody");
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Cargando...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Cargando...</td></tr>';
     try {
       let url = orgId ? "/organizations/" + orgId + "/locations" : "/organizations";
       let locations = [];
 
       if (orgId) {
         const r = await hqFetch(url);
-        if (!r.ok) { tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Error al cargar</td></tr>'; return; }
+        if (!r.ok) { tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Error al cargar</td></tr>'; return; }
         const d = await r.json();
         locations = (d.data && d.data.locations) || [];
       } else {
@@ -252,9 +247,9 @@
       }
 
       ALL_LOCATIONS = locations;
-      renderSedesTable(locations);
+      renderLocationsTable(locations);
     } catch (e) {
-      tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Error de conexión</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Error de conexión</td></tr>';
     }
   };
 
@@ -263,10 +258,10 @@
     return o ? o.name : "Org #" + orgId;
   }
 
-  function renderSedesTable(locations) {
+  function renderLocationsTable(locations) {
     const tbody = $("sedes-tbody");
     if (!locations.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Sin sedes</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Sin sedes</td></tr>';
       return;
     }
     tbody.innerHTML = "";
@@ -293,10 +288,6 @@
       const tdAddr = document.createElement("td");
       tdAddr.style.cssText = "font-size:12px;color:#888;max-width:200px;";
       tdAddr.textContent = loc.address || "—";
-
-      const tdWa = document.createElement("td");
-      tdWa.style.cssText = "font-size:12px;color:#888;";
-      tdWa.textContent = loc.whatsapp_number || "hereda";
 
       const tdPrimary = document.createElement("td");
       tdPrimary.innerHTML = loc.is_primary
@@ -346,7 +337,6 @@
       tr.appendChild(tdName);
       tr.appendChild(tdCode);
       tr.appendChild(tdAddr);
-      tr.appendChild(tdWa);
       tr.appendChild(tdPrimary);
       tr.appendChild(tdActive);
       tr.appendChild(tdActions);
@@ -366,15 +356,12 @@
       if (org) {
         $("om-name").value = org.name || "";
         $("om-slug").value = org.slug || "";
-        $("om-whatsapp").value = org.whatsapp_number || "";
-        $("om-wa-phone-id").value = org.wa_phone_id || "";
-        $("om-wa-token").value = "";
-        $("om-plan").value = org.subscription_plan || "free";
+        $("om-plan").value = org.plan_code || "esencial";
       }
     } else {
-      ["om-name", "om-slug", "om-whatsapp", "om-wa-phone-id", "om-wa-token"].forEach((id) => { const el = $(id); if (el) el.value = ""; });
+      ["om-name", "om-slug"].forEach((id) => { const el = $(id); if (el) el.value = ""; });
       const planSel = $("om-plan");
-      if (planSel) planSel.value = "free";
+      if (planSel) planSel.value = "restaurante";
     }
     $("org-modal-error").textContent = "";
     modal.style.display = "flex";
@@ -389,9 +376,6 @@
     const orgId = $("org-modal-org-id").value;
     const name = $("om-name").value.trim();
     const slug = $("om-slug").value.trim();
-    const whatsapp = $("om-whatsapp").value.trim();
-    const waPhoneId = $("om-wa-phone-id").value.trim();
-    const waToken = $("om-wa-token").value.trim();
     const plan = $("om-plan").value;
     const errEl = $("org-modal-error");
 
@@ -399,10 +383,7 @@
 
     const body = { name };
     if (slug) body.slug = slug;
-    if (whatsapp) body.whatsapp_number = whatsapp;
-    if (waPhoneId) body.wa_phone_id = waPhoneId;
-    if (waToken) body.wa_access_token = waToken;
-    if (plan) body.subscription_plan = plan;
+    if (plan) body.plan_code = plan;
 
     try {
       let r;
@@ -476,7 +457,7 @@
     $("loc-modal-error").textContent = "";
 
     // Reset fields
-    ["lm-name", "lm-code", "lm-address", "lm-lat", "lm-lon", "lm-whatsapp", "lm-wa-phone-id", "lm-wa-token"].forEach(
+    ["lm-name", "lm-code", "lm-address", "lm-lat", "lm-lon"].forEach(
       (id) => { const el = $(id); if (el) el.value = ""; }
     );
     const tzSel = $("lm-timezone");
@@ -503,8 +484,6 @@
         const ad = $("lm-address"); if (ad) ad.value = loc.address || "";
         const lt = $("lm-lat"); if (lt) lt.value = loc.latitude != null ? loc.latitude : "";
         const ln = $("lm-lon"); if (ln) ln.value = loc.longitude != null ? loc.longitude : "";
-        const wn = $("lm-whatsapp"); if (wn) wn.value = loc.whatsapp_number || "";
-        const wp = $("lm-wa-phone-id"); if (wp) wp.value = loc.wa_phone_id || "";
         const tz = $("lm-timezone"); if (tz) tz.value = loc.timezone || "America/Bogota";
         const ac = $("lm-active"); if (ac) ac.checked = !!loc.active;
       }
@@ -551,9 +530,6 @@
     const address = $("lm-address").value.trim();
     const lat = $("lm-lat").value.trim();
     const lon = $("lm-lon").value.trim();
-    const wa = $("lm-whatsapp").value.trim();
-    const waPhoneId = $("lm-wa-phone-id").value.trim();
-    const waToken = $("lm-wa-token").value.trim();
     const tz = $("lm-timezone") ? $("lm-timezone").value : null;
     const active = $("lm-active") ? $("lm-active").checked : true;
 
@@ -561,9 +537,6 @@
     if (address) body.address = address;
     if (lat) body.latitude = parseFloat(lat);
     if (lon) body.longitude = parseFloat(lon);
-    if (wa) body.whatsapp_number = wa;
-    if (waPhoneId) body.wa_phone_id = waPhoneId;
-    if (waToken) body.wa_access_token = waToken;
     if (tz) body.timezone = tz;
     body.active = active;
 
@@ -648,7 +621,7 @@
   };
 
   // ── Filter handler ────────────────────────────────────────────────────────────
-  window.onSedesOrgFilterChange = function () {
+  window.onLocationsOrgFilterChange = function () {
     const sel = $("sedes-org-filter");
     const orgId = sel ? (sel.value ? parseInt(sel.value) : null) : null;
     loadAllLocations(orgId);

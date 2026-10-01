@@ -31,7 +31,7 @@ STAFF_PIN = "4321"
 
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
 
@@ -49,7 +49,7 @@ async def e2e_app(wa_capture):
 async def test_staff_pin_login_returns_token(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture,
+    bot_replies,
 ):
     """
     Seed staff with a known PIN -> POST /api/staff/pin-login -> assert token returned.
@@ -64,7 +64,7 @@ async def test_staff_pin_login_returns_token(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Pin Login Test Restaurant",
-        bot_number_raw="+570E2EPINLOG",
+        key="+570E2EPINLOG",
         num_branches=0,
     )
     org_id = restaurant["id"]
@@ -119,14 +119,15 @@ async def test_staff_pin_login_returns_token(
     )
 
     # The token must actually authenticate downstream (proves session was created).
-    profile_resp = await e2e_app.get(
-        "/api/staff/self/profile",
+    sections_resp = await e2e_app.get(
+        "/api/staff/sections",
         headers={"Authorization": f"Bearer {data['token']}"},
     )
-    assert profile_resp.status_code == 200, (
-        f"Token from pin-login does not authenticate /api/staff/self/profile: "
-        f"{profile_resp.status_code} {profile_resp.text}"
+    assert sections_resp.status_code == 200, (
+        f"Token from pin-login does not authenticate /api/staff/sections: "
+        f"{sections_resp.status_code} {sections_resp.text}"
     )
+    assert "waiter" in sections_resp.json()["sections"]
 
 
 @pytest.mark.e2e_no_llm
@@ -134,7 +135,7 @@ async def test_staff_pin_login_returns_token(
 async def test_staff_pin_login_wrong_pin_returns_401(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture,
+    bot_replies,
 ):
     """Wrong PIN must return 401 with a constant-time response (no enumeration)."""
     pool = test_pool
@@ -143,7 +144,7 @@ async def test_staff_pin_login_wrong_pin_returns_401(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Pin Login Wrong Pin Restaurant",
-        bot_number_raw="+570E2EPINBAD",
+        key="+570E2EPINBAD",
         num_branches=0,
     )
     org_id = restaurant["id"]

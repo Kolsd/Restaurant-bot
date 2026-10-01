@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Mi equipo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/team.css">
+</head>
+<body data-active="staff">
+<div class="app">
+
+  <!-- ── Sidebar (shared component — sidebar.js) ───────────────── -->
+  <aside class="sidebar" role="navigation" aria-label="Menú principal"></aside>
+
+  <!-- ── Main ──────────────────────────────────────────────────── -->
+  <main class="main">
+    <header class="topbar">
+      <span class="topbar-crumb">Equipo<span class="sep">›</span></span>
+      <span class="topbar-title">Mi equipo</span>
+      <div class="topbar-right">
+        <div class="search" style="min-width:280px;">
+          <span style="color:var(--text-4);">⌕</span>
+          <input id="searchInput" placeholder="Buscar miembro o rol…" aria-label="Buscar miembro">
+          <span class="kbd">⌘K</span>
+        </div>
+        <button class="btn brand" id="inviteBtn">+ Invitar miembro</button>
+      </div>
+    </header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Tu equipo</h1>
+          <p class="page-sub" id="teamSub">Cargando datos del equipo…</p>
+        </div>
+      </div>
+
+      <!-- ── Members table ─────────────────────────────────────── -->
+      <div class="card flush">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Miembros del equipo</div>
+            <div class="card-sub" id="memberCount">Cargando…</div>
+          </div>
+          <div class="row">
+            <div class="seg">
+              <button class="seg-btn active" data-role="all">Todos</button>
+              <button class="seg-btn" data-role="mesero">Meseros</button>
+              <button class="seg-btn" data-role="cocina">Cocina</button>
+              <button class="seg-btn" data-role="bar">Barra</button>
+              <button class="seg-btn" data-role="admin">Admin</button>
+            </div>
+          </div>
+        </div>
+        <table class="tbl ppl-tbl">
+          <thead>
+            <tr>
+              <th>Miembro</th>
+              <th>Rol</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="membersTbody">
+            <tr>
+              <td colspan="4" style="text-align:center;color:var(--text-4);padding:32px;">
+                Cargando miembros…
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div><!-- /page -->
+  </main>
+</div><!-- /app -->
+
+<!-- ── Invite modal ───────────────────────────────────────────── -->
+<div class="m-modal-overlay" id="inviteModal" role="dialog" aria-modal="true" aria-labelledby="inviteModalTitle">
+  <div class="m-modal-box" id="inviteModalBox">
+    <h3 id="inviteModalTitle">Invitar nuevo miembro</h3>
+
+    <div class="form-field">
+      <label for="inviteName">Nombre completo</label>
+      <input id="inviteName" class="form-input" type="text" placeholder="Ana García" />
+    </div>
+
+    <div class="form-field">
+      <label for="inviteRole">Rol</label>
+      <select id="inviteRole" class="form-input">
+        <option value="mesero">Mesero/a</option>
+        <option value="cocina">Cocina</option>
+        <option value="bar">Bartender</option>
+        <option value="caja">Caja</option>
+        <option value="domiciliario">Domiciliario</option>
+        <option value="gerente">Gerente</option>
+        <option value="admin">Admin</option>
+        <option value="otro">Otro</option>
+      </select>
+    </div>
+
+    <div class="form-field">
+      <label for="inviteDoc">Número de documento (opcional)</label>
+      <input id="inviteDoc" class="form-input" type="text" placeholder="CC 1234567890" />
+    </div>
+
+    <div class="form-field">
+      <label for="invitePassword">Contraseña / PIN de acceso</label>
+      <input id="invitePassword" class="form-input" type="password" minlength="4" placeholder="Mínimo 4 caracteres" />
+    </div>
+
+    <!-- Sede selector — only shown for multi-sede orgs (docs/claude/delivery-web.md
+         chunk 8: "single-sede orgs: no selector needed"); populated from
+         GET /api/staff/locations. -->
+    <div class="form-field" id="inviteLocationField" style="display:none;">
+      <label for="inviteLocation">Sede</label>
+      <select id="inviteLocation" class="form-input"></select>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+      <button class="btn" id="inviteModalCancel">Cancelar</button>
+      <button class="btn brand" id="inviteModalSubmit">Crear miembro</button>
+    </div>
+    <button class="icon-btn" id="inviteModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">✕</button>
+  </div>
+</div>
+
+<!-- ── Edit member modal ─────────────────────────────────────────── -->
+<div class="m-modal-overlay" id="editStaffModal" role="dialog" aria-modal="true" aria-labelledby="editStaffModalTitle">
+  <div class="m-modal-box" id="editStaffModalBox">
+    <h3 id="editStaffModalTitle">Editar miembro</h3>
+
+    <div class="form-field">
+      <label for="editStaffName">Nombre completo</label>
+      <input id="editStaffName" class="form-input" type="text" />
+    </div>
+
+    <div class="form-field">
+      <label for="editStaffRole">Rol</label>
+      <select id="editStaffRole" class="form-input">
+        <option value="mesero">Mesero/a</option>
+        <option value="cocina">Cocina</option>
+        <option value="bar">Bartender</option>
+        <option value="caja">Caja</option>
+        <option value="domiciliario">Domiciliario</option>
+        <option value="gerente">Gerente</option>
+        <option value="admin">Admin</option>
+        <option value="otro">Otro</option>
+      </select>
+    </div>
+
+    <!-- Sede selector — only shown for multi-sede orgs, same as the invite
+         modal (docs/claude/delivery-web.md chunk 8). -->
+    <div class="form-field" id="editStaffLocationField" style="display:none;">
+      <label for="editStaffLocation">Sede</label>
+      <select id="editStaffLocation" class="form-input"></select>
+    </div>
+
+    <div class="form-field">
+      <label><input type="checkbox" id="editStaffActive" /> Miembro activo</label>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+      <button class="btn" id="editStaffModalCancel">Cancelar</button>
+      <button class="btn brand" id="editStaffModalSubmit">Guardar cambios</button>
+    </div>
+    <button class="icon-btn" id="editStaffModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">✕</button>
+  </div>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/sidebar.js"></script>
+<script src="/static/js/pages/team.js"></script>
+</body>
+</html>

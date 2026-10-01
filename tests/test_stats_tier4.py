@@ -3,7 +3,6 @@ tests/test_stats_tier4.py
 
 Unit + integration tests for:
   Tier 4d — Comparatives (compare=true on by-channel, payment-status, top-dishes)
-  Tier 4a — AI Daily Insight (/api/stats/daily-insight)
 
 Unit tests mock the repo layer.
 Integration tests (require TEST_DATABASE_URL) hit real queries with empty data.
@@ -137,7 +136,7 @@ class TestByChannelCompare:
         """compare=true returns previous + deltas with correct shape."""
         call_count = {"n": 0}
 
-        async def _mock_channel(org_id, period_start, period_end, location_id=None):
+        async def _mock_channel(org_id, period_start, period_end, location_id=None, tz="UTC"):
             call_count["n"] += 1
             return _MOCK_CHANNEL if call_count["n"] == 1 else _MOCK_PREV_CHANNEL
 
@@ -175,7 +174,7 @@ class TestByChannelCompare:
                       "total": 0, "total_count": 0, "channels": []}
         call_count = {"n": 0}
 
-        async def _mock(org_id, period_start, period_end, location_id=None):
+        async def _mock(org_id, period_start, period_end, location_id=None, tz="UTC"):
             call_count["n"] += 1
             return _MOCK_CHANNEL if call_count["n"] == 1 else empty_prev
 
@@ -201,7 +200,7 @@ class TestPaymentStatusCompare:
         """compare=true returns previous + deltas with correct shape."""
         call_count = {"n": 0}
 
-        async def _mock(org_id, period_start, period_end, location_id=None):
+        async def _mock(org_id, period_start, period_end, location_id=None, tz="UTC"):
             call_count["n"] += 1
             return _MOCK_PAYMENT if call_count["n"] == 1 else _MOCK_PREV_PAYMENT
 
@@ -229,7 +228,7 @@ class TestPaymentStatusCompare:
                       "buckets": [], "total_count": 0}
         call_count = {"n": 0}
 
-        async def _mock(org_id, period_start, period_end, location_id=None):
+        async def _mock(org_id, period_start, period_end, location_id=None, tz="UTC"):
             call_count["n"] += 1
             return _MOCK_PAYMENT if call_count["n"] == 1 else empty_prev
 
@@ -296,148 +295,13 @@ class TestTopDishesCompare:
 # Tier 4a — AI Daily Insight
 # ══════════════════════════════════════════════════════════════════════════════
 
-class TestAIDailyInsight:
-
-    def test_feature_disabled_no_llm_call(self, client, patched_auth, monkeypatch):
-        """Feature disabled → {"enabled": false} without any LLM call."""
-        called = {"n": 0}
-
-        async def _mock_generate(*args, **kwargs):
-            called["n"] += 1
-            return {"enabled": True, "insight_text": "test"}
-
-        monkeypatch.setattr(
-            "app.services.ai_insights.generate_daily_insight",
-            _mock_generate,
-        )
-        with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-            resp = client.get("/api/stats/daily-insight", headers=_auth_headers())
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["enabled"] is False
-        assert data["reason"] == "feature_disabled"
-        assert called["n"] == 0  # generate_daily_insight never called
-
-    def test_feature_enabled_cache_hit(self, client, patched_auth_with_ai, monkeypatch):
-        """Feature enabled + Redis cache hit → returns cached shape."""
-        cached_payload = {
-            "enabled": True,
-            "generated_at": "2026-04-18T14:00:00+00:00",
-            "insight_text": "Hoy proyectas $1.84M en ventas (+12%). Refuerza cocina 7-9pm.",
-            "signals": {
-                "sales_7d_total": 12_400_000,
-                "pending_orders_today": 5,
-                "top_dish": "Bandeja Paisa",
-                "inventory_alerts_count": 2,
-                "at_risk_customers_count": 8,
-            },
-        }
-
-        async def _mock_generate(org_id, location_id):
-            return cached_payload
-
-        monkeypatch.setattr(
-            "app.services.ai_insights.generate_daily_insight",
-            _mock_generate,
-        )
-        with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-            resp = client.get("/api/stats/daily-insight", headers=_auth_headers())
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["enabled"] is True
-        assert "insight_text" in data
-        assert "signals" in data
-        assert data["insight_text"] == cached_payload["insight_text"]
-
-    def test_feature_enabled_cache_miss_calls_llm(self, client, patched_auth_with_ai, monkeypatch):
-        """Cache miss → generate_daily_insight is called and returns full shape."""
-        fresh_payload = {
-            "enabled": True,
-            "generated_at": "2026-04-18T16:30:00+00:00",
-            "insight_text": "Ventas del día: $480K (en línea). Papa criolla crítica — re-stock urgente.",
-            "signals": {
-                "sales_7d_total": 9_800_000,
-                "pending_orders_today": 3,
-                "top_dish": "Ajiaco",
-                "inventory_alerts_count": 1,
-                "at_risk_customers_count": 12,
-            },
-        }
-        called = {"n": 0}
-
-        async def _mock_generate(org_id, location_id):
-            called["n"] += 1
-            return fresh_payload
-
-        monkeypatch.setattr(
-            "app.services.ai_insights.generate_daily_insight",
-            _mock_generate,
-        )
-        with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-            resp = client.get("/api/stats/daily-insight", headers=_auth_headers())
-
-        assert resp.status_code == 200
-        assert called["n"] == 1
-        data = resp.json()
-        assert data["enabled"] is True
-        assert data["signals"]["top_dish"] == "Ajiaco"
-
-    def test_missing_api_key_returns_llm_unavailable(self, monkeypatch):
-        """Missing ANTHROPIC_API_KEY → signals-only payload, no crash."""
-        import os
-        from app.services import ai_insights
-
-        # Ensure no API key
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-
-        # Patch gather_signals to avoid real DB calls
-        mock_signals = {
-            "sales_7d_total": 5_000_000,
-            "pending_orders_today": 2,
-            "top_dish": "Cazuela de mariscos",
-            "inventory_alerts_count": 0,
-            "at_risk_customers_count": 3,
-        }
-
-        async def _mock_gather(org_id, location_id):
-            return mock_signals
-
-        async def _mock_redis_get(*args, **kwargs):
-            return None
-
-        monkeypatch.setattr(ai_insights, "_gather_signals", _mock_gather)
-
-        # Patch Redis to return None (cache miss)
-        import app.services.redis_client as rc
-        monkeypatch.setattr(rc, "get_redis", AsyncMock(return_value=None))
-
-        import asyncio
-        # Use a fresh loop instead of asyncio.run() — asyncio.run() closes and
-        # removes the current event loop, which breaks test_weekly_reports.py's
-        # _run() helper that calls asyncio.get_event_loop().run_until_complete().
-        _loop = asyncio.new_event_loop()
-        try:
-            result = _loop.run_until_complete(
-                ai_insights.generate_daily_insight(org_id=42, location_id=42)
-            )
-        finally:
-            _loop.close()
-
-        assert result["enabled"] is True
-        assert result.get("error") == "llm_unavailable"
-        assert "signals" in result
-        assert "insight_text" not in result
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Integration tests — removed
 # ══════════════════════════════════════════════════════════════════════════════
 # The 3 *_compare_empty_db tests were removed because they used TestClient(app)
 # against the real DB pool from within synchronous test methods — a pattern that
 # caused asyncpg "another operation is in progress" interference with
-# test_weekly_reports.py when both files ran in the same pytest session.
+# other DB tests in the same pytest session.
 #
 # Coverage is fully preserved by the unit tests above
 # (TestByChannelCompare.test_compare_true_zero_prev_returns_null_deltas,

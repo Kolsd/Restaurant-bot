@@ -16,7 +16,6 @@ def _loc_summary(loc: dict) -> dict:
         "id":               loc.get("id"),
         "name":             loc.get("name"),
         "is_primary":       loc.get("is_primary", False),
-        "whatsapp_number":  loc.get("whatsapp_number"),
         "active":           loc.get("active", True),
     }
 
@@ -32,9 +31,9 @@ async def _build_org_shape(org: dict) -> dict:
     return {
         "id":                 org.get("id"),
         "name":               org.get("name"),
-        "whatsapp_number":    org.get("whatsapp_number"),
         "features":           feats,
-        "subscription_plan":  org.get("subscription_plan"),
+        "subscription_plan":  org.get("plan_code") or org.get("subscription_plan"),
+        "plan_code":          org.get("plan_code"),
         "locale":             feats.get("locale",   "es-CO"),
         "currency":           feats.get("currency", "COP"),
     }
@@ -50,10 +49,10 @@ _INVALID_CREDS = "Credenciales inválidas"
 
 
 async def login(username: str, password: str) -> dict:
-    # ── Intento 1: tabla users (admin / gerente / owner) ──────────────────────
+    # ── Attempt 1: users table (admin / manager / owner) ──────────────────────
     user = await db.db_get_user(username)
     if not user:
-        # ── Intento 2: tabla staff (operativos con contraseña) ────────────────
+        # ── Attempt 2: staff table (operators with a password) ────────────────
         candidates = await db.db_get_staff_candidates_by_name(username)
         member = next((c for c in candidates if verify_password(password, c["pin"], c.get("name", ""))), None)
         if not member:
@@ -80,7 +79,6 @@ async def login(username: str, password: str) -> dict:
         roles     = member.get("roles") or [member.get("role", "mesero")]
         role      = ",".join(roles)
         branch_id = member.get("restaurant_id")
-        whatsapp_number = ""
         features: dict = {}
         restaurant_name = ""
 
@@ -91,10 +89,17 @@ async def login(username: str, password: str) -> dict:
 
         try:
             if branch_id:
-                restaurant = await db.db_get_restaurant_by_id(branch_id)
+                # branch_id here is member["restaurant_id"] == staff.org_id
+                # (confirmed: db_get_staff_for_pin_login queries
+                # `staff WHERE org_id=$1`) — always an org_id, safe.
+                restaurant = await db.db_get_restaurant_by_org_id(branch_id)
                 if restaurant:
-                    restaurant_name = restaurant.get("name", "")
-                    whatsapp_number = restaurant.get("whatsapp_number", "")
+                    # display_name (migration 0092) names the sede when the
+                    # org runs several, so the dashboard header and every
+                    # report say which restaurant they are about.
+                    restaurant_name = (
+                        restaurant.get("display_name") or restaurant.get("name", "")
+                    )
                     raw = restaurant.get("features") or {}
                     features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
 
@@ -132,7 +137,6 @@ async def login(username: str, password: str) -> dict:
             "username":         member["name"],
             "role":             role,
             "branch_id":        branch_id,
-            "whatsapp_number":  whatsapp_number,
             "features":         features,
             "locale":           features.get("locale",   "es-CO"),
             "currency":         features.get("currency", "COP"),
@@ -143,6 +147,8 @@ async def login(username: str, password: str) -> dict:
             "token":    token,
             "role":     role,
             "staff_id": member["id"],
+            # Who is logged in — the staff app greets by it (rb_staff_name).
+            "name":     member["name"],
             "restaurant": legacy_restaurant,  # legacy key — kept for backward compat
         }
         if org_shape is not None:
@@ -166,8 +172,6 @@ async def login(username: str, password: str) -> dict:
     token = await sessions_repo.create_session(username.lower().strip())
 
     role = user.get("role", "owner")
-    branch_id = user.get("branch_id")
-    whatsapp_number = ""
     features: dict = {}
 
     # ── New shape: resolve Org + Locations post-0037 (Wave 2) ────────────────
@@ -175,81 +179,67 @@ async def login(username: str, password: str) -> dict:
     locations_list: list = []
     default_location_id: int | None = None
 
-    try:
-        if branch_id:
-            restaurant = await db.db_get_restaurant_by_id(branch_id)
-            if restaurant:
-                whatsapp_number = restaurant.get("whatsapp_number", "")
-                raw = restaurant.get("features") or {}
-                features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
-        else:
-            # Wave-2: legacy admin login path where the user record has no
-            # branch_id assigned. We look the org up by NAME match against
-            # users.restaurant_name. NO cross-tenant fallback to all_orgs[0]
-            # — that used to silently log the user into a different tenant
-            # if name matching failed (catastrophic in multi-tenant prod).
-            target_name = (user.get("restaurant_name") or "").lower().strip()
-            if target_name:
-                all_orgs = await db.db_get_all_orgs(active_only=False)
-                for o in all_orgs:
-                    if (o.get("name") or "").lower().strip() == target_name:
-                        whatsapp_number = o.get("whatsapp_number", "") or ""
-                        branch_id = o.get("id")
-                        raw = o.get("features") or {}
-                        features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
-                        break
-            # If name match failed: leave branch_id/whatsapp_number empty.
-            # The downstream "if branch_id and org_shape is None" guard returns
-            # a friendly error to the client instead of impersonating another
-            # tenant. Failing the login is correct here — the user record is
-            # genuinely orphaned (no branch_id, no matching org by name).
+    # P0 fix (2026-09): resolve ONLY through the explicit users.org_id /
+    # users.location_id columns (backfilled by the users_org_location
+    # migration). The old path resolved via the mixed-kind users.branch_id
+    # column — some writers stored an org_id there, others a location_id —
+    # feeding it into the now-deleted ambiguous db_get_restaurant_by_id lookup
+    # and, when that failed, into a "Matriz invariant" fallback that treated
+    # branch_id as an org_id regardless. Either path could silently resolve
+    # to an UNRELATED org whenever branch_id collided with someone else's
+    # real id. A user whose org_id cannot be resolved is DENIED here — never
+    # guessed via name-match or branch_id fallback.
+    org_id = user.get("org_id")
+    location_id = user.get("location_id")
 
-        # Resolve Org via locations table (post-0037, no mapping table)
-        if branch_id:
-            from app.repositories.restaurant_repo import (  # noqa: PLC0415
-                db_get_org_by_id,
-                db_get_org_locations,
-            )
-
-            loc = await db_get_location_by_id_safe(int(branch_id))
-            if loc and loc.get("org_id"):
-                org_id_resolved = int(loc["org_id"])
-            else:
-                _log.warning("auth.org_id_fallback_used", branch_id=int(branch_id))
-                org_id_resolved = int(branch_id)  # Matriz invariant fallback
-
-            org_obj = await db_get_org_by_id(org_id_resolved)
-            if org_obj:
-                org_shape = await _build_org_shape(org_obj)
-                all_locs = await db_get_org_locations(org_id_resolved)
-                locations_list = [_loc_summary(l) for l in all_locs]
-                # Post-Wave-2: no primary flag — use lowest id as deterministic default
-                default_location_id = all_locs[0]["id"] if all_locs else None
-
-    except Exception:
-        _log.exception("auth.admin_login.org_resolve_error")
-
-    if branch_id and org_shape is None:
-        _log.error("auth.login.org_resolve_failed_hard", branch_id=branch_id, username=username)
-        return {"success": False, "error": "Problema con la configuración de la sucursal"}
-
-    # Wave-2 Paso 9: also fail if branch_id never got resolved at all (orphaned
-    # owner — user record has no branch_id AND no org with matching name).
-    # Pre-Paso-9 the legacy fallback would impersonate any tenant globally;
-    # post-fix we leave branch_id None and must NOT proceed to issue a session
-    # with empty restaurant data — the user has no resolvable tenant context.
-    if branch_id is None:
+    if not org_id:
         _log.error("auth.login.no_tenant_context", username=username,
                    restaurant_name=user.get("restaurant_name"))
         return {"success": False, "error": "Problema con la configuración de la sucursal"}
 
+    try:
+        from app.repositories.restaurant_repo import (  # noqa: PLC0415
+            db_get_org_by_id,
+            db_get_org_locations,
+        )
+
+        restaurant = await db.db_get_restaurant_by_org_id(int(org_id))
+        if restaurant:
+            raw = restaurant.get("features") or {}
+            features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
+
+        loc = await db_get_location_by_id_safe(int(location_id)) if location_id else None
+        if loc and int(loc.get("org_id") or -1) != int(org_id):
+            # Ownership sanity check: never trust a location_id that does
+            # not belong to this user's own org.
+            _log.warning(
+                "auth.login.location_org_mismatch",
+                username=username, location_id=location_id, org_id=org_id,
+            )
+            loc = None
+
+        org_obj = await db_get_org_by_id(int(org_id))
+        if org_obj:
+            org_shape = await _build_org_shape(org_obj)
+            all_locs = await db_get_org_locations(int(org_id))
+            locations_list = [_loc_summary(l) for l in all_locs]
+            # Post-Wave-2: no primary flag — prefer the user's own assigned
+            # location, else the lowest id as deterministic default.
+            default_location_id = loc["id"] if loc else (all_locs[0]["id"] if all_locs else None)
+
+    except Exception:
+        _log.exception("auth.admin_login.org_resolve_error")
+
+    if org_shape is None:
+        _log.error("auth.login.org_resolve_failed_hard", org_id=org_id, username=username)
+        return {"success": False, "error": "Problema con la configuración de la sucursal"}
+
     legacy_restaurant = {
-        "id": branch_id,
+        "id": org_id,
         "name": user["restaurant_name"],
         "username": username,
         "role": role,
-        "branch_id": branch_id,
-        "whatsapp_number": whatsapp_number,
+        "branch_id": org_id,
         "features": features,
         "locale":   features.get("locale",   "es-CO"),
         "currency": features.get("currency", "COP"),
@@ -259,6 +249,8 @@ async def login(username: str, password: str) -> dict:
         "success": True,
         "token": token,
         "role": role,
+        # Who is logged in (an owner has no display name on file — their login).
+        "name": username,
         "restaurant": legacy_restaurant,  # legacy key — kept for backward compat
     }
     if org_shape is not None:

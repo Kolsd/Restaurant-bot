@@ -58,6 +58,28 @@ def quantize_money(value: Any, currency: str | None = None) -> Decimal:
     return d.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
 
 
+def format_money_es(value: Any, currency: str | None = None) -> str:
+    """Customer-facing amount in Spanish/LatAm style: "$ 75.400" for COP,
+    "$ 1.234,50" for a two-decimal currency.
+
+    Matches what the diner pages render with Intl es-CO, so a server-side
+    message ("El monto indicado no cubre el total del pedido ($ 75.400)")
+    reads the same as the totals printed right above it. Python's `:,`
+    format spec gives the US style ("$75,400"), which a Colombian customer
+    reads as seventy-five pesos with a decimal part.
+    """
+    amount = quantize_money(value, currency)
+    exp = currency_exponent(currency)
+    sign = "-" if amount < 0 else ""
+    amount = abs(amount)
+    if exp == 0:
+        body = f"{int(amount):,}".replace(",", ".")
+    else:
+        whole, frac = f"{amount:.2f}".split(".")
+        body = f"{int(whole):,}".replace(",", ".") + "," + frac
+    return f"{sign}$ {body}"
+
+
 def money_sum(values: Iterable[Any]) -> Decimal:
     total = ZERO
     for v in values:

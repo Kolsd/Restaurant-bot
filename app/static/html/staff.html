@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Mesio — Staff</title>
+  <link rel="icon" type="image/png" href="/static/img/logo.png">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/shared.css">
+  <link rel="stylesheet" href="/static/css/pages/staff.css">
+  <!-- Section stylesheets: each is scoped to its own .mesio-sec-<name>
+       wrapper class (see app/static/js/staff/sections/*.js) so only one
+       section's styling is ever visible at a time, and none of it leaks
+       onto this shell's sidebar/topbar. Safe to load unconditionally. -->
+  <link rel="stylesheet" href="/static/css/pages/cashier.css">
+  <link rel="stylesheet" href="/static/css/pages/waiter.css">
+  <link rel="stylesheet" href="/static/css/pages/bar.css">
+  <link rel="stylesheet" href="/static/css/pages/courier.css">
+  <link rel="stylesheet" href="/static/css/pages/staff-clock.css">
+</head>
+<body data-active="staff">
+
+<div class="app">
+  <!-- ── SIDEBAR (rendered by staff-shell.js — same chrome as the admin dashboard) ── -->
+  <aside class="sidebar" role="navigation" aria-label="Menú de Staff App">
+    <div class="sb-brand">
+      <div class="mark">M</div>
+      <div>
+        <div class="sb-brand-name">Mesio</div>
+        <div class="sb-brand-sub" id="sb-org-sub">Staff App</div>
+      </div>
+    </div>
+
+    <div class="sb-switcher" id="sb-switcher" style="pointer-events:none;">
+      <div id="sb-org-avatar" style="width:20px;height:20px;border-radius:5px;background:#e0e0d8;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#555;flex-shrink:0;"></div>
+      <div class="grow">
+        <div class="sb-switcher-name" id="sb-org-name">Cargando…</div>
+      </div>
+    </div>
+
+    <nav id="staff-sidebar-nav" aria-label="Secciones">
+      <!-- Populated by staff-shell.js: one .sb-group per section group,
+           only the sections app/services/staff_sections.py allows for
+           this user's roles. -->
+    </nav>
+
+    <div class="sb-bottom">
+      <div class="sb-user" id="sb-user">
+        <div class="sb-avatar" id="sb-user-avatar" style="flex-shrink:0;"></div>
+        <div class="grow">
+          <div class="sb-user-name" id="sb-user-name">—</div>
+          <div class="sb-user-role" id="sb-user-role"></div>
+        </div>
+      </div>
+      <button id="staff-btn-logout" class="btn sm ghost" style="width:100%;margin-top:8px;">Salir</button>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ─────────────────────────────────────────────────────────── -->
+  <main class="main" role="main">
+    <div class="topbar">
+      <div class="row" style="gap:6px;">
+        <span class="topbar-crumb">Mesio</span>
+        <span class="sep topbar-crumb">/</span>
+        <span class="topbar-title" id="staff-topbar-title">Staff</span>
+      </div>
+      <div class="topbar-right">
+        <div class="m-live-status offline" id="staff-live-status" data-mesio-live>
+          <div class="dot"></div><span class="label">Sin conexión</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section content — mounted/unmounted by staff-shell.js, no full
+         page reload when switching sections. Each section manages its own
+         internal layout/scrolling (KDS/POS sections are full-bleed dark). -->
+    <div id="staff-section-root"></div>
+  </main>
+</div><!-- /.app -->
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/mesio-realtime.js"></script>
+<script src="/static/js/staff/staff-shell.js"></script>
+</body>
+</html>

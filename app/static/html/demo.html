@@ -2,344 +2,150 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Mesio · Demo en vivo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Demo en vivo — Mesio</title>
+<meta name="description" content="Pide desde tu celular en un restaurante de demostración y mira llegar el pedido a la pantalla de cocina.">
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;0,9..144,900;1,9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/demo-mesio.css">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;1,9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<style>
+:root {
+  --max-w: 1180px;
+  --pad-x: clamp(16px, 4vw, 40px);
+  --rule: 1px solid var(--border-dark);
+  --accent: var(--brand);
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg-dark); color: var(--text-on-dark);
+  font-family: var(--font-body); line-height: 1.55; -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+button { cursor: pointer; font: inherit; color: inherit; background: none; border: none; }
+em { font-style: italic; color: var(--accent); }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.wrap { max-width: var(--max-w); margin-inline: auto; padding-inline: var(--pad-x); }
+.eyebrow { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+
+.nav { height: 68px; border-bottom: var(--rule); }
+.nav-inner { height: 100%; display: flex; align-items: center; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 600; font-size: 22px; }
+.brand img { width: 30px; height: 30px; border-radius: 8px; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 0 20px; border-radius: var(--radius-pill); font-weight: 600; font-size: 15px;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--brand-dark); }
+.btn-ghost { border: 1px solid var(--border-dark-strong); }
+.btn-ghost:hover { border-color: var(--text-on-dark-mute); }
+.btn-sm { min-height: 38px; padding: 0 14px; font-size: 14px; }
+.nav .btn { margin-left: auto; }
+
+.head { padding-block: clamp(36px, 6vw, 64px) 28px; max-width: 760px; }
+.title { font-family: var(--font-display); font-weight: 600; font-size: clamp(32px, 5vw, 52px); line-height: 1.08; letter-spacing: -.015em; margin-top: 12px; }
+.sub { color: var(--text-on-dark-dim); font-size: 17px; margin-top: 16px; }
+
+.grid { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding-bottom: 64px; align-items: start; }
+.card { background: var(--surface-dark); border: var(--rule); border-radius: var(--radius-xl); padding: 24px; }
+.card h2 { font-size: 17px; display: flex; align-items: center; gap: 10px; }
+.step { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; align-items: center; justify-content: center; background: var(--accent); color: #fff; font-size: 13px; font-weight: 700; }
+.qr-box { background: #fff; border-radius: var(--radius-lg); padding: 16px; margin: 18px auto 12px; width: 232px; height: 232px; display: flex; align-items: center; justify-content: center; }
+.qr-box canvas, .qr-box img { width: 200px !important; height: 200px !important; }
+.table-name { text-align: center; font-family: var(--font-display); font-size: 22px; font-weight: 600; }
+.open-here { display: block; text-align: center; color: var(--accent); font-weight: 600; margin-top: 10px; }
+.how { margin-top: 18px; padding-top: 16px; border-top: var(--rule); display: flex; flex-direction: column; gap: 8px; font-size: 14.5px; color: var(--text-on-dark-dim); list-style: none; counter-reset: how; }
+.how li { counter-increment: how; padding-left: 26px; position: relative; }
+.how li::before { content: counter(how); position: absolute; left: 0; top: 1px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border-dark-strong); font-size: 11px; display: flex; align-items: center; justify-content: center; }
+.new-table { margin-top: 16px; font-size: 13px; color: var(--text-on-dark-mute); text-decoration: underline; }
+
+.kds-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.live { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: .06em; text-transform: uppercase; }
+.live::before { content: '●'; margin-right: 6px; animation: blink 1.6s infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .live::before { animation: none; } }
+.tickets { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-top: 18px; }
+.empty { margin-top: 18px; padding: 36px 20px; border: 1px dashed var(--border-dark-strong); border-radius: var(--radius-lg); text-align: center; color: var(--text-on-dark-dim); }
+.empty b { display: block; color: var(--text-on-dark); font-size: 16px; margin-bottom: 6px; }
+.ticket { background: var(--bg-dark); border: 1px solid var(--border-dark-strong); border-radius: var(--radius-lg); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.ticket.is-new { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(29,158,117,.18); }
+.ticket-top { display: flex; justify-content: space-between; align-items: baseline; }
+.ticket-top b { font-size: 18px; }
+.ticket-top span { font-family: var(--mono); font-size: 12px; color: var(--text-on-dark-mute); }
+.ticket ul { list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
+.ticket li small { display: block; color: var(--warning); font-size: 13px; }
+.chip { align-self: flex-start; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: var(--radius-pill); background: var(--surface-dark-2); color: var(--text-on-dark-dim); }
+.chip.recibido { background: rgba(245,158,11,.15); color: #FBBF24; }
+.chip.en_preparacion { background: rgba(59,130,246,.15); color: #93C5FD; }
+.chip.listo, .chip.entregado { background: rgba(29,158,117,.18); color: var(--accent); }
+.ticket .btn { width: 100%; }
+.ticket .hint { font-size: 13px; color: var(--accent); }
+.err { margin-top: 12px; color: var(--danger); font-size: 14px; }
+
+.cta { border-top: var(--rule); padding-block: 48px; text-align: center; }
+.cta h2 { font-family: var(--font-display); font-weight: 600; font-size: clamp(26px, 4vw, 36px); }
+.cta p { color: var(--text-on-dark-dim); margin: 10px 0 22px; }
+
+@media (max-width: 860px) {
+  .grid { grid-template-columns: 1fr; }
+}
+</style>
 </head>
 <body>
 
-<!-- ═══════════════ CHROME (top) ═══════════════ -->
-<header class="topframe" role="banner">
-  <div class="topframe-inner">
-    <a class="brand" href="#" aria-label="Mesio">
-      <span class="brand-mark">M</span>
-      <span class="brand-word">Mesio<span class="brand-dot">.</span></span>
-    </a>
-    <div class="frame-pill" aria-label="Estado del demo">
-      <span class="live-dot" aria-hidden="true"></span>
-      Demo en vivo · Restaurante <b>Sazón Caribe</b>
-    </div>
-    <div class="frame-actions">
-      <button class="btn btn-ghost" id="btn-share" type="button">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-        Compartir
-      </button>
-      <a class="btn btn-primary" href="#cta">
-        Ver con tus datos
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-      </a>
-    </div>
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="/"><img src="/static/img/logo.png" alt="" width="30" height="30">Mesio</a>
+    <a class="btn btn-primary btn-sm" href="/signup">Probar 15 días gratis</a>
   </div>
 </header>
 
-<!-- ═══════════════ MAIN STAGE ═══════════════ -->
-<main class="stage">
-
-  <!-- LEFT — Phone (chat) -->
-  <section class="col col-phone" aria-label="Conversación de WhatsApp del cliente">
-    <div class="col-label">
-      <span class="col-icon">📲</span>
-      Cliente · WhatsApp
-    </div>
-
-    <div class="phone" id="phone">
-      <div class="phone-bezel">
-        <div class="phone-notch" aria-hidden="true"></div>
-
-        <!-- WA header -->
-        <div class="wa-header">
-          <div class="wa-back" aria-hidden="true">‹</div>
-          <div class="wa-avatar" aria-hidden="true">SC</div>
-          <div class="wa-meta">
-            <div class="wa-name">Sazón Caribe</div>
-            <div class="wa-status"><span class="wa-typing-dot"></span>en línea</div>
-          </div>
-          <div class="wa-icons" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z"/></svg>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20 15.5c-1.25 0-2.45-.2-3.57-.57a1 1 0 0 0-1.02.24l-2.2 2.2a15.05 15.05 0 0 1-6.59-6.58l2.2-2.21a1 1 0 0 0 .25-1.02A11.36 11.36 0 0 1 8.5 4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1c0 9.39 7.61 17 17 17a1 1 0 0 0 1-1v-3.5a1 1 0 0 0-1-1z"/></svg>
-          </div>
-        </div>
-
-        <!-- Chat area -->
-        <div class="wa-chat" id="wa-chat" role="log" aria-live="polite" aria-relevant="additions">
-          <div class="wa-day"><span>hoy</span></div>
-        </div>
-
-        <!-- Typing indicator -->
-        <div class="wa-typing" id="wa-typing" hidden>
-          <div class="wa-typing-bubble">
-            <span></span><span></span><span></span>
-          </div>
-        </div>
-
-        <!-- Input -->
-        <div class="wa-input" aria-hidden="true">
-          <div class="wa-input-field">
-            <span class="wa-emoji">😀</span>
-            <span class="wa-placeholder">Mensaje</span>
-            <span class="wa-attach">📎</span>
-          </div>
-          <button class="wa-send" type="button" tabindex="-1">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
-          </button>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- CENTER — Connector (desktop only) -->
-  <div class="connector" aria-hidden="true">
-    <div class="connector-line"></div>
-    <div class="connector-pulse" id="connector-pulse"></div>
-    <div class="connector-label">en tiempo real</div>
+<main class="wrap">
+  <div class="head">
+    <div class="eyebrow">Demo en vivo · Casa Mesio</div>
+    <h1 class="title">Pide desde tu celular y <em>mira llegar el pedido a la cocina.</em></h1>
+    <p class="sub">Es el producto real, no un video. Escanea el código de tu mesa, pide de la carta y sigue tu pedido desde esta pantalla, que es la que vería tu cocina.</p>
   </div>
 
-  <!-- RIGHT — Mini dashboard -->
-  <section class="col col-dash" aria-label="Dashboard del dueño del restaurante">
-    <div class="col-label">
-      <span class="col-icon">🖥️</span>
-      Dueño · Dashboard
-      <span class="col-meta">
-        <span class="live-dot small"></span> en vivo
-      </span>
-    </div>
+  <div class="grid">
+    <section class="card" aria-labelledby="mesa-title">
+      <h2 id="mesa-title"><span class="step">1</span> Tu mesa</h2>
+      <div class="qr-box" id="qr" aria-label="Código QR de tu mesa"></div>
+      <div class="table-name" id="table-name">Buscando una mesa libre…</div>
+      <a class="open-here" id="open-here" href="#" target="_blank" rel="noopener" hidden>¿Estás en el celular? Abre la mesa aquí →</a>
+      <ol class="how">
+        <li>Escanea el código con la cámara de tu celular.</li>
+        <li>Toca una categoría y agrega platos.</li>
+        <li>Envía el pedido y mira esta pantalla.</li>
+      </ol>
+      <button class="new-table" id="new-table" type="button">Usar otra mesa</button>
+      <div class="err" id="table-error" role="alert" hidden></div>
+    </section>
 
-    <div class="dash" id="dash">
-      <!-- Dash topbar -->
-      <div class="dash-top">
-        <div class="dash-title">
-          <div class="dash-title-main">Resumen · Hoy</div>
-          <div class="dash-title-sub">Sazón Caribe · Bogotá Centro · <span id="dash-clock">12:42</span></div>
-        </div>
-        <div class="dash-top-right">
-          <span class="dash-badge"><span class="live-dot tiny"></span>Bot 24/7</span>
-        </div>
+    <section class="card" aria-labelledby="cocina-title">
+      <div class="kds-head">
+        <h2 id="cocina-title"><span class="step">2</span> La pantalla de tu cocina</h2>
+        <span class="live">En vivo</span>
       </div>
-
-      <!-- Live ticker (top-right of dash content) -->
-      <div class="dash-ticker" id="dash-ticker" aria-live="polite">
-        <div class="ticker-empty">Esperando actividad…</div>
-      </div>
-
-      <!-- 4 metric tiles -->
-      <div class="dash-metrics">
-        <div class="metric" data-key="revenue">
-          <div class="metric-label">Ingresos hoy</div>
-          <div class="metric-value">$<span class="num" id="m-revenue" data-current="412000">412.000</span></div>
-          <div class="metric-delta up">+8.2% vs ayer</div>
-        </div>
-        <div class="metric" data-key="orders">
-          <div class="metric-label">Pedidos</div>
-          <div class="metric-value"><span class="num" id="m-orders" data-current="27">27</span></div>
-          <div class="metric-delta up" id="m-orders-delta">+3 hoy</div>
-        </div>
-        <div class="metric" data-key="active-tables">
-          <div class="metric-label">Mesas activas</div>
-          <div class="metric-value"><span class="num" id="m-tables" data-current="4">4</span><span class="metric-frac">/ 8</span></div>
-          <div class="metric-delta flat" id="m-tables-delta">4 libres</div>
-        </div>
-        <div class="metric" data-key="ticket">
-          <div class="metric-label">Ticket promedio</div>
-          <div class="metric-value">$<span class="num" id="m-ticket" data-current="38500">38.500</span></div>
-          <div class="metric-delta up">+$1.200</div>
-        </div>
-      </div>
-
-      <!-- Two-column body: floor plan + KDS -->
-      <div class="dash-body">
-
-        <!-- Floor plan -->
-        <div class="dash-card">
-          <div class="dash-card-head">
-            <span class="dash-card-title">Salón en vivo</span>
-            <span class="dash-card-meta"><span id="floor-active">4</span> ocupadas · <span id="floor-free">4</span> libres</span>
-          </div>
-          <div class="floor" id="floor">
-            <!-- 8 tables (4×2), populated by JS for animation control -->
-          </div>
-        </div>
-
-        <!-- KDS -->
-        <div class="dash-card">
-          <div class="dash-card-head">
-            <span class="dash-card-title">Cocina (KDS)</span>
-            <span class="dash-card-meta"><span id="kds-count">2</span> tickets activos</span>
-          </div>
-          <div class="kds" id="kds" aria-live="polite">
-            <div class="kds-ticket">
-              <div class="kds-ticket-head">
-                <span class="kds-mesa">Mesa 4</span>
-                <span class="kds-time">3 min</span>
-              </div>
-              <div class="kds-line">3× Ajiaco Bogotano</div>
-              <div class="kds-line">3× Cerveza Club</div>
-            </div>
-            <div class="kds-ticket">
-              <div class="kds-ticket-head">
-                <span class="kds-mesa">Mesa 8</span>
-                <span class="kds-time">1 min</span>
-              </div>
-              <div class="kds-line">1× Cazuela de Mariscos</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Inventory + DIAN — full width -->
-        <div class="dash-card dash-card-wide">
-          <div class="dash-card-head">
-            <span class="dash-card-title">Inventario · ítems críticos</span>
-            <span class="dash-card-meta">15 productos · 2 en alerta</span>
-          </div>
-          <div class="inv-row">
-            <div class="inv-item" data-key="frijoles">
-              <div class="inv-name">Frijoles</div>
-              <div class="inv-bar"><div class="inv-bar-fill" id="inv-frijoles-fill" style="width:60%"></div></div>
-              <div class="inv-stock"><span id="inv-frijoles">3.0</span> kg <span class="inv-min">· min 5.0</span></div>
-            </div>
-            <div class="inv-item">
-              <div class="inv-name">Maíz tierno</div>
-              <div class="inv-bar"><div class="inv-bar-fill warn" style="width:67%"></div></div>
-              <div class="inv-stock">2.0 kg <span class="inv-min">· min 3.0</span></div>
-            </div>
-            <div class="inv-item">
-              <div class="inv-name">Pollo</div>
-              <div class="inv-bar"><div class="inv-bar-fill ok" style="width:78%"></div></div>
-              <div class="inv-stock">15.5 kg <span class="inv-min">· min 5.0</span></div>
-            </div>
-            <div class="inv-item">
-              <div class="inv-name">Papa</div>
-              <div class="inv-bar"><div class="inv-bar-fill ok" style="width:80%"></div></div>
-              <div class="inv-stock">40 kg <span class="inv-min">· min 10</span></div>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  </section>
+      <div class="empty" id="empty"><b>Esperando tu pedido</b>Cuando lo envíes desde el celular, aparece aquí en segundos.</div>
+      <div class="tickets" id="tickets" aria-live="polite"></div>
+    </section>
+  </div>
 </main>
 
-<!-- ═══════════════ TRANSPORT (auto-play controls) ═══════════════ -->
-<div class="transport" id="transport">
-  <button class="t-btn t-play" id="btn-play" type="button" aria-label="Play / pausa">
-    <svg id="ico-play" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-    <svg id="ico-pause" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" hidden><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
-  </button>
-  <div class="t-meta">
-    <div class="t-scenario" id="t-scenario">Escena 1 · Mesa con QR</div>
-    <div class="t-progress"><div class="t-progress-fill" id="t-progress-fill"></div></div>
-    <div class="t-time"><span id="t-elapsed">0:00</span> / <span id="t-total">0:14</span></div>
+<section class="cta">
+  <div class="wrap">
+    <h2>Así funcionaría <em>en tu restaurante.</em></h2>
+    <p>Carga tu carta, imprime tus códigos QR y recibe tu primer pedido hoy.</p>
+    <a class="btn btn-primary" href="/signup">Probar 15 días gratis</a>
   </div>
-  <button class="t-btn" id="btn-restart" type="button" aria-label="Reiniciar">
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-  </button>
-  <div class="t-dots" id="t-dots" role="tablist" aria-label="Escenas">
-    <button class="t-dot active" data-key="mesa"     type="button" role="tab" aria-label="Escena 1: Mesa">1</button>
-    <button class="t-dot"        data-key="delivery" type="button" role="tab" aria-label="Escena 2: Domicilio">2</button>
-    <button class="t-dot"        data-key="nps"      type="button" role="tab" aria-label="Escena 3: NPS">3</button>
-    <button class="t-dot"        data-key="reserva"  type="button" role="tab" aria-label="Escena 4: Reserva">4</button>
-    <button class="t-dot"        data-key="nomina"   type="button" role="tab" aria-label="Escena 5: Nómina">5</button>
-  </div>
-  <div class="t-divider" aria-hidden="true"></div>
-  <button class="t-btn t-mode" id="btn-mode" type="button">
-    <span id="mode-label">Auto</span>
-  </button>
-</div>
+</section>
 
-<!-- ═══════════════ CTA DOCK ═══════════════ -->
-<aside class="cta-dock" id="cta-dock" hidden>
-  <div class="cta-dock-inner">
-    <div class="cta-dock-text">
-      <div class="cta-dock-title">¿Querés ver esto con <em>los datos de tu restaurante</em>?</div>
-      <div class="cta-dock-sub">Cero compromiso. Te lo armamos en 48 h.</div>
-    </div>
-    <div class="cta-dock-actions">
-      <a class="btn btn-ghost" href="https://wa.me/573001234567" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M20.5 3.5A11.5 11.5 0 0 0 3.6 18.4L3 21l2.7-.7A11.5 11.5 0 1 0 20.5 3.5zm-8.4 17.6c-1.7 0-3.4-.5-4.8-1.3l-.3-.2-2.8.7.7-2.7-.2-.3a9.5 9.5 0 1 1 7.4 3.8z"/></svg>
-        Hablar por WhatsApp
-      </a>
-      <button class="btn btn-primary" type="button" id="cta-share">
-        Mandárselo a mi socio
-      </button>
-    </div>
-    <button class="cta-dock-close" id="cta-dock-close" aria-label="Cerrar">×</button>
-  </div>
-</aside>
-
-<!-- ═══════════════ Toast (share confirmation) ═══════════════ -->
-<div class="toast" id="toast" hidden></div>
-
-<!-- ═══════════════ LIVE CHAT FAB (revealed after last scene) ═══════════════ -->
-<button class="demo-chat-fab" id="demo-chat-fab" type="button" hidden
-        aria-label="Abrir chat con el bot de Mesio"
-        aria-controls="demo-chat-panel" aria-expanded="false">
-  <span class="demo-chat-fab-icon" aria-hidden="true">
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-  </span>
-  <span class="demo-chat-fab-label">Chatea con el bot</span>
-  <span class="demo-chat-fab-pulse" aria-hidden="true"></span>
-</button>
-
-<!-- ═══════════════ LIVE CHAT WIDGET ═══════════════ -->
-<aside class="demo-chat-panel" id="demo-chat-panel" aria-label="Chat en vivo con el bot de Mesio" role="complementary" hidden>
-
-  <!-- Header -->
-  <div class="demo-chat-header">
-    <div class="demo-chat-title">
-      <span class="demo-chat-avatar" aria-hidden="true">M</span>
-      Chatea con el bot ahora
-    </div>
-    <div class="demo-chat-header-meta">
-      <span class="demo-chat-counter" id="demo-chat-counter" aria-live="polite" aria-atomic="true">0 / 30 mensajes</span>
-      <button class="demo-chat-reset-btn" id="demo-chat-reset" type="button" aria-label="Reiniciar conversación de demo">
-        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-        Reiniciar
-      </button>
-      <button class="demo-chat-close-btn" id="demo-chat-close" type="button" aria-label="Cerrar chat">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-  </div>
-
-  <!-- Status bar (hidden when empty) -->
-  <p class="demo-chat-status" id="demo-chat-status" hidden></p>
-
-  <!-- Message list -->
-  <div class="demo-chat-messages" id="demo-chat-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensajes del chat de demo"></div>
-
-  <!-- Typing indicator -->
-  <div class="demo-chat-typing" id="demo-chat-typing" hidden aria-hidden="true">
-    <span class="demo-bubble-avatar" aria-hidden="true">M</span>
-    <div class="demo-typing-bubble">
-      <span></span><span></span><span></span>
-    </div>
-  </div>
-
-  <!-- Input row -->
-  <div class="demo-chat-input-row">
-    <input
-      class="demo-chat-input"
-      id="demo-chat-input"
-      type="text"
-      placeholder="Escribe un mensaje…"
-      aria-label="Mensaje para el bot de demo"
-      maxlength="500"
-      autocomplete="off"
-    >
-    <button class="demo-chat-send-btn" id="demo-chat-send" type="button" aria-label="Enviar mensaje">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="white" aria-hidden="true"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
-    </button>
-  </div>
-</aside>
-
-<script src="/static/js/mesio-utils.js"></script>
-<script src="/static/js/mesio-demo-bus.js"></script>
-<script src="/static/js/mesio-demo-scenarios.js"></script>
-<script src="/static/js/mesio-demo-orchestrator.js"></script>
-<script src="/static/js/pages/demo-chat.js"></script>
+<script src="/static/vendor/qrcode.min.js"></script>
+<script src="/static/js/pages/demo.js"></script>
 </body>
 </html>

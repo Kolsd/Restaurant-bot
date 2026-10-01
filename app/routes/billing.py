@@ -10,6 +10,7 @@ from typing import Optional
 
 from app.services import database as db
 from app.routes.deps import get_current_user, get_current_restaurant_scoped
+from app.services import plan_access, plans
 from app.services.billing import (
     get_billing_config,
     save_billing_config,
@@ -26,15 +27,20 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 # ── AUTH HELPER ───────────────────────────────────────────────────────
 
 async def _get_restaurant_id(user: dict) -> int:
-    # 1. Si es un empleado (Staff con PIN), ya tiene el ID directo
+    # P0 fix (2026-09): prefer the explicit org_id (unambiguous tenant key,
+    # set on the user dict by deps.get_current_user / backfilled onto
+    # users.org_id). users.branch_id has no fixed id-kind contract — some
+    # writers stored an org_id there, others a location_id — so falling
+    # back to it here could scope billing into the WRONG tenant.
+    if user.get("org_id"):
+        return int(user["org_id"])
+
+    # Legacy staff shape without org_id (should not happen post-migration,
+    # kept defensively).
     if "restaurant_id" in user:
         return user["restaurant_id"]
 
-    # 2. Si es un Admin/Dueño, usamos su branch_id
-    if user.get("branch_id"):
-        return user["branch_id"]
-
-    # Name-based fallback removed: IDOR risk — trust only the JWT claims.
+    # No resolvable tenant: deny rather than guess via branch_id.
     raise HTTPException(status_code=401, detail="Token no contiene restaurante asignado")
 
 # ── MODELOS ──────────────────────────────────────────────────────────
@@ -77,8 +83,8 @@ class BillingConfigPayload(BaseModel):
     restaurant_address_dian: Optional[str]   = None  # Dirección fiscal
     tax_regime:              Optional[str]   = None  # "iva" | "ico" (Impuesto al Consumo)
     nit_id_type:             Optional[str]   = None  # "31"=NIT (default) | "13"=CC
-    software_id:             Optional[str]   = None  # ID software habilitado en DIAN
-    software_pin:            Optional[str]   = None  # PIN del software DIAN
+    software_id:             Optional[str]   = None  # Software ID enabled in DIAN
+    software_pin:            Optional[str]   = None  # DIAN software PIN
     dian_environment:        Optional[str]   = None  # "test" | "production"
 
 class EmitInvoicePayload(BaseModel):
@@ -107,6 +113,7 @@ async def get_config(request: Request):
 async def set_config(request: Request, payload: BillingConfigPayload):
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
+    await plan_access.require_feature(restaurant_id, plans.DIAN)
 
     allowed = {"siigo", "alegra", "loggro", "mesio_native"}
     if payload.provider.lower() not in allowed:
@@ -120,14 +127,16 @@ async def set_config(request: Request, payload: BillingConfigPayload):
 
 @router.post("/emit")
 async def emit(request: Request, payload: EmitInvoicePayload):
-    """Emite manualmente una factura para un pedido específico."""
+    """Manually issues an invoice for a specific order."""
     from app.services.database import UsageLimitExceeded  # noqa: PLC0415
 
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
+    # Electronic invoicing starts at Pro (pricing 2026-09-30).
+    await plan_access.require_feature(restaurant_id, plans.DIAN)
 
     # DIAN feature gate — must be explicitly enabled in /settings
-    restaurant = await db.db_get_restaurant_by_id(restaurant_id)
+    restaurant = await db.db_get_restaurant_by_org_id(restaurant_id)
     if not restaurant or not _is_dian_enabled((restaurant.get("features") or {})):
         raise HTTPException(
             status_code=422,
@@ -160,6 +169,7 @@ async def test_connection(request: Request):
     """Prueba las credenciales sin emitir factura real."""
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
+    await plan_access.require_feature(restaurant_id, plans.DIAN)
     with tenant_scope(restaurant_id):
         config = await get_billing_config(restaurant_id)
 
@@ -185,22 +195,6 @@ class DowngradeRequestPayload(BaseModel):
     kept_location_id: int
 
 
-# Plan sort order (smaller index = smaller plan) — mirrors plan_limits_repo
-_PLAN_ORDER = ["pulso", "restaurante", "pro", "cadena"]
-_PLAN_LOCATIONS = {
-    "pulso": 1,
-    "restaurante": 3,
-    "pro": 10,
-    "cadena": None,  # unlimited
-}
-_PLAN_PRICES = {
-    "pulso": 149_000,
-    "restaurante": 299_000,
-    "pro": 549_000,
-    "cadena": 899_000,
-}
-
-
 @router.get("/plan-options")
 async def plan_options(
     restaurant: dict = Depends(get_current_restaurant_scoped),
@@ -214,7 +208,8 @@ async def plan_options(
         result.append({
             "plan_code": code,
             "display_name": p.get("display_name", code.capitalize()),
-            "sucursales_max": p.get("locations_included"),  # None = unlimited
+            # Every plan is priced per sede, so none limits how many sedes stay.
+            "sucursales_max": None,
             "monthly_price_cop": p.get("monthly_price_cop"),
         })
     return {"plans": result}
@@ -226,15 +221,18 @@ async def plan_status(
 ):
     """Return current plan, pending downgrade state, and list of current sucursales."""
     from app.repositories.plan_limits_repo import db_get_org_subscription, db_get_pending_downgrade  # noqa: PLC0415
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
 
     org_id = restaurant["id"]
     sub = await db_get_org_subscription(org_id)
     pending = await db_get_pending_downgrade(org_id)
 
-    # Fetch current sucursales (locations) under bypass (locations table has no RLS)
-    with bypass_tenant_scope("billing.plan_status.list_locations"):
-        locations = await db.db_get_org_locations(org_id, active_only=False)
+    # Fetch current sucursales (locations). get_current_restaurant_scoped already
+    # pinned tenant_scope(org_id) above — a strict bypass_tenant_scope() here would
+    # raise TenantContextConflict (found during the RLS sweep, same pattern as
+    # db_get_plan). db_get_org_locations uses bypass_tenant_scope_if_unset
+    # internally (locations has no RLS policy either way), so it's safe to call
+    # directly under the existing scope.
+    locations = await db.db_get_org_locations(org_id, active_only=False)
     sucursales = [
         {"id": loc["id"], "name": loc.get("name", f"Sede {loc['id']}")}
         for loc in locations

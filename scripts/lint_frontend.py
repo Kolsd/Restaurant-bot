@@ -57,24 +57,16 @@ CSS_ALLOW_MARKER = re.compile(r"/\*\s*lint-allow:\s*(\S.+?)\s*\*/")
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Files that are allowed to contain mock data by design.
-# These power the public marketing demo at /demo and /dashboard-demo.
-# Not served to real admins.
-MOCK_FILE_ALLOWLIST = {
-    "mesio-demo-bus.js",
-    "mesio-demo-orchestrator.js",
-    "mesio-demo-scenarios.js",
-    "dashboard-demo-mesio.js",
-}
+# Files that are allowed to contain mock data by design. Empty since the
+# scripted WhatsApp-era demo was deleted (2026-09-25).
+MOCK_FILE_ALLOWLIST: set[str] = set()
 
 # HTML pages exempt from seed-data checks — these are marketing/demo surfaces
 # where fake names and hardcoded numbers are the point (landing, sales demo).
 HTML_SEED_EXEMPT = {
     "landing.html",
-    "demo.html",
-    "dashboard-demo.html",
-    "privacidad.html",
-    "terminos.html",
+    "privacy.html",
+    "terms.html",
     "menu.html",  # public QR menu — restaurants edit content via admin
     "dish_page.html",  # public dish deep-link
 }
@@ -397,8 +389,15 @@ def check_html_seed_money(path: Path, source: str) -> list[Violation]:
 #   - When you add a new page, add a contract here.  When you rename a button,
 #     update the contract.
 PAGE_CONTRACTS: dict[str, dict] = {
-    "domiciliario.html": {
-        "js": "pages/domiciliario.js",
+    # These 6 entries cover the Staff App (/staff) sections — one unified
+    # page since 2026-09-14 (see app/static/html/staff.html +
+    # app/static/js/staff/staff-shell.js). There is no per-role .html file
+    # any more (the old cashier.html/waiter.html/kitchen.html/bar.html/
+    # courier.html/staff-hq.html were deleted) — the dict key is just a
+    # human-readable label for this section, and "js" points at the actual
+    # section module under app/static/js/staff/sections/ that renders it.
+    "staff:courier": {
+        "js": "staff/sections/courier.js",
         "required_button_labels": [
             "Salir a entregar",
             "Llegué",
@@ -406,12 +405,31 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "Tomar",
         ],
         "required_fetches": [
-            "/api/delivery/orders",
-            "/status",
+            # The org-wide legacy '/api/delivery/orders' fetch (and its
+            # PATCH .../status sibling) was deleted in chunk 9
+            # (docs/claude/delivery-web.md) along with WhatsApp delivery/
+            # pickup ordering — courier.js now reads only the sede-scoped
+            # staff_delivery.py routes.
+            "/api/staff/delivery/orders/mine",
+            "/en-route",
         ],
     },
-    "mesero.html": {
-        "js": "pages/mesero.js",
+    "staff:delivery": {
+        "js": "staff/sections/delivery.js",
+        "required_button_labels": [
+            "Aceptar",
+            "Rechazar",
+            "Asignar",
+            "En camino",
+            "Entregado",
+        ],
+        "required_fetches": [
+            "/api/staff/delivery/orders",
+            "/api/staff/delivery/couriers",
+        ],
+    },
+    "staff:waiter": {
+        "js": "staff/sections/waiter.js",
         "required_button_labels": [
             "Cobrar mesa",
             "Mandar a caja",
@@ -424,8 +442,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/waiter-alerts",
         ],
     },
-    "caja.html": {
-        "js": "pages/caja.js",
+    "staff:cashier": {
+        "js": "staff/sections/cashier.js",
         "required_button_labels": [
             "Cobrar total completo",
             "Cobrar este check",
@@ -437,8 +455,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/pos/order",
         ],
     },
-    "kitchen.html": {
-        "js": "pages/kitchen.js",
+    "staff:kitchen": {
+        "js": "staff/sections/kitchen.js",
         "required_button_labels": [
             "Listo",
             "+ 2 min",
@@ -448,8 +466,8 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/kitchen/delivery-orders",
         ],
     },
-    "bar.html": {
-        "js": "pages/bar.js",
+    "staff:bar": {
+        "js": "staff/sections/bar.js",
         "required_button_labels": [
             "Listo",
             "+2 min",
@@ -458,35 +476,20 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/table-orders",
         ],
     },
-    "staff-hq.html": {
-        "js": "pages/staff-clock.js",
-        "required_button_labels": [
-            "Confirmar entrada",
-            "Confirmar salida",
-            "Entrada registrada",
-            "Salida registrada",
-        ],
-        "required_fetches": [
-            "/api/staff/self/profile",
-            "/api/staff/self/clock-in",
-            "/api/staff/self/clock-out",
-        ],
-    },
     "settings.html": {
         "js": "pages/settings.js",
         # Labels are JS strings that must exist in settings.js to prove wiring:
-        # saveBtnTop/js-save-btn = Guardar changes; kiosko-copy-btn = copy kiosko URL; btnPause = danger zone
+        # saveBtnTop/js-save-btn = Guardar changes; btnPause = danger zone
         "required_button_labels": [
             "saveBtnTop",
-            "kiosko-copy-btn",
             "btnPause",
         ],
         "required_fetches": [
             "/api/settings",
         ],
     },
-    "equipo.html": {
-        "js": "pages/equipo.js",
+    "team.html": {
+        "js": "pages/team.js",
         # Labels are JS identifier strings that must exist to prove wiring:
         # inviteBtn = Invitar miembro handler; membersTbody = team roster render target
         "required_button_labels": [
@@ -495,22 +498,23 @@ PAGE_CONTRACTS: dict[str, dict] = {
         ],
         "required_fetches": [
             "/api/staff",
-            "/api/staff/schedules",
         ],
     },
-    "fidelizacion.html": {
-        "js": "pages/fidelizacion.js",
-        # Labels are JS getElementById strings that must exist to prove handler wiring:
-        # btn-new-campaign = Nueva campaña; btn-configure = Configurar programa; campaigns-list = render target
+    "diner-chat.html": {
+        "js": "pages/diner-chat.js",
+        # Labels prove the core diner flows are wired: adding a dish (with a
+        # free-text note), opening/editing the cart, and the waiter-call sheet.
         "required_button_labels": [
-            "btn-new-campaign",
-            "btn-configure",
-            "campaigns-list",
+            "Agregar",
+            "Ver / editar pedido",
+            "Quitar",
+            "¿En qué te ayudamos?",
         ],
         "required_fetches": [
-            "/api/loyalty/aggregates",
-            "/api/loyalty/segments",
-            "/api/loyalty/campaigns",
+            "/api/diner/session",
+            "/api/diner/chat",
+            "/api/diner/menu",
+            "/api/diner/waiter-call",
         ],
     },
 }
@@ -523,7 +527,7 @@ def check_page_contracts(violations: list[Violation]) -> None:
     simple substring search for each required button label and fetch URL.  A
     missing anchor means the page almost certainly renders flat or broken for
     the role that depends on it — exactly the class of bug that escaped CI when
-    domiciliario.html was deployed with its render code gutted.
+    courier.html was deployed with its render code gutted.
 
     Violations are appended to the provided list in-place.  Error format:
         PAGE-CONTRACTS [<html>]: missing required button label '<label>'
@@ -534,7 +538,7 @@ def check_page_contracts(violations: list[Violation]) -> None:
     js_root = JS_DIR  # app/static/js/
 
     for html_name, contract in PAGE_CONTRACTS.items():
-        js_rel = contract["js"]          # e.g. "pages/domiciliario.js"
+        js_rel = contract["js"]          # e.g. "pages/courier.js" or "staff/sections/courier.js"
         js_path = js_root / js_rel
         if not js_path.exists():
             violations.append(Violation(

@@ -34,35 +34,6 @@ async def _get_pool():
 
 # ── Source functions ──────────────────────────────────────────────────────────
 
-async def _fetch_dead_letters() -> list[dict]:
-    """Dead letters in webhook_inbox (messages that permanently failed)."""
-    try:
-        pool = await _get_pool()
-        async with pool.acquire() as conn:
-            count = await conn.fetchval(
-                "SELECT COUNT(*) FROM webhook_inbox WHERE last_error LIKE 'DEAD_LETTER:%'"
-            )
-        count = int(count or 0)
-        if count == 0:
-            return []
-        return [
-            {
-                "id": f"deadletter:{count}",
-                "type": "deadletter",
-                "severity": "high",
-                "title": f"{count} dead letter{'s' if count != 1 else ''} en inbox",
-                "detail": "Mensajes que fallaron 5 intentos. Investiga ASAP.",
-                "url": "/internal/monitoring",
-                "created_at": _now_iso(),
-                "count": count,
-                "tenant_id": None,
-            }
-        ]
-    except Exception:
-        log.exception("notifications_repo.dead_letters_error")
-        return []
-
-
 async def _fetch_cost_runaway() -> list[dict]:
     """Tenants who exceeded 2x their plan daily token budget today."""
     try:
@@ -76,12 +47,12 @@ async def _fetch_cost_runaway() -> list[dict]:
                 SELECT
                     su.org_id,
                     o.name                                AS org_name,
-                    COALESCE(o.subscription_plan, 'free') AS plan_code,
+                    COALESCE(o.plan_code, 'esencial') AS plan_code,
                     COALESCE(SUM(su.total_tokens), 0)::BIGINT AS tokens_today
                 FROM subscription_usage su
                 LEFT JOIN organizations o ON o.id = su.org_id
                 WHERE su.usage_date = $1
-                GROUP BY su.org_id, o.name, o.subscription_plan
+                GROUP BY su.org_id, o.name, o.plan_code
                 HAVING COALESCE(SUM(su.total_tokens), 0) > 0
                 """,
                 today,
@@ -90,7 +61,7 @@ async def _fetch_cost_runaway() -> list[dict]:
         results = []
         for row in rows:
             plan = (row["plan_code"] or "free").lower()
-            daily_limit = _PLAN_DAILY_TOKEN_LIMITS.get(plan, _PLAN_DAILY_TOKEN_LIMITS.get("pulso", 50_000))
+            daily_limit = _PLAN_DAILY_TOKEN_LIMITS.get(plan, _PLAN_DAILY_TOKEN_LIMITS.get("esencial", 50_000))
             if daily_limit <= 0:
                 continue  # unlimited plan
             tokens_today = int(row["tokens_today"] or 0)
@@ -128,25 +99,16 @@ async def _fetch_churn_risk() -> list[dict]:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                WITH bot_orgs AS (
+                WITH daily AS (
                     SELECT
-                        l.org_id,
+                        o.id AS org_id,
                         o.name AS org_name,
-                        COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
-                    FROM locations l
-                    JOIN organizations o ON o.id = l.org_id
-                    WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
-                ),
-                daily AS (
-                    SELECT
-                        bo.org_id,
-                        bo.org_name,
                         (c.created_at::date) AS day,
                         COUNT(*) AS cnt
                     FROM conversations c
-                    JOIN bot_orgs bo ON bo.bot_number = c.bot_number
+                    JOIN organizations o ON o.id = c.org_id
                     WHERE c.created_at >= CURRENT_DATE - INTERVAL '21 days'
-                    GROUP BY bo.org_id, bo.org_name, c.created_at::date
+                    GROUP BY o.id, o.name, c.created_at::date
                 ),
                 baseline AS (
                     SELECT org_id, org_name,
@@ -196,7 +158,7 @@ async def _fetch_churn_risk() -> list[dict]:
                         f"últimos 7d = {recent:.1f} conv/día. "
                         f"Caída del {drop_pct}%."
                     ),
-                    "url": "/internal/analytics",
+                    "url": "/internal/superadmin",
                     "created_at": _now_iso(),
                     "count": 1,
                     "tenant_id": org_id,
@@ -273,27 +235,94 @@ async def _fetch_suspended_tenants() -> list[dict]:
         return []
 
 
+_TRIAL_WARNING_DAYS = 3
+
+
+async def _fetch_billing_attention() -> list[dict]:
+    """Orgs whose subscription needs Mesio this week (billing is manual):
+    a trial ending within _TRIAL_WARNING_DAYS (call them before it pauses),
+    a payment overdue in its grace days, and paused accounts."""
+    from app.services import plans  # noqa: PLC0415
+
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, name, comp_until, paid_until
+                FROM organizations
+                WHERE comp_until IS NOT NULL OR paid_until IS NOT NULL
+                ORDER BY id
+                """
+            )
+
+        now = datetime.now(tz=timezone.utc)
+        results = []
+        for row in rows:
+            org_id = row["id"]
+            org_name = row["name"] or f"Org #{org_id}"
+            status = plans.billing_status(row["comp_until"], row["paid_until"], now)
+            if status == plans.TRIAL:
+                days = (row["comp_until"] - now).days
+                if days >= _TRIAL_WARNING_DAYS:
+                    continue
+                kind, severity = "trial_ending", "medium"
+                title = f"La prueba de {org_name} termina en {days + 1} día(s)"
+                detail = "Escríbele para elegir plan: al terminar la prueba sin pago, la cuenta se pausa."
+            elif status == plans.OVERDUE:
+                kind, severity = "payment_overdue", "high"
+                title = f"{org_name} tiene el pago vencido"
+                detail = (f"Pagado hasta {row['paid_until'].date().isoformat()}. "
+                          f"Se pausa {plans.PAYMENT_GRACE_DAYS} días después.")
+            elif status == plans.SUSPENDED:
+                kind, severity = "account_paused", "high"
+                title = f"{org_name} está pausada"
+                detail = "Sus clientes no pueden pedir por QR ni por su link hasta registrar un pago."
+            else:
+                continue
+            results.append(
+                {
+                    "id": f"{kind}:{org_id}",
+                    "type": kind,
+                    "severity": severity,
+                    "title": title,
+                    "detail": detail,
+                    "url": "/internal/superadmin",
+                    "created_at": _now_iso(),
+                    "count": 1,
+                    "tenant_id": org_id,
+                }
+            )
+        return results
+    except Exception:
+        log.exception("notifications_repo.billing_attention_error")
+        return []
+
+
 async def _fetch_plan_cap_warnings() -> list[dict]:
-    """Tenants using >= 90% of their monthly conversation allowance."""
+    """Tenants at >= 90% of their plan's conversation soft ceiling.
+
+    The ceiling only alerts Mesio (LLM cost vs. price); it never stops the bot.
+    It used to read columns that do not exist (su.conversations_used,
+    pl.conversations_per_month), so it always failed into [] and never alerted.
+    """
     try:
         pool = await _get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
                 SELECT
-                    su.org_id,
+                    o.id AS org_id,
                     o.name AS org_name,
                     o.plan_code,
-                    su.conversations_used,
-                    pl.conversations_per_month
-                FROM subscription_usage su
-                JOIN organizations o ON o.id = su.org_id
+                    o.current_period_convs_used AS conversations_used,
+                    pl.conv_cap AS conversations_per_month
+                FROM organizations o
                 JOIN plan_limits pl ON pl.plan_code = o.plan_code
-                WHERE su.conversations_used >= pl.conversations_per_month * 0.9
-                  AND o.plan_code IN ('pulso', 'restaurante', 'pro')
-                  AND pl.conversations_per_month > 0
+                WHERE pl.conv_cap > 0
+                  AND o.current_period_convs_used >= pl.conv_cap * 0.9
                 ORDER BY
-                    (su.conversations_used::float / NULLIF(pl.conversations_per_month, 0)) DESC
+                    (o.current_period_convs_used::float / pl.conv_cap) DESC
                 """
             )
 
@@ -344,12 +373,12 @@ async def db_get_notifications() -> list[dict]:
     import asyncio  # noqa: PLC0415
 
     results_per_source = await asyncio.gather(
-        _fetch_dead_letters(),
         _fetch_cost_runaway(),
         _fetch_churn_risk(),
         _fetch_new_prospects(),
         _fetch_suspended_tenants(),
         _fetch_plan_cap_warnings(),
+        _fetch_billing_attention(),
         return_exceptions=False,  # each source already catches its own exceptions
     )
 

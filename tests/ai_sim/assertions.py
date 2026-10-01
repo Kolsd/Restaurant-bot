@@ -124,14 +124,6 @@ def check(expected: ExpectedState, snapshot: DBSnapshot) -> AssertionResult:
                     f"dish '{dish}' unexpectedly found in committed orders"
                 )
 
-    # ── inbox dead letters ────────────────────────────────────────────────────
-    actual_dead = snapshot.webhook_inbox_stats.get("dead_letters", 0)
-    if actual_dead > expected.inbox_dead_letters:
-        failures.append(
-            f"webhook_inbox dead letters: expected <= {expected.inbox_dead_letters}, "
-            f"got {actual_dead}"
-        )
-
     # ── tokens used ──────────────────────────────────────────────────────────
     if expected.tokens_used_gt_zero:
         tokens = snapshot.subscription_usage.get("total_tokens", 0)
@@ -181,7 +173,7 @@ def _collect_all_item_names(snapshot: DBSnapshot) -> list[str]:
 
 async def snapshot_db_state(
     conn: asyncpg.Connection,
-    bot_number: str,
+    org_id: int,
     user_phone: str,
 ) -> DBSnapshot:
     """Query the DB and return a point-in-time snapshot for assertion/reporting.
@@ -194,15 +186,6 @@ async def snapshot_db_state(
         if not rows:
             return []
         return [dict(r) for r in rows]
-
-    # ── org_id for this bot (Wave 2: tenant key is org_id, not restaurant_id) ─
-    # The `restaurants` VIEW is now (locations JOIN organizations) so its `id`
-    # is really the location_id — useless for the snapshot which needs the org.
-    # Query organizations directly instead.
-    org_id = await conn.fetchval(
-        "SELECT id FROM organizations WHERE whatsapp_number = $1",
-        bot_number,
-    )
 
     # ── table_orders ──────────────────────────────────────────────────────────
     table_orders = _rows_to_dicts(
@@ -237,28 +220,28 @@ async def snapshot_db_state(
     carts = _rows_to_dicts(
         await conn.fetch(
             """
-            SELECT phone, bot_number, cart_data AS items, updated_at
+            SELECT phone, org_id, cart_data AS items, updated_at
             FROM carts
-            WHERE phone = $1 AND bot_number = $2
+            WHERE phone = $1 AND org_id = $2
             """,
             user_phone,
-            bot_number,
+            org_id,
         )
     )
 
     # ── waiter_alerts ─────────────────────────────────────────────────────────
     waiter_alerts: list[dict] = []
     if org_id:
-        # Alerts are tied to bot_number or to the restaurant's tables
+        # Alerts of this org, or raised for this diner
         waiter_alerts = _rows_to_dicts(
             await conn.fetch(
                 """
-                SELECT id, table_id, table_name, phone, bot_number, alert_type AS type, created_at
+                SELECT id, table_id, table_name, phone, org_id, alert_type AS type, created_at
                 FROM waiter_alerts
-                WHERE bot_number = $1 OR phone = $2
+                WHERE org_id = $1 OR phone = $2
                 ORDER BY created_at DESC
                 """,
-                bot_number,
+                org_id,
                 user_phone,
             )
         )
@@ -282,30 +265,14 @@ async def snapshot_db_state(
     conversations = _rows_to_dicts(
         await conn.fetch(
             """
-            SELECT phone, bot_number, history, updated_at
+            SELECT phone, org_id, history, updated_at
             FROM conversations
-            WHERE phone = $1 AND bot_number = $2
+            WHERE phone = $1 AND org_id = $2
             """,
             user_phone,
-            bot_number,
+            org_id,
         )
     )
-
-    # ── webhook_inbox stats ───────────────────────────────────────────────────
-    inbox_row = await conn.fetchrow(
-        """
-        SELECT
-            COUNT(*)                                          AS total,
-            COUNT(*) FILTER (WHERE processed_at IS NULL)     AS pending,
-            COUNT(*) FILTER (WHERE last_error LIKE 'DEAD_LETTER:%') AS dead_letters
-        FROM webhook_inbox
-        """
-    )
-    webhook_inbox_stats = {
-        "total": int(inbox_row["total"]) if inbox_row else 0,
-        "pending": int(inbox_row["pending"]) if inbox_row else 0,
-        "dead_letters": int(inbox_row["dead_letters"]) if inbox_row else 0,
-    }
 
     # ── subscription_usage (Wave 2: filter by org_id) ────────────────────────
     usage_row = None
@@ -322,7 +289,7 @@ async def snapshot_db_state(
 
     log.debug(
         "snapshot.taken",
-        bot_number=bot_number,
+        org_id=org_id,
         user_phone=user_phone,
         table_orders=len(table_orders),
         orders=len(orders),
@@ -338,6 +305,5 @@ async def snapshot_db_state(
         waiter_alerts=waiter_alerts,
         reservations=reservations,
         conversations=conversations,
-        webhook_inbox_stats=webhook_inbox_stats,
         subscription_usage=subscription_usage,
     )

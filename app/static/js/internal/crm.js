@@ -11,7 +11,6 @@ const S = {
   view: 'dashboard',
   prospects: [],
   filtered: [],
-  templates: [],
   stats: {},
   page: 0,
   pageSize: 25,
@@ -21,7 +20,6 @@ const S = {
   filters: { stage:'', priority:'', city:'', source:'', search:'', archived: false },
   activeId: null,
   detailTab: 'overview',
-  inboxId: null,
   pollTimer: null,
   lastUpdate: null,
   dragSrcId: null,
@@ -33,7 +31,7 @@ const STAGE_LABEL = {prospecto:'Prospecto',contactado:'Contactado',respondio:'Re
 const STAGE_COLOR = {prospecto:'#6B7280',contactado:'#3B82F6',respondio:'#F59E0B',
   demo:'#8B5CF6',negociacion:'#F97316',cerrado:'#10B981',perdido:'#EF4444'};
 const NOTE_ICON = {note:'📝',call:'📞',whatsapp:'💬',email:'📧',meeting:'🤝'};
-const VIEW_TITLE = {dashboard:'Dashboard',inbox:'Inbox',pipeline:'Pipeline',contacts:'Contactos'};
+const VIEW_TITLE = {dashboard:'Dashboard',pipeline:'Pipeline',contacts:'Contactos'};
 
 const H = () => ({ 'Authorization':'Bearer '+ADMIN_KEY, 'Content-Type':'application/json' });
 
@@ -42,7 +40,7 @@ async function api(method, path, body) {
   try {
     const opts = { method, headers: H() };
     if (body !== undefined) opts.body = JSON.stringify(body);
-    const r = await fetch('/api/internal/crm' + path, opts);
+    const r = await fetch('/api/internal/crm' + path, opts); // lint-allow: base prefix; every path appended is a route in routes/internal/crm.py
     if (r.status === 401) { window.location.href = '/superadmin?redirect=crm'; return null; }
     if (!r.ok) { const e = await r.json().catch(()=>({detail:'Error'})); throw new Error(e.detail||'Error'); }
     return r.status === 204 ? {} : await r.json();
@@ -51,7 +49,7 @@ async function api(method, path, body) {
 
 // ── INIT ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  await Promise.all([loadProspects(), loadTemplates(), loadStats()]);
+  await Promise.all([loadProspects(), loadStats()]);
   renderDashboard();
   startPoll();
 });
@@ -67,22 +65,6 @@ async function loadStats() {
   if (d) S.stats = d;
 }
 
-async function loadTemplates() {
-  const d = await api('GET', '/templates');
-  if (d) { S.templates = d.templates || []; populateTemplateSelects(); }
-}
-
-function populateTemplateSelects() {
-  ['tpl-send-sel'].forEach(id => {
-    const sel = document.getElementById(id);
-    if (!sel) return;
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">— Elegir —</option>' +
-      S.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
-    sel.value = cur;
-  });
-}
-
 // ── POLL ─────────────────────────────────────────────
 function startPoll() {
   S.pollTimer = setInterval(async () => {
@@ -92,7 +74,6 @@ function startPoll() {
       await loadProspects();
       await loadStats();
       if (S.view === 'dashboard') renderDashboard();
-      else if (S.view === 'inbox') renderInbox();
       else if (S.view === 'pipeline') renderPipeline();
       else if (S.view === 'contacts') renderContacts();
       if (S.activeId) refreshDetailSoft();
@@ -138,7 +119,6 @@ function applyFilters() {
 
   if (S.view === 'contacts') renderContacts();
   else if (S.view === 'pipeline') renderPipeline();
-  else if (S.view === 'inbox') renderInbox();
 }
 
 function onSearch(v) { S.filters.search = v; applyFilters(); }
@@ -176,7 +156,6 @@ function showView(v, btn) {
   if (btn) btn.classList.add('active');
   document.getElementById('topbar-title').textContent = VIEW_TITLE[v] || v;
   if (v === 'dashboard') renderDashboard();
-  else if (v === 'inbox')    renderInbox();
   else if (v === 'pipeline') renderPipeline();
   else if (v === 'contacts') renderContacts();
 }
@@ -380,124 +359,6 @@ async function renderActivityFeed() {
 }
 
 // ── INBOX ─────────────────────────────────────────────
-function renderInbox() {
-  const sorted = [...S.filtered].sort((a,b) => {
-    const ta = a.last_contact_at || a.created_at || '';
-    const tb = b.last_contact_at || b.created_at || '';
-    return tb.localeCompare(ta);
-  });
-  document.getElementById('inbox-total').textContent = sorted.length;
-  document.getElementById('inbox-list').innerHTML = sorted.map(p => {
-    const active   = S.inboxId === p.id;
-    const dir      = p.last_message_direction;     // 'inbound' | 'outbound' | null
-    const hasNew   = dir === 'inbound' && !active;
-    const waiting  = dir === 'outbound';
-    const preview  = p.last_message_preview
-      ? esc(p.last_message_preview.slice(0, 50)) + (p.last_message_preview.length > 50 ? '…' : '')
-      : '<span style="color:var(--text-3);font-style:italic">Sin mensajes</span>';
-    const statusDot = hasNew
-      ? `<span style="width:10px;height:10px;border-radius:50%;background:#22c55e;flex-shrink:0;display:inline-block"></span>`
-      : waiting
-        ? `<span style="font-size:11px;color:var(--text-3)">⏳</span>`
-        : '';
-    return `<div class="inbox-row${active?' active':''}${hasNew?' inbox-row--unread':''}" onclick="openInboxChat(${p.id})">
-      <div class="inbox-av" style="${hasNew?'background:#22c55e;color:#fff':''}">${(p.restaurant_name||'?')[0].toUpperCase()}</div>
-      <div class="inbox-info" style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:6px;justify-content:space-between">
-          <div class="inbox-iname" style="${hasNew?'font-weight:700':''}">${esc(p.restaurant_name)}${p.owner_name?' · '+esc(p.owner_name):''}</div>
-          ${statusDot}
-        </div>
-        <div class="inbox-ipreview" style="${hasNew?'color:var(--text-1);font-weight:500':''}">${preview}</div>
-        <div class="inbox-imeta">${p.city?esc(p.city)+' · ':''}${STAGE_LABEL[p.stage]||''}</div>
-      </div>
-    </div>`;
-  }).join('') || '<div class="empty-state"><div class="empty-state-ico">💬</div>Sin conversaciones</div>';
-}
-
-async function openInboxChat(id) {
-  S.inboxId = id;
-  const p = S.prospects.find(x => x.id === id);
-  if (!p) return;
-  // mark active row
-  document.querySelectorAll('.inbox-row').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.inbox-row').forEach(el => {
-    if (el.onclick?.toString().includes('('+id+')')) el.classList.add('active');
-  });
-  renderInbox(); // re-render list to update active state
-  // Show chat pane
-  document.getElementById('inbox-placeholder').style.display = 'none';
-  document.getElementById('chat-container').style.display = 'flex';
-  document.getElementById('chat-hd').innerHTML = `
-    <div>
-      <div class="chat-hd-name">${esc(p.restaurant_name)}</div>
-      <div class="chat-hd-meta">${p.owner_name?esc(p.owner_name)+' · ':''}${esc(p.phone||'')} · <span class="badge badge-${p.stage}">${STAGE_LABEL[p.stage]}</span></div>
-    </div>
-    <button class="btn-ghost btn-sm" onclick="openDetail(${p.id})">Ver perfil →</button>`;
-  // mobile
-  document.querySelector('.inbox-wrap')?.classList.add('chat-open');
-  await loadInboxMessages(id);
-}
-
-async function loadInboxMessages(id) {
-  const d = await api('GET', `/prospects/${id}/interactions`);
-  if (!d) return;
-  const msgs = d.interactions || [];
-  const el = document.getElementById('chat-messages');
-  if (!msgs.length) { el.innerHTML = '<div class="empty-state" style="padding:2rem">Sin mensajes aún</div>'; return; }
-  el.innerHTML = msgs.filter(m => m.content?.trim()).map(m => {
-    const out = m.direction === 'outbound';
-    return `<div class="msg-bubble ${out?'msg-out':'msg-in'}${m.template_name?' msg-template':''}">${esc(m.content)}<div class="msg-time">${fmtTime(m.created_at)}</div></div>`;
-  }).join('');
-  el.scrollTop = el.scrollHeight;
-}
-
-async function sendMessage() {
-  const input = document.getElementById('chat-input');
-  const msg = input.value.trim();
-  if (!msg || !S.inboxId) return;
-  input.value = '';
-  autoResizeChatInput(input);
-  const d = await api('POST', '/send-message', { prospect_id: S.inboxId, message: msg });
-  if (d?.success) { await loadInboxMessages(S.inboxId); toast('Mensaje enviado', 'ok'); }
-}
-
-function chatKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-}
-
-function autoResizeChatInput(el) {
-  el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 180) + 'px';
-}
-
-function chatInputPaste(e) {
-  const html = e.clipboardData.getData('text/html');
-  if (!html) return; // plain text paste: browser handles it natively
-  e.preventDefault();
-  const tmp = document.createElement('div');
-  tmp.innerHTML = html;
-  // block-level elements → newline before their text
-  tmp.querySelectorAll('p, div, li, tr, blockquote').forEach(el => {
-    el.prepend(document.createTextNode('\n'));
-  });
-  // <br> → newline
-  tmp.querySelectorAll('br').forEach(el => el.replaceWith('\n'));
-  let text = tmp.textContent;
-  // collapse more than 2 consecutive newlines, trim edges
-  text = text.replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '');
-  const ta = e.target;
-  const s = ta.selectionStart, end = ta.selectionEnd;
-  ta.value = ta.value.slice(0, s) + text + ta.value.slice(end);
-  ta.selectionStart = ta.selectionEnd = s + text.length;
-  autoResizeChatInput(ta);
-}
-
-function openQuickTemplate() {
-  if (!S.inboxId) return;
-  S.selectedIds.clear();
-  S.selectedIds.add(S.inboxId);
-  openTemplateModal();
-}
 
 // ── PIPELINE ──────────────────────────────────────────
 function renderPipeline() {
@@ -703,7 +564,6 @@ function dpSwitchTab(tab, btn) {
   }
   if (tab === 'overview')  renderDpOverview();
   else if (tab === 'timeline') renderDpTimeline();
-  else if (tab === 'messages') renderDpMessages();
   else if (tab === 'notes')    renderDpNotes();
 }
 
@@ -711,7 +571,6 @@ async function refreshDetailSoft() {
   if (!S.activeId) return;
   if (S.detailTab === 'overview') renderDetailHeader();
   else if (S.detailTab === 'timeline') renderDpTimeline();
-  else if (S.detailTab === 'messages') renderDpMessages();
 }
 
 function renderDpOverview() {
@@ -803,12 +662,6 @@ async function dpArchive() {
   }
 }
 
-function dpSendTemplate() {
-  if (!S.activeId) return;
-  S.selectedIds.clear(); S.selectedIds.add(S.activeId);
-  openTemplateModal();
-}
-
 async function renderDpTimeline() {
   const id = S.activeId; if (!id) return;
   const el = document.getElementById('dp-body');
@@ -834,41 +687,6 @@ async function renderDpTimeline() {
       </div>
     </div>`;
   }).join('') + '</div>';
-}
-
-async function renderDpMessages() {
-  const id = S.activeId; if (!id) return;
-  const el = document.getElementById('dp-body');
-  el.innerHTML = '<div class="spinner" style="margin:1rem auto;display:block"></div>';
-  const d = await api('GET', `/prospects/${id}/interactions`);
-  const msgs = d?.interactions || [];
-  const p = S.prospects.find(x => x.id === id);
-  el.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1rem">
-      ${msgs.length ? msgs.map(m => {
-        const out = m.direction === 'outbound';
-        return `<div style="max-width:85%;align-self:${out?'flex-end':'flex-start'}">
-          <div class="msg-bubble ${out?'msg-out':'msg-in'}${m.template_name?' msg-template':''}">${esc(m.content)}</div>
-          <div class="msg-time" style="text-align:${out?'right':'left'}">${fmtTime(m.created_at)}</div>
-        </div>`;
-      }).join('') : '<div class="empty-state" style="padding:1.5rem">Sin mensajes</div>'}
-    </div>
-    <div style="border-top:.5px solid var(--border);padding-top:12px">
-      <textarea id="dp-msg-input" rows="2" style="width:100%;border:.5px solid var(--border);border-radius:var(--rad);padding:8px 10px;resize:none;outline:none;font-size:12.5px;background:var(--bg)" placeholder="Escribe un mensaje…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();dpSendMsg();}"></textarea>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
-        <button class="btn-ghost btn-sm" onclick="dpSendTemplate()">📤 Template</button>
-        <button class="btn-primary btn-sm" onclick="dpSendMsg()">Enviar →</button>
-      </div>
-    </div>`;
-}
-
-async function dpSendMsg() {
-  const id = S.activeId; if (!id) return;
-  const inp = document.getElementById('dp-msg-input');
-  const msg = inp?.value.trim(); if (!msg) return;
-  inp.value = '';
-  const d = await api('POST', '/send-message', { prospect_id: id, message: msg });
-  if (d?.success) { toast('Enviado', 'ok'); renderDpMessages(); }
 }
 
 async function renderDpNotes() {
@@ -916,10 +734,6 @@ async function delNote(nid) {
 }
 
 // ── BULK ACTIONS ──────────────────────────────────────
-function bulkSendTemplate() {
-  if (!S.selectedIds.size) return;
-  openTemplateModal();
-}
 function openBulkStage() {
   const n = S.selectedIds.size; if (!n) return;
   document.getElementById('bulk-stage-count').textContent = n;
@@ -992,110 +806,12 @@ async function saveProspect() {
 }
 
 // ── TEMPLATES ─────────────────────────────────────────
-function openTemplateModal() {
-  const n = S.selectedIds.size;
-  document.getElementById('tpl-send-count').textContent = n;
-  document.getElementById('tpl-send-preview').style.display = 'none';
-  document.getElementById('tpl-send-sel').value = '';
-  openModal('modal-tpl-send');
-}
 
 const _PROSPECT_FIELDS_JS = {
   restaurante: 'restaurant_name', restaurant: 'restaurant_name',
   nombre: 'owner_name', name: 'owner_name',
   ciudad: 'city', city: 'city',
 };
-
-function onTplSendSelect() {
-  const id = parseInt(document.getElementById('tpl-send-sel').value);
-  const tpl = S.templates.find(t => t.id === id);
-  const preview = document.getElementById('tpl-send-preview');
-  if (!tpl) { preview.style.display = 'none'; return; }
-  preview.style.display = 'block';
-  const params = tpl.params || [];
-  // Mostrar qué campo se usará por parámetro (solo informativo, sin inputs)
-  document.getElementById('tpl-params-wrap').innerHTML = params.length
-    ? `<div style="margin-top:10px"><div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;margin-bottom:6px">Parámetros automáticos</div>` +
-      params.map(p => {
-        const key = p.trim().toLowerCase();
-        const field = _PROSPECT_FIELDS_JS[key];
-        const badge = field
-          ? `<span style="color:var(--green,#22c55e)">✓ se usará <b>${field === 'restaurant_name' ? 'nombre del restaurante' : field === 'owner_name' ? 'nombre del dueño' : field}</b></span>`
-          : `<span style="color:var(--text-3)">— sin dato, se omitirá</span>`;
-        return `<div style="font-size:12px;margin-bottom:4px"><code>{{${esc(p)}}}</code> ${badge}</div>`;
-      }).join('') + '</div>'
-    : '';
-  document.getElementById('tpl-preview-body').textContent = tpl.body;
-}
-
-async function doSendTemplate() {
-  const tplId = parseInt(document.getElementById('tpl-send-sel').value);
-  if (!tplId) { toast('Selecciona un template', 'err'); return; }
-  const tpl = S.templates.find(t => t.id === tplId);
-  if (!tpl) return;
-  const ids = [...S.selectedIds];
-  if (!ids.length) { toast('No hay prospectos seleccionados', 'err'); return; }
-
-  const btn = document.querySelector('#modal-tpl-send .btn-primary');
-  if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
-
-  try {
-    // Parámetros se resuelven automáticamente en el backend desde los datos del prospecto
-    const paramsMap = {};
-    ids.forEach(id => { paramsMap[id] = []; });
-    const d = await api('POST', '/send-template', { prospect_ids: ids, template_id: tplId, params_map: paramsMap });
-    if (d) {
-      toast(`${d.sent||0} enviados, ${d.errors||0} errores`, d.errors ? 'err' : 'ok');
-      closeModal('modal-tpl-send');
-      clearSelection();
-      await loadProspects();
-      if (S.view !== 'pipeline') applyFilters();
-      else renderPipeline();
-    }
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Enviar'; }
-  }
-}
-
-function openTemplateManager() {
-  loadTemplateManagerList();
-  openModal('modal-tpl-mgr');
-}
-
-function loadTemplateManagerList() {
-  document.getElementById('tpl-mgr-list').innerHTML = S.templates.length
-    ? S.templates.map(t => `<div class="tpl-row">
-        <div>
-          <div class="tpl-row-name">${esc(t.name)}</div>
-          <div class="tpl-row-wa">${esc(t.wa_name)}</div>
-        </div>
-        <button class="btn-ghost btn-sm" onclick="deleteTemplate(${t.id})">Eliminar</button>
-      </div>`).join('')
-    : '<div style="color:var(--text-3);font-size:12px">Sin templates</div>';
-}
-
-async function saveTemplate() {
-  const name     = document.getElementById('tpl-name').value.trim();
-  const wa_name  = document.getElementById('tpl-wa-name').value.trim();
-  const language = document.getElementById('tpl-language').value.trim() || 'es_CO';
-  const body     = document.getElementById('tpl-body').value.trim();
-  const params   = document.getElementById('tpl-params').value.split(',').map(s=>s.trim()).filter(Boolean);
-  if (!name || !wa_name || !body) { toast('Nombre, wa_name y cuerpo son requeridos', 'err'); return; }
-  const d = await api('POST', '/templates', { name, wa_name, language, body, params, category:'MARKETING' });
-  if (d?.success) {
-    await loadTemplates();
-    loadTemplateManagerList();
-    ['tpl-name','tpl-wa-name','tpl-body','tpl-params'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-    const langEl = document.getElementById('tpl-language'); if(langEl) langEl.value='es_CO';
-    toast('Template guardado', 'ok');
-  }
-}
-
-async function deleteTemplate(id) {
-  if (!confirm('¿Eliminar este template?')) return;
-  const d = await api('DELETE', `/templates/${id}`);
-  if (d?.success) { await loadTemplates(); loadTemplateManagerList(); toast('Eliminado'); }
-}
 
 // ── CSV ───────────────────────────────────────────────
 async function handleCSVUpload(e) {
@@ -1225,17 +941,15 @@ async function openConvertModal(pid) {
       <div style="margin-bottom:10px;">
         <label style="font-size:11px;color:#888;font-weight:600;display:block;margin-bottom:4px;">Plan inicial</label>
         <select id="cv-plan" style="width:100%;padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-          <option value="restaurante" selected>Restaurante ($299K/mes)</option>
-          <option value="pulso">Pulso ($149K/mes)</option>
-          <option value="pro">Pro ($549K/mes)</option>
-          <option value="cadena">Cadena ($899K/mes)</option>
-          <option value="comp">Comp (gratis)</option>
-          <option value="free">Free / Demo</option>
+          <option value="restaurante" selected>Restaurante ($249K/sede)</option>
+          <option value="esencial">Esencial ($119K/sede)</option>
+          <option value="pro">Pro ($349K/sede)</option>
+          <option value="cadena">Cadena ($299K/sede)</option>
         </select>
       </div>
       <div style="margin-bottom:1.25rem;">
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-          <input type="checkbox" id="cv-skip-wa"> Omitir mensaje de bienvenida por WhatsApp
+          <input type="checkbox" id="cv-skip-wa"> Omitir el email de bienvenida
         </label>
       </div>
       <div id="cv-result" style="margin-bottom:1rem;display:none;"></div>
@@ -1267,7 +981,7 @@ async function doConvert(pid) {
 
   // Success — show credentials to founder (shown once; not logged)
   const user = data.user || {};
-  const waSent = data.welcome_message_sent;
+  const welcomeSent = data.welcome_message_sent;
   result.style.display = 'block';
   result.innerHTML = `
     <div style="background:#E1F5EE;border-radius:8px;padding:12px 14px;font-size:13px;">
@@ -1276,7 +990,7 @@ async function doConvert(pid) {
         <div style="margin-bottom:4px;"><span style="color:#555;">Usuario:</span> <code style="background:#fff;padding:2px 6px;border-radius:4px;">${esc(user.username)}</code></div>
         <div style="margin-bottom:4px;"><span style="color:#555;">Contraseña temp:</span> <code style="background:#fff;padding:2px 6px;border-radius:4px;">${esc(user.temp_password||'—')}</code> <span style="font-size:11px;color:#888;">(cópiala ya — no se muestra de nuevo)</span></div>
       ` : '<div style="color:#888;font-size:12px;">Usuario no creado — hacerlo manualmente en Superadmin.</div>'}
-      <div style="margin-top:4px;font-size:12px;color:#555;">WA bienvenida: ${waSent ? '✅ enviado' : '⚠️ no enviado (reenviar manualmente)'}</div>
+      <div style="margin-top:4px;font-size:12px;color:#555;">Email de bienvenida: ${welcomeSent ? '✅ enviado' : '⚠️ no enviado (reenviar manualmente)'}</div>
     </div>`;
 
   btn.style.display = 'none';

@@ -80,13 +80,13 @@ def _setup_stdlib() -> None:
 # ── structlog setup ──────────────────────────────────────────────────────────
 
 def _setup_structlog() -> None:
-    # 1. Configurar el logging de Python (stdlib) para que apunte a consola
+    # 1. Configure Python's (stdlib) logging to point to the console
     logging.basicConfig(
         format="%(message)s",
         level=logging.DEBUG if os.getenv("DEBUG") else logging.INFO,
     )
 
-    # 2. Configurar structlog para que use stdlib internamente
+    # 2. Configure structlog to use stdlib internally
     structlog.configure(
         processors=[
             structlog.stdlib.add_logger_name,
@@ -95,7 +95,7 @@ def _setup_structlog() -> None:
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
-            # Si quieres JSON en prod y amigable en dev:
+            # If you want JSON in prod and friendly output in dev:
             structlog.processors.JSONRenderer() if not os.getenv("DEV_LOGS") else structlog.dev.ConsoleRenderer()
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
@@ -115,6 +115,21 @@ def mask_phone(phone: "str | None") -> str:
     if not phone or len(phone) < 4:
         return "***"
     return "***" + phone[-4:]
+
+
+def mask_email(email: "str | None") -> str:
+    """Return a masked email for logs: first char of the local part + '***@domain'.
+
+    e.g. 'john.doe@example.com' -> 'j***@example.com'. Preserves enough signal
+    to correlate log entries (domain, first letter) without exposing the full
+    address. Safe to call with None, empty strings, or malformed input.
+    """
+    if not email or "@" not in email:
+        return "***"
+    local, _, domain = email.partition("@")
+    if not local:
+        return "***@" + domain
+    return local[0] + "***@" + domain
 
 
 # ── Public factory ───────────────────────────────────────────────────────────

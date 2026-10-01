@@ -42,13 +42,28 @@ class OrderCommitError(Exception):
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
-async def _deduct_inventory_in_tx(
+async def deduct_inventory_in_tx(
     conn,
     restaurant_id: int,
     items: list[dict],
+    location_id: int | None = None,
 ) -> None:
     """
     Deducts inventory inside an already-open transaction.
+
+    `location_id` is the sede that is actually cooking. Stock is per sede
+    (PM 2026-09-20), so an order at sede B must come out of sede B's fridge.
+    Recipes stay org-level - a dish is made the same way everywhere - which
+    means `dish_recipes.ingredient_id` points at the inventory row of
+    whichever sede the recipe happened to be written in. It is resolved to
+    the row of THIS sede by name, the same rule transfers use
+    (inventory_repo module note). An ingredient the sede does not stock at
+    all is skipped, exactly as a missing row already was: refusing the order
+    instead would take a restaurant offline the first time it forgot to
+    create one row.
+
+    location_id=None keeps the old org-wide behaviour, for the legacy
+    callers that have no sede to hand.
 
     Uses SELECT FOR UPDATE + WHERE current_stock >= deduct_amount RETURNING to
     ensure no negative stock ever reaches the DB. Raises InsufficientStockError
@@ -56,6 +71,16 @@ async def _deduct_inventory_in_tx(
 
     Supports both escandallo (dish_recipes) and legacy linked_dishes paths,
     mirroring db_deduct_inventory_for_order — but WITHOUT the max(0, stock) clamp.
+
+    PUBLIC (chunk 4, docs/claude/delivery-web.md): this was originally a
+    private helper reachable only through commit_order_transaction below.
+    It takes just (conn, org_id, items) — no dependency on
+    commit_order_transaction's own fixed INSERT column list — so it is safe
+    to reuse verbatim from app.repositories.delivery_repo.db_create_delivery_order,
+    which does its own INSERT (with the delivery-specific columns
+    commit_order_transaction does not carry) and calls this helper against the
+    SAME already-open connection/transaction, so a stock failure rolls back
+    the order insert too instead of leaving an orphaned row.
     """
     for item in items:
         dish_name = item.get("name", "")
@@ -73,14 +98,29 @@ async def _deduct_inventory_in_tx(
 
         if recipe_rows:
             ingredient_ids = [r["ingredient_id"] for r in recipe_rows]
+            # `src.id -> the same product at THIS sede`. With location_id NULL
+            # the join degenerates to src = tgt and this is the old behaviour.
             locked = await conn.fetch(
-                """SELECT id, current_stock, min_stock, linked_dishes
-                   FROM inventory
-                   WHERE id = ANY($1::int[])
-                   FOR UPDATE""",
-                ingredient_ids,
+                """SELECT src.id AS recipe_ingredient_id,
+                          tgt.id, tgt.current_stock, tgt.min_stock, tgt.linked_dishes
+                     FROM inventory src
+                     JOIN inventory tgt
+                       ON tgt.org_id = src.org_id
+                      AND lower(tgt.name) = lower(src.name)
+                      AND ($2::bigint IS NULL
+                           OR tgt.location_id = $2
+                           OR tgt.location_id IS NULL)
+                    WHERE src.id = ANY($1::int[])
+                      AND src.org_id = $3
+                 ORDER BY tgt.id
+                      FOR UPDATE OF tgt""",
+                ingredient_ids, location_id, restaurant_id,
             )
-            locked_map = {r["id"]: r for r in locked}
+            # One row per recipe ingredient: the first match wins, so a sede
+            # with a duplicate name deducts from one row rather than twice.
+            locked_map = {}
+            for r in locked:
+                locked_map.setdefault(r["recipe_ingredient_id"], r)
 
             for rline in recipe_rows:
                 ing_id = rline["ingredient_id"]
@@ -88,6 +128,9 @@ async def _deduct_inventory_in_tx(
                 inv = locked_map.get(ing_id)
                 if not inv:
                     continue
+                # From here on it is THIS sede's row that moves, not the one
+                # the recipe names.
+                ing_id = inv["id"]
 
                 # Atomic check-and-update: only succeeds if stock is sufficient
                 updated = await conn.fetchrow(
@@ -118,24 +161,47 @@ async def _deduct_inventory_in_tx(
                 min_stock = to_decimal(inv["min_stock"] or 0)
                 # Sync dish_recipes-based availability (Fase 5c)
                 from app.repositories.inventory_repo import _sync_ingredient_dishes_conn
-                await _sync_ingredient_dishes_conn(conn, ing_id, float(new_stock), float(min_stock), restaurant_id)
+                await _sync_ingredient_dishes_conn(
+                    conn, ing_id, float(new_stock), float(min_stock), restaurant_id, location_id,
+                )
                 # Also sync legacy linked_dishes on the same ingredient
                 if new_stock <= min_stock:
                     dishes = inv["linked_dishes"]
                     if isinstance(dishes, str):
                         dishes = json.loads(dishes)
                     if dishes:
-                        await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
+                        await _sync_dish_availability_conn(
+                            conn, dishes, False, restaurant_id, location_id,
+                        )
 
         else:
             # ── 2. Legacy linked_dishes path ─────────────────────────────────
+            # P0 (found while wiring this function into delivery_repo.py for
+            # chunk 4, docs/claude/delivery-web.md): the pool's jsonb codec
+            # (app/services/database.py get_pool(), encoder=json.dumps)
+            # already serializes a Python list into a $N::jsonb parameter.
+            # Passing a PRE-dumped json.dumps() string here double-encoded it
+            # into a jsonb STRING SCALAR wrapping the array text, so
+            # `linked_dishes @> $2::jsonb` (array containment) silently NEVER
+            # matched any row — this exact function, reused unmodified by
+            # commit_order_transaction for every WhatsApp-era delivery/pickup
+            # order, never enforced or decremented stock for a restaurant on
+            # the legacy linked_dishes path (no dish_recipes escandallo). The
+            # identical bug was already found and fixed in the sibling
+            # implementation, app/repositories/inventory_repo.py's
+            # db_deduct_inventory_for_order (see its "P0 found 2026-09" note)
+            # but never applied to this copy. Pass the raw list so the codec
+            # encodes it exactly once, matching that fix.
             rows = await conn.fetch(
                 """SELECT id, current_stock, linked_dishes, min_stock
                    FROM inventory
                    WHERE org_id = $1
                      AND linked_dishes @> $2::jsonb
+                     AND ($3::bigint IS NULL
+                          OR location_id = $3
+                          OR location_id IS NULL)
                    FOR UPDATE""",
-                restaurant_id, json.dumps([dish_name]),
+                restaurant_id, [dish_name], location_id,
             )
             for row in rows:
                 available = to_decimal(row["current_stock"])
@@ -168,20 +234,36 @@ async def _deduct_inventory_in_tx(
                     dishes = json.loads(dishes)
                 min_stock = to_decimal(row["min_stock"] or 0)
                 if new_stock <= min_stock and dishes:
-                    await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
+                    await _sync_dish_availability_conn(
+                        conn, dishes, False, restaurant_id, location_id,
+                    )
+
+
+# Backward-compatible private alias — tests/test_stock_autohide.py calls the
+# old private name directly. One implementation, two names; do not fork this.
+_deduct_inventory_in_tx = deduct_inventory_in_tx
 
 
 async def _sync_dish_availability_conn(
-    conn, dish_names: list[str], available: bool, restaurant_id: int
+    conn, dish_names: list[str], available: bool, restaurant_id: int,
+    location_id: int = None,
 ) -> None:
-    """Mirror of database._sync_dish_availability_conn — used inside the transaction."""
+    """Mirror of inventory_repo._sync_dish_availability_conn — used inside the
+    transaction. Sold-out state is per sede (migration 0091), so a caller with
+    no sede writes nothing rather than re-creating an org-wide row."""
+    if location_id is None:
+        log.warning(
+            "menu_availability.sync_without_sede",
+            restaurant_id=restaurant_id, dishes=dish_names,
+        )
+        return
     for name in dish_names:
         await conn.execute(
-            """INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
-               VALUES ($1, $2, $3, NOW())
-               ON CONFLICT (dish_name, org_id)
+            """INSERT INTO menu_availability (dish_name, org_id, location_id, available, updated_at)
+               VALUES ($1, $2, $3, $4, NOW())
+               ON CONFLICT (org_id, location_id, dish_name)
                DO UPDATE SET available = EXCLUDED.available, updated_at = NOW()""",
-            name, restaurant_id, available,
+            name, restaurant_id, location_id, available,
         )
 
 
@@ -207,7 +289,7 @@ async def commit_order_transaction(
         pool:           asyncpg pool obtained from db.get_pool().
         restaurant_id:  Numeric restaurant ID (used for inventory lookup).
         conversation_id: Phone / conversation identifier (used for cart delete).
-        cart:           Full cart dict (contains 'items' and 'bot_number').
+        cart:           Full cart dict (contains 'items').
         order_payload:  Order dict — same shape expected by db_save_order.
         channel:        Optional attribution channel (whatsapp_bot, pos, qr_pickup, web, manual).
                         If provided, stored on the orders row. Legacy rows leave this NULL.
@@ -220,7 +302,6 @@ async def commit_order_transaction(
         InsufficientStockError: one ingredient is out of stock; transaction rolled back.
         OrderCommitError:       any other DB failure; transaction rolled back.
     """
-    bot_number = order_payload.get("bot_number", "")
     order_id = order_payload["id"]
     items = order_payload.get("items", [])
 
@@ -281,10 +362,10 @@ async def commit_order_transaction(
                         """INSERT INTO orders
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
-                                payment_url, bot_number, payment_method,
+                                payment_url, payment_method,
                                 base_order_id, sub_number, org_id, channel, location_id,
                                 scheduled_pickup_at)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)""",
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)""",
                         order_payload["id"],
                         order_payload["phone"],
                         json.dumps(order_payload["items"]),
@@ -297,7 +378,6 @@ async def commit_order_transaction(
                         order_payload["status"],
                         order_payload["paid"],
                         order_payload.get("payment_url", ""),
-                        bot_number,
                         order_payload.get("payment_method", ""),
                         base_order_id,
                         order_payload["sub_number"],
@@ -311,10 +391,10 @@ async def commit_order_transaction(
                         """INSERT INTO orders
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
-                                payment_url, bot_number, payment_method,
+                                payment_url, payment_method,
                                 base_order_id, sub_number, org_id, channel, location_id,
                                 scheduled_pickup_at)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
                            ON CONFLICT (id) DO UPDATE SET
                                items               = EXCLUDED.items,
                                subtotal            = EXCLUDED.subtotal,
@@ -343,7 +423,6 @@ async def commit_order_transaction(
                         order_payload["status"],
                         order_payload["paid"],
                         order_payload.get("payment_url", ""),
-                        bot_number,
                         order_payload.get("payment_method", ""),
                         None,
                         order_payload.get("sub_number", 1),
@@ -355,12 +434,13 @@ async def commit_order_transaction(
 
                 # 2. Deduct inventory (raises InsufficientStockError on shortage)
                 if items:
-                    await _deduct_inventory_in_tx(conn, restaurant_id, items)
+                    # location_id is this order's sede — stock is per sede.
+                    await deduct_inventory_in_tx(conn, restaurant_id, items, location_id=location_id)
 
                 # 3. Delete the cart row — phone is the cart PK column
                 await conn.execute(
-                    "DELETE FROM carts WHERE phone = $1 AND bot_number = $2",
-                    conversation_id, bot_number,
+                    "DELETE FROM carts WHERE phone = $1 AND org_id = $2",
+                    conversation_id, restaurant_id,
                 )
 
     except InsufficientStockError:
@@ -369,6 +449,15 @@ async def commit_order_transaction(
     except Exception as exc:
         _log.exception("order_commit_failed", order_id=order_payload.get("id"), error=str(exc))
         raise OrderCommitError(f"Order commit failed for order '{order_payload.get('id')}': {exc}") from exc
+
+    # Publish OUTSIDE the transaction block — _tenant_connection() has already
+    # committed by here. order_payload["id"] may have been reassigned above
+    # (sub-order numbering) so read it fresh rather than the outer order_id.
+    from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+    await realtime.publish(
+        restaurant_id, "order.created",
+        location_id=location_id, table_id=None, entity_id=order_payload["id"],
+    )
 
 
 # ── Lazy wrappers (break circular import with database.py) ────────────────────
@@ -392,9 +481,9 @@ async def db_save_order(order: dict):
     async with _tenant_connection() as conn:
         await conn.execute("""
             INSERT INTO orders (id, phone, items, order_type, address, notes,
-                subtotal, delivery_fee, total, status, paid, payment_url, bot_number,
+                subtotal, delivery_fee, total, status, paid, payment_url,
                 payment_method, base_order_id, sub_number, org_id, channel)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items,
                 subtotal=EXCLUDED.subtotal,
@@ -413,7 +502,7 @@ async def db_save_order(order: dict):
         order["order_type"], order.get("address", ""), order.get("notes", ""),
         order["subtotal"], order["delivery_fee"], order["total"],
         order["status"], order["paid"], order.get("payment_url", ""),
-        order.get("bot_number", ""), order.get("payment_method", ""),
+        order.get("payment_method", ""),
         order.get("base_order_id"), order.get("sub_number", 1),
         order.get("restaurant_id") or order.get("org_id"),
         order.get("channel"))
@@ -439,15 +528,26 @@ async def db_confirm_payment(order_id: str, transaction_id: str):
                AND status NOT IN ('cancelado', 'entregado')
             RETURNING *
         """, order_id, transaction_id)
-        return _serialize(dict(row)) if row else None
 
-async def db_get_orders_range(date_from: str, date_to: str, bot_number: str = None):
+    if row is None:
+        return None
+
+    # Publish OUTSIDE the transaction block — _tenant_connection() has already
+    # committed by here.
+    from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+    await realtime.publish(
+        row["org_id"], "order.updated",
+        location_id=row.get("location_id"), table_id=None, entity_id=order_id,
+    )
+    return _serialize(dict(row))
+
+async def db_get_orders_range(date_from: str, date_to: str, org_id: int | None = None):
     from datetime import timedelta
     d_from = _to_date(date_from)
     d_to_inclusive = _to_date(date_to) + timedelta(days=1)
     async with _tenant_connection() as conn:
-        if bot_number:
-            rows = await conn.fetch("SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2 AND bot_number=$3 ORDER BY created_at DESC", d_from, d_to_inclusive, bot_number)
+        if org_id:
+            rows = await conn.fetch("SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2 AND org_id=$3 ORDER BY created_at DESC", d_from, d_to_inclusive, org_id)
         else:
             rows = await conn.fetch("SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2 ORDER BY created_at DESC", d_from, d_to_inclusive)
         return [_serialize(dict(r)) for r in rows]
@@ -457,85 +557,17 @@ async def db_get_order(order_id: str):
         row = await conn.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
         return _serialize(dict(row)) if row else None
 
-async def db_get_all_orders(bot_number: str = None):
+async def db_get_all_orders(org_id: int | None = None):
     async with _tenant_connection() as conn:
-        if bot_number:
-            rows = await conn.fetch("SELECT * FROM orders WHERE bot_number=$1 ORDER BY created_at DESC", bot_number)
+        if org_id:
+            rows = await conn.fetch("SELECT * FROM orders WHERE org_id=$1 ORDER BY created_at DESC", org_id)
         else:
             rows = await conn.fetch("SELECT * FROM orders ORDER BY created_at DESC")
         return [_serialize(dict(r)) for r in rows]
 
-async def db_get_delivery_orders(status_list: list, restaurant_id: int | None = None):
-    """Obtiene los pedidos de domicilio filtrados por una lista de estados.
-    Si restaurant_id se provee, filtra exactamente por ese restaurante/sucursal (r.id = restaurant_id).
-    Cada caja ve únicamente sus propios pedidos — sin herencia de sucursales."""
-    async with _tenant_connection() as conn:
-        if restaurant_id is not None:
-            # Filter directly on orders.org_id — no JOIN needed.
-            # The previous JOIN restaurants → locations multiplied each order row
-            # by the number of locations sharing the same whatsapp_number.
-            rows = await conn.fetch(
-                """SELECT * FROM orders
-                   WHERE order_type IN ('domicilio', 'recoger')
-                     AND status = ANY($1)
-                     AND org_id = $2
-                   ORDER BY created_at ASC""",
-                status_list, restaurant_id
-            )
-        else:
-            rows = await conn.fetch(
-                "SELECT * FROM orders WHERE order_type IN ('domicilio', 'recoger') AND status = ANY($1) ORDER BY created_at ASC",
-                status_list
-            )
-        return [_serialize(dict(r)) for r in rows]
-
-async def db_update_pending_order_payment_method(phone: str, bot_number: str, payment_method: str):
-    """Updates payment_method on the most recent pending delivery/pickup order for a phone+bot."""
-    async with _tenant_connection() as conn:
-        await conn.execute(
-            """UPDATE orders SET payment_method=$3
-               WHERE id = (
-                 SELECT id FROM orders
-                 WHERE phone=$1 AND bot_number=$2
-                   AND order_type IN ('domicilio','recoger')
-                   AND paid=false
-                   AND status NOT IN ('cancelado','entregado')
-                 ORDER BY created_at DESC LIMIT 1
-               )""",
-            phone, bot_number, payment_method
-        )
-
-
-async def db_attach_order_proof(phone: str, bot_number: str, media_url: str) -> str | None:
-    """
-    Adjunta URL de comprobante al pedido delivery/pickup más reciente NO PAGADO
-    de phone+bot_number. Retorna order_id si se vinculó, None si no hubo match.
-
-    Pareja del table_orders db_attach_proof, pero para órdenes externas. Solo
-    toca órdenes paid=false y no-terminales para evitar pisar comprobantes ya
-    validados o adjuntar a órdenes canceladas.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with _tenant_connection() as conn:
-        row = await conn.fetchrow(
-            """UPDATE orders SET proof_url=$3
-               WHERE id = (
-                 SELECT id FROM orders
-                 WHERE phone=$1 AND bot_number=$2
-                   AND order_type IN ('domicilio','recoger')
-                   AND paid=false
-                   AND status NOT IN ('cancelado','entregado')
-                 ORDER BY created_at DESC LIMIT 1
-               )
-               RETURNING id""",
-            phone, bot_number, media_url,
-        )
-        return row["id"] if row else None
-
 async def db_update_order_status(order_id: str, new_status: str) -> dict | None:
     """
-    Actualiza el estado de un pedido y todas sus sub-órdenes con el mismo base_order_id.
+    Updates the status of an order and all its sub-orders with the same base_order_id.
 
     Returns the updated main-order row dict, or None if the status was already
     the same value (or the order does not exist) — so the caller can detect
@@ -554,7 +586,15 @@ async def db_update_order_status(order_id: str, new_status: str) -> dict | None:
             "UPDATE orders SET status=$2 WHERE base_order_id=$1 AND id != $1",
             order_id, new_status,
         )
-        return _serialize(dict(row))
+
+    # Publish OUTSIDE the transaction block — _tenant_connection() has already
+    # committed by here.
+    from app.services import realtime  # noqa: PLC0415 — avoid import cycle at module load
+    await realtime.publish(
+        row["org_id"], "order.updated",
+        location_id=row.get("location_id"), table_id=None, entity_id=order_id,
+    )
+    return _serialize(dict(row))
 
 
 # ── Wompi webhook idempotency (GLOBAL table) ──────────────────────────────────
@@ -608,60 +648,6 @@ async def record_wompi_event(
 
 # ── Customer self-cancellation ───────────────────────────────────────────────
 
-async def db_cancel_pending_order(
-    phone: str,
-    bot_number: str,
-    reason: str | None = None,
-) -> dict | None:
-    """
-    Cancel the most recent active delivery/pickup order for a customer IF its
-    status is still 'pendiente' (before kitchen confirmation).
-
-    Returns a dict with keys:
-        "cancelled": True  — order was found and cancelled
-        "too_late":  True  — order exists but is past 'pendiente'; cannot cancel
-        "not_found": True  — no active order found for this customer
-
-    DB side effect: sets status='cancelado', cancelled_at=NOW(), cancelled_reason=$reason.
-    Wraps inside tenant_connection() — the caller must have an active tenant_scope.
-    """
-    async with _tenant_connection() as conn:
-        # Find the most recent non-terminal order for this customer
-        row = await conn.fetchrow(
-            """
-            SELECT id, status
-            FROM orders
-            WHERE phone      = $1
-              AND bot_number = $2
-              AND status NOT IN ('cancelado', 'entregado')
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            phone, bot_number,
-        )
-
-    if row is None:
-        return {"not_found": True}
-
-    if row["status"] != "pendiente":
-        return {"too_late": True, "status": row["status"]}
-
-    # Status is 'pendiente' — cancel it
-    async with _tenant_connection() as conn:
-        await conn.execute(
-            """
-            UPDATE orders
-               SET status           = 'cancelado',
-                   cancelled_at     = NOW(),
-                   cancelled_reason = $2
-             WHERE id = $1
-            """,
-            row["id"], reason or None,
-        )
-
-    return {"cancelled": True, "order_id": row["id"]}
-
-
 # ── Caja customer helpers ────────────────────────────────────────────────────
 
 async def db_get_recent_orders_by_phone(
@@ -707,92 +693,3 @@ async def db_get_recent_orders_by_phone(
             "source": "delivery",
         })
     return results
-
-
-# ── Delivery ETA (estimated_minutes) ─────────────────────────────────────────
-#
-# Pair with migration 0064. Three primitives drive the flow:
-#   set_eta            → admin enters ETA via /api/delivery/orders/{id}/eta
-#   needing_communication → scheduler scans pending ones every 3 min
-#   mark_communicated  → scheduler flips the flag after WhatsApp sends
-#
-# All three are tenant-scoped (rely on RLS). The scheduler enumerates orgs
-# under bypass and enters tenant_scope per-org before calling the second one.
-
-async def db_set_order_eta(order_id: str, estimated_minutes: int) -> dict | None:
-    """Set the ETA for a delivery/pickup order.
-
-    Resets eta_communicated to FALSE so the scheduler picks the row up on
-    its next sweep, even if a previous ETA was already communicated. This
-    lets admins update the ETA mid-flight ("we're running 10 min later").
-
-    Returns the updated row dict, or None if the order does not exist.
-
-    # Requires active tenant_scope().
-    """
-    if estimated_minutes is None:
-        raise ValueError("estimated_minutes must not be None")
-    minutes = int(estimated_minutes)
-    if minutes < 1 or minutes > 180:
-        raise ValueError(f"estimated_minutes must be 1..180, got {minutes}")
-
-    async with _tenant_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE orders
-               SET estimated_minutes = $2,
-                   eta_communicated  = FALSE
-             WHERE id = $1
-            RETURNING id, estimated_minutes, eta_communicated, status, paid,
-                      phone, bot_number, order_type
-            """,
-            order_id, minutes,
-        )
-        return dict(row) if row else None
-
-
-async def db_get_orders_needing_eta_communication() -> list[dict]:
-    """Return paid orders with an ETA that has not been WhatsApp'd yet.
-
-    Filtered to active statuses (confirmado, en_preparacion). Orders that
-    already shipped (en_camino, en_puerta, entregado) are excluded — their
-    notification path is handled by send_delivery_notification on status
-    transitions, not by the ETA scheduler.
-
-    # Requires active tenant_scope() (per-org wrap by the scheduler).
-    """
-    async with _tenant_connection() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, phone, bot_number, estimated_minutes, status, order_type
-            FROM orders
-            WHERE paid              = TRUE
-              AND status            IN ('confirmado', 'en_preparacion')
-              AND estimated_minutes IS NOT NULL
-              AND eta_communicated  = FALSE
-            ORDER BY created_at ASC
-            """,
-        )
-        return [dict(r) for r in rows]
-
-
-async def db_mark_eta_communicated(order_id: str) -> bool:
-    """Atomically flip eta_communicated=TRUE — single-winner.
-
-    Returns True on the FIRST mark only. A second worker calling this on
-    the same order returns False, so we never double-WhatsApp the customer
-    even if two scheduler ticks race.
-
-    # Requires active tenant_scope().
-    """
-    async with _tenant_connection() as conn:
-        result = await conn.execute(
-            """
-            UPDATE orders
-               SET eta_communicated = TRUE
-             WHERE id = $1
-               AND eta_communicated = FALSE
-            """,
-            order_id,
-        )
-        return result == "UPDATE 1"

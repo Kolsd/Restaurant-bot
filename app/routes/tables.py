@@ -1,31 +1,32 @@
 import asyncio
 import html as _html
 import os
-import httpx
 import urllib.parse
 import uuid
 from decimal import Decimal
-from pathlib import Path
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from app.services import database as db
 from app.services import billing
+from app.services import realtime
+from app.services import sede_menu
 from app.services import state_store
 from app.services.agent import trigger_nps
-from app.routes.deps import require_auth, get_current_user, get_current_restaurant, get_current_restaurant_scoped
+from app.routes.deps import (
+    require_auth, get_current_user, get_current_restaurant,
+    get_current_restaurant_scoped, may_span_locations, resolve_sede_filter,
+)
 from app.services.tenant_context import tenant_scope, bypass_tenant_scope
 from app.services.tenant_db import tenant_connection
-from app.services import loyalty as loyalty_svc
 from app.services.money import to_decimal, money_mul, quantize_money, money_sum
 from app.services.logging import get_logger
+from app.repositories import delivery_repo
 from app.repositories import tables_repo as tr
 
 log = get_logger(__name__)
 
 router = APIRouter()
-STATIC = Path(__file__).parent.parent / "static"
-META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 _APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
 # Role-based status transition map: which roles may set each status
@@ -40,72 +41,6 @@ _STATUS_ROLE_MAP: dict[str, set[str]] = {
     'cancelado':        {'caja', 'mesero', 'admin', 'owner', 'gerente'},
 }
 
-# WA notification rate-limiting moved to Redis via state_store (multi-worker safe).
-# Keys: notif_wa:{bot_number}:{phone}:{kind}  max 1 per 5 min per worker pool.
-
-async def _get_active_session_for_table(table_id: str, org_id: int) -> dict | None:
-    """Return the active table_session row for a table_id (tenant-scoped).
-
-    Requires caller to be inside tenant_scope(org_id) already.
-    Returns None if no active session exists.
-    """
-    async with tenant_connection() as conn:
-        row = await conn.fetchrow(
-            """SELECT assigned_staff_id
-               FROM table_sessions
-               WHERE table_id = $1 AND org_id = $2 AND status = 'active'
-               ORDER BY started_at DESC LIMIT 1""",
-            table_id, org_id,
-        )
-    return dict(row) if row else None
-
-
-async def _resolve_mesero(staff_id: str | None, org_id: int) -> dict | None:
-    """Resolve staff name from staff_id UUID (GLOBAL lookup, no tenant scope needed).
-
-    Returns {"name": "...", "first_name": "..."} or None if not found.
-    """
-    if not staff_id:
-        return None
-    try:
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT name FROM staff WHERE id = $1::uuid AND org_id = $2",
-                str(staff_id), org_id,
-            )
-        if not row:
-            return None
-        full_name: str = row["name"] or ""
-        first_name = full_name.split()[0] if full_name else full_name
-        return {"name": full_name, "first_name": first_name}
-    except Exception:
-        log.warning("tables.resolve_mesero_error", staff_id=staff_id)
-        return None
-
-
-async def get_table_wa_number(table: dict) -> str:
-    """Resolve the WhatsApp number to use for a wa.me link from a table dict.
-
-    Wave-2: tables belong to a SPECIFIC sede (branch_id = location_id), and
-    each sede has its own whatsapp_number on the org+location join. We must
-    NOT fall back to "any restaurant globally" — that's cross-tenant data
-    leakage (the link would point to another customer's WhatsApp).
-
-    If branch_id is missing or no restaurant resolves, return empty string —
-    the caller renders the page without a wa.me link rather than with a
-    wrong/cross-tenant one.
-    """
-    wa_number = ""
-    bid = table.get("branch_id")
-    if bid:
-        r = await db.db_get_restaurant_by_id(bid)
-        if r:
-            wa_number = r.get("whatsapp_number", "") or ""
-
-    # 🛡️ Limpiamos el sufijo _b para que el enlace wa.me sea válido
-    return wa_number.split("_b")[0] if wa_number else ""
-
 async def _get_restaurant_for_table(table_id: str | None, session_data: dict | None) -> dict:
     """Resuelve el restaurante/sucursal a partir de la mesa o la sesión activa."""
     if table_id:
@@ -114,11 +49,11 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
         if table:
             bid = table.get("branch_id")
             if bid:
-                r = await db.db_get_restaurant_by_id(bid)
+                r = await db.db_get_restaurant_by_location_id(bid)
                 if r:
                     return r
-    if session_data and session_data.get("bot_number"):
-        r = await db.db_get_restaurant_by_bot_number(session_data["bot_number"])
+    if session_data and session_data.get("org_id"):
+        r = await db.db_get_restaurant_by_org_id(int(session_data["org_id"]))
         if r:
             return r
     # Wave-2: NO cross-tenant fallback. Returning "any restaurant globally"
@@ -126,59 +61,83 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
     # in single-tenant dev that worked; in production it would return another
     # customer's restaurant dict for a phone we cannot identify. Fail open
     # with an empty dict; callers (e.g. _farewell_and_nps) already short-circuit
-    # on missing whatsapp_number so this degrades gracefully without leaking.
+    # on a missing org so this degrades gracefully without leaking.
     return {}
 
-async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict | None, db_phone_id: str | None, username: str) -> None:
+async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict | None, username: str) -> None:
     rest = await _get_restaurant_for_table(table_id, session_data)
-    # Usamos el bot_number limpio para que coincida con el webhook de Meta
-    raw_bot_num = rest.get("whatsapp_number", "")
-    clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
-    final_bot_num = (session_data.get("bot_number") if session_data else None) or clean_bot_num
-    
+    final_org_id = (
+        (session_data.get("org_id") if session_data else None)
+        or rest.get("org_id")
+    )
+
     rest_name = rest.get("name", "nuestro restaurante")
-    # Disparamos directamente la encuesta NPS
-    if final_bot_num:
-        asyncio.create_task(trigger_nps(phone, final_bot_num, rest_name))
-        asyncio.create_task(send_wa_interactive_nps(phone, rest_name, db_phone_id))
+    # The diner answers the survey in their own chat: GET /api/diner/status
+    # renders the nps_prompt block (blocks.py) once trigger_nps sets the state.
+    # Trigger the NPS survey directly
+    if final_org_id:
+        final_org_id = int(final_org_id)
+        asyncio.create_task(trigger_nps(phone, final_org_id, rest_name))
         with bypass_tenant_scope("farewell_and_nps: mark session nps_pending by phone"):
-            await db.db_mark_session_nps_pending(phone, final_bot_num)
+            await db.db_mark_session_nps_pending(phone, final_org_id)
 
     with bypass_tenant_scope("farewell_and_nps: cleanup checkout data by phone"):
         await db.db_cleanup_after_checkout(phone)
 
-# ── MESAS ────────────────────────────────────────────────────────────
+# ── TABLES ────────────────────────────────────────────────────────────
+
+async def _tables_scope(request: Request) -> tuple[int, int | None]:
+    """(org_id, branch_id) for a table listing, verified against the user.
+
+    P0 fix (2026-09): previously used user["branch_id"] (mixed id kind —
+    for staff it is actually the ORG id, not a location id) directly as
+    the location_id filter, under bypass_tenant_scope (no RLS net). If
+    that number happened to collide with an unrelated org's real location
+    id, this leaked that org's tables. Now scoped by the explicit org_id
+    under REAL tenant_scope (RLS-protected), and X-Branch-ID is verified
+    to belong to that org before being used as a location filter.
+
+    Shared by the table list and the QR sheet so the codes a restaurant
+    prints can never cover a sede its listing does not show.
+    """
+    user = await get_current_user(request)
+
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No se pudo determinar la organización del usuario")
+    org_id = int(org_id)
+
+    is_owner_or_admin = "owner" in user.get("role", "") or "admin" in user.get("role", "")
+    branch_header = request.headers.get("X-Branch-ID")
+    branch_id = None
+    if is_owner_or_admin:
+        if branch_header and branch_header.isdigit():
+            candidate = int(branch_header)
+            candidate_rest = await db.db_get_restaurant_by_location_id(candidate)
+            if not candidate_rest or candidate_rest.get("org_id") != org_id:
+                raise HTTPException(status_code=403, detail="Sucursal no pertenece a tu organización")
+            branch_id = candidate
+        # branch_id=None → admin global view (all branches of this org)
+    else:
+        # Non-admin (mesero/gerente/etc): staff has no per-location
+        # assignment today, so they see every table of their own org.
+        branch_id = user.get("location_id")
+
+    return org_id, branch_id
+
 
 @router.get("/api/tables")
 async def get_tables(request: Request):
-    """Devuelve las mesas de la sucursal actual para pintarlas en el dashboard."""
+    """Returns the current branch's tables for rendering on the dashboard."""
     await require_auth(request)
-    user = await get_current_user(request)
-
-    # Por defecto, asumimos el branch_id del usuario (útil para meseros/gerentes)
-    branch_id = user.get("branch_id")
-
-    # Si el dueño/admin usa el selector del Topbar:
-    branch_header = request.headers.get("X-Branch-ID")
-    is_owner_or_admin = "owner" in user.get("role", "") or "admin" in user.get("role", "")
-    if is_owner_or_admin:
-        if branch_header and branch_header.isdigit():
-            branch_id = int(branch_header)
-        # branch_id=None → admin global view (all branches)
-    else:
-        # Non-admin: must always have a branch_id; fall back to restaurant_id if missing
-        if branch_id is None:
-            branch_id = user.get("restaurant_id")
-        if branch_id is None:
-            raise HTTPException(status_code=400, detail="No se pudo determinar la sucursal del usuario")
-
-    with bypass_tenant_scope("get_tables: admin global view or branch-scoped via user.branch_id"):
+    org_id, branch_id = await _tables_scope(request)
+    with tenant_scope(org_id):
         tables = await db.db_get_tables(branch_id=branch_id)
     return {"tables": tables}
 
 @router.post("/api/tables")
 async def create_table(request: Request):
-    """Crea una mesa automáticamente sin pedir número ni nombre manual."""
+    """Automatically creates a table without asking for a manual number or name."""
     await require_auth(request)
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
@@ -196,8 +155,13 @@ async def create_table(request: Request):
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit() and ("owner" in user.get("role", "") or "admin" in user.get("role", "")):
         candidate = int(branch_header)
-        branch_rest = await db.db_get_restaurant_by_id(candidate)
-        if branch_rest:
+        # P0 fix (2026-09): verify the candidate location actually belongs to
+        # the caller's own org before trusting it — previously ANY existing
+        # location id was accepted with no ownership check, letting an
+        # owner/admin create a table under a DIFFERENT tenant's location id
+        # while scoped under their own org (cross-tenant corruption).
+        branch_rest = await db.db_get_restaurant_by_location_id(candidate)
+        if branch_rest and branch_rest.get("org_id") == org_id:
             # Header value is the location_id of the selected sede. The
             # org_id stays the same — all branches of a Matriz share one org.
             branch_location_id = candidate
@@ -226,7 +190,7 @@ async def _verify_table_ownership(table_id: str, restaurant: dict) -> None:
         return
 
     # Cross-location check: verify the table's branch belongs to the same org
-    branch_rest = await db.db_get_restaurant_by_id(table_branch_id)
+    branch_rest = await db.db_get_restaurant_by_location_id(table_branch_id)
     if branch_rest and branch_rest.get("org_id") == org_id:
         return
 
@@ -235,7 +199,7 @@ async def _verify_table_ownership(table_id: str, restaurant: dict) -> None:
 
 @router.delete("/api/tables/{table_id}")
 async def delete_table(table_id: str, restaurant=Depends(get_current_restaurant_scoped)):
-    """Elimina una mesa por su ID."""
+    """Deletes a table by its ID."""
     await _verify_table_ownership(table_id, restaurant)
     await db.db_delete_table(table_id)
     return {"success": True}
@@ -243,7 +207,7 @@ async def delete_table(table_id: str, restaurant=Depends(get_current_restaurant_
 
 @router.get("/api/tables/floor-plan")
 async def get_floor_plan(request: Request, restaurant=Depends(get_current_restaurant_scoped)):
-    """Devuelve todas las mesas con posiciones y ocupación actual para el mapa de planta.
+    """Returns all tables with positions and current occupancy for the floor plan.
 
     Filtering:
       - X-Branch-ID = digit (location_id) → filter to that sede.
@@ -258,8 +222,11 @@ async def get_floor_plan(request: Request, restaurant=Depends(get_current_restau
     nothing for any owner whose branch dropdown was on Casa Matriz —
     floor plan went empty for everyone.
     """
-    branch_id_str = request.headers.get("x-branch-id")
-    branch_id = int(branch_id_str) if branch_id_str and branch_id_str.isdigit() else None
+    # The header alone used to decide this, with no role check: a waiter of
+    # sede A could name sede B, and one who named nothing got the floor plan
+    # of every sede in the org.
+    user = await get_current_user(request)
+    branch_id = resolve_sede_filter(request, user)
     return await db.db_get_floor_plan(branch_id=branch_id)
 
 
@@ -280,7 +247,7 @@ class TablePropertiesBody(BaseModel):
 
 @router.put("/api/tables/{table_id}/position")
 async def update_table_position(table_id: str, body: TablePositionBody, restaurant=Depends(get_current_restaurant_scoped)):
-    """Actualiza la posición (x, y) de una mesa en el mapa de planta."""
+    """Updates a table's (x, y) position on the floor plan."""
     await _verify_table_ownership(table_id, restaurant)
     result = await db.db_update_table_position(
         table_id, body.position_x, body.position_y
@@ -359,7 +326,7 @@ async def save_floor_plan(
 
 @router.put("/api/tables/{table_id}/properties")
 async def update_table_properties(table_id: str, body: TablePropertiesBody, restaurant=Depends(get_current_restaurant_scoped)):
-    """Actualiza propiedades de una mesa (capacity, table_type, zone)."""
+    """Updates a table's properties (capacity, table_type, zone)."""
     await _verify_table_ownership(table_id, restaurant)
     updates = body.model_dump(exclude_none=True)
     if "table_type" in updates and updates["table_type"] not in _VALID_TABLE_TYPES:
@@ -372,104 +339,21 @@ async def update_table_properties(table_id: str, body: TablePropertiesBody, rest
     return result
 
 
-@router.get("/menu", response_class=HTMLResponse)
-async def menu_page_bot():
-    """Sirve el catálogo para contexto delivery/recoger (?bot=NUMBER)."""
-    p = STATIC / "html" / "menu.html"
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="menu.html no encontrado en static/")
-    return HTMLResponse(p.read_text(encoding="utf-8"))
+def table_qr_url(request: Request, table_id: str) -> str:
+    """Where a table's printed QR sends the diner.
 
+    `/chat/{table_id}` — the diner's own web channel, which is the product:
+    scanning opens the chat, the bot shows the carta as cards, and the order
+    reaches the kitchen (closed product decision, docs/claude/status.md).
 
-@router.get("/menu/{table_id}", response_class=HTMLResponse)
-async def menu_page(table_id: str):
-    # Resolve catalog_v2_enabled to pick legacy vs current template.
-    catalog_v2 = True  # default: serve new catalog
-    try:
-        with bypass_tenant_scope("menu_page: pre-resolve table tenant for template selection"):
-            table = await db.db_get_table_by_id(table_id)
-        if table:
-            wa_number = await get_table_wa_number(table)
-            restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
-            feat = restaurant.get("features") or {}
-            if isinstance(feat, str):
-                import json as _json
-                try:
-                    feat = _json.loads(feat)
-                except Exception:
-                    feat = {}
-            catalog_v2 = bool(feat.get("catalog_v2_enabled", True))
-    except Exception:
-        log.exception("menu_page.template_resolution_failed", table_id=table_id)
-        # on any error keep default (True) — non-critical path (template fallback)
+    Until 2026-09-24 every QR pointed at `/menu/{table_id}` instead, the
+    catalog page whose printed sheet told the diner to "pedir por WhatsApp"
+    — the channel being retired. A restaurant that printed its codes was
+    handing customers the wrong flow on physical paper, which is the most
+    expensive place to be wrong.
+    """
+    return f"{_public_base_url(request)}/chat/{table_id}"
 
-    html_file = "menu.html" if catalog_v2 else "menu-legacy.html"
-    p = STATIC / "html" / html_file
-    if not p.exists():
-        raise HTTPException(status_code=404, detail=f"{html_file} no encontrado en static/")
-    return HTMLResponse(p.read_text(encoding="utf-8"))
-
-@router.get("/api/public/menu-context/{table_id}")
-async def public_menu_context(table_id: str):
-    with bypass_tenant_scope("public_menu_context: pre-resolve table tenant for public menu"):
-        table = await db.db_get_table_by_id(table_id)
-    if not table:
-        raise HTTPException(status_code=404, detail="Mesa no encontrada")
-
-    wa_number = await get_table_wa_number(table)
-    if not wa_number:
-        raise HTTPException(status_code=404, detail="Restaurante no configurado para esta mesa")
-    # The [t:<id>] marker is REQUIRED by detect_table_context (agent.py:154) to
-    # establish a salon session. Without it the bot falls through to manual-text
-    # detection which is gated by features.allow_manual_table_number=False (the
-    # secure default) and rejects the customer with no visible explanation. The
-    # marker is invisible in WhatsApp's preview because it sits at end-of-line
-    # and most clients trim it visually.
-    wa_msg = f"Hola! Estoy en {table['name']} [t:{table['id']}]"
-    wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
-
-    menu = await db.db_get_menu(wa_number) or {}
-    restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
-    if restaurant.get("id"):
-        with tenant_scope(restaurant["id"]):
-            availability = await db.db_get_menu_availability(restaurant["id"])
-    else:
-        availability = {}
-    features = restaurant.get("features") or {}
-    if isinstance(features, str):
-        import json as _json
-        try: features = _json.loads(features)
-        except Exception: features = {}
-
-    # ── Table context: active session + assigned mesero ────────────────────
-    table_context = None
-    rid = restaurant.get("id")
-    if rid:
-        try:
-            with tenant_scope(rid):
-                session_row = await _get_active_session_for_table(table_id, rid)
-            if session_row:
-                mesero_info = await _resolve_mesero(session_row.get("assigned_staff_id"), rid)
-                table_context = {
-                    "table_name": table["name"],
-                    "assigned_mesero": mesero_info,
-                }
-        except Exception:
-            from app.services.logging import get_logger as _gl
-            _gl(__name__).warning("public_menu_context.table_context_error", table_id=table_id)
-
-    return {
-        "table_name": table["name"],
-        "wa_url": wa_url,
-        "menu": menu,
-        "availability": availability,
-        "locale": features.get("locale", "es-CO"),
-        "currency": features.get("currency", "COP"),
-        "catalog_v2_enabled": bool(features.get("catalog_v2_enabled", True)),
-        "bot_visual_menu": bool(features.get("bot_visual_menu", False)),
-        "bot_number": wa_number,
-        "table_context": table_context,
-    }
 
 def build_qr_html(menu_url: str, table_name: str, width: int = 300) -> str:
     return f"<!DOCTYPE html><html><head><meta charset='UTF-8'><script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script></head><body style='margin:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;'><div id='qr'></div><script>window.onload=function(){{new QRCode(document.getElementById('qr'),{{text:decodeURIComponent('{urllib.parse.quote(menu_url)}'),width:{width},height:{width},colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});}};</script></body></html>"
@@ -481,24 +365,125 @@ def _public_base_url(request: Request) -> str:
         return f"https://{_APP_DOMAIN}"
     return str(request.base_url).rstrip('/')
 
+_QR_SHEET_CSS = """
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Arial,Helvetica,sans-serif;background:#f4f4f2;color:#0D1412;}
+.bar{position:sticky;top:0;background:#fff;border-bottom:1px solid #e3e3e0;
+     padding:14px 20px;display:flex;align-items:center;gap:14px;}
+.bar h1{font-size:16px;font-weight:700;}
+.bar .sub{font-size:13px;color:#666;}
+.bar button{margin-left:auto;background:#1D9E75;color:#fff;border:0;border-radius:8px;
+     padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;padding:20px;}
+.card{background:#fff;border:2px solid #0D1412;border-radius:16px;padding:20px;
+      text-align:center;break-inside:avoid;page-break-inside:avoid;}
+.logo{font-size:22px;font-weight:900;}
+.logo span{color:#1D9E75;}
+.tname{font-size:19px;font-weight:700;margin:10px 0 2px;}
+.instr{font-size:12px;color:#666;margin-bottom:12px;line-height:1.45;}
+.qrbox{width:180px;height:180px;margin:0 auto 12px;}
+.qrbox canvas,.qrbox img{width:180px !important;height:180px !important;}
+.steps{text-align:left;background:#f8f8f5;border-radius:10px;padding:10px 14px;}
+.step{font-size:11.5px;color:#444;padding:2px 0;display:flex;gap:7px;}
+.sn{color:#1D9E75;font-weight:700;}
+.empty{padding:60px 20px;text-align:center;color:#666;font-size:14px;}
+@media print{
+  body{background:#fff;}
+  .bar{display:none;}
+  .grid{padding:0;gap:0;grid-template-columns:repeat(2,1fr);}
+  .card{border-radius:0;margin:0;}
+}
+"""
+
+
+@router.get("/api/tables/qr-sheet", response_class=HTMLResponse)
+async def get_all_tables_qr_sheet(request: Request):
+    """Every table's QR on one printable page.
+
+    A restaurant opening for the first time has to put a code on each
+    table, and the only way to get them was one page per table — open the
+    sheet, print, go back, next table. For twenty tables that is twenty
+    round trips, on the very first day, which is exactly where onboarding
+    is abandoned.
+
+    Scoped through the same `_tables_scope` as the table listing, so a
+    sheet can never contain a sede the user is not entitled to see.
+    """
+    await require_auth(request)
+    org_id, branch_id = await _tables_scope(request)
+    with tenant_scope(org_id):
+        tables = await db.db_get_tables(branch_id=branch_id)
+
+    cards = []
+    for t in tables:
+        table_id = str(t.get("id") or t.get("table_id") or "").strip()
+        if not table_id:
+            continue
+        safe_name = _html.escape(str(t.get("name") or table_id))
+        encoded = urllib.parse.quote(table_qr_url(request, table_id))
+        cards.append(
+            "<div class='card'>"
+            "<div class='logo'>Mesio<span>.</span></div>"
+            f"<div class='tname'>{safe_name}</div>"
+            "<div class='instr'>Escanea el QR con la cámara<br>para ver la carta y pedir</div>"
+            f"<div class='qrbox' data-qr='{encoded}'></div>"
+            "<div class='steps'>"
+            "<div class='step'><span class='sn'>1.</span><span>Abre la cámara de tu celular</span></div>"
+            "<div class='step'><span class='sn'>2.</span><span>Apunta al código QR</span></div>"
+            "<div class='step'><span class='sn'>3.</span><span>Elige tus platos de la carta</span></div>"
+            "<div class='step'><span class='sn'>4.</span><span>Envía el pedido a la cocina</span></div>"
+            "</div></div>"
+        )
+
+    body = (
+        "<div class='grid'>" + "".join(cards) + "</div>"
+        if cards else
+        "<div class='empty'>Todavía no tienes mesas creadas.<br>"
+        "Crea tus mesas y vuelve aquí para imprimir sus códigos.</div>"
+    )
+    count = len(cards)
+    plural = "" if count == 1 else "s"
+
+    # The QR images are drawn in the browser from data-qr, never built into
+    # the HTML string: the URL is the only place a table name or id could
+    # reach the page unescaped, and keeping it in an attribute the script
+    # reads keeps that one value out of the markup it generates.
+    return HTMLResponse(
+        "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Códigos QR de tus mesas — Mesio</title>"
+        f"<style>{_QR_SHEET_CSS}</style>"
+        "<script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script>"
+        "</head><body>"
+        "<div class='bar'><div><h1>Códigos QR de tus mesas</h1>"
+        f"<div class='sub'>{count} mesa{plural} · imprime y pega uno en cada mesa</div></div>"
+        "<button onclick='window.print()'>Imprimir</button></div>"
+        f"{body}"
+        "<script>window.onload=function(){"
+        "document.querySelectorAll('.qrbox').forEach(function(el){"
+        "new QRCode(el,{text:decodeURIComponent(el.dataset.qr),width:180,height:180,"
+        "colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});"
+        "});};</script>"
+        "</body></html>"
+    )
+
+
 @router.get("/api/tables/{table_id}/qr", response_class=HTMLResponse)
 async def get_table_qr(request: Request, table_id: str):
     with bypass_tenant_scope("qr_public_lookup: pre-resolve table tenant for QR"):
         table = await db.db_get_table_by_id(table_id)
     if not table: raise HTTPException(status_code=404, detail="Mesa no encontrada")
-    menu_url = f"{_public_base_url(request)}/menu/{table_id}"
-    return build_qr_html(menu_url, table["name"], width=300)
+    return build_qr_html(table_qr_url(request, table_id), table["name"], width=300)
 
 @router.get("/api/tables/{table_id}/qr-sheet")
 async def get_qr_sheet(request: Request, table_id: str):
     with bypass_tenant_scope("qr_sheet_public_lookup: pre-resolve table tenant for QR sheet"):
         table = await db.db_get_table_by_id(table_id)
     if not table: raise HTTPException(status_code=404, detail="Mesa no encontrada")
-    menu_url = f"{_public_base_url(request)}/menu/{table_id}"
-    encoded = urllib.parse.quote(menu_url)
+    encoded = urllib.parse.quote(table_qr_url(request, table_id))
     safe_name = _html.escape(table['name'])
     return HTMLResponse(
-        f"<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><style>*{{box-sizing:border-box;margin:0;padding:0;}}body{{font-family:Arial,sans-serif;background:#fff;}}.page{{width:10cm;margin:1cm auto;text-align:center;padding:1.5cm;border:2px solid #0D1412;border-radius:16px;}}.logo{{font-size:28px;font-weight:900;color:#0D1412;margin-bottom:4px;}}.logo span{{color:#1D9E75;}}.tname{{font-size:20px;font-weight:700;color:#0D1412;margin:12px 0 4px;}}.instr{{font-size:13px;color:#666;margin-bottom:16px;line-height:1.5;}}.qrbox{{width:200px;height:200px;margin:0 auto 16px;}}.qrbox canvas,.qrbox img{{width:200px !important;height:200px !important;border-radius:8px;}}.wa-badge{{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}.steps{{text-align:left;background:#f8f8f5;border-radius:10px;padding:12px 16px;margin-top:8px;}}.step{{font-size:12px;color:#444;padding:3px 0;display:flex;gap:8px;}}.sn{{color:#1D9E75;font-weight:700;}}@media print{{body{{margin:0;}}}}</style><script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script></head><body><div class='page'><div class='logo'>Mesio<span>.</span></div><div class='tname'>{safe_name}</div><div class='instr'>Escanea el QR para ver el menú<br>y pedir por WhatsApp</div><div class='qrbox' id='qrc'></div><div class='wa-badge'>Ver Menú y Pedir</div><div class='steps'><div class='step'><span class='sn'>1.</span><span>Abre la cámara de tu celular</span></div><div class='step'><span class='sn'>2.</span><span>Apunta al código QR</span></div><div class='step'><span class='sn'>3.</span><span>Revisa el menú interactivo</span></div><div class='step'><span class='sn'>4.</span><span>Toca pedir por WhatsApp</span></div></div></div><script>window.onload=function(){{new QRCode(document.getElementById('qrc'),{{text:decodeURIComponent('{encoded}'),width:200,height:200,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});setTimeout(function(){{window.print();}},800);}};</script></body></html>"
+        f"<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><style>*{{box-sizing:border-box;margin:0;padding:0;}}body{{font-family:Arial,sans-serif;background:#fff;}}.page{{width:10cm;margin:1cm auto;text-align:center;padding:1.5cm;border:2px solid #0D1412;border-radius:16px;}}.logo{{font-size:28px;font-weight:900;color:#0D1412;margin-bottom:4px;}}.logo span{{color:#1D9E75;}}.tname{{font-size:20px;font-weight:700;color:#0D1412;margin:12px 0 4px;}}.instr{{font-size:13px;color:#666;margin-bottom:16px;line-height:1.5;}}.qrbox{{width:200px;height:200px;margin:0 auto 16px;}}.qrbox canvas,.qrbox img{{width:200px !important;height:200px !important;border-radius:8px;}}.wa-badge{{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}.steps{{text-align:left;background:#f8f8f5;border-radius:10px;padding:12px 16px;margin-top:8px;}}.step{{font-size:12px;color:#444;padding:3px 0;display:flex;gap:8px;}}.sn{{color:#1D9E75;font-weight:700;}}@media print{{body{{margin:0;}}}}</style><script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script></head><body><div class='page'><div class='logo'>Mesio<span>.</span></div><div class='tname'>{safe_name}</div><div class='instr'>Escanea el QR con la cámara<br>para ver la carta y pedir</div><div class='qrbox' id='qrc'></div><div class='wa-badge'>Ver la carta y pedir</div><div class='steps'><div class='step'><span class='sn'>1.</span><span>Abre la cámara de tu celular</span></div><div class='step'><span class='sn'>2.</span><span>Apunta al código QR</span></div><div class='step'><span class='sn'>3.</span><span>Elige tus platos de la carta</span></div><div class='step'><span class='sn'>4.</span><span>Envía el pedido a la cocina</span></div></div></div><script>window.onload=function(){{new QRCode(document.getElementById('qrc'),{{text:decodeURIComponent('{encoded}'),width:200,height:200,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});setTimeout(function(){{window.print();}},800);}};</script></body></html>"
     )
 
 # ── ALERTAS MESERO ──────────────────────────────────────────────────
@@ -506,10 +491,27 @@ async def get_qr_sheet(request: Request, table_id: str):
 async def get_waiter_alerts(request: Request):
     await require_auth(request)
     restaurant = await get_current_restaurant(request)
-    bot_number = restaurant.get("whatsapp_number", "")
+
+    # A waiter sees THEIR OWN sede's alerts and nobody else's — the filter is
+    # their staff row, not a header they control (memory: mesero-location-gap).
+    # Owner/admin keep the org-wide view this screen has always had, and may
+    # narrow it to one sede from the sidebar. The header value is verified to
+    # belong to this org before it is used; resolve_sede_filter only decides
+    # WHO may name a sede, not that the sede is theirs.
+    user = await get_current_user(request)
+    location_id = resolve_sede_filter(request, user)
+    if location_id is not None and may_span_locations(user):
+        try:
+            with tenant_scope(restaurant["id"]):
+                loc = await db.db_get_location_by_id(location_id)
+        except Exception:
+            loc = None
+        if not loc or loc.get("org_id") != restaurant.get("id"):
+            location_id = None
+
     try:
         with tenant_scope(restaurant["id"]):
-            alerts = await tr.db_get_waiter_alerts(bot_number)
+            alerts = await tr.db_get_waiter_alerts(int(restaurant["id"]), location_id=location_id)
     except Exception as e:
         log.exception("tables.alerts_read_failed", restaurant_id=restaurant.get("id"), error=str(e))
         alerts = []
@@ -519,31 +521,51 @@ class AdminCallRequest(BaseModel):
     phone: str = ""
     table_id: str = ""
     table_name: str = ""
-    bot_number: str = ""
 
 @router.post("/api/waiter-alerts/admin-call")
 async def admin_call_waiter(request: Request, body: AdminCallRequest):
-    """El administrador convoca a un mesero/empleado a caja o dashboard."""
+    """El administrador convoca a un mesero/empleado a caja o dashboard.
+
+    SECURITY (2026-09 audit): the tenant key used to come straight from the
+    request BODY and the alert was written under bypass_tenant_scope — any
+    authenticated user (of ANY restaurant) could push an alert onto another
+    restaurant's waiter screen. The caller's OWN restaurant is resolved
+    server-side and the alert is written inside tenant_scope().
+    """
     await require_auth(request)
-    with bypass_tenant_scope("admin_call_waiter: cross-tenant waiter alert from dashboard"):
+    restaurant = await get_current_restaurant(request)
+    with tenant_scope(restaurant["id"]):
         alert = await db.db_create_waiter_alert(
             phone=body.phone or "admin",
-            bot_number=body.bot_number,
+            org_id=int(restaurant["id"]),
             alert_type="admin_call",
             message="El Administrador requiere verte en caja/dashboard",
             table_id=body.table_id,
             table_name=body.table_name,
+            location_id=restaurant.get("location_id"),
         )
     return {"success": True, "alert": alert}
 
 @router.post("/api/waiter-alerts/{alert_id}/dismiss")
 async def dismiss_waiter_alert(request: Request, alert_id: int):
+    """SECURITY (2026-09 audit): this used to run the UPDATE under
+    bypass_tenant_scope with NO ownership check — alert ids are sequential
+    integers, so any authenticated user of restaurant A could silence
+    restaurant B's alerts by guessing ids (IDOR). Running it inside the
+    caller's own tenant_scope() instead means RLS's org_isolation policy
+    (waiter_alerts IS RLS-protected) makes the UPDATE match zero rows for a
+    foreign or unknown id — we surface that as 404 and never touch the row.
+    """
     await require_auth(request)
+    restaurant = await get_current_restaurant(request)
     try:
-        with bypass_tenant_scope("dismiss_waiter_alert: global kitchen alert dismiss"):
-            await tr.db_dismiss_waiter_alert(alert_id)
+        with tenant_scope(restaurant["id"]):
+            dismissed = await tr.db_dismiss_waiter_alert(alert_id)
     except Exception:
-        log.warning("tables.dismiss_waiter_alert_failed", alert_id=alert_id)
+        log.exception("tables.dismiss_waiter_alert_failed", alert_id=alert_id, restaurant_id=restaurant.get("id"))
+        raise HTTPException(status_code=404, detail="Alerta no encontrada")
+    if not dismissed:
+        raise HTTPException(status_code=404, detail="Alerta no encontrada")
     return {"success": True}
 
 # ── ELIMINAR CONVERSACIONES (MANUAL) ─────────────────────────────────
@@ -559,17 +581,55 @@ async def force_delete_conversation(request: Request, phone: str):
     return {"success": True}
 
 # ── DELIVERY ORDERS ───────────────────────────────────────────────────
+
+
+def _kitchen_delivery_location_filter(request: Request, user: dict) -> int | None:
+    """Resolve which sede's delivery tickets a kitchen/caja/admin caller may
+    see (docs/claude/delivery-web.md, "Known open items": this feed was
+    org-scoped only, so every kitchen of a multi-sede org saw every sede's
+    delivery tickets). Mirrors the X-Location-ID / own-staff.location_id
+    convention app/routes/staff_delivery.py::delivery_scope already uses —
+    same header name, same "admin picks explicitly, everyone else gets their
+    own sede" shape — rather than inventing a second one.
+
+    Unlike that stricter cashier-only surface, an admin caller here who sends
+    NO header keeps this feed's EXISTING default (every sede) instead of
+    being refused outright — this screen has always been usable org-wide by
+    an admin, and chunk 8 only closes the "sees ANOTHER sede without asking"
+    gap, not that existing convenience.
+
+    Returns None (no filter -> every sede) only for an admin role with no
+    header. Every other caller (kitchen/cocina/bar/caja/mesero/... or an
+    admin WITH a header) gets a concrete int, or the call raises 403 when a
+    non-admin has no sede of their own.
+    """
+    from app.services.staff_sections import ADMIN_ROLES, normalize_role  # noqa: PLC0415
+
+    roles = {normalize_role(r) for r in (user.get("role") or "").split(",") if r.strip()}
+    is_admin = bool(roles & ADMIN_ROLES)
+    header = request.headers.get("X-Location-ID", "").strip()
+
+    if is_admin:
+        return int(header) if header.isdigit() else None
+
+    raw_location_id = user.get("location_id")
+    if not raw_location_id:
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene una sede asignada")
+    return int(raw_location_id)
+
+
 @router.get("/api/kitchen/delivery-orders")
 async def get_delivery_orders(request: Request):
-    await require_auth(request)
+    user = await get_current_user(request)
     import json as _json
 
     # Tenant-scope the read so RLS filters to the authenticated admin's org.
-    # Without this, db_get_delivery_orders_for_caja returned ALL tenants' orders.
+    # Without this, db_get_delivery_orders_for_cashier returned ALL tenants' orders.
     restaurant = await get_current_restaurant(request)
     org_id = restaurant["id"]
+    location_filter = _kitchen_delivery_location_filter(request, user)
     with tenant_scope(org_id):
-        rows = await tr.db_get_delivery_orders_for_caja()
+        rows = await tr.db_get_delivery_orders_for_cashier(int(org_id), location_filter)
     orders = []
     for r in rows:
         items = r["items"]
@@ -578,6 +638,8 @@ async def get_delivery_orders(request: Request):
             except: items = []
         orders.append({
             "id": r["id"],
+            # The code the customer holds (/pedido/{code}) — what they say at pickup.
+            "public_code": r.get("public_code"),
             "phone": r["phone"],
             "items": items,
             "order_type": r["order_type"],
@@ -594,11 +656,11 @@ async def get_delivery_orders(request: Request):
 
 @router.patch("/api/kitchen/delivery-orders/{order_id}/status")
 async def update_delivery_order_status(request: Request, order_id: str):
-    await require_auth(request)
+    user = await get_current_user(request)
     body = await request.json()
     new_status = body.get("status", "")
     valid = ["pendiente_pago", "confirmado", "en_preparacion", "listo", "en_camino", "entregado", "cancelado"]
-    
+
     if new_status not in valid:
         raise HTTPException(status_code=400, detail="Estado inválido")
 
@@ -606,47 +668,45 @@ async def update_delivery_order_status(request: Request, order_id: str):
     # Without this, any authenticated admin could PATCH any tenant's order.
     restaurant = await get_current_restaurant(request)
     org_id = restaurant["id"]
+    location_filter = _kitchen_delivery_location_filter(request, user)
+
+    # Web delivery/pickup orders (docs/claude/delivery-web.md) have their own
+    # lifecycle: the cashier accepts, the kitchen only marks them ready, the
+    # courier/cashier close them. The legacy path below would (a) let the
+    # kitchen set ANY status, skipping acceptance, (b) never tell the
+    # customer's status page, and (c) send WhatsApp messages and the WhatsApp
+    # NPS to the order's `phone`, which for a web order is a `web:<uuid>`
+    # identity — i.e. call Meta with an invalid number.
+    with tenant_scope(org_id):
+        routing = await delivery_repo.db_get_order_channel(org_id, order_id)
+    if routing and routing.get("channel") == "web_chat":
+        # Chunk 8: a kitchen must not act on another sede's order — same
+        # "doesn't exist for you" 404 treatment delivery_repo.py's own
+        # docstrings use for a caller who can't even see a row (as opposed
+        # to a 409 for a real state conflict on a row they DO own).
+        if location_filter is not None and int(routing.get("location_id") or -1) != location_filter:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado en tu sede.")
+        if new_status != "listo":
+            raise HTTPException(
+                status_code=409,
+                detail="Este pedido se gestiona desde Domicilios; la cocina solo lo marca listo.",
+            )
+        with tenant_scope(org_id):
+            ready = await delivery_repo.db_mark_ready(org_id, order_id, location_filter)
+        if not ready:
+            raise HTTPException(
+                status_code=409,
+                detail="El pedido ya no está en preparación. Actualiza la pantalla.",
+            )
+        await realtime.publish_delivery_status(org_id, ready.get("location_id"), order_id)
+        return {"success": True}
+
     with tenant_scope(org_id):
         await tr.db_update_delivery_order_status(order_id, new_status)
 
-    if new_status in ("confirmado", "en_camino", "entregado", "listo"):
-        with tenant_scope(org_id):
-            row = await tr.db_get_delivery_order_contact(order_id)
-            # entregado also needs the full row to fetch bot_number for trigger_nps.
-            full = await tr.db_get_delivery_order_full(order_id) if new_status in ("listo", "entregado") else None
-        if row:
-            phone = row["phone"]
-            order_type = (full or {}).get("order_type", "domicilio")
-            if new_status == "confirmado":
-                msg = f"✅ ¡Tu pedido fue confirmado! Ya está en preparación y pronto estará listo. 🍽️"
-            elif new_status == "listo" and order_type == "recoger":
-                msg = "🛍️ ¡Tu pedido está listo para recoger! Puedes pasar a buscarlo cuando quieras. ¡Te esperamos!"
-            elif new_status == "en_camino":
-                msg = f"🛵 ¡Tu pedido ya va en camino a {row['address']}! Pronto estaremos contigo."
-            elif new_status == "entregado":
-                msg = f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
-            else:
-                msg = None
-            if msg:
-                try:
-                    with bypass_tenant_scope("update_delivery_order_status: meta phone ID lookup"):
-                        db_phone_id = await tr.db_get_meta_phone_id_for_session(phone)
-                except Exception:
-                    db_phone_id = None
-                await send_wa_msg(phone, msg, db_phone_id)
-
-            # Parity with /api/delivery/orders PATCH: trigger NPS on entregado.
-            # Without this, kitchen-path "entregado" skips NPS entirely.
-            if new_status == "entregado":
-                try:
-                    restaurant = await get_current_restaurant(request)
-                    rest_name = (restaurant or {}).get("name", "")
-                    bot_number_for_nps = (full or {}).get("bot_number")
-                    if bot_number_for_nps:
-                        await trigger_nps(phone, bot_number_for_nps, rest_name)
-                except Exception:
-                    log.exception("kitchen.nps_trigger_failed", phone=phone, order_id=order_id)
-
+    # The customer follows the order on /pedido/{code} (live over SSE); the
+    # WhatsApp status texts and the bot NPS that used to fire here are gone —
+    # a web order's NPS is asked on that page (diner_delivery.py).
     if new_status == "confirmado":
         with bypass_tenant_scope("update_delivery_order_status: full order for billing"):
             order_row = await tr.db_get_delivery_order_full(order_id)
@@ -694,21 +754,24 @@ async def update_delivery_order_status(request: Request, order_id: str):
 
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None, station: str = None, table_id: str = None):
-    """Devuelve órdenes de mesa filtradas por sede y estado.
+    """Returns table orders filtered by sede and status.
 
-    Resolution rules (post-2026-04-29 — fixes empty 'Pedidos activos' /
-    Comanda Sin productos / proof loop bug family):
-      - Caller is owner/admin: org_id = restaurant['id'] (org_id post-
-        Wave-2). location_id (= legacy branch_id column) only when the
-        user explicitly picked a sede via X-Branch-ID = digit.
-      - Caller is staff (mesero/caja/cocina): org_id from get_current_restaurant
-        too; location_id = user.branch_id when staff is pinned to a sede.
-      - X-Branch-ID = 'all' / 'matriz' / missing: cross-sede view of the org
-        (org_id filter only).
+    Resolution rules:
+      - owner/admin: every sede of the org, or ONE when they pick it from the
+        sidebar (X-Branch-ID / X-Location-ID = digit).
+      - everyone else (mesero, caja, cocina, bar, gerente): their OWN sede,
+        from their staff row. Never a header.
+
+    That second rule is the fix (PM 2026-09-20). The docstring already
+    claimed "location_id = user.branch_id when staff is pinned to a sede",
+    but the code never read it: `location_id` was set ONLY from the header
+    and ONLY for admins, so every non-admin fell through to `None` and the
+    kitchen of one sede got the comandas of every sede in the org.
     """
     user = await get_current_user(request)
-    role = user.get("role", "")
-    is_admin = any(r in role for r in ("owner", "admin", "gerente"))
+    # Substring matching on the joined role string used to decide this
+    # ("admin" also matches inside other words); roles_of() splits properly.
+    is_admin = may_span_locations(user)
 
     # Resolve org_id (canonical tenant key post-Wave-2). For owner/admin/gerente
     # we rely on the restaurant lookup; for staff (mesero/caja/...) the
@@ -719,13 +782,15 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
     except HTTPException:
         org_id = user.get("restaurant_id") or user.get("branch_id")
 
-    # Specific sede: only when X-Branch-ID is a digit and caller is admin/owner.
-    # The digit value is the location_id (sede) coming from the sidebar dropdown
-    # populated by /api/team/branches.
-    location_id: int | None = None
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and is_admin:
-        location_id = int(branch_header)
+    # Without an org_id the repo's `is_admin + no filters` branch returns
+    # EVERY tenant's table orders (it runs under bypass_tenant_scope below).
+    # Refuse instead of leaking across tenants.
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No se pudo resolver tu organización")
+
+    # Specific sede: the sidebar dropdown's location_id for an admin, the
+    # caller's own staff row for everyone else.
+    location_id = resolve_sede_filter(request, user)
 
     with bypass_tenant_scope("get_table_orders: may span branches or be admin view"):
         rows = await tr.db_get_table_orders_for_branch(
@@ -757,9 +822,9 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
 @router.get("/api/table-orders/{order_id}/ticket")
 async def get_order_ticket(request: Request, order_id: str):
     """
-    Devuelve los datos estructurados de un ticket/comanda agregando todas
-    las sub-órdenes del mismo base_order_id.
-    Incluye datos fiscales (CUFE, QR) si existe una factura emitida.
+    Returns the structured data for a ticket, aggregating all
+    sub-orders with the same base_order_id.
+    Includes fiscal data (CUFE, QR) if an invoice has been issued.
     """
     import json as _json
     user = await get_current_user(request)
@@ -771,7 +836,7 @@ async def get_order_ticket(request: Request, order_id: str):
     if not rows:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
-    # Agregar ítems y totales de todas las sub-órdenes
+    # Aggregate items and totals from all sub-orders
     all_items: list = []
     total: Decimal = Decimal("0")
     notes_parts: list = []
@@ -790,7 +855,7 @@ async def get_order_ticket(request: Request, order_id: str):
         if row.get("notes"):
             notes_parts.append(row["notes"])
 
-    # Datos fiscales: última factura emitida para esta orden (deferred to billing layer).
+    # Fiscal data: last invoice issued for this order (deferred to billing layer).
     # Use tenant_connection so the lookup inherits the active bypass_tenant_scope
     # set above (admins legitimately view tickets across branches). Raw pool.acquire
     # would create a new connection without the GUC — RLS-blocked under mesio_app
@@ -829,64 +894,6 @@ async def get_order_ticket(request: Request, order_id: str):
     }
 
 
-async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
-    token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
-    final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
-
-    if token and final_phone_id:
-        try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                resp = await client.post(
-                    f"https://graph.facebook.com/{META_API_VERSION}/{final_phone_id}/messages",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": text}}
-                )
-                log.info("tables.wa_notification_sent", phone=phone, status=resp.status_code)
-        except Exception as e:
-            log.error("tables.wa_notification_failed", phone=phone, error=str(e))
-    else:
-        log.warning("tables.wa_notification_skipped_no_credentials", phone=phone, has_token=bool(token), phone_id=final_phone_id)
-
-
-async def send_wa_interactive_nps(phone: str, nps_label: str, db_phone_id: str = None):
-    """Send the NPS rating question as an interactive WhatsApp message with a skip button."""
-    token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
-    final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
-
-    if not token or not final_phone_id:
-        log.warning("tables.nps_interactive_skipped_no_credentials", phone=phone)
-        return
-
-    nps_text = (
-        f"⭐ Antes de irte, ¿cómo calificarías tu experiencia en {nps_label} hoy?\n"
-        f"Responde con un número del 1 al 5\n"
-        f"(1 = Muy mala · 5 = Excelente)"
-    )
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": phone,
-        "type": "interactive",
-        "interactive": {
-            "type": "button",
-            "body": {"text": nps_text},
-            "action": {
-                "buttons": [
-                    {"type": "reply", "reply": {"id": "skip_nps", "title": "No calificar"}}
-                ]
-            }
-        }
-    }
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.post(
-                f"https://graph.facebook.com/{META_API_VERSION}/{final_phone_id}/messages",
-                headers={"Authorization": f"Bearer {token}"},
-                json=payload
-            )
-            log.info("tables.nps_interactive_sent", phone=phone, status=resp.status_code)
-    except Exception as e:
-        log.error("tables.nps_interactive_failed", phone=phone, error=str(e))
-
 @router.post("/api/table-orders/{order_id}/status")
 async def update_order_status(request: Request, order_id: str):
     username = await require_auth(request)
@@ -913,7 +920,6 @@ async def update_order_status(request: Request, order_id: str):
     phone = order.get("phone")
     table_name = order.get("table_name", "tu mesa")
 
-    db_phone_id = None
     session_data = None
     if phone and phone != "manual":
         try:
@@ -921,20 +927,13 @@ async def update_order_status(request: Request, order_id: str):
                 session = await tr.db_get_open_table_session_by_phone(phone)
             if session:
                 session_data = session
-                db_phone_id = session_data.get("meta_phone_id")
         except Exception:
             log.exception("tables.session_lookup_error", phone=phone)
 
     if status == "generar_factura":
         base_id = order.get("base_order_id") or order_id
         with bypass_tenant_scope("update_order_status: mark factura generada by order ID"):
-            await db.db_mark_factura_generada(base_id)
-        if phone and phone != "manual":
-            await send_wa_msg(
-                phone,
-                f"🧾 Estamos preparando tu factura de {table_name}. En un momento te la llevamos.",
-                db_phone_id
-            )
+            await db.db_mark_invoice_generated(base_id)
         return {"success": True, "order_id": order_id, "status": "factura_generada"}
 
     if status in ("cerrar_mesa", "factura_entregada"):
@@ -942,25 +941,16 @@ async def update_order_status(request: Request, order_id: str):
         with bypass_tenant_scope("update_order_status: close table bill by order ID"):
             await db.db_close_table_bill(base_id)
         if phone and phone != "manual":
-            await _farewell_and_nps(phone, order.get("table_id"), session_data, db_phone_id, username)
+            await _farewell_and_nps(phone, order.get("table_id"), session_data, username)
         return {"success": True, "order_id": order_id, "status": "factura_entregada"}
 
     # ── C. ESTADOS NORMALES (Prep, Listo, Entregado) ──
     else:
         with bypass_tenant_scope("update_order_status: normal status update by order ID"):
             await db.db_update_table_order_status(order_id, status)
-        # bot_number needed for per-tenant rate-limit key (Redis, cross-worker safe)
-        _bot_number = (session_data.get("bot_number") if session_data else None) or order.get("bot_number", "")
-        if status == "entregado" and phone and phone != "manual":
-            _rl_key = f"notif_wa:{_bot_number}:{phone}:entregado"
-            if await state_store.rate_limit_check(_rl_key, max_requests=1, window_seconds=300):
-                msg = f"¡Tu pedido ha llegado a {table_name}! 🍽️\n\n¡Que lo disfrutes! Cuando estés listo, puedes pedir la cuenta aquí mismo."
-                await send_wa_msg(phone, msg, db_phone_id)
+        # The diner's chat says "listo"/"entregado" (SSE table_order.updated →
+        # diner-chat.js announceKitchenProgress).
         if status == "listo" and phone and phone != "manual":
-            _rl_key = f"notif_wa:{_bot_number}:{phone}:listo"
-            if await state_store.rate_limit_check(_rl_key, max_requests=1, window_seconds=300):
-                msg = f"🍽️ ¡Tu pedido en {table_name} está listo!\n\nUn mesero te lo llevará en un momento. ¡Buen provecho! 😋"
-                await send_wa_msg(phone, msg, db_phone_id)
             # Notify the assigned mesero that food is ready at the pass.
             # Best-effort: failure to create the alert MUST NOT block the
             # customer notification or the status update. Same pattern as
@@ -976,11 +966,12 @@ async def update_order_status(request: Request, order_id: str):
                     with tenant_scope(int(_order_org_id)):
                         await db.db_create_waiter_alert(
                             phone=phone,
-                            bot_number=_bot_number,
+                            org_id=int(_order_org_id),
                             alert_type="ready",
                             message=f"Pedido listo en pase — Mesa {table_name}",
                             table_id=order.get("table_id", ""),
                             table_name=table_name,
+                            location_id=order.get("location_id"),
                         )
                 except Exception:
                     log.exception(
@@ -992,17 +983,6 @@ async def update_order_status(request: Request, order_id: str):
 
     return {"success": True, "order_id": order_id, "status": status}
 
-@router.get("/cocina", response_class=HTMLResponse)
-async def kitchen_display():
-    return HTMLResponse((STATIC / "html" / "kitchen.html").read_text(encoding="utf-8"))
-
-@router.get("/bar", response_class=HTMLResponse)
-async def bar_display():
-    p = STATIC / "html" / "bar.html"
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="bar.html no encontrado en static/")
-    return HTMLResponse(p.read_text(encoding="utf-8"))
-
 # ── MÓDULO PUNTO DE VENTA (POS) PARA MESEROS ─────────────────────────
 
 class ManualOrderRequest(BaseModel):
@@ -1012,41 +992,38 @@ class ManualOrderRequest(BaseModel):
     total:      Decimal
     notes:      str = ""
     station:    str = "all"
-    branch_id:  int = None  # 🛡️ Agregamos branch_id al modelo
+    branch_id:  int = None  # 🛡️ Added branch_id to the model
     
 @router.get("/api/pos/menu")
 async def get_pos_menu(request: Request):
-    """Devuelve el menú del restaurante para pintarlo en el POS del mesero.
+    """Returns the restaurant's menu for rendering in the waiter's POS.
 
-    Wave-2: the menu lives at the org level (organizations.menu). The wa_number
-    used for the menu lookup must come from the staff's actual sede (resolved
-    via user.branch_id → location.whatsapp_number); we no longer fall back
-    to "any restaurant globally" — that would render another customer's menu
-    in this customer's POS (cross-tenant leak).
+    The carta is the staff's own sede's; we never fall back to "any
+    restaurant globally" — that would render another customer's menu in
+    this customer's POS (cross-tenant leak).
     """
     user = await get_current_user(request)
 
-    wa_number = ""
-    if user and user.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(user["branch_id"])
-        if r:
-            wa_number = r.get("whatsapp_number", "") or ""
-
-    if not wa_number:
-        # Cannot resolve the staff's sede → return empty menu rather than a
-        # cross-tenant one. The frontend handles {} gracefully (shows
-        # "menu not configured" state) instead of mixing data from another tenant.
+    if not user or not user.get("org_id"):
+        # Cannot resolve the caller's org → an empty menu rather than a
+        # cross-tenant one. The frontend shows "menu not configured".
         return {"menu": {}}
 
-    menu = await db.db_get_menu(wa_number) or {}
-    return {"menu": menu}
+    # The POS sells at ONE sede, at that sede's prices (migration 0093).
+    # owner/admin may pick the sede they are working; everyone else is
+    # pinned to their own.
+    org_id = int(user["org_id"])
+    sede = resolve_sede_filter(request, user, admin_without_header="own")
+    with tenant_scope(org_id):
+        menu = await sede_menu.get_sede_menu(org_id, sede if isinstance(sede, int) else None)
+    return {"menu": menu, "location_id": sede}
 
 @router.get("/api/pos/tables-status")
 async def get_tables_status(request: Request):
-    """Devuelve todas las mesas y su estado actual (ideal para pintar el mapa)"""
+    """Returns all tables and their current status (ideal for rendering the map)"""
     await require_auth(request)
 
-    # 1. Resolución de contexto inteligente
+    # 1. Smart context resolution
     restaurant = await get_current_restaurant(request)
 
     # Wave-2 model: every restaurant is a `locations` row. There is NO special
@@ -1054,8 +1031,8 @@ async def get_tables_status(request: Request):
     # primary sede of an org. We need TWO distinct integers here:
     #   - org_id        : tenant key for tenant_scope() / RLS GUC
     #   - location_id   : the sede id stored in restaurant_tables.branch_id
-    # Both are consistently populated by db_get_restaurant_by_id (and now also
-    # by db_get_all_restaurants post the same-paso fix). If location_id is
+    # Both are consistently populated by db_get_restaurant_by_org_id / by_location_id
+    # (and by db_get_all_restaurants post the same-paso fix). If location_id is
     # missing we fail fast — silently falling back to org_id (the old
     # "Matriz invariant" trick) only works for orgs created BEFORE Wave-2 deploy
     # where 0034 backfilled org_id == matriz_location_id by coincidence.
@@ -1102,7 +1079,7 @@ async def get_tables_status(request: Request):
 
 # ── Capa 3: Anti-impostor validation endpoints ────────────────────────────────
 
-@router.post("/api/mesero/tables/{table_id}/confirm-real")
+@router.post("/api/waiter/tables/{table_id}/confirm-real")
 async def confirm_table_real(request: Request, table_id: str):
     """Waiter confirms the customer is real at this table.
 
@@ -1145,7 +1122,7 @@ async def confirm_table_real(request: Request, table_id: str):
     }
 
 
-@router.post("/api/mesero/tables/{table_id}/mark-ghost")
+@router.post("/api/waiter/tables/{table_id}/mark-ghost")
 async def mark_table_ghost(request: Request, table_id: str):
     """Waiter marks this table as a ghost (no real customer present).
 
@@ -1214,7 +1191,7 @@ async def mark_table_ghost(request: Request, table_id: str):
 
 @router.patch("/api/table-orders/{base_order_id}/adjust")
 async def adjust_table_bill(request: Request, base_order_id: str):
-    """Ajusta ítems y total de una factura antes de cobrar (descuentos, propina, etc.)"""
+    """Adjusts an invoice's items and total before charging (discounts, tip, etc.)"""
     await require_auth(request)
     import json as _json
 
@@ -1239,8 +1216,8 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
     await require_auth(request)
     user = await get_current_user(request)
     
-    # 🛡️ RESOLUCIÓN DE SUCURSAL
-    # Si viene en el body lo usamos, si no, usamos el del usuario (mesero/admin)
+    # 🛡️ BRANCH RESOLUTION
+    # If it comes in the body we use it, otherwise use the user's (waiter/admin)
     branch_id = body.branch_id or user.get("branch_id")
     
     order_id = f"pos-{str(uuid.uuid4())[:8]}"
@@ -1283,79 +1260,6 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
     return {"success": True, "order_id": order_id, "message": f"Comanda enviada a {dest}"}
 
 
-# ── PRE-CUENTA ─────────────────────────────────────────────────────────────────
-
-@router.post("/api/pos/tables/{table_id}/pre-cuenta")
-async def pos_pre_cuenta(request: Request, table_id: str):
-    """Sends a WhatsApp pre-bill summary to the customer at the table.
-
-    Queries the active session to get the customer's phone, aggregates all open
-    table orders, and sends a formatted WA text message.
-    Returns {success, phone, items_count, total} or 404 if no active session.
-    """
-    restaurant = await get_current_restaurant(request)
-
-    # 1. Find active session for this table
-    with bypass_tenant_scope("pre_cuenta: active session lookup for table"):
-        sess = await db.db_get_active_session_by_table_id(table_id)
-
-    if not sess:
-        raise HTTPException(status_code=404, detail="No hay sesión activa en esta mesa")
-
-    customer_phone = sess["phone"]
-    meta_phone_id = sess.get("meta_phone_id")
-
-    # 2. Get all open orders for this table
-    with bypass_tenant_scope("pre_cuenta: order aggregation for table"):
-        base_order_id = await db.db_get_base_order_id(table_id)
-
-    if not base_order_id:
-        raise HTTPException(status_code=404, detail="No hay pedidos activos en esta mesa")
-
-    with bypass_tenant_scope("pre_cuenta: ticket aggregation"):
-        ticket = await db.db_get_order_ticket_data(base_order_id, None)
-
-    if not ticket:
-        raise HTTPException(status_code=404, detail="No se pudo obtener el ticket de la mesa")
-
-    items = ticket.get("items", [])
-    total = ticket.get("total", 0)
-    table_name = ticket.get("table_name", table_id)
-
-    # 3. Build the pre-cuenta message
-    if items:
-        lines = []
-        for item in items:
-            name = item.get("name", "")
-            qty  = item.get("qty", item.get("quantity", 1))
-            price = item.get("price", item.get("unit_price", 0))
-            subtotal = (qty or 1) * (price or 0)
-            lines.append(f"  • {qty}x {name} — ${int(subtotal):,}")
-        items_text = "\n".join(lines)
-    else:
-        items_text = "  (sin ítems)"
-
-    total_fmt = f"${int(total):,}"
-    wa_text = (
-        f"🧾 *Pre-cuenta — {table_name}*\n\n"
-        f"{items_text}\n\n"
-        f"*Total: {total_fmt}*\n\n"
-        f"¿Todo bien? Responde *Sí* para pedir la cuenta formalmente o dinos si hay algo más."
-    )
-
-    db_phone_id = meta_phone_id or restaurant.get("phone_number_id") or None
-    await send_wa_msg(customer_phone, wa_text, db_phone_id=db_phone_id)
-
-    log.info("tables.pre_cuenta_sent", table_id=table_id, phone=customer_phone, items=len(items), total=total)
-    return {
-        "success":     True,
-        "phone":       customer_phone,
-        "items_count": len(items),
-        "total":       float(total),
-        "message":     f"Pre-cuenta enviada a {customer_phone}",
-    }
-
-
 # ── SPLIT CHECKS / PAGOS MIXTOS (FASE 5) ──────────────────────────────────────
 
 class CheckItem(BaseModel):
@@ -1369,7 +1273,7 @@ class CheckDef(BaseModel):
 
 class CreateChecksBody(BaseModel):
     checks: list[CheckDef]
-    tax_pct: float = 19.0        # enviado por el cliente desde la config de billing
+    tax_pct: float = 19.0        # sent by the client from the billing config
     tax_regime: str = "iva"
 
 class PaymentMethod(BaseModel):
@@ -1381,7 +1285,7 @@ class PayCheckBody(BaseModel):
     customer_name: str = Field("Consumidor Final", max_length=200)
     customer_nit: str = Field("222222222", max_length=30, pattern=r"^[\d\-]{6,30}$")
     customer_email: str = Field("", max_length=254)
-    service_charge: float = 0.0  # Cargo de servicio en valor absoluto (ej. 10% del subtotal)
+    service_charge: float = 0.0  # Service charge as an absolute value (e.g. 10% of the subtotal)
     tip_amount: float = Field(0.0, ge=0.0)
 
     @field_validator("customer_email")
@@ -1396,43 +1300,41 @@ class PayCheckBody(BaseModel):
 @router.post("/api/table-orders/{base_order_id}/checks")
 async def create_checks(request: Request, base_order_id: str, body: CreateChecksBody):
     """
-    Crea o reemplaza la división de cuenta de una mesa.
-    Valida integridad de cantidades contra el ticket original.
-    Calcula subtotal/impuesto/total servidor-side (no confía en el cliente).
+    Creates or replaces a table's bill split.
+    Validates quantity integrity against the original ticket.
+    Calculates subtotal/tax/total server-side (does not trust the client).
     """
     user = await get_current_user(request)
 
-    # Obtener el ticket completo para validar cantidades
+    # Get the full ticket to validate quantities
     # First try with the user's branch filter; if nothing found (e.g. Matriz admin
     # handling a branch order), retry without the branch filter. The ownership
     # check below still enforces restaurant boundaries.
     with bypass_tenant_scope("create_checks: ticket lookup by order ID across branches"):
-        ticket = await db.db_get_order_ticket_data(base_order_id, user.get("branch_id") or None)
+        ticket = await db.db_get_order_ticket_data(base_order_id, user.get("location_id") or None)
         if not ticket:
             ticket = await db.db_get_order_ticket_data(base_order_id, None)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
 
-    # Mapa de qty disponible por plato en el ticket original
+    # Map of available qty per dish in the original ticket
     available: dict[str, int] = {}
     for item in ticket.get("items", []):
         key = item["name"].strip().lower()
         available[key] = available.get(key, 0) + int(item.get("quantity", item.get("qty", 1)))
 
     # Ownership check: ticket must belong to this user's org (Wave-2 tenant boundary)
+    # P0 fix (2026-09): use the explicit org_id off the user dict directly —
+    # no DB round-trip, and no risk of the old branch_id guess resolving to
+    # an unrelated org (this was the pay_check tenant-scope P0: user["branch_id"]
+    # is mixed-kind and was being fed into the now-deleted ambiguous lookup).
     ticket_org_id = ticket.get("org_id")
-    user_branch_id = user.get("branch_id") or user.get("restaurant_id")
-    user_org_id = None
-    if user_branch_id:
-        with bypass_tenant_scope("create_checks: resolve user org_id from branch_id"):
-            user_rest = await db.db_get_restaurant_by_id(int(user_branch_id))
-        if user_rest:
-            user_org_id = user_rest.get("org_id")
+    user_org_id = user.get("org_id") or user.get("restaurant_id")
     # Fail closed: if either side is unresolvable, deny rather than allow cross-tenant write
-    if ticket_org_id is None or user_org_id is None or ticket_org_id != user_org_id:
+    if ticket_org_id is None or user_org_id is None or int(ticket_org_id) != int(user_org_id):
         raise HTTPException(status_code=403, detail="Este ticket no pertenece a tu organización")
 
-    # Validar que los checks no excedan las cantidades disponibles
+    # Validate that the checks don't exceed the available quantities
     check_totals: dict[str, int] = {}
     for chk in body.checks:
         for it in chk.items:
@@ -1446,7 +1348,7 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
                 detail=f"'{name}': cantidad en checks ({qty}) supera la pedida ({avail})"
             )
 
-    # Validar que el desglose cubre TODOS los ítems del ticket (no solo que no exceda)
+    # Validate that the breakdown covers ALL the ticket's items (not just that it doesn't exceed)
     for name, avail_qty in available.items():
         assigned = check_totals.get(name, 0)
         if assigned < avail_qty:
@@ -1455,11 +1357,11 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
                 detail=f"El desglose no cubre todos los ítems. Faltan: {name} x{avail_qty - assigned}"
             )
 
-    # Construir checks con totales calculados servidor-side
+    # Build checks with server-side calculated totals
     tax_factor = to_decimal(body.tax_pct) / Decimal("100")
     validated = []
     for chk in body.checks:
-        # Reconstruir items con unit_price desde el ticket (busca por nombre)
+        # Rebuild items with unit_price from the ticket (looked up by name)
         price_map: dict[str, Decimal] = {}
         for item in ticket.get("items", []):
             price_map[item["name"].strip().lower()] = to_decimal(item.get("price", 0))
@@ -1494,7 +1396,7 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
 
 @router.get("/api/table-orders/{base_order_id}/checks")
 async def get_checks(request: Request, base_order_id: str):
-    """Lista todos los checks de una mesa con sus datos fiscales."""
+    """Lists all of a table's checks with their fiscal data."""
     await get_current_user(request)
     with bypass_tenant_scope("get_checks: checks lookup by order ID across branches"):
         checks = await db.db_get_checks(base_order_id)
@@ -1503,40 +1405,40 @@ async def get_checks(request: Request, base_order_id: str):
 @router.post("/api/table-orders/{base_order_id}/checks/single/pay")
 async def pay_check_single(request: Request, base_order_id: str, body: PayCheckBody):
     """
-    Cobro de mesa completa en un solo check (sin split previo).
+    Charges the whole table in a single check (no prior split).
 
-    Crea atómicamente un check único con TODOS los ítems del ticket y lo cobra
-    reutilizando el flujo de pay_check (fiscal, lealtad, NPS, cambio, propina).
+    Atomically creates a single check with ALL the ticket's items and charges it
+    reusing the pay_check flow (fiscal, NPS, change, tip).
 
-    Caja llama acá cuando el usuario selecciona "Pagar mesa completa" sin haber
-    dividido la cuenta. El check_id real se devuelve en la respuesta para que
-    el frontend pueda referenciarlo después si es necesario.
+    The cashier calls this when the user selects "Pagar mesa completa" without
+    having split the bill. The real check_id is returned in the response so
+    the frontend can reference it later if needed.
     """
     user = await get_current_user(request)
 
-    # TOCTOU guard — serialize concurrent single-pay attempts per mesa.
+    # TOCTOU guard — serialize concurrent single-pay attempts per table.
     rl_key = f"pay_single:{base_order_id}"
     if not await state_store.rate_limit_check(rl_key, max_requests=1, window_seconds=15):
         raise HTTPException(status_code=429, detail="Ya hay un cobro de mesa en proceso. Espera unos segundos.")
 
     # Fetch ticket — cross-branch bypass mirrors the pattern in create_checks.
+    # db_get_order_ticket_data's branch_id param is a LOCATION id
+    # (table_orders.branch_id == location_id) — user["location_id"] is the
+    # correct explicit field for it (was user["branch_id"], mixed-kind).
     with bypass_tenant_scope("pay_check_single: ticket lookup across branches"):
-        ticket = await db.db_get_order_ticket_data(base_order_id, user.get("branch_id") or None)
+        ticket = await db.db_get_order_ticket_data(base_order_id, user.get("location_id") or None)
         if not ticket:
             ticket = await db.db_get_order_ticket_data(base_order_id, None)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
 
-    # Ownership check: ticket must belong to this user's org
+    # Ownership check: ticket must belong to this user's org.
+    # P0 fix (2026-09): use the explicit org_id off the user dict directly —
+    # no DB round-trip, and no risk of the old branch_id guess resolving to
+    # an unrelated org (this was the pay_check tenant-scope P0).
     ticket_org_id = ticket.get("org_id")
-    user_branch_id = user.get("branch_id") or user.get("restaurant_id")
-    user_org_id = None
-    if user_branch_id:
-        with bypass_tenant_scope("pay_check_single: resolve user org_id from branch_id"):
-            user_rest = await db.db_get_restaurant_by_id(int(user_branch_id))
-        if user_rest:
-            user_org_id = user_rest.get("org_id")
-    if ticket_org_id is None or user_org_id is None or ticket_org_id != user_org_id:
+    user_org_id = user.get("org_id") or user.get("restaurant_id")
+    if ticket_org_id is None or user_org_id is None or int(ticket_org_id) != int(user_org_id):
         raise HTTPException(status_code=403, detail="Este ticket no pertenece a tu organización")
 
     # Refuse if the order already has any non-cancelled check — caller should use /checks/{id}/pay
@@ -1563,7 +1465,7 @@ async def pay_check_single(request: Request, base_order_id: str, body: PayCheckB
         })
         gross += money_mul(unit_price, qty)
 
-    # For a single full-mesa check we treat the ticket's total as gross.
+    # For a single full-table check we treat the ticket's total as gross.
     # Tax factor is 0 here — split checks can pass tax_pct on creation, but
     # the single pay path uses whatever tax was already computed into the ticket.
     total      = quantize_money(gross)
@@ -1589,7 +1491,7 @@ async def pay_check_single(request: Request, base_order_id: str, body: PayCheckB
         raise HTTPException(status_code=500, detail="Check creado sin id — estado inconsistente")
 
     # Delegate to the existing pay_check — it handles rate-limit, tenant_scope,
-    # fiscal invoice (gated by dian_active flag; currently OFF), loyalty accrual,
+    # fiscal invoice (gated by dian_active flag; currently OFF),
     # NPS farewell, and change calculation in one coherent path.
     return await pay_check(request, base_order_id, check_id, body)
 
@@ -1608,107 +1510,115 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             raise HTTPException(status_code=429, detail="Demasiadas solicitudes de pago. Intenta de nuevo en unos segundos.")
         restaurant = await get_current_restaurant(request)
 
-        # Atomic claim: SELECT FOR UPDATE + transition open→paying. Two cashiers
-        # paying concurrently — only the first wins; the second gets None and
-        # the request fails with 409 BEFORE any DIAN invoice is generated.
+        # Ambient scope for the ENTIRE payment flow — this used to be 8 separate
+        # `with tenant_scope(...)` blocks sprinkled through the function, and the
+        # billing.get_billing_config() call below was accidentally left outside
+        # ALL of them, so every single table payment raised TenantNotSetError.
+        # A route with N manual scope blocks WILL eventually miss one — pin the
+        # scope once, for the whole handler, so a missed call site is structurally
+        # impossible. NOTE: `_farewell_and_nps(...)` below is deliberately called
+        # AFTER this block exits — it internally uses bypass_tenant_scope() for
+        # cross-tenant phone lookups (NPS/session cleanup are keyed by phone, not
+        # restaurant), and bypass_tenant_scope() raises TenantContextConflict if a
+        # tenant scope is already pinned. Do NOT move that call inside this block.
         with tenant_scope(restaurant["id"]):
+            # Atomic claim: SELECT FOR UPDATE + transition open→paying. Two cashiers
+            # paying concurrently — only the first wins; the second gets None and
+            # the request fails with 409 BEFORE any DIAN invoice is generated.
             check = await db.db_claim_check_for_payment(check_id, base_order_id)
 
-        if check is None:
-            # Could be: not found, wrong order, or already paying/invoiced/cancelled.
-            # We do a follow-up read to give a precise error message — it's not
-            # part of the race-protected path so it's fine to query unscoped here.
-            with tenant_scope(restaurant["id"]):
+            if check is None:
+                # Could be: not found, wrong order, or already paying/invoiced/cancelled.
+                # We do a follow-up read to give a precise error message.
                 existing = await db.db_get_check(check_id)
-            if not existing:
-                raise HTTPException(status_code=404, detail="Check no encontrado")
-            if existing["base_order_id"] != base_order_id:
-                raise HTTPException(status_code=400, detail="El check no pertenece a este ticket")
-            raise HTTPException(status_code=409, detail=f"Este check ya fue procesado (status: {existing['status']})")
-        _claimed = True
+                if not existing:
+                    raise HTTPException(status_code=404, detail="Check no encontrado")
+                if existing["base_order_id"] != base_order_id:
+                    raise HTTPException(status_code=400, detail="El check no pertenece a este ticket")
+                raise HTTPException(status_code=409, detail=f"Este check ya fue procesado (status: {existing['status']})")
+            _claimed = True
 
-        # Si no se enviaron pagos, usar proposed_payments del check (flujo bot)
-        if not body.payments:
-            proposed = check.get("proposed_payments")
-            if isinstance(proposed, str):
+            # If no payments were sent, use the check's proposed_payments (bot flow)
+            if not body.payments:
+                proposed = check.get("proposed_payments")
+                if isinstance(proposed, str):
+                    import json as _json
+                    proposed = _json.loads(proposed)
+                if proposed:
+                    body.payments = [PaymentMethod(method=p["method"], amount=p["amount"]) for p in proposed]
+                else:
+                    raise HTTPException(status_code=400, detail="No se especificaron métodos de pago")
+
+            # Also use the proposed tip if no explicit tip was sent and one is stored
+            if body.tip_amount == 0.0 and check.get("proposed_tip"):
+                body.tip_amount = float(to_decimal(check["proposed_tip"]))
+
+            total_paid = to_decimal(sum(p.amount for p in body.payments))
+            check_total  = to_decimal(check["total"]) + to_decimal(body.service_charge)
+            if total_paid < check_total:
+                raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${float(check_total):,.0f}, se recibieron ${float(total_paid):,.0f}")
+
+            # Resolve currency before quantizing change/tip so zero-decimal currencies (COP, CLP)
+            # are rounded correctly at this JSON boundary.
+            features = restaurant.get("features") or {}
+            if isinstance(features, str):
                 import json as _json
-                proposed = _json.loads(proposed)
-            if proposed:
-                body.payments = [PaymentMethod(method=p["method"], amount=p["amount"]) for p in proposed]
+                try:
+                    features = _json.loads(features)
+                except Exception:
+                    features = {}
+            _currency = features.get("currency") if isinstance(features, dict) else None
+
+            change = float(quantize_money(total_paid - check_total, _currency))
+
+            tip_amount_d = to_decimal(body.tip_amount)
+            tip_cap_base = to_decimal(check["total"]) + to_decimal(body.service_charge)
+            if tip_amount_d > 0 and tip_amount_d > money_mul(tip_cap_base, Decimal("0.5")):
+                raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del total")
+
+            config = await billing.get_billing_config(restaurant["id"])
+
+            items = check.get("items", [])
+            if isinstance(items, str):
+                import json as _json
+                items = _json.loads(items)
+
+            _check_total_d = to_decimal(check["total"])
+            _svc_charge_d  = to_decimal(body.service_charge)
+            order_for_billing = {
+                "id":             check_id,
+                "total":          float(_check_total_d + _svc_charge_d),  # JSON boundary
+                "subtotal":       float(_check_total_d),                   # JSON boundary
+                "service_charge": float(_svc_charge_d),
+                "items":          items,
+                "payment_method": body.payments[0].method if body.payments else "cash",
+                "order_ref":      base_order_id,
+                "customer": {
+                    "name":  body.customer_name,
+                    "nit":   body.customer_nit,
+                    "email": body.customer_email,
+                },
+            }
+
+            fiscal_invoice_id = None
+            if config and billing._is_dian_enabled(features):
+                config["_restaurant_id"] = restaurant["id"]
+                provider = config.get("provider", "mesio_native")
+                adapter  = billing.get_adapter(provider)
+                try:
+                    fiscal = await adapter.create_invoice(order_for_billing, config)
+                except Exception as exc:
+                    # DIAN failed AFTER we claimed the check. Release the claim so
+                    # the cashier can retry without waiting for the lock to expire.
+                    # The except below would also do this via the _claimed flag, but
+                    # being explicit here keeps the rollback close to the failure.
+                    raise HTTPException(status_code=500, detail=f"Error al emitir factura: {exc}")
+                fiscal_invoice_id = fiscal["id"]
             else:
-                raise HTTPException(status_code=400, detail="No se especificaron métodos de pago")
+                fiscal = {"id": None, "local": True}
 
-        # También usar tip propuesto si no se envió tip explícito y hay uno guardado
-        if body.tip_amount == 0.0 and check.get("proposed_tip"):
-            body.tip_amount = float(to_decimal(check["proposed_tip"]))
+            payments_list = [{"method": p.method, "amount": p.amount} for p in body.payments]
 
-        total_pagado = to_decimal(sum(p.amount for p in body.payments))
-        check_total  = to_decimal(check["total"]) + to_decimal(body.service_charge)
-        if total_pagado < check_total:
-            raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${float(check_total):,.0f}, se recibieron ${float(total_pagado):,.0f}")
-
-        # Resolve currency before quantizing change/tip so zero-decimal currencies (COP, CLP)
-        # are rounded correctly at this JSON boundary.
-        features = restaurant.get("features") or {}
-        if isinstance(features, str):
-            import json as _json
-            try:
-                features = _json.loads(features)
-            except Exception:
-                features = {}
-        _currency = features.get("currency") if isinstance(features, dict) else None
-
-        change = float(quantize_money(total_pagado - check_total, _currency))
-
-        tip_amount_d = to_decimal(body.tip_amount)
-        tip_cap_base = to_decimal(check["total"]) + to_decimal(body.service_charge)
-        if tip_amount_d > 0 and tip_amount_d > money_mul(tip_cap_base, Decimal("0.5")):
-            raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del total")
-
-        config = await billing.get_billing_config(restaurant["id"])
-
-        items = check.get("items", [])
-        if isinstance(items, str):
-            import json as _json
-            items = _json.loads(items)
-
-        _check_total_d = to_decimal(check["total"])
-        _svc_charge_d  = to_decimal(body.service_charge)
-        order_for_billing = {
-            "id":             check_id,
-            "total":          float(_check_total_d + _svc_charge_d),  # JSON boundary
-            "subtotal":       float(_check_total_d),                   # JSON boundary
-            "service_charge": float(_svc_charge_d),
-            "items":          items,
-            "payment_method": body.payments[0].method if body.payments else "cash",
-            "order_ref":      base_order_id,
-            "customer": {
-                "name":  body.customer_name,
-                "nit":   body.customer_nit,
-                "email": body.customer_email,
-            },
-        }
-
-        fiscal_invoice_id = None
-        if config and billing._is_dian_enabled(features):
-            config["_restaurant_id"] = restaurant["id"]
-            provider = config.get("provider", "mesio_native")
-            adapter  = billing.get_adapter(provider)
-            try:
-                fiscal = await adapter.create_invoice(order_for_billing, config)
-            except Exception as exc:
-                # DIAN failed AFTER we claimed the check. Release the claim so
-                # the cashier can retry without waiting for the lock to expire.
-                # The except below would also do this via the _claimed flag, but
-                # being explicit here keeps the rollback close to the failure.
-                raise HTTPException(status_code=500, detail=f"Error al emitir factura: {exc}")
-            fiscal_invoice_id = fiscal["id"]
-        else:
-            fiscal = {"id": None, "local": True}
-
-        payments_list = [{"method": p.method, "amount": p.amount} for p in body.payments]
-
-        with tenant_scope(restaurant["id"]):
             finalized = await db.db_finalize_check_payment(
                 check_id=check_id,
                 base_order_id=base_order_id,
@@ -1720,49 +1630,54 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
                 customer_email=body.customer_email,
                 tip_amount=body.tip_amount,
             )
-        if not finalized:
-            # The claim was lost between db_claim_check_for_payment and here
-            # (extremely unlikely — would require external state mutation).
-            # Treat as 409 and DO NOT proceed to loyalty accrual / NPS.
-            _claimed = False  # don't release a claim that's no longer ours
-            log.warning("tables.pay_check.finalize_no_op", check_id=check_id, base_order_id=base_order_id)
-            raise HTTPException(status_code=409, detail="El check fue modificado por otra operación. Refresca la pantalla.")
-        # From here on, the check is invoiced. No release on subsequent errors.
-        _claimed = False
+            if not finalized:
+                # The claim was lost between db_claim_check_for_payment and here
+                # (extremely unlikely — would require external state mutation).
+                # Treat as 409 and DO NOT proceed to NPS.
+                _claimed = False  # don't release a claim that's no longer ours
+                log.warning("tables.pay_check.finalize_no_op", check_id=check_id, base_order_id=base_order_id)
+                raise HTTPException(status_code=409, detail="El check fue modificado por otra operación. Refresca la pantalla.")
+            # From here on, the check is invoiced. No release on subsequent errors.
+            _claimed = False
 
-        if hasattr(loyalty_svc, "accrue_on_check"):
-            _loyalty_org_id = restaurant["id"]
-            _loyalty_bot    = restaurant.get("whatsapp_number", "")
-            _loyalty_boid   = base_order_id
-            _loyalty_cid    = check_id
-            _loyalty_total  = float(to_decimal(check["total"]) + to_decimal(body.service_charge))
-
-            async def _accrue_with_scope(
-                rid=_loyalty_org_id, bn=_loyalty_bot,
-                boid=_loyalty_boid, cid=_loyalty_cid, total=_loyalty_total,
-            ):
-                with tenant_scope(rid):
-                    await loyalty_svc.accrue_on_check(
-                        restaurant_id=rid,
-                        bot_number=bn,
-                        base_order_id=boid,
-                        check_id=cid,
-                        total_cop=total,
-                    )
-
-            asyncio.create_task(_accrue_with_scope())
-        else:
-            log.warning("tables.loyalty_accrue_not_implemented", check_id=check_id)
-
-        with tenant_scope(restaurant["id"]):
             order_row = await db.db_get_first_table_order(base_order_id)
-        if order_row and order_row["status"] == "factura_entregada":
-            customer_phone = order_row.get("phone")
-            if customer_phone and customer_phone != "manual":
-                with tenant_scope(restaurant["id"]):
+            farewell_targets = []
+            if order_row and order_row["status"] == "factura_entregada":
+                # Whole table just settled (every check invoiced/cancelled).
+                # Notify EVERY distinct diner who ordered here — not just
+                # order_row's phone (which is only the FIRST table_orders
+                # row's phone, i.e. whoever opened the table). On a normal
+                # single-phone WhatsApp table every row shares that same
+                # phone, so `distinct_phones` collapses to exactly one value
+                # and behaviour is unchanged; on a shared diner-web table
+                # (app/routes/diner.py — each participant's own "web:<uuid4>"
+                # phone) every diner who actually had orders here gets their
+                # own farewell/NPS trigger.
+                distinct_phones: list[str] = []
+                seen_phones: set[str] = set()
+                try:
+                    table_rows = await tr.db_get_table_orders_by_base_id(base_order_id)
+                except Exception:
+                    log.exception("tables.pay_check.farewell_targets_lookup_failed", base_order_id=base_order_id)
+                    table_rows = []
+                for row in table_rows:
+                    p = row.get("phone")
+                    if not p or p == "manual" or p in seen_phones:
+                        continue
+                    if row.get("status") in ("cancelado", "cancelled"):
+                        continue
+                    seen_phones.add(p)
+                    distinct_phones.append(p)
+                if not distinct_phones and order_row.get("phone") and order_row["phone"] != "manual":
+                    distinct_phones = [order_row["phone"]]
+
+                for customer_phone in distinct_phones:
                     sess = await db.db_get_open_session_by_phone(customer_phone)
-                session_phone_id = sess.get("meta_phone_id") if sess else None
-                await _farewell_and_nps(customer_phone, order_row.get("table_id"), sess, session_phone_id, "caja")
+                    farewell_targets.append((customer_phone, order_row.get("table_id"), sess))
+
+        # Outside the ambient scope on purpose — see comment above the `with` block.
+        for args in farewell_targets:
+            await _farewell_and_nps(*args, "caja")
 
         return {
             "success":  True,
@@ -1802,7 +1717,7 @@ async def attach_checkout_proof(
     base_order_id: str,
     body: CheckoutProofBody,
 ):
-    """Adjunta comprobante de pago a los checks con propuesta awaiting_proof."""
+    """Attaches proof of payment to checks with an awaiting_proof proposal."""
     await get_current_user(request)
     with bypass_tenant_scope("attach_proof: proof attachment by order ID across branches"):
         updated = await db.db_attach_proof(base_order_id, body.customer_phone, body.media_url)
@@ -1814,18 +1729,15 @@ async def attach_checkout_proof(
 @router.get("/api/checkout-proposals")
 async def list_checkout_proposals(request: Request):
     """
-    Lista mesas con propuestas de pago bot activas (pending/awaiting_proof/proof_received).
-    Para el tab 'Por Confirmar' en caja.html.
+    Lists tables with active bot payment proposals (pending/awaiting_proof/proof_received).
+    For the 'Por Confirmar' tab in cashier.html.
     """
     restaurant = await get_current_restaurant(request)
-    branch_header = request.headers.get("X-Branch-ID", "")
-
-    branch_ids = None
-    if branch_header and branch_header != "all":
-        try:
-            branch_ids = [int(branch_header)]
-        except ValueError:
-            pass
+    # Cashier-facing: a cajero sees the proposals of their own sede. Only
+    # owner/admin may look at another one, or at all of them at once.
+    user = await get_current_user(request)
+    location_id = resolve_sede_filter(request, user)
+    branch_ids = [location_id] if location_id is not None else None
 
     with tenant_scope(restaurant["id"]):
         proposals = await db.db_list_checkout_proposals(restaurant["id"], branch_ids)
@@ -1842,7 +1754,7 @@ async def cancel_checkout_proposal(base_order_id: str, request: Request):
 
 @router.get("/api/table-orders/{base_order_id}/checks/{check_id}/ticket")
 async def get_check_ticket(request: Request, base_order_id: str, check_id: str):
-    """Devuelve los datos del check para impresión de factura térmica."""
+    """Returns the check data for thermal receipt printing."""
     await get_current_user(request)
     with bypass_tenant_scope("get_check_ticket: ticket lookup by check ID across branches"):
         ticket = await db.db_get_check_ticket(check_id)
@@ -1893,13 +1805,22 @@ class QuickInvoiceBody(BaseModel):
 @router.post("/api/pos/quick-invoice")
 async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
     """
-    Crea una venta rápida desde caja sin pasar por el flujo de mesa/bot.
-    Crea un table_order efímero, un check y lo paga en un solo paso.
+    Creates a quick sale from the register without going through the table/bot flow.
+    Creates an ephemeral table_order, a check, and pays it in a single step.
     """
     restaurant = await get_current_restaurant(request)
     user = await get_current_user(request)
 
-    branch_id = body.branch_id or user.get("branch_id") or restaurant["id"]
+    # P1 fix (2026-09-17): `user.get("branch_id")` is the AMBIGUOUS legacy
+    # column (users.branch_id — some writers stored org_id, others
+    # location_id; see docs/claude/rls-multitenant.md). Falling back further
+    # to `restaurant["id"]` (the ORG id) was even worse: it substituted an
+    # org_id for a location_id, exactly the conflation CLAUDE.md forbids.
+    # `user.get("location_id")` is the explicit, unambiguous field (backfilled
+    # by migration 0081). If neither the caller nor the user carries a real
+    # location, branch_id stays NULL — table_orders.branch_id is nullable —
+    # rather than guessing.
+    branch_id = body.branch_id or user.get("location_id")
 
     if not body.items:
         raise HTTPException(status_code=400, detail="Se requiere al menos un ítem")
@@ -1923,7 +1844,22 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
 
     order = {
         "id": order_id,
-        "table_id": None,
+        # P1 fix (2026-09-17): table_orders.table_id is TEXT NOT NULL with no
+        # default and no FK to restaurant_tables — quick-invoice has no real
+        # table, so `None` here always violated the NOT NULL constraint (this
+        # was masked in practice because db_save_table_order's own org_id
+        # resolution — see below — raised ValueError first). Reuse the
+        # synthetic order_id: it's unique (uuid4-based) and never collides
+        # with a real table id (those look like "table-{org_id}-{number}",
+        # see db_create_table), so it can't be mistaken for one anywhere that
+        # joins on table_id.
+        "table_id": order_id,
+        # db_save_table_order cannot resolve a tenant from table_id alone for
+        # a synthetic id like the one above — it used to raise ValueError
+        # trying. This route already knows the ORG id (it's what it scopes
+        # tenant_scope() with below) — pass it through explicitly instead of
+        # relying on the table_id lookup.
+        "org_id": restaurant["id"],
         "table_name": body.table_name,
         "phone": "caja",
         "items": items_payload,
@@ -1937,73 +1873,119 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
         "channel": "pos",
         "waiter_staff_id": user.get("staff_id") or None,
     }
+    # Ambient scope for the ENTIRE quick-invoice flow — same fix as pay_check()
+    # above. This handler used to have the create/finalize DB calls each in
+    # their own `with tenant_scope(...)` block with the DIAN billing calls
+    # (get_billing_config / adapter.create_invoice) left unscoped in between.
+    # Both are tenant_connection()-backed repo calls (fiscal_repo), so any
+    # restaurant with DIAN enabled would 500 on quick-invoice exactly like
+    # pay_check did. Pinning the scope once for the whole block makes that
+    # class of bug structurally impossible here too.
+    #
+    # _claimed tracks whether we hold the check in 'paying' state (mirrors
+    # pay_check()'s pattern below) — release it on any failure after the
+    # claim so a retry isn't stuck behind a check nothing will ever finalize.
+    check_id = None
+    _claimed = False
     with tenant_scope(restaurant["id"]):
-        await db.db_save_table_order(order)
-
-        # Crear un check único para esta venta
-        check_payload = [{
-            "check_number": 1,
-            "items": items_payload,
-            "subtotal": float(to_decimal(subtotal)),
-            "tax_amount": 0.0,
-            "total": float(to_decimal(subtotal)),
-        }]
-        created = await db.db_create_checks(base_order_id, check_payload)
-    if not created:
-        raise HTTPException(status_code=500, detail="No se pudo crear el check")
-    check_id = created[0]["id"]
-
-    # Billing / DIAN (opcional)
-    features = restaurant.get("features") or {}
-    if isinstance(features, str):
-        import json as _json
         try:
-            features = _json.loads(features)
-        except Exception:
-            features = {}
-    _currency = features.get("currency") if isinstance(features, dict) else None
+            await db.db_save_table_order(order)
 
-    fiscal_invoice_id = None
-    if billing._is_dian_enabled(features):
-        config = await billing.get_billing_config(restaurant["id"])
-        if config:
-            config["_restaurant_id"] = restaurant["id"]
-            provider = config.get("provider", "mesio_native")
-            adapter = billing.get_adapter(provider)
-            order_for_billing = {
-                "id": check_id,
-                "total": float(total_d),
-                "subtotal": float(to_decimal(subtotal)),
-                "service_charge": 0.0,
+            # Create a single check for this sale
+            check_payload = [{
+                "check_number": 1,
                 "items": items_payload,
-                "payment_method": body.payment_method,
-                "order_ref": base_order_id,
-                "customer": {
-                    "name": body.customer_name,
-                    "nit": body.customer_nit,
-                    "email": body.customer_email,
-                },
-            }
-            try:
-                fiscal = await adapter.create_invoice(order_for_billing, config)
-                fiscal_invoice_id = fiscal["id"]
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail=f"Error al emitir factura DIAN: {exc}")
+                "subtotal": float(to_decimal(subtotal)),
+                "tax_amount": 0.0,
+                "total": float(to_decimal(subtotal)),
+            }]
+            created = await db.db_create_checks(base_order_id, check_payload)
+            if not created:
+                raise HTTPException(status_code=500, detail="No se pudo crear el check")
+            check_id = created[0]["id"]
 
-    payments_list = [{"method": body.payment_method, "amount": float(total_d)}]
+            # P1 fix (2026-09-17): db_create_checks always creates in status
+            # 'open'. db_finalize_check_payment only commits a check that is
+            # in status 'paying' (its documented pre-condition — see
+            # db_claim_check_for_payment's docstring) and silently returns
+            # False otherwise. Calling finalize directly on an 'open' check
+            # (as this route used to) is a same-shape bug to the org_id one:
+            # it looked like a working call but was structurally a no-op —
+            # the route reported success while the check stayed unpaid.
+            claimed_check = await db.db_claim_check_for_payment(check_id, base_order_id)
+            if claimed_check is None:
+                raise HTTPException(status_code=500, detail="No se pudo reservar el check para el pago")
+            _claimed = True
 
-    with tenant_scope(restaurant["id"]):
-        await db.db_finalize_check_payment(
-            check_id=check_id,
-            base_order_id=base_order_id,
-            payments=payments_list,
-            change_amount=0.0,
-            fiscal_invoice_id=fiscal_invoice_id,
-            customer_name=body.customer_name,
-            customer_nit=body.customer_nit,
-            customer_email=body.customer_email,
-            tip_amount=float(tip_d),
-        )
+            # Billing / DIAN (opcional)
+            features = restaurant.get("features") or {}
+            if isinstance(features, str):
+                import json as _json
+                try:
+                    features = _json.loads(features)
+                except Exception:
+                    features = {}
+            _currency = features.get("currency") if isinstance(features, dict) else None
+
+            fiscal_invoice_id = None
+            if billing._is_dian_enabled(features):
+                config = await billing.get_billing_config(restaurant["id"])
+                if config:
+                    config["_restaurant_id"] = restaurant["id"]
+                    provider = config.get("provider", "mesio_native")
+                    adapter = billing.get_adapter(provider)
+                    order_for_billing = {
+                        "id": check_id,
+                        "total": float(total_d),
+                        "subtotal": float(to_decimal(subtotal)),
+                        "service_charge": 0.0,
+                        "items": items_payload,
+                        "payment_method": body.payment_method,
+                        "order_ref": base_order_id,
+                        "customer": {
+                            "name": body.customer_name,
+                            "nit": body.customer_nit,
+                            "email": body.customer_email,
+                        },
+                    }
+                    try:
+                        fiscal = await adapter.create_invoice(order_for_billing, config)
+                        fiscal_invoice_id = fiscal["id"]
+                    except Exception as exc:
+                        raise HTTPException(status_code=500, detail=f"Error al emitir factura DIAN: {exc}")
+
+            payments_list = [{"method": body.payment_method, "amount": float(total_d)}]
+
+            finalized = await db.db_finalize_check_payment(
+                check_id=check_id,
+                base_order_id=base_order_id,
+                payments=payments_list,
+                change_amount=0.0,
+                fiscal_invoice_id=fiscal_invoice_id,
+                customer_name=body.customer_name,
+                customer_nit=body.customer_nit,
+                customer_email=body.customer_email,
+                tip_amount=float(tip_d),
+            )
+            if not finalized:
+                _claimed = False  # claim already gone (concurrent op) — nothing to release
+                raise HTTPException(status_code=409, detail="El check fue modificado por otra operación.")
+            _claimed = False
+        except HTTPException:
+            if _claimed and check_id:
+                try:
+                    await db.db_release_check(check_id)
+                except Exception:
+                    log.exception("tables.pos_quick_invoice.release_failed", check_id=check_id)
+            raise
+        except Exception as e:
+            if _claimed and check_id:
+                try:
+                    await db.db_release_check(check_id)
+                except Exception:
+                    log.exception("tables.pos_quick_invoice.release_failed", check_id=check_id)
+            log.exception("tables.pos_quick_invoice.unexpected_error", order_id=order_id)
+            raise HTTPException(status_code=500, detail=f"Error interno del servidor: {e}")
 
     return {
         "success": True,
@@ -2016,12 +1998,12 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
 
 # ── CAJA: Customer lookup ─────────────────────────────────────────────────────
 
-@router.get("/api/caja/customer/{phone}")
-async def get_caja_customer(
+@router.get("/api/cashier/customer/{phone}")
+async def get_cashier_customer(
     phone: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ) -> dict:
-    """Return customer profile + loyalty balance + recent orders for the caja UI.
+    """Return customer profile + recent orders for the caja UI.
 
     Auth: Bearer token of admin/owner/gerente (get_current_restaurant_scoped).
     Tenant-scoped: all repo calls run under tenant_scope(org_id) set by the dep.
@@ -2032,15 +2014,12 @@ async def get_caja_customer(
             "name": str | None,
             "is_known": bool,
             "stats": {"total_orders", "total_spent", "last_seen", "first_seen"} | {},
-            "loyalty": {"points": int, "tier": null} | null,
             "recent_orders": [{"id", "total", "created_at", "items_summary"}]
         }
 
     If the phone is unknown, is_known=false with empty stats and empty recent_orders.
-    If the loyalty module is disabled or has no record, loyalty=null.
     """
     from app.repositories import customer_profiles_repo as cp_repo  # noqa: PLC0415
-    from app.repositories import loyalty_repo  # noqa: PLC0415
     from app.services.money import quantize_money, to_decimal  # noqa: PLC0415
 
     # Normalise phone: strip leading +, spaces, and URL-encode artifacts.
@@ -2059,7 +2038,7 @@ async def get_caja_customer(
         org_id_resolved = await db_resolve_org_id_from_location(int(restaurant["id"]))
         if org_id_resolved is None:
             return {"phone": clean_phone, "name": None, "is_known": False,
-                    "stats": {}, "loyalty": None, "recent_orders": []}
+                    "stats": {}, "recent_orders": []}
         org_id = org_id_resolved  # explicit org_id resolved from location — DO NOT use restaurant["id"]
 
     # ── Customer profile ──────────────────────────────────────────────────────
@@ -2071,21 +2050,8 @@ async def get_caja_customer(
             "name": None,
             "is_known": False,
             "stats": {},
-            "loyalty": None,
             "recent_orders": [],
         }
-
-    # ── Loyalty balance (best-effort — module may be disabled) ───────────────
-    loyalty_data: dict | None = None
-    try:
-        lb = await loyalty_repo.db_get_loyalty_balance(org_id, clean_phone)
-        if lb is not None:
-            loyalty_data = {
-                "points": lb.get("puntos_actuales", 0),
-                "tier": None,
-            }
-    except Exception:
-        log.exception("caja_customer.loyalty_lookup_failed", phone=clean_phone, org_id=org_id)
 
     # ── Recent orders (last 5 from orders + table_orders, by phone) ──────────
     recent_orders: list[dict] = await _get_recent_orders_for_phone(org_id, clean_phone, limit=5)
@@ -2100,7 +2066,6 @@ async def get_caja_customer(
             "last_seen": profile.get("last_seen").isoformat() if profile.get("last_seen") else None,
             "first_seen": profile.get("first_seen").isoformat() if profile.get("first_seen") else None,
         },
-        "loyalty": loyalty_data,
         "recent_orders": recent_orders,
     }
 
@@ -2118,7 +2083,7 @@ async def _get_recent_orders_for_phone(org_id: int, phone: str, limit: int = 5) 
         delivery = await db_get_recent_orders_by_phone(org_id, phone, limit)
         table = await db_get_recent_table_orders_by_phone(org_id, phone, limit)
     except Exception:
-        log.exception("caja_customer.recent_orders_failed", phone=phone, org_id=org_id)
+        log.exception("cashier_customer.recent_orders_failed", phone=phone, org_id=org_id)
         return []
 
     combined = delivery + table
@@ -2128,8 +2093,8 @@ async def _get_recent_orders_for_phone(org_id: int, phone: str, limit: int = 5) 
 
 # ── CAJA: Recent NPS feed ─────────────────────────────────────────────────────
 
-@router.get("/api/caja/recent-nps")
-async def get_caja_recent_nps(
+@router.get("/api/cashier/recent-nps")
+async def get_cashier_recent_nps(
     limit: int = 10,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ) -> dict:
@@ -2143,5 +2108,5 @@ async def get_caja_recent_nps(
 
     Phone is anonymized (last 4 digits only). limit is clamped to [1, 50].
     """
-    rows = await db.db_get_recent_nps_for_caja(limit)
+    rows = await db.db_get_recent_nps_for_cashier(limit)
     return {"items": rows}

@@ -74,8 +74,6 @@ function renderSettings(r) {
   var notif = (r.features && r.features.notifications) ? r.features.notifications : {};
   renderNotifToggles(notif);
 
-  // Bot features — voice notes
-  renderBotFeatures(r.features || {});
 
   // Commerce features — DIAN toggle
   renderCommerceFeatures(r);
@@ -83,8 +81,6 @@ function renderSettings(r) {
   // DIAN — read-only display
   renderDIAN(r.features || {});
 
-  // Kiosko de personal URL
-  renderKioskoUrl(r);
 
   // Sidebar user
   var avatarEl = document.getElementById('sbAvatar');
@@ -204,14 +200,6 @@ function renderNotifToggles(notif) {
   });
 }
 
-// ── Bot features toggles ──────────────────────────────────────────
-function renderBotFeatures(features) {
-  var voiceSw = document.getElementById('bot-sw-voice-notes');
-  if (voiceSw) {
-    if (features.bot_voice_notes) { voiceSw.classList.add('on'); } else { voiceSw.classList.remove('on'); }
-  }
-}
-
 // ── Commerce features toggles ─────────────────────────────────────
 function renderCommerceFeatures(features) {
   var dianSw = document.getElementById('commerce-sw-dian');
@@ -270,12 +258,6 @@ function collectFormData() {
     notifications[key] = sw ? sw.classList.contains('on') : true;
   });
 
-  // Bot features
-  var voiceSw = document.getElementById('bot-sw-voice-notes');
-  var botFeatures = {
-    bot_voice_notes: voiceSw ? voiceSw.classList.contains('on') : false,
-  };
-
   // Commerce features
   var dianSw = document.getElementById('commerce-sw-dian');
   var commerceFeatures = {
@@ -299,9 +281,6 @@ function collectFormData() {
     city: getVal('inputCity'),
     cuisine_type: getVal('inputCuisine'),
     wompi: wompiPayload,
-    // bot feature flags — sent as top-level keys so _features_updatable in
-    // settings_routes.py picks them up and writes them into features JSONB
-    bot_voice_notes: botFeatures.bot_voice_notes,
     // commerce feature flags
     dian_enabled: commerceFeatures.dian_enabled,
     features: Object.assign(currentFeatures, {
@@ -475,50 +454,6 @@ function bindLogout() {
   if (btn) { btn.addEventListener('click', mesioLogout); }
 }
 
-// ── Kiosko de personal ────────────────────────────────────────────
-function renderKioskoUrl(r) {
-  var urlInput = document.getElementById('kiosko-url-input');
-  if (!urlInput) return;
-  // org_id is exposed as restaurant_id in the /api/settings response
-  var orgId = (r && (r.restaurant_id || r.id)) || '';
-  var kioskUrl = orgId
-    ? (window.location.origin + '/staff-hq?kiosko=true&r=' + orgId)
-    : '';
-  urlInput.value = kioskUrl;
-}
-
-function bindKioskoHandlers() {
-  var copyBtn = document.getElementById('kiosko-copy-btn');
-  if (!copyBtn) return;
-  copyBtn.addEventListener('click', function () {
-    var urlInput = document.getElementById('kiosko-url-input');
-    var url = urlInput ? urlInput.value : '';
-    if (!url) {
-      mesioToast('No hay URL disponible aún', 'error');
-      return;
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(function () {
-        mesioToast('URL copiada', 'success');
-      }).catch(function () {
-        _kioskoCopyFallback(urlInput);
-      });
-    } else {
-      _kioskoCopyFallback(urlInput);
-    }
-  });
-}
-
-function _kioskoCopyFallback(inputEl) {
-  if (!inputEl) return;
-  inputEl.select();
-  try {
-    document.execCommand('copy');
-    mesioToast('URL copiada', 'success');
-  } catch (_) {
-    mesioToast('Copiá manualmente la URL del campo', 'info');
-  }
-}
 
 // ── Phone blocklist (admin) ───────────────────────────────────────
 function _formatRelativeUntil(iso) {
@@ -729,7 +664,6 @@ document.addEventListener('DOMContentLoaded', function () {
   bindSwitches();
   bindNavLinks();
   bindLogout();
-  bindKioskoHandlers();
   bindBlocklistHandlers();
   initScrollSpy();
   loadSettings().then(function () { _updatePauseButton(); });

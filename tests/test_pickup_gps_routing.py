@@ -1,25 +1,23 @@
 """
 tests/test_pickup_gps_routing.py
 =================================
-Integration tests for the pickup GPS branch-routing path in agent_external.py.
+Integration tests for `restaurant_repo.db_resolve_location_by_gps` — the
+haversine-based nearest-Location resolver.
 
-Background — the spec auditors thought GPS routing only fires on delivery.
-Reality (as of agent_external.py:361): pickup ALSO routes by GPS when the
-customer has shared their location AND the org has multiple sedes. The
-auto-assigned location is then written to routing_context["location_id"]
-so create_pickup_order picks it up.
+Originally written for the WhatsApp pickup GPS branch-routing path in
+agent_external.py (deleted in chunk 9, docs/claude/delivery-web.md —
+delivery/pickup ordering moved entirely to the web channel). The routing
+block itself and its "single-location auto-assign" test went with it; this
+function stays alive as a general Org/Location repo primitive (also covered
+by tests/test_org_repos.py) even though nothing calls it from the deleted
+agent_external.py path any more. The web ordering flow's own GPS→sede
+resolution (app/services/delivery.py::resolve_order_mode) reuses the same
+underlying `restaurant_repo.haversine_km`, not this function.
 
 What we verify:
-  1. Pickup with GPS in cart auto-assigns the nearest active Location.
-  2. Pickup without GPS on a single-Location org auto-assigns silently
-     (the "single-location rule" — never ask "which sede?" when there's
-     only one).
-  3. db_resolve_location_by_gps respects the radius cap — coordinates
-     outside the radius return None, not the closest available.
-
-These tests exercise the repo helpers + the routing block in
-execute_external_action directly (no LLM, no inbox worker). Full happy-path
-GPS pickup is covered by tests/e2e/test_pickup_lifecycle.py.
+  1. The resolver picks the nearest active Location within radius_km.
+  2. It respects the radius cap — coordinates outside the radius return
+     None, not the closest available.
 
 Skipped when TEST_DATABASE_URL is unset.
 """
@@ -134,17 +132,15 @@ async def org_id(db_conn):
     return row["id"]
 
 
-async def _insert_location(conn, org_id_, *, name, lat, lon, whatsapp=None):
+async def _insert_location(conn, org_id_, *, name, lat, lon):
     row = await conn.fetchrow(
         """
         INSERT INTO locations
-            (org_id, name, code, address, latitude, longitude,
-             whatsapp_number, active)
-        VALUES ($1, $2, $3, 'Test addr', $4, $5, $6, TRUE)
+            (org_id, name, code, address, latitude, longitude, active)
+        VALUES ($1, $2, $3, 'Test addr', $4, $5, TRUE)
         RETURNING id
         """,
         org_id_, name, name.lower().replace(" ", "-"), lat, lon,
-        whatsapp or "",
     )
     return row["id"]
 
@@ -160,11 +156,11 @@ async def test_pickup_gps_resolves_to_nearest_location(db_conn, org_id):
     # Two sedes in Bogotá: zona norte (~4.7110) and zona sur (~4.6000)
     norte_id = await _insert_location(
         db_conn, org_id, name="Sede Norte",
-        lat=4.7110, lon=-74.0721, whatsapp="+5715551111",
+        lat=4.7110, lon=-74.0721,
     )
     await _insert_location(
         db_conn, org_id, name="Sede Sur",
-        lat=4.6000, lon=-74.0900, whatsapp="+5715552222",
+        lat=4.6000, lon=-74.0900,
     )
 
     # Customer near Sede Norte (within ~150m)
@@ -202,77 +198,3 @@ async def test_pickup_gps_outside_radius_returns_none(db_conn, org_id):
         "Radius cap not enforced — would route customer to a too-far sede."
     )
 
-
-@pytest.mark.asyncio
-async def test_pickup_single_location_no_gps_auto_assigns(db_conn, org_id):
-    """Single-Location org with no GPS in cart → routing_context picks the only sede.
-
-    This exercises the agent_external.py:370 branch: when org has exactly one
-    Location, we auto-assign it without asking the customer "which sede?". Per
-    the SINGLE-LOCATION rule in the system prompt.
-    """
-    from app.services.agent_external import execute_external_action
-    from app.services.tenant_context import tenant_scope
-    from app.services import orders as orders_service
-
-    only_loc = await _insert_location(
-        db_conn, org_id, name="Solo Sede",
-        lat=4.7110, lon=-74.0721, whatsapp="+5715551111",
-    )
-
-    phone = "+573009990501"
-    bot_number = "+5715551111"
-
-    # RLS WITH CHECK on `carts` requires app.org_id GUC matching the row's org_id.
-    await db_conn.execute(
-        "SELECT set_config('app.org_id', $1::text, true)",
-        str(org_id),
-    )
-
-    # Seed cart with one item so the empty-cart guard doesn't short-circuit.
-    # carts uses a single JSONB cart_data column (not separate items/etc).
-    cart_row = await db_conn.fetchrow(
-        """
-        INSERT INTO carts (phone, bot_number, cart_data, org_id)
-        VALUES ($1, $2, $3::jsonb, $4)
-        RETURNING phone
-        """,
-        phone, bot_number,
-        '{"items":[{"name":"Empanada","qty":1,"price":5000}],"order_type":null,"address":null,"notes":""}',
-        org_id,
-    )
-    assert cart_row is not None
-
-    routing_context: dict = {}
-
-    # Skip the actual order creation — patch orders.create_order to short-circuit.
-    async def _fake_create_order(*a, **kw):
-        return {"success": False, "error": "test_short_circuit"}
-
-    # Use monkeypatch via direct attribute (we're not in the monkeypatch fixture)
-    real_create_order = orders_service.create_order
-    orders_service.create_order = _fake_create_order
-    try:
-        with tenant_scope(org_id):
-            await execute_external_action(
-                parsed={
-                    "action": "pickup",
-                    "payment_method": "Nequi",
-                },
-                phone=phone,
-                bot_number=bot_number,
-                restaurant_obj={"id": org_id, "parent_restaurant_id": None},
-                routing_context=routing_context,
-                reply="",
-            )
-    finally:
-        orders_service.create_order = real_create_order
-
-    assert routing_context.get("location_id") == only_loc, (
-        f"Expected routing_context.location_id={only_loc}, "
-        f"got {routing_context.get('location_id')!r}. "
-        "Single-Location org should auto-assign its only sede on pickup."
-    )
-    assert routing_context.get("branch_id") == only_loc, (
-        "branch_id should be aliased to location_id for backward compat."
-    )

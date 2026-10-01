@@ -15,6 +15,24 @@ var MESIO_LOCATIONS_KEY        = 'rb_locations';
 var MESIO_CURRENT_LOCATION_KEY = 'rb_current_location_id';
 
 // ── Org/Location helpers ─────────────────────────
+/**
+ * Parse a timestamp from the API into a Date.
+ *
+ * The API sends two shapes: naive TIMESTAMP columns ("2026-09-18T21:12:49")
+ * which are UTC but carry no designator, and TIMESTAMPTZ columns
+ * ("2026-09-18T21:12:49+00:00"). Appending "Z" to everything that does not
+ * end in "Z" turned the second shape into "...+00:00Z" — an Invalid Date —
+ * so every filter on accepted_at / delivered_at / rejected_at / cancelled_at
+ * silently matched nothing. Only append "Z" when there is no zone at all.
+ */
+function mesioParseServerDate(iso) {
+  if (!iso) return null;
+  var s = String(iso);
+  var hasZone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(s);
+  var d = new Date(hasZone ? s : s + 'Z');
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function mesioSetOrg(org, locations, defaultLocationId) {
   try {
     localStorage.setItem(MESIO_ORG_KEY, JSON.stringify(org || {}));
@@ -457,6 +475,34 @@ function mesioInterval(fn, ms) {
   }, ms);
 }
 
+// ── Live-aware interval (safety net behind MesioRealtime SSE) ───────────
+/**
+ * Like mesioInterval, but treats window.MesioRealtime as the fresh source
+ * of truth when it's connected: polling backs off to once every 60s (just
+ * a safety net for a missed event or a disconnect the client hasn't
+ * noticed yet). While MesioRealtime isn't connected (script not loaded on
+ * this page, stream still reconnecting, etc.) it falls back to the
+ * original `fastMs` cadence, same as mesioInterval(fn, fastMs) would.
+ *
+ * Returns a real setInterval id — cancel it with clearInterval() exactly
+ * like mesioInterval(), so existing _trackInterval()/unmount() cleanup
+ * needs no changes at call sites.
+ */
+function mesioLiveInterval(fn, fastMs) {
+  var SAFE_MS = 60000;
+  var tickMs = Math.min(fastMs, 5000);
+  var last = Date.now();
+  return setInterval(() => {
+    if (document.visibilityState === 'hidden') return;
+    var live = (typeof MesioRealtime !== 'undefined') && MesioRealtime.connected;
+    var period = live ? SAFE_MS : fastMs;
+    if (Date.now() - last >= period) {
+      last = Date.now();
+      fn();
+    }
+  }, tickMs);
+}
+
 // ── Cloudinary image URL transform ───────────────
 /**
  * Insert a Cloudinary transform into an image URL. Falls through unchanged
@@ -535,8 +581,8 @@ function mesioDateTime(isoStr) { return mesioDate(isoStr, { format: 'short' }); 
 (function _mesioSupportButton() {
   // URL patterns where the button should NOT appear
   var SKIP_PATHS = [
-    '/caja', '/cocina', '/bar', '/mesero', '/domiciliario', '/staff-hq',
-    '/landing', '/menu', '/login', '/signup', '/demo', '/dashboard-demo',
+    '/staff',   // unified Staff App (cashier/waiter/kitchen/bar/courier/my shift)
+    '/landing', '/menu', '/login', '/signup',
     '/r/',   // public QR menu routes
   ];
 
@@ -546,15 +592,15 @@ function mesioDateTime(isoStr) { return mesioDate(isoStr, { format: 'short' }); 
       if (p === SKIP_PATHS[i] || p.startsWith(SKIP_PATHS[i] + '/') || p.startsWith(SKIP_PATHS[i] + '?')) {
         return false;
       }
-      // Exact match for paths like '/caja' that may not have trailing slash
+      // Exact match for paths like '/cashier' that may not have trailing slash
       if (p.replace(/\/$/, '') === SKIP_PATHS[i].replace(/\/$/, '')) return false;
     }
     // Only show on known admin paths — don't show on public menu.html etc.
     var ADMIN_PATHS = [
-      '/dashboard', '/pedidos', '/reservaciones', '/menu-admin', '/menu-engineering',
-      '/nps', '/fidelizacion', '/clientes-riesgo', '/nomina', '/sucursales',
-      '/floorplan', '/equipo', '/settings', '/billing', '/stats',
-      '/internal/analytics', '/internal/monitoring', '/internal/superadmin', '/internal/crm',
+      '/dashboard', '/orders', '/reservations', '/menu-admin',
+      '/nps', '/locations',
+      '/floorplan', '/team', '/settings', '/billing', '/stats',
+      '/internal/monitoring', '/internal/superadmin', '/internal/crm',
     ];
     for (var j = 0; j < ADMIN_PATHS.length; j++) {
       if (p === ADMIN_PATHS[j] || p.startsWith(ADMIN_PATHS[j] + '/')) return true;

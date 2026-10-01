@@ -58,21 +58,24 @@
         </div>
       </div>
 
-      <!-- AI insight banner (hidden until data loads; hidden if feature disabled) -->
-      <div class="ai-card" id="ai-insight-banner" style="display:none;">
-        <div class="ai-card-head">
-          <span class="ai-spark"></span>
-          Mesio IA — lectura del día
+      <!-- Setup checklist — what this restaurant still has to do before it can
+           sell through Mesio. Filled by pages/onboarding-card.js from
+           /api/onboarding; stays hidden once every required step is done. -->
+      <div class="card" id="onboarding-card" style="display:none;margin-bottom:16px;padding:18px 20px;">
+        <div class="row" style="align-items:baseline;gap:10px;margin-bottom:4px;">
+          <div style="font-size:15px;font-weight:700;">Pon tu restaurante a vender</div>
+          <div id="onboarding-progress" style="font-size:12px;color:var(--text-3);"></div>
+          <div id="onboarding-trial" style="margin-left:auto;font-size:12px;font-weight:600;color:var(--brand);"></div>
         </div>
-        <div class="ai-card-body" id="ai-insight-text"></div>
+        <div id="onboarding-steps" style="display:flex;flex-direction:column;gap:10px;margin-top:12px;"></div>
       </div>
 
-      <!-- North-star: Pedidos rescatados -->
+      <!-- North-star: Rescued orders -->
       <div class="metric metric--north-star" id="metric-rescatados" style="margin-bottom:16px;">
         <div class="metric-label" style="font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:var(--brand);font-weight:600;">Pedidos rescatados este mes</div>
         <div class="metric-value" id="m-rescatados" style="font-size:2.8rem;font-weight:800;color:var(--brand);line-height:1.05;">—</div>
         <div class="metric-sub metric-delta" id="m-rescatados-delta" style="font-size:12px;margin-top:4px;"></div>
-        <div style="font-size:11px;color:var(--text-3);margin-top:6px;">Pedidos que llegaron por el bot WhatsApp</div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:6px;">Pedidos que llegaron por el chat de Mesio</div>
       </div>
 
       <!-- Metrics row -->
@@ -134,7 +137,7 @@
           </div>
         </div>
 
-        <!-- Ventas por canal -->
+        <!-- Sales by channel -->
         <div class="card flush" id="card-channels">
           <div class="card-head">
             <div class="card-title">Ventas por canal</div>
@@ -158,7 +161,7 @@
               <div class="card-title">Pedidos en vivo</div>
               <span class="badge brand" id="live-count-badge">—</span>
             </div>
-            <a href="/caja" class="btn sm ghost">Ver todos →</a>
+            <a href="/staff?section=cashier" class="btn sm ghost">Ver todos →</a>
           </div>
           <div class="live-list" id="live-orders-list">
             <div class="skel" style="height:68px;margin:12px 18px;border-radius:8px;"></div>
@@ -202,7 +205,6 @@
         <div class="card flush" id="card-top-dishes">
           <div class="card-head">
             <div class="card-title">Top platos · 7 días</div>
-            <a href="/menu-engineering" class="btn sm ghost">Menu Engineering →</a>
           </div>
           <table class="tbl" id="top-dishes-table">
             <thead>
@@ -242,5 +244,6 @@
 <script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/pages/sidebar.js"></script>
 <script src="/static/js/pages/dashboard.js"></script>
+<script src="/static/js/pages/onboarding-card.js"></script>
 </body>
 </html>

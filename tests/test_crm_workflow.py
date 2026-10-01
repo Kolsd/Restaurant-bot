@@ -213,7 +213,7 @@ class TestConvertProspect:
         assert resp.status_code == 409
 
     def test_convert_uses_body_overrides(self, super_client, monkeypatch):
-        """body.name + body.whatsapp_number override prospect defaults."""
+        """body.name + body.plan_code override prospect defaults."""
         from app.repositories.internal import crm_repo
         from app.repositories import restaurant_repo
 
@@ -244,7 +244,6 @@ class TestConvertProspect:
             "/api/internal/crm/prospects/99/convert",
             json={
                 "name":            "Override Name",
-                "whatsapp_number": "573001112222",
                 "plan_code":       "pro",
                 "skip_welcome_message": True,
             },
@@ -253,5 +252,6 @@ class TestConvertProspect:
         assert resp.status_code == 200
         kwargs = create_org_mock.await_args.kwargs
         assert kwargs["name"] == "Override Name"
-        assert kwargs["whatsapp_number"] == "573001112222"
-        assert kwargs["subscription_plan"] == "pro"
+        # The prospect's phone is a sales contact, never the org's key.
+        assert "whatsapp_number" not in kwargs
+        assert kwargs["plan_code"] == "pro"

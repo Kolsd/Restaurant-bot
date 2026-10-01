@@ -1,4 +1,6 @@
 import pytest
+
+from tests.conftest import stub_plan
 from unittest.mock import AsyncMock
 import app.routes.billing as billing_routes
 
@@ -13,11 +15,11 @@ def test_get_providers_list(client):
     assert "loggro" in provider_ids
 
 def test_get_billing_config_authorized(client, monkeypatch):
-    # 1. Burlamos la seguridad para que crea que somos un usuario válido
+    # 1. Bypass security so it believes we're a valid user
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
-    monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}))
-    
-    # 2. Burlamos la configuración que viene de la base de datos
+    monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1}))
+
+    # 2. Mock the config coming from the database
     mock_cfg = {
         "provider": "alegra",
         "alegra_email": "test@test.com",
@@ -31,12 +33,12 @@ def test_get_billing_config_authorized(client, monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["configured"] is True
-    # Verificamos que se censure el token de seguridad
+    # Verify the security token is redacted
     assert "fake_token_123" not in str(data["config"])
     assert "***" in str(data["config"])
 
 def test_get_billing_config_unauthorized(client, monkeypatch):
-    # Simulamos que el token no es válido
+    # Simulate an invalid token
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value=None))
 
     response = client.get("/api/billing/config")
@@ -45,18 +47,20 @@ def test_get_billing_config_unauthorized(client, monkeypatch):
     assert response.json()["detail"] == "Unauthorized"
 
 def test_emit_manual_invoice_endpoint(client, monkeypatch):
-    # Burlamos la seguridad nuevamente
+    # Bypass security again
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
-    monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}))
+    monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1}))
 
     # Mock restaurant lookup with dian_enabled=True (gate check added 2026-05-07)
     mock_restaurant = {"id": 1, "name": "Test", "features": {"dian_enabled": True}}
     import app.routes.billing as _billing_routes_mod
-    monkeypatch.setattr(_billing_routes_mod.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant))
+    monkeypatch.setattr(_billing_routes_mod.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=mock_restaurant))
 
-    # Burlamos la función que emite la factura a Alegra/Siigo
+    # Mock the function that issues the invoice to Alegra/Siigo
     mock_emit = AsyncMock(return_value={"success": True, "provider": "alegra", "external_id": "999"})
     monkeypatch.setattr(billing_routes, "emit_invoice", mock_emit)
+    # DIAN starts at Pro (app/services/plans.py).
+    stub_plan(monkeypatch, "pro")
 
     headers = {"Authorization": "Bearer fake_token_123"}
     payload = {
@@ -71,7 +75,7 @@ def test_emit_manual_invoice_endpoint(client, monkeypatch):
     assert data["success"] is True
     assert data["external_id"] == "999"
 
-    # Verificamos que nuestro endpoint de la API llamó correctamente a la función de facturación
+    # Verify our API endpoint correctly called the billing function
     mock_emit.assert_called_once()
     args, _ = mock_emit.call_args
     assert args[0] == "ORD-TEST-01"

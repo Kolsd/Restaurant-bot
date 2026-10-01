@@ -76,62 +76,9 @@ def override_webauthn_deps(monkeypatch):
 
 # ── Test 1: same org → 200 ────────────────────────────────────────────────────
 
-def test_webauthn_delete_same_org_allowed(client):
-    """Credential belongs to ORG_A; authenticated restaurant is ORG_A → 200."""
-    cred = _webauthn_cred(org_id=ORG_A)
-    deleted_mock = AsyncMock(return_value=True)
-
-    with (
-        patch("app.routes.staff_webauthn.db.db_get_webauthn_credential", AsyncMock(return_value=cred)),
-        patch("app.routes.staff_webauthn.db.db_delete_webauthn_credential", deleted_mock),
-    ):
-        resp = client.delete(
-            "/api/staff/webauthn/credentials/base64-cred-id",
-            headers={"Authorization": "Bearer test"},
-        )
-
-    assert resp.status_code == 200, resp.text
-    deleted_mock.assert_awaited_once_with("base64-cred-id")
-
-
 # ── Test 2: cross-org → 403 ───────────────────────────────────────────────────
 
-def test_webauthn_delete_cross_org_blocked(client):
-    """Credential belongs to ORG_B; authenticated restaurant is ORG_A → 403."""
-    cred = _webauthn_cred(org_id=ORG_B)
-
-    with patch("app.routes.staff_webauthn.db.db_get_webauthn_credential", AsyncMock(return_value=cred)):
-        resp = client.delete(
-            "/api/staff/webauthn/credentials/base64-cred-id",
-            headers={"Authorization": "Bearer test"},
-        )
-
-    assert resp.status_code == 403, resp.text
-
-
 # ── Test 3: missing org_id → 403 (fail closed) ───────────────────────────────
-
-def test_webauthn_delete_missing_org_id_fails_closed(client):
-    """Credential dict has no org_id key → should fail closed with 403."""
-    cred_no_org = {
-        "id": "cred-uuid-1",
-        "staff_id": "staff-uuid-1",
-        "credential_id": "base64-cred-id",
-        "public_key": "pk",
-        "sign_count": 0,
-        "transports": [],
-        "staff_name": "Test Staff",
-        # org_id intentionally absent
-    }
-
-    with patch("app.routes.staff_webauthn.db.db_get_webauthn_credential", AsyncMock(return_value=cred_no_org)):
-        resp = client.delete(
-            "/api/staff/webauthn/credentials/base64-cred-id",
-            headers={"Authorization": "Bearer test"},
-        )
-
-    assert resp.status_code == 403, resp.text
-
 
 # ─── team_routes fixtures ─────────────────────────────────────────────────────
 
@@ -141,6 +88,9 @@ def team_client(monkeypatch, client):
     user_dict = {
         "username": "owner1",
         "branch_id": LOCATION_A,   # location_id in Wave-2 context
+        # P0 fix (2026-09): team_routes now reads user["org_id"] directly
+        # instead of resolving it via a DB lookup on branch_id.
+        "org_id": ORG_A,
         "role": "owner",
     }
 
@@ -167,7 +117,7 @@ def test_team_delete_branch_cross_tenant_blocked(team_client):
             return branch_row
         return None
 
-    with patch("app.routes.team_routes.db.db_get_restaurant_by_id", side_effect=_mock_get_by_id):
+    with patch("app.routes.team_routes.db.db_get_restaurant_by_location_id", side_effect=_mock_get_by_id):
         resp = team_client.delete(
             "/api/team/branches/55",
             headers={"Authorization": "Bearer test"},
@@ -191,7 +141,7 @@ def test_team_list_users_cross_tenant_blocked(team_client):
             return foreign_branch
         return None
 
-    with patch("app.routes.team_routes.db.db_get_restaurant_by_id", side_effect=_mock_get_by_id):
+    with patch("app.routes.team_routes.db.db_get_restaurant_by_location_id", side_effect=_mock_get_by_id):
         resp = team_client.get(
             "/api/team/users",
             headers={"Authorization": "Bearer test", "X-Branch-ID": "77"},

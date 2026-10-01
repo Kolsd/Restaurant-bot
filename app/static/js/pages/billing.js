@@ -414,10 +414,8 @@
    Mi Plan — Subscription dashboard module
    Endpoints consumed:
      GET  /api/billing/plans           (public plan catalog)
-     GET  /api/billing/plan            (current plan + addons + auto-recharge)
+     GET  /api/billing/plan            (current plan + addons)
      GET  /api/billing/usage           (per-dimension cap status)
-     POST /api/billing/auto-recharge   (body: {enabled, max_packs})
-     POST /api/billing/buy-pack        (manual pack purchase)
 
    Fallback: if these endpoints 404 (not yet in router), section hides
    gracefully. All fetches are lint-allow'd below because the backend
@@ -428,7 +426,7 @@
 
   // ── Dimension display metadata ─────────────────────────────────
   var DIMENSION_META = {
-    conversations: { label: 'Conversaciones WhatsApp', unit: 'conv.' },
+    conversations: { label: 'Conversaciones del bot', unit: 'conv.' },
     audio:         { label: 'Minutos de audio (voz)',  unit: 'min'   },
     storage:       { label: 'Almacenamiento',           unit: 'MB'    },
     staff:         { label: 'Empleados activos',        unit: ''      },
@@ -436,18 +434,17 @@
     marketing:     { label: 'Mensajes marketing/mes',   unit: 'msgs'  },
   };
 
-  // Plan catalog used for the "Cambiar plan" modal.
-  // Prices in COP, formatted with mesioFmt when available.
+  // Plan catalog used for the "Cambiar plan" modal — mirrors
+  // app/services/plans.py and the landing's #precios. Prices per sede.
   var PLAN_CATALOG = [
-    { id: 'pulso',      name: 'Pulso',      price: 149000,  desc: 'Para restaurantes que arrancan. 300 conversaciones/mes, 1 sede.' },
-    { id: 'restaurante',name: 'Restaurante',price: 299000,  desc: 'El plan más popular. 1.000 conversaciones, staff y nómina.' },
-    { id: 'pro',        name: 'Pro',        price: 599000,  desc: 'Multi-sede, analytics avanzados, catálogo visual, 3.000 conversaciones.' },
-    { id: 'cadena',     name: 'Cadena',     price: null,    desc: 'Para grupos con 5+ sedes. Precio a medida. Habla con nosotros.' },
+    { id: 'esencial',    name: 'Esencial',    price: 119000, desc: 'Carta QR y pedidos desde la mesa, cocina, caja y panel de ventas. Hasta 5 usuarios.' },
+    { id: 'restaurante', name: 'Restaurante', price: 249000, desc: 'Todo lo de Esencial + asistente con IA, domicilios y recogida por tu link, usuarios ilimitados.' },
+    { id: 'pro',         name: 'Pro',         price: 349000, desc: 'Todo lo de Restaurante + reservas, inventario por pedido y facturación DIAN (folios aparte).' },
+    { id: 'cadena',      name: 'Cadena',      price: 299000, desc: 'Desde 3 sedes: todo lo de Pro + panel de todas tus sedes y traslados de inventario.' },
   ];
+  var PLAN_NAMES = { esencial: 'Esencial', restaurante: 'Restaurante', pro: 'Pro', cadena: 'Cadena' };
 
   var _currentPlan   = null; // plan id string from backend
-  var _autoRecharge  = false;
-  var _maxPacks      = 5;
   var _planModalTrap = null; // focus trap reference
 
   // ── Helpers ────────────────────────────────────────────────────
@@ -472,17 +469,13 @@
     if (el) el.textContent = text;
   }
 
-  function _formatNextRenewal(periodStartIso) {
-    if (!periodStartIso) return '';
-    try {
-      var start = new Date(periodStartIso);
-      var next  = new Date(start);
-      next.setDate(next.getDate() + 30);
-      var months = ['enero','febrero','marzo','abril','mayo','junio',
-                    'julio','agosto','septiembre','octubre','noviembre','diciembre'];
-      return 'Proximo cobro: ' + next.getDate() + ' de ' + months[next.getMonth()] + ' de ' + next.getFullYear();
-    } catch (e) { return ''; }
+  var MONTHS = ['enero','febrero','marzo','abril','mayo','junio',
+                'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+  function _longDate(d) {
+    return d.getDate() + ' de ' + MONTHS[d.getMonth()] + ' de ' + d.getFullYear();
   }
+
 
   // ── Gauge renderer ─────────────────────────────────────────────
 
@@ -544,13 +537,13 @@
     if (status === 'exceeded') {
       var sub = document.createElement('div');
       sub.className = 'm-gauge-subtext exceeded';
-      sub.textContent = 'Excedido — el bot esta redirigiendo a un humano.';
+      sub.textContent = 'Superaste lo previsto en tu plan. El bot sigue atendiendo con normalidad.';
       el.appendChild(sub);
     } else if (status === 'warn90' || status === 'warn80') {
       var remaining = cap - used;
       var sub2 = document.createElement('div');
       sub2.className = 'm-gauge-subtext';
-      sub2.textContent = 'Te quedan ' + Number(remaining).toLocaleString() + (meta.unit ? ' ' + meta.unit : '') + '. Activa la auto-recarga para evitar interrupciones.';
+      sub2.textContent = 'Te quedan ' + Number(remaining).toLocaleString() + (meta.unit ? ' ' + meta.unit : '') + ' este período.';
       el.appendChild(sub2);
     } else if (status === 'unlimited') {
       var unlimEl = document.createElement('div');
@@ -572,22 +565,40 @@
   // ── Render plan card ───────────────────────────────────────────
 
   function renderPlanCard(planData) {
-    _currentPlan = planData.plan_id || planData.plan || null;
+    _currentPlan = planData.plan_code || null;
+    _setText('plan-name-display', planData.plan_name || PLAN_NAMES[_currentPlan] || 'Plan activo');
 
-    // Plan name
-    var nameMap = { pulso: 'Pulso', restaurante: 'Restaurante', pro: 'Pro', cadena: 'Cadena' };
-    var displayName = nameMap[_currentPlan] || (_currentPlan ? _currentPlan.charAt(0).toUpperCase() + _currentPlan.slice(1) : 'Plan activo');
-    _setText('plan-name-display', displayName);
-
-    // Price
-    var price = planData.price_monthly;
-    var priceEl = document.getElementById('plan-price-display');
-    if (priceEl) {
-      priceEl.textContent = (price != null && price !== 0) ? _fmt(price) + '/mes' : 'Precio a medida';
+    // Price is per sede; the total multiplies by the active sedes.
+    var perSede = planData.monthly_price_cop;
+    var sedes = planData.sedes || 1;
+    var priceTxt = perSede != null ? _fmt(perSede) + ' por sede al mes' : '';
+    if (sedes > 1 && planData.monthly_total_cop != null) {
+      priceTxt += ' · ' + sedes + ' sedes = ' + _fmt(planData.monthly_total_cop) + ' al mes';
     }
+    _setText('plan-price-display', priceTxt);
+    _setText('plan-founder-display', planData.founder
+      ? 'Precio fundador: congelado de por vida mientras mantengas tu suscripción (lista: ' + _fmt(planData.list_price_cop) + ').'
+      : '');
 
-    // Renewal date
-    _setText('plan-renewal-display', _formatNextRenewal(planData.current_period_start));
+    // Subscription state (app/services/plans.billing_status): free days,
+    // paid period, overdue in its grace days, or paused.
+    var status = planData.billing_status;
+    var renewal = '';
+    if (status === 'trial' && planData.comp_until) {
+      renewal = 'Prueba gratis hasta el ' + _longDate(new Date(planData.comp_until)) + '.';
+      if (planData.effective_plan && planData.effective_plan !== _currentPlan) {
+        renewal += ' Mientras tanto tienes todo el plan ' + (PLAN_NAMES[planData.effective_plan] || '') + '.';
+      }
+    } else if (status === 'suspendido') {
+      renewal = 'Tu cuenta está pausada: tus clientes no pueden pedir por QR ni por tu link. ' +
+        'Escríbenos a soporte para activar tu plan.';
+    } else if (status === 'vencido' && planData.pauses_on) {
+      renewal = 'Tu pago está pendiente. Si no lo recibimos, la cuenta se pausa el ' +
+        _longDate(new Date(planData.pauses_on)) + '.';
+    } else if (planData.paid_until) {
+      renewal = 'Pagado hasta el ' + _longDate(new Date(planData.paid_until)) + '.';
+    }
+    _setText('plan-renewal-display', renewal);
 
     // Add-ons
     var addonsEl = document.getElementById('plan-addons-display');
@@ -605,29 +616,6 @@
         });
       }
     }
-
-    // Auto-recharge state
-    var ar = planData.auto_recharge || {};
-    _autoRecharge = !!ar.enabled;
-    _maxPacks     = ar.max_packs || 5;
-    _syncAutoRechargeUI();
-  }
-
-  // ── Auto-recharge UI sync ──────────────────────────────────────
-
-  function _syncAutoRechargeUI() {
-    var toggle = document.getElementById('toggle-autorecharge');
-    if (toggle) {
-      toggle.checked = _autoRecharge;
-      toggle.setAttribute('aria-checked', _autoRecharge ? 'true' : 'false');
-    }
-    var maxInput = document.getElementById('input-max-packs');
-    if (maxInput) maxInput.value = _maxPacks;
-
-    var maxRow   = document.getElementById('autorecharge-maxpacks-row');
-    var warning  = document.getElementById('autorecharge-off-warning');
-    if (maxRow)  maxRow.style.display   = _autoRecharge ? '' : 'none';
-    if (warning) warning.style.display  = _autoRecharge ? 'none' : '';
   }
 
   // ── Render usage gauges ────────────────────────────────────────
@@ -638,7 +626,9 @@
     container.textContent = '';
 
     var dims = usageData.dimensions || {};
-    var order = ['conversations', 'audio', 'storage', 'staff', 'sku', 'marketing'];
+    // Only staff users are a limit the owner has (Esencial: 5). The
+    // conversation allowance is an internal ceiling that alerts Mesio.
+    var order = ['staff'];
 
     order.forEach(function (dim) {
       var d = dims[dim];
@@ -673,7 +663,7 @@
 
         var priceEl2 = document.createElement('div');
         priceEl2.className = 'plan-option-price';
-        priceEl2.textContent = plan.price ? _fmt(plan.price) + '/mes +IVA' : 'Precio a medida';
+        priceEl2.textContent = _fmt(plan.price) + ' por sede al mes';
 
         var descEl = document.createElement('div');
         descEl.className = 'plan-option-desc';
@@ -720,81 +710,6 @@
 
   // ── API calls ──────────────────────────────────────────────────
 
-  async function saveAutoRecharge() {
-    var toggle = document.getElementById('toggle-autorecharge');
-    var maxInput = document.getElementById('input-max-packs');
-    var enabled  = toggle ? toggle.checked : false;
-    var maxPacks = maxInput ? Math.max(1, Math.min(5, parseInt(maxInput.value, 10) || 5)) : 5;
-
-    var btn = document.getElementById('btn-save-autorecharge');
-    if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
-
-    try {
-      var r = await fetch('/api/billing/auto-recharge', { // lint-allow: subscription billing endpoint — wired in billing_subscription.py
-        method: 'POST',
-        headers: mesioHeaders(),
-        body: JSON.stringify({ enabled: enabled, max_packs: maxPacks }),
-      });
-      mesioTrackFetch(r.ok);
-      if (!r.ok) {
-        var err = await r.json().catch(function () { return {}; });
-        throw new Error(err.detail || 'Error al guardar');
-      }
-      _autoRecharge = enabled;
-      _maxPacks     = maxPacks;
-      _syncAutoRechargeUI();
-      mesioToast('Auto-recarga actualizada', 'success');
-    } catch (e) {
-      mesioToast(e.message || 'Error al guardar', 'error');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; }
-    }
-  }
-
-  async function buyPack() {
-    var confirmed = await mesioConfirm(
-      'Comprar 1 pack de 100 conversaciones extra por $50.000 COP (+IVA). Se cobrará a tu método de pago configurado.',
-      { confirmText: 'Comprar', danger: false }
-    );
-    if (!confirmed) return;
-
-    var btn = document.getElementById('btn-buy-pack');
-    if (btn) { btn.disabled = true; btn.textContent = 'Procesando...'; }
-
-    try {
-      // Pago real via Wompi pendiente — backend stub crea pack sin cobrar // lint-allow: subscription billing endpoint — wired in billing_subscription.py
-      var r = await fetch('/api/billing/buy-pack', { // lint-allow: subscription billing endpoint — wired in billing_subscription.py
-        method: 'POST',
-        headers: mesioHeaders(),
-        body: JSON.stringify({}),
-      });
-      mesioTrackFetch(r.ok);
-      if (!r.ok) {
-        var err2 = await r.json().catch(function () { return {}; });
-        throw new Error(err2.detail || 'Error al comprar pack');
-      }
-      var d = await r.json();
-      mesioToast('Pack comprado: +100 conversaciones. Total packs este mes: ' + (d.packs_this_period || '—'), 'success');
-      // Reload usage to reflect new cap
-      await loadUsage();
-      _updatePacksDisplay(d.packs_this_period);
-    } catch (e) {
-      mesioToast(e.message || 'Error al comprar pack', 'error');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Comprar 100 conversaciones extra ($50.000 +IVA)'; }
-    }
-  }
-
-  function _updatePacksDisplay(count) {
-    var el = document.getElementById('packs-count-display');
-    if (!el) return;
-    if (count != null && count > 0) {
-      el.textContent = 'Packs comprados este periodo: ' + count;
-    } else {
-      el.textContent = '';
-    }
-  }
-
   // ── Data fetchers ──────────────────────────────────────────────
 
   async function loadPlan() {
@@ -835,9 +750,6 @@
       if (planData) {
         renderPlanCard(planData);
         document.getElementById('plan-current-card').style.display = '';
-        document.getElementById('plan-autorecharge-card').style.display = '';
-        document.getElementById('plan-buypack-card').style.display = '';
-        _updatePacksDisplay(planData.packs_this_period);
       }
 
       if (usageData) {
@@ -865,21 +777,6 @@
     });
   }
 
-  var toggleAR = document.getElementById('toggle-autorecharge');
-  if (toggleAR) {
-    toggleAR.addEventListener('change', function () {
-      _autoRecharge = toggleAR.checked;
-      toggleAR.setAttribute('aria-checked', _autoRecharge ? 'true' : 'false');
-      _syncAutoRechargeUI();
-    });
-  }
-
-  var btnSaveAR = document.getElementById('btn-save-autorecharge');
-  if (btnSaveAR) btnSaveAR.addEventListener('click', saveAutoRecharge);
-
-  var btnBuyPack = document.getElementById('btn-buy-pack');
-  if (btnBuyPack) btnBuyPack.addEventListener('click', buyPack);
-
   // Bootstrap
   loadMyPlan();
 })();
@@ -900,7 +797,7 @@
   var _selectedLocId  = null;   // currently selected kept_location_id
 
   // ── Plan order for "is this a downgrade?" check ────────────────
-  var PLAN_ORDER = ['pulso', 'restaurante', 'pro', 'cadena'];
+  var PLAN_ORDER = ['esencial', 'restaurante', 'pro', 'cadena'];
 
   function _planRank(code) {
     var idx = PLAN_ORDER.indexOf((code || '').toLowerCase());
@@ -926,7 +823,7 @@
       banner.style.display = 'none';
       return;
     }
-    var nameMap = { pulso: 'Pulso', restaurante: 'Restaurante', pro: 'Pro', cadena: 'Cadena' };
+    var nameMap = { esencial: 'Esencial', restaurante: 'Restaurante', pro: 'Pro', cadena: 'Cadena' };
     var planName = nameMap[status.pending_plan] || status.pending_plan;
     var keptName = '';
     if (status.kept_location_id && status.current_sucursales) {
@@ -1001,15 +898,14 @@
       return;
     }
 
-    // Determine how many sucursales the new plan allows
-    var planLocLimits = { pulso: 1, restaurante: 3, pro: 10, cadena: null };
-    var newLimit = planLocLimits[newPlan];
-    var sucursales = status.current_sucursales || [];
+    // Every plan is priced per sede, so no plan limits how many sedes stay.
+    var newLimit = null;
+    var branches = status.current_sucursales || [];
 
-    if (newLimit !== null && sucursales.length > newLimit) {
+    if (newLimit !== null && branches.length > newLimit) {
       // Need to pick which one to keep
       list.textContent = '';
-      sucursales.forEach(function (s) {
+      branches.forEach(function (s) {
         var label = document.createElement('label');
         label.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;';
         var radio = document.createElement('input');
@@ -1029,9 +925,9 @@
       picker.style.display = '';
       btn.disabled = true; // require location selection
     } else {
-      // Single sede or plan allows all current sedes — auto-pick first
+      // Single location or plan allows all current locations — auto-pick first
       picker.style.display = 'none';
-      _selectedLocId = sucursales.length > 0 ? sucursales[0].id : null;
+      _selectedLocId = branches.length > 0 ? branches[0].id : null;
       btn.disabled = !newPlan;
     }
   }

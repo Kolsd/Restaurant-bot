@@ -6,7 +6,7 @@
  *
  * Opt-out: set data-hq-shell="skip" on <body> to prevent injection entirely.
  * Sidebar: enabled by default unless data-hq-sidebar="false" on <body>.
- * Active page: set data-page="analytics" (etc.) on <body> to highlight nav item.
+ * Active page: set data-page="crm" (etc.) on <body> to highlight nav item.
  */
 (function () {
   'use strict';
@@ -31,7 +31,6 @@
   // ── Nav items ─────────────────────────────────────────────────────────────────
   const NAV_ITEMS = [
     { page: 'index',      href: '/internal',            icon: '🏠', label: 'Resumen'     },
-    { page: 'analytics',  href: '/internal/analytics',  icon: '📊', label: 'Analytics'   },
     { page: 'crm',        href: '/internal/crm',        icon: '👥', label: 'CRM'         },
     { page: 'superadmin', href: '/internal/superadmin', icon: '🔧', label: 'Superadmin'  },
     { page: 'costs',      href: '/internal/costs',      icon: '💰', label: 'Costos'      },

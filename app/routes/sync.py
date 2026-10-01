@@ -19,7 +19,7 @@ router = APIRouter()
 
 class SyncOperation(BaseModel):
     id: str                        # Client-generated UUID v4
-    type: str                      # Entity type: 'staff_shift', 'staff', etc.
+    type: str                      # Entity type: 'staff', 'table_order', etc.
     action: str = "upsert"         # Always 'upsert' for offline-first
     data: dict[str, Any]           # The record payload
     client_ts: str | None = None   # ISO-8601 timestamp from the client

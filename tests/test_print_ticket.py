@@ -1,7 +1,7 @@
 """
-Tests para el endpoint GET /api/table-orders/{order_id}/ticket (FASE 3).
-Cubre: agregación de sub-órdenes, datos fiscales opcionales, auth.
-No requiere base de datos ni credenciales reales.
+Tests for the GET /api/table-orders/{order_id}/ticket endpoint (PHASE 3).
+Covers: sub-order aggregation, optional fiscal data, auth.
+Does not require a database or real credentials.
 """
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -26,7 +26,7 @@ def _make_tenant_mock_conn():
 MOCK_USER = {"username": "cajero", "branch_id": 5, "role": "caja"}
 
 def _make_row(order_id, base_id, table_name, items, total, notes="", sub_number=1):
-    """Crea un objeto asyncpg Row-like (dict envuelto en MagicMock)."""
+    """Creates an asyncpg Row-like object (dict wrapped in a MagicMock)."""
     d = {
         "id":            order_id,
         "base_order_id": base_id,
@@ -51,12 +51,12 @@ def _make_row(order_id, base_id, table_name, items, total, notes="", sub_number=
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 1. Endpoint /ticket — agregación de órdenes
+# 1. /ticket endpoint — order aggregation
 # ══════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_ticket_agrega_subordenes():
-    """Múltiples sub-órdenes del mismo base_order_id deben agregarse en un solo ticket."""
+async def test_ticket_aggregates_suborders():
+    """Multiple sub-orders with the same base_order_id must be aggregated into a single ticket."""
     import json
     items1 = json.dumps([{"name": "Pizza", "price": 45000, "quantity": 2}])
     items2 = json.dumps([{"name": "Gaseosa", "price": 5000, "quantity": 3}])
@@ -66,7 +66,7 @@ async def test_ticket_agrega_subordenes():
 
     mock_conn = _make_tenant_mock_conn()
     mock_conn.fetch = AsyncMock(return_value=[row1, row2])
-    mock_conn.fetchrow = AsyncMock(return_value=None)  # sin factura fiscal
+    mock_conn.fetchrow = AsyncMock(return_value=None)  # no fiscal invoice
 
     mock_pool = AsyncMock()
     mock_pool.acquire = MagicMock(return_value=AsyncMock(
@@ -92,8 +92,8 @@ async def test_ticket_agrega_subordenes():
 
 
 @pytest.mark.asyncio
-async def test_ticket_orden_simple():
-    """Una sola orden (sin sub-órdenes) devuelve sus datos correctamente."""
+async def test_ticket_simple_order():
+    """A single order (no sub-orders) returns its data correctly."""
     import json
     items = json.dumps([{"name": "Bandeja Paisa", "price": 28000, "quantity": 1}])
     row   = _make_row("ORD-XYZ", None, "Mesa 2", items, 28000, notes="Sin picante")
@@ -124,8 +124,8 @@ async def test_ticket_orden_simple():
 
 
 @pytest.mark.asyncio
-async def test_ticket_orden_no_encontrada_retorna_404():
-    """Si no hay órdenes con ese ID debe levantar HTTPException 404."""
+async def test_ticket_order_not_found_returns_404():
+    """If there are no orders with that ID it must raise HTTPException 404."""
     from fastapi import HTTPException
 
     mock_conn = _make_tenant_mock_conn()
@@ -152,12 +152,12 @@ async def test_ticket_orden_no_encontrada_retorna_404():
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 2. Datos fiscales incluidos si existen
+# 2. Fiscal data included if it exists
 # ══════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_ticket_incluye_fiscal_si_existe():
-    """Si hay una factura emitida, el ticket debe incluir cufe, qr_data y dian_status."""
+async def test_ticket_includes_fiscal_if_exists():
+    """If an invoice has been issued, the ticket must include cufe, qr_data and dian_status."""
     import json
     items = json.dumps([{"name": "Ceviche", "price": 32000, "quantity": 1}])
     row   = _make_row("ORDER-FISCAL", None, "Mesa 7", items, 32000)
@@ -204,11 +204,11 @@ async def test_ticket_incluye_fiscal_si_existe():
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 3. Auth vía TestClient
+# 3. Auth via TestClient
 # ══════════════════════════════════════════════════════════════════════
 
-def test_ticket_sin_auth_retorna_401(client, monkeypatch):
-    """Sin Bearer token válido el endpoint debe retornar 401."""
+def test_ticket_without_auth_returns_401(client, monkeypatch):
+    """Without a valid Bearer token the endpoint must return 401."""
     from fastapi import HTTPException
 
     async def fake_verify_token(token: str):
@@ -217,6 +217,6 @@ def test_ticket_sin_auth_retorna_401(client, monkeypatch):
         return token
 
     monkeypatch.setattr("app.routes.deps.verify_token", fake_verify_token)
-    # Llamada sin header Authorization → token vacío → 401
+    # Call without an Authorization header → empty token → 401
     response = client.get("/api/table-orders/cualquier-id/ticket")
     assert response.status_code == 401

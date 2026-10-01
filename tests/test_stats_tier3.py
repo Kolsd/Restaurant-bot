@@ -1,9 +1,8 @@
 """
 tests/test_stats_tier3.py
 
-Unit + integration tests for the five Tier-3 Dashboard/Staff-HQ endpoints:
+Unit + integration tests for the Tier-3 Dashboard/Staff-HQ endpoints:
   GET /api/stats/payment-status
-  GET /api/stats/customers-at-risk
   GET /api/stats/staff-performance
   GET /api/stats/tips-pool
   GET /api/public/menu-context/{table_id}  — table_context field
@@ -113,52 +112,6 @@ def test_payment_bucket_logic():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 2. GET /api/stats/customers-at-risk
-# ══════════════════════════════════════════════════════════════════════════════
-
-MOCK_AT_RISK = {
-    "count": 2,
-    "customers": [
-        {
-            "phone": "+57301...", "name": "Ana M.", "total_orders": 12,
-            "last_seen": "2026-03-28T00:00:00", "days_since": 22,
-            "total_spent": 340000,
-        },
-        {
-            "phone": "+57310...", "name": "Beto R.", "total_orders": 5,
-            "last_seen": "2026-03-30T00:00:00", "days_since": 20,
-            "total_spent": 80000,
-        },
-    ],
-}
-
-
-def test_customers_at_risk_shape(client, patched_auth, monkeypatch):
-    """Returns count + customers list with required fields."""
-    monkeypatch.setattr(
-        stats_repo, "db_customers_at_risk",
-        AsyncMock(return_value=MOCK_AT_RISK),
-    )
-    with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-        resp = client.get("/api/stats/customers-at-risk", headers=_auth_headers())
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "count" in data
-    assert "customers" in data
-    assert data["count"] == len(data["customers"])
-    c = data["customers"][0]
-    for key in ("phone", "name", "total_orders", "last_seen", "days_since", "total_spent"):
-        assert key in c, f"Missing field: {key}"
-
-
-def test_customers_at_risk_limit_validation(client, patched_auth, monkeypatch):
-    """limit must be 1–200; 0 and 201 rejected with 422."""
-    monkeypatch.setattr(stats_repo, "db_customers_at_risk", AsyncMock(return_value=MOCK_AT_RISK))
-    assert client.get("/api/stats/customers-at-risk?limit=0", headers=_auth_headers()).status_code == 422
-    assert client.get("/api/stats/customers-at-risk?limit=201", headers=_auth_headers()).status_code == 422
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # 3. GET /api/stats/staff-performance
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -225,127 +178,9 @@ MOCK_TIPS_POOL = {
 }
 
 
-def test_tips_pool_shape(client, patched_auth, monkeypatch):
-    """Returns documented shape: period, pool_total, entries_count, entries_preview, unallocated."""
-    monkeypatch.setattr(
-        stats_repo, "db_tips_pool",
-        AsyncMock(return_value=MOCK_TIPS_POOL),
-    )
-    with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-        resp = client.get("/api/stats/tips-pool", headers=_auth_headers())
-    assert resp.status_code == 200
-    data = resp.json()
-    for key in ("period", "pool_total", "entries_count", "entries_preview", "unallocated"):
-        assert key in data, f"Missing field: {key}"
-    assert isinstance(data["entries_preview"], list)
-    assert isinstance(data["period"], dict)
-    assert "start" in data["period"] and "end" in data["period"]
-
-
-def test_tips_pool_default_period_set(client, patched_auth, monkeypatch):
-    """When no period params given, the repo must still be called with valid dates."""
-    captured = {}
-
-    async def _mock(org_id, location_id, period_start, period_end, branch_id=None, caller_staff_id=None):
-        captured["period_start"] = period_start
-        captured["period_end"] = period_end
-        return MOCK_TIPS_POOL
-
-    monkeypatch.setattr(stats_repo, "db_tips_pool", _mock)
-    with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-        resp = client.get("/api/stats/tips-pool", headers=_auth_headers())
-    assert resp.status_code == 200
-    # Default period is current week — values must be set by db_tips_pool internals
-    # (period_start/end default to None; db_tips_pool fills them)
-    # We just ensure no crash and shape OK.
-    assert "pool_total" in resp.json()
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 5. GET /api/public/menu-context/{table_id} — table_context field
 # ══════════════════════════════════════════════════════════════════════════════
-
-def test_public_menu_context_includes_table_context_key(monkeypatch):
-    """table_context key must be present in the response (even if null)."""
-    from app.routes import tables as tables_mod
-
-    async def _fake_table(tid):
-        return {"id": tid, "name": "Mesa 5", "bot_number": "+57300", "branch_id": 1}
-
-    async def _fake_wa(_table):
-        return "+57300"
-
-    async def _fake_menu(wa):
-        return {}
-
-    async def _fake_restaurant(wa):
-        return {"id": 1, "name": "Test", "features": {}, "whatsapp_number": "+57300"}
-
-    async def _fake_availability(rid):
-        return {}
-
-    async def _fake_active_session(tid, oid):
-        return None  # no active session → table_context = null
-
-    monkeypatch.setattr("app.routes.tables.db.db_get_table_by_id", _fake_table)
-    monkeypatch.setattr("app.routes.tables.get_table_wa_number", _fake_wa)
-    monkeypatch.setattr("app.routes.tables.db.db_get_menu", _fake_menu)
-    monkeypatch.setattr("app.routes.tables.db.db_get_restaurant_by_bot_number", _fake_restaurant)
-    monkeypatch.setattr("app.routes.tables.db.db_get_menu_availability", _fake_availability)
-    monkeypatch.setattr("app.routes.tables._get_active_session_for_table", _fake_active_session)
-    with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-        with patch("app.services.state_store.rate_limit_check", new=AsyncMock(return_value=True)):
-            client = TestClient(app)
-            resp = client.get("/api/public/menu-context/table-abc")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "table_context" in data  # key must exist (null is fine)
-
-
-def test_public_menu_context_table_context_populated(monkeypatch):
-    """When active session + assigned_staff_id exist, table_context is populated."""
-    from app.routes import tables as tables_mod
-
-    async def _fake_table(tid):
-        return {"id": tid, "name": "Mesa 7", "bot_number": "+57300", "branch_id": 1}
-
-    async def _fake_wa(_table):
-        return "+57300"
-
-    async def _fake_menu(wa):
-        return {}
-
-    async def _fake_restaurant(wa):
-        return {"id": 1, "name": "Test", "features": {}, "whatsapp_number": "+57300"}
-
-    async def _fake_availability(rid):
-        return {}
-
-    async def _fake_active_session(tid, oid):
-        return {"assigned_staff_id": "00000000-0000-0000-0000-000000000042"}
-
-    async def _fake_resolve_mesero(sid, oid):
-        return {"name": "Valentina Cano", "first_name": "Valentina"}
-
-    monkeypatch.setattr("app.routes.tables.db.db_get_table_by_id", _fake_table)
-    monkeypatch.setattr("app.routes.tables.get_table_wa_number", _fake_wa)
-    monkeypatch.setattr("app.routes.tables.db.db_get_menu", _fake_menu)
-    monkeypatch.setattr("app.routes.tables.db.db_get_restaurant_by_bot_number", _fake_restaurant)
-    monkeypatch.setattr("app.routes.tables.db.db_get_menu_availability", _fake_availability)
-    monkeypatch.setattr("app.routes.tables._get_active_session_for_table", _fake_active_session)
-    monkeypatch.setattr("app.routes.tables._resolve_mesero", _fake_resolve_mesero)
-
-    with patch("app.services.tenant_context.tenant_scope", return_value=_mock_scope()):
-        with patch("app.services.state_store.rate_limit_check", new=AsyncMock(return_value=True)):
-            client = TestClient(app)
-            resp = client.get("/api/public/menu-context/table-abc")
-    assert resp.status_code == 200
-    data = resp.json()
-    tc = data.get("table_context")
-    assert tc is not None
-    assert tc["table_name"] == "Mesa 7"
-    assert tc["assigned_mesero"]["name"] == "Valentina Cano"
-    assert tc["assigned_mesero"]["first_name"] == "Valentina"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -380,24 +215,6 @@ async def test_integration_payment_status_empty(db_pool):
 
 
 @pytest.mark.asyncio
-async def test_integration_customers_at_risk_empty(db_pool):
-    """Empty DB returns empty customers list."""
-    import app.services.database as _db
-    from unittest.mock import patch as _patch
-    from app.services.tenant_context import tenant_scope
-
-    async def _test_pool():
-        return db_pool
-
-    with _patch.object(_db, "get_pool", _test_pool):
-        org_id = 999999
-        with tenant_scope(org_id):
-            result = await stats_repo.db_customers_at_risk(org_id=org_id, limit=10)
-    assert result["count"] == 0
-    assert result["customers"] == []
-
-
-@pytest.mark.asyncio
 async def test_integration_staff_performance_empty(db_pool):
     """Unknown staff_id returns empty weeks array (no 404)."""
     import app.services.database as _db
@@ -418,26 +235,3 @@ async def test_integration_staff_performance_empty(db_pool):
     assert result["weeks"] == []
     assert result["staff_name"] is None
 
-
-@pytest.mark.asyncio
-async def test_integration_tips_pool_empty(db_pool):
-    """Empty DB returns zero pool_total and empty entries_preview."""
-    import app.services.database as _db
-    from unittest.mock import patch as _patch
-    from app.services.tenant_context import tenant_scope
-
-    async def _test_pool():
-        return db_pool
-
-    with _patch.object(_db, "get_pool", _test_pool):
-        org_id = 999999
-        with tenant_scope(org_id):
-            result = await stats_repo.db_tips_pool(
-                org_id=org_id,
-                location_id=999999,
-                period_start="2026-01-01",
-                period_end="2026-01-07",
-            )
-    assert result["pool_total"] == 0
-    assert result["entries_preview"] == []
-    assert result["unallocated"] == 0

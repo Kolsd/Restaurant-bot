@@ -3,20 +3,17 @@ Settings routes: restaurant settings (GET/POST) and all /api/dashboard/* data en
 Also includes the order-status update and table-session helpers that power the dashboard UI.
 """
 import json
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Request, HTTPException, Depends
-from anthropic import Anthropic
 
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_user, get_current_restaurant
+from app.routes.deps import (
+    require_auth, get_current_user, get_current_restaurant,
+    may_span_locations, resolve_sede_filter,
+)
 from app.repositories import restaurant_repo, tables_repo as tr
-from app.repositories import weekly_reports_repo
-from app.repositories.staff_repo import db_has_staff
 from app.services.tenant_context import bypass_tenant_scope, tenant_scope
-from app.repositories.restaurant_repo import db_has_orders_by_bot_number
 from app.services.logging import get_logger
 from app.services import state_store
 from pydantic import BaseModel
@@ -67,7 +64,6 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
     return {
         "restaurant_id":       restaurant["id"],
         "name":                restaurant.get("name", ""),
-        "whatsapp_number":     restaurant.get("whatsapp_number", ""),
         "address":             restaurant.get("address", ""),
         # Fields persisted in features JSONB (no dedicated column)
         "nit":                 features.get("nit", ""),
@@ -92,8 +88,6 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
         # Catálogo visual v2 — Fase 1
         "bot_visual_menu":     features.get("bot_visual_menu", False),
         "catalog_v2_enabled":  features.get("catalog_v2_enabled", True),
-        # Voice notes transcription — opt-in, default OFF
-        "bot_voice_notes":     features.get("bot_voice_notes", False),
         # DIAN electronic invoicing — opt-in, default OFF (requires folio purchase ~$400K COP)
         "dian_enabled":        features.get("dian_enabled", False),
         # Wompi config (sensitive: secret never returned plaintext)
@@ -103,37 +97,24 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
 
 @router.get("/api/settings")
 async def get_settings(request: Request):
-    user = await get_current_user(request)
-    branch_id = user.get("branch_id")
-    branch_header = request.headers.get("X-Branch-ID")
-
-    if branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
-        branch_id = int(branch_header)
-
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
-    if not restaurant:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
+    # P0 fix (2026-09): get_current_restaurant resolves ONLY through the
+    # explicit users.org_id / users.location_id columns (+ a verified
+    # X-Branch-ID override) — replaces the old ambiguous branch_id guess,
+    # which also had NO ownership check on the X-Branch-ID header value.
+    restaurant = await get_current_restaurant(request)
     features = _parse_features(restaurant)
     return _build_settings_response(restaurant, features)
 
 
 @router.post("/api/settings")
 async def save_settings(request: Request):
-    user = await get_current_user(request)
-
-    branch_id = user.get("branch_id")
     branch_header = request.headers.get("X-Branch-ID")
 
     if branch_header == "all":
         raise HTTPException(status_code=400, detail="No puedes editar configuración en modo 'Todas las sucursales'. Selecciona una específica.")
 
-    if branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
-        branch_id = int(branch_header)
-
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
-    if not restaurant:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    # P0 fix (2026-09): see get_settings above.
+    restaurant = await get_current_restaurant(request)
 
     body = await request.json()
 
@@ -153,8 +134,6 @@ async def save_settings(request: Request):
         "timezone", "currency", "locale",
         # Catálogo visual v2 — Fase 1
         "bot_visual_menu", "catalog_v2_enabled",
-        # Voice notes transcription — opt-in, default OFF
-        "bot_voice_notes",
         # DIAN electronic invoicing — opt-in, default OFF
         "dian_enabled",
         # Extended info — no dedicated DB column; live in features JSONB
@@ -231,8 +210,9 @@ async def save_settings(request: Request):
         if _location_updates:
             await restaurant_repo.db_update_location(restaurant["id"], **_location_updates)
 
-    # Re-fetch to return authoritative state
-    updated = await db.db_get_restaurant_by_id(restaurant["id"])
+    # Re-fetch to return authoritative state. restaurant["id"] is already
+    # normalized to org_id by get_current_restaurant.
+    updated = await db.db_get_restaurant_by_org_id(restaurant["id"])
     if not updated:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
     final_features = _parse_features(updated)
@@ -266,15 +246,10 @@ async def pause_restaurant(body: _PauseBody, request: Request):
             detail="Solo owner o admin pueden pausar/reanudar el restaurante",
         )
 
-    branch_id = user.get("branch_id")
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and role in ("owner", "admin"):
-        branch_id = int(branch_header)
-
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
-    if not restaurant:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
+    # P0 fix (2026-09): resolve via get_current_restaurant (explicit org_id /
+    # location_id + verified X-Branch-ID override) instead of the ambiguous
+    # branch_id guess.
+    restaurant = await get_current_restaurant(request)
     restaurant_id = restaurant["id"]
 
     if body.paused:
@@ -301,8 +276,8 @@ async def pause_restaurant(body: _PauseBody, request: Request):
         paused_by=user.get("username"),
     )
 
-    # Re-fetch to return authoritative state
-    updated = await db.db_get_restaurant_by_id(restaurant_id)
+    # Re-fetch to return authoritative state (restaurant_id is org_id here)
+    updated = await db.db_get_restaurant_by_org_id(restaurant_id)
     features = _parse_features(updated or {})
 
     return {
@@ -436,254 +411,7 @@ async def unblock_phone(phone: str, request: Request):
     return {"success": True, "phone": phone_clean}
 
 
-# ── WEEKLY REPORTS ────────────────────────────────────────────────────
-
-_PHONE_RE = re.compile(r"^\+?\d{10,15}$")
-
-
-class WeeklyReportSettings(BaseModel):
-    enabled: bool | None = None
-    owner_phone: str | None = None
-    timezone: str | None = None
-
-
-@router.get("/api/weekly-reports")
-async def get_weekly_reports(
-    restaurant: dict = Depends(get_current_restaurant),
-):
-    """Return the last 12 weekly reports and current settings for the authenticated restaurant."""
-    restaurant_id = restaurant["id"]
-
-    with tenant_scope(restaurant_id):
-        reports_raw = await weekly_reports_repo.get_recent_reports(restaurant_id, limit=12)
-
-    reports = []
-    for r in reports_raw:
-        reports.append({
-            "id": r["id"],
-            "week_start": r["week_start"].isoformat() if hasattr(r.get("week_start"), "isoformat") else str(r.get("week_start", "")),
-            "generated_at": r["generated_at"].isoformat() + "Z" if r.get("generated_at") else None,
-            "sent_at": r["sent_at"].isoformat() + "Z" if r.get("sent_at") else None,
-            "delivery_status": r.get("delivery_status"),
-            "error_message": r.get("error_message"),
-            "payload": r.get("payload"),
-        })
-
-    raw_features = restaurant.get("features") or {}
-    if isinstance(raw_features, str):
-        try:
-            features = json.loads(raw_features)
-        except Exception:
-            features = {}
-    else:
-        features = dict(raw_features)
-
-    settings = {
-        "enabled": features.get("weekly_report_enabled", True),
-        "owner_phone": features.get("owner_phone"),
-        "timezone": features.get("timezone") or "America/Bogota",
-    }
-
-    return {"reports": reports, "settings": settings}
-
-
-@router.patch("/api/weekly-reports/settings")
-async def patch_weekly_report_settings(
-    body: WeeklyReportSettings,
-    restaurant: dict = Depends(get_current_restaurant),
-):
-    """Update weekly report settings (enabled flag, owner_phone, timezone)."""
-    restaurant_id = restaurant["id"]
-
-    with tenant_scope(restaurant_id):
-        # ── Validate owner_phone ──────────────────────────────────────────
-        if body.owner_phone is not None:
-            phone = body.owner_phone.strip()
-            if phone == "":
-                # Empty string clears the phone
-                phone = None
-            else:
-                # Normalize: leading "00" → "+"
-                if phone.startswith("00"):
-                    phone = "+" + phone[2:]
-                if not _PHONE_RE.match(phone):
-                    raise HTTPException(
-                        status_code=422,
-                        detail="owner_phone debe seguir el formato E.164 (ej. +573001234567, 10–15 dígitos)",
-                    )
-            await restaurant_repo.db_update_restaurant_owner_phone(restaurant_id, phone)
-            log.info("weekly_reports.settings.phone_updated", restaurant_id=restaurant_id)
-
-        # ── Validate timezone ─────────────────────────────────────────────
-        if body.timezone is not None:
-            tz_str = body.timezone.strip()
-            if tz_str == "":
-                raise HTTPException(
-                    status_code=422,
-                    detail="timezone no puede ser vacío. Usa un nombre IANA válido (ej. America/Bogota)",
-                )
-            try:
-                ZoneInfo(tz_str)
-            except ZoneInfoNotFoundError:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"timezone inválido: '{tz_str}'. Usa un nombre IANA válido (ej. America/Bogota, America/New_York)",
-                )
-            await restaurant_repo.db_update_restaurant_timezone(restaurant_id, tz_str)
-            log.info("weekly_reports.settings.timezone_updated", restaurant_id=restaurant_id, timezone=tz_str)
-
-        # ── Update enabled flag in features JSONB ────────────────────────
-        if body.enabled is not None:
-            await restaurant_repo.db_merge_restaurant_features(
-                restaurant_id, {"weekly_report_enabled": body.enabled}
-            )
-            log.info(
-                "weekly_reports.settings.enabled_updated",
-                restaurant_id=restaurant_id,
-                enabled=body.enabled,
-            )
-
-    # ── Re-fetch to return authoritative state ────────────────────────
-    updated = await db.db_get_restaurant_by_id(restaurant_id)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
-    raw_features = updated.get("features") or {}
-    if isinstance(raw_features, str):
-        try:
-            features = json.loads(raw_features)
-        except Exception:
-            features = {}
-    else:
-        features = dict(raw_features)
-
-    return {
-        "enabled": features.get("weekly_report_enabled", True),
-        "owner_phone": updated.get("owner_phone"),
-        "timezone": updated.get("timezone") or "America/Bogota",
-    }
-
-
 # ── ONBOARDING STATUS ────────────────────────────────────────────────
-
-@router.get("/api/onboarding/status")
-async def get_onboarding_status(request: Request):
-    """
-    Returns the onboarding completion status for the currently authenticated restaurant.
-    Each criterion is checked independently; failures default to done=False.
-    Score = number of completed steps × 20 (5 steps × 20 = 100 max).
-    """
-    user = await get_current_user(request)
-    branch_id = user.get("branch_id")
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
-        branch_id = int(branch_header)
-
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
-    if not restaurant:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
-    restaurant_id = restaurant["id"]
-    whatsapp_number = restaurant.get("whatsapp_number") or ""
-
-    raw_features = restaurant.get("features") or {}
-    if isinstance(raw_features, str):
-        try:
-            features = json.loads(raw_features)
-        except Exception:
-            features = {}
-    else:
-        features = dict(raw_features)
-
-    # ── 1. has_menu ───────────────────────────────────────────────────
-    has_menu = False
-    try:
-        raw_menu = restaurant.get("menu")
-        if raw_menu:
-            if isinstance(raw_menu, str):
-                menu = json.loads(raw_menu)
-            else:
-                menu = raw_menu
-            if isinstance(menu, dict):
-                has_menu = any(
-                    isinstance(v, list) and len(v) > 0
-                    for v in menu.values()
-                )
-            elif isinstance(menu, list):
-                has_menu = len(menu) > 0
-    except Exception as exc:
-        log.warning("onboarding.menu_check_failed", error=str(exc))
-
-    # If the restaurant dict doesn't carry menu directly, fall back to db_get_menu
-    if not has_menu and whatsapp_number:
-        try:
-            menu = await db.db_get_menu(whatsapp_number) or {}
-            if isinstance(menu, dict):
-                has_menu = any(
-                    isinstance(v, list) and len(v) > 0
-                    for v in menu.values()
-                )
-            elif isinstance(menu, list):
-                has_menu = len(menu) > 0
-        except Exception as exc:
-            log.warning("onboarding.menu_fallback_check_failed", error=str(exc))
-
-    # ── 2. has_staff ──────────────────────────────────────────────────
-    has_staff = False
-    try:
-        with bypass_tenant_scope("onboarding_has_staff"):
-            has_staff = await db_has_staff(restaurant_id)
-    except Exception as exc:
-        log.warning("onboarding.staff_check_failed", error=str(exc))
-
-    # ── 3. has_billing ────────────────────────────────────────────────
-    has_billing = bool(
-        features.get("billing_provider")
-        or features.get("alegra_email")
-        or features.get("billing_enabled")
-    )
-
-    # ── 4. has_whatsapp ───────────────────────────────────────────────
-    has_whatsapp = bool(whatsapp_number.strip())
-
-    # ── 5. has_first_order ───────────────────────────────────────────
-    has_first_order = False
-    if whatsapp_number:
-        try:
-            has_first_order = await db_has_orders_by_bot_number(whatsapp_number)
-        except Exception as exc:
-            log.warning("onboarding.first_order_check_failed", error=str(exc))
-
-    steps = {
-        "menu": {
-            "done": has_menu,
-            "label": "Carta del restaurante",
-            "description": "Sube tu menú para que los clientes puedan pedir por WhatsApp",
-        },
-        "staff": {
-            "done": has_staff,
-            "label": "Equipo operativo",
-            "description": "Agrega al menos un empleado para gestionar turnos y nómina",
-        },
-        "billing": {
-            "done": has_billing,
-            "label": "Facturación electrónica",
-            "description": "Configura tu proveedor de facturación DIAN",
-        },
-        "whatsapp": {
-            "done": has_whatsapp,
-            "label": "WhatsApp conectado",
-            "description": "Conecta tu número de WhatsApp Business",
-        },
-        "first_order": {
-            "done": has_first_order,
-            "label": "Primer pedido",
-            "description": "Recibe tu primer pedido a través del bot",
-        },
-    }
-
-    score = sum(20 for s in steps.values() if s["done"])
-    return {"score": score, "steps": steps}
 
 
 # ── SHARED FILTER HELPER ─────────────────────────────────────────────
@@ -695,36 +423,47 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
 
     role = user.get("role", "")
     branch_header = request.headers.get("X-Branch-ID")
+    user_org_id = user.get("org_id")
 
     # For owner/admin: respect X-Branch-ID. If they didn't explicitly pick a
     # sede (no header, 'matriz', 'all'), show all sedes of the org. The old
     # fallback to user.branch_id assumed branch_id == location_id, which broke
     # post-Wave-2 (user.branch_id is the org_id, not a location_id, so
     # filtering downstream by location_id matched nothing).
-    if role in ("owner", "admin"):
+    #
+    # P0 fix (2026-09): X-Branch-ID is always a location_id and MUST be
+    # verified to belong to the caller's own org before use — it previously
+    # had no ownership check at all, so any owner/admin could pass another
+    # tenant's location id and read that tenant's dashboard data.
+    # `role` is a comma-joined string, so `role in ("owner", "admin")` only
+    # matched an account with exactly ONE role — an "owner,admin" user fell
+    # into the staff branch. may_span_locations() splits it properly.
+    if may_span_locations(user):
         if branch_header == "all":
             branch_id = "all"
         elif branch_header and branch_header.isdigit():
-            branch_id = int(branch_header)
+            candidate = int(branch_header)
+            candidate_rest = await db.db_get_restaurant_by_location_id(candidate)
+            if not candidate_rest or candidate_rest.get("org_id") != user_org_id:
+                raise HTTPException(status_code=403, detail="Sucursal no pertenece a tu organización")
+            branch_id = candidate
         else:
-            # Default for owners/admins: cross-sede view ('all'). bot_number
-            # filter (resolved below) provides tenant scoping.
+            # Default for owners/admins: cross-sede view ('all'). The org_id
+            # filter provides tenant scoping.
             branch_id = "all"
     else:
-        # gerente / staff: use "all" so that bot_number does the tenant scoping.
-        # user["branch_id"] stores org_id (not location_id) for staff users —
-        # passing it as location_id filter would return 0 rows post-Wave-2.
-        branch_id = "all"
+        # gerente / staff: their OWN sede. This used to be "all" — every
+        # employee of a multi-sede org read the whole business's dashboard
+        # numbers, which is exactly what PM 2026-09-20 closed. The old
+        # comment blamed `user["org_id"]` being the wrong id kind; the fix is
+        # to use `location_id`, the id kind that actually means "sede".
+        branch_id = resolve_sede_filter(request, user)
 
-    bot_number = None
-    if branch_id and branch_id != "all":
-        r = await db.db_get_restaurant_by_id(branch_id)
-        if r:
-            bot_number = r.get("whatsapp_number")
-    elif branch_id == "all":
-        r = await db.db_get_restaurant_by_id(user.get("branch_id"))
-        if r:
-            bot_number = r.get("whatsapp_number")
+    if not user_org_id:
+        # The dashboard reads run under bypass and filter by org_id — without
+        # one they would read every tenant.
+        raise HTTPException(status_code=403, detail="Sin organización")
+    org_id = int(user_org_id)
 
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     now_local = now_utc - timedelta(minutes=tz_offset)
@@ -748,19 +487,19 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
     start_date = start_local + timedelta(minutes=tz_offset)
     end_date = end_local + timedelta(minutes=tz_offset)
 
-    return branch_id, bot_number, start_date, end_date
+    return branch_id, org_id, start_date, end_date
 
 
 # ── DASHBOARD DATA ENDPOINTS ─────────────────────────────────────────
 
 @router.get("/api/dashboard/orders")
 async def get_dashboard_orders(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
-    branch_id, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
+    branch_id, org_id, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
 
     orders = []
     try:
         rows_wa, rows_mesa = await restaurant_repo.db_get_dashboard_orders(
-            start_date, end_date, branch_id, bot_number
+            start_date, end_date, branch_id, org_id
         )
         for r in rows_wa:
             orders.append({
@@ -841,13 +580,9 @@ async def update_order_status(order_id: str, request: Request):
     if not order:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
+    # P0 fix (2026-09): use the explicit org_id off the user dict directly.
     order_org_id = order.get("org_id")
-    user_location_id = user.get("branch_id") or user.get("restaurant_id")
-    if user_location_id:
-        user_rest = await db.db_get_restaurant_by_id(user_location_id)
-        user_org_id = (user_rest or {}).get("org_id") or user_location_id
-    else:
-        user_org_id = None
+    user_org_id = user.get("org_id") or user.get("restaurant_id")
 
     if order_org_id and user_org_id and int(order_org_id) != int(user_org_id):
         raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
@@ -864,24 +599,11 @@ async def update_order_status(order_id: str, request: Request):
 @router.get("/api/table-sessions/closed")
 async def get_closed_sessions(request: Request, hours: int = 24):
     hours = max(1, min(hours, 720))  # clamp: 1h – 30 days
-    branch_id, bot_number, _, _ = await get_dashboard_filters(request, "today")
+    _, org_id, _, _ = await get_dashboard_filters(request, "today")
 
     try:
-        # db_get_closed_sessions uses tenant_connection() — must be wrapped in tenant_scope.
-        # branch_id may be an int, "all", or None; fall back to bypass when cross-tenant.
-        # Wave-2: branch_id from get_dashboard_filters is a LOCATION_ID (from
-        # user.branch_id or X-Branch-ID header). tenant_scope() requires an
-        # org_id; we resolve it via db_get_restaurant_by_id which normalizes
-        # `id` to org_id regardless of which key was passed in.
-        if isinstance(branch_id, int):
-            branch_rest = await db.db_get_restaurant_by_id(branch_id)
-            org_id_for_scope = branch_rest["id"] if branch_rest else branch_id
-            with tenant_scope(org_id_for_scope):
-                rows = await tr.db_get_closed_sessions(hours, bot_number)
-        else:
-            from app.services.tenant_context import bypass_tenant_scope as _bypass
-            with _bypass("get_closed_sessions: cross-tenant dashboard view"):
-                rows = await tr.db_get_closed_sessions(hours, bot_number)
+        with tenant_scope(org_id):
+            rows = await tr.db_get_closed_sessions(hours, org_id)
     except Exception as e:
         log.warning("dashboard.table_sessions_query_failed", error=str(e))
         rows = []
@@ -898,11 +620,11 @@ async def get_closed_sessions(request: Request, hours: int = 24):
 
 @router.get("/api/dashboard/reservations")
 async def get_dashboard_reservations(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
-    _, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
+    _, org_id, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
 
     reservations = []
     try:
-        rows = await restaurant_repo.db_get_dashboard_reservations(start_date, end_date, bot_number)
+        rows = await restaurant_repo.db_get_dashboard_reservations(start_date, end_date, org_id)
         for r in rows:
             reservations.append({
                 "id": r["id"], "name": r["name"], "date": str(r["date"]),
@@ -910,19 +632,16 @@ async def get_dashboard_reservations(request: Request, period: str = "today", cu
                 "phone": r["phone"], "notes": r["notes"]
             })
     except Exception:
-        log.exception("dashboard.reservations_load_failed", bot_number=bot_number)
+        log.exception("dashboard.reservations_load_failed", org_id=org_id)
 
     return {"reservations": reservations}
 
 
 @router.get("/api/dashboard/conversations")
 async def get_dashboard_conversations(request: Request):
-    branch_id, bot_number, _, _ = await get_dashboard_filters(request, "today")
+    branch_id, org_id, _, _ = await get_dashboard_filters(request, "today")
 
-    if bot_number:
-        bot_number = bot_number.split("_b")[0]
-
-    rows = await restaurant_repo.db_get_dashboard_conversations(branch_id, bot_number)
+    rows = await restaurant_repo.db_get_dashboard_conversations(branch_id, org_id)
 
     convs = []
     for r in rows:
@@ -952,13 +671,29 @@ async def get_dashboard_conversations(request: Request):
 
 @router.get("/api/dashboard/menu")
 async def get_dashboard_menu(request: Request):
-    _, bot_number, _, _ = await get_dashboard_filters(request, "today")
-    menu = await db.db_get_menu(bot_number) or {}
+    """The organization's BASE carta — what the full carta editor loads.
+
+    Resolved by org_id. It used to identify the restaurant by its WhatsApp
+    number, so any org without one got an empty carta and the editor opened
+    blank with a menu sitting in the database.
+
+    Base and not sede-merged, on purpose: whatever this returns is what the
+    editor saves back through `PUT /api/menu/update`, which writes the base
+    every sede inherits. Returning a sede's overridden prices here would
+    quietly promote them into the base on the next save. A sede's own carta
+    is edited through `/api/menu/sede/*`.
+    """
+    from app.repositories import sede_menu_repo  # noqa: PLC0415
+
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+    with tenant_scope(org_id):
+        menu = await sede_menu_repo.db_get_org_menu(org_id) or {}
     return {"menu": menu}
 
 
-@router.get("/api/dashboard/pedidos-rescatados")
-async def get_pedidos_rescatados(
+@router.get("/api/dashboard/orders-rescued")
+async def get_rescued_orders(
     request: Request,
     period: str = "mtd",
 ):
@@ -982,12 +717,16 @@ async def get_pedidos_rescatados(
 
     Requires: active restaurant Bearer token.
     """
-    from datetime import date, timedelta
-    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    from app.repositories.north_star_repo import db_count_rescued_orders
+    from app.routes.stats import get_tz
     from app.services.tenant_context import tenant_scope
 
     restaurant = await get_current_restaurant(request)
-    today = date.today()
+    # The restaurant's own days: date.today() is the server's (UTC) date.
+    tz = get_tz(restaurant)
+    today = datetime.now(ZoneInfo(tz)).date()
     if period == "mtd":
         period_start = today.replace(day=1)
         period_end   = today
@@ -1007,10 +746,10 @@ async def get_pedidos_rescatados(
     org_id = restaurant["id"]
     try:
         with tenant_scope(org_id):
-            current = await db_count_pedidos_rescatados(period_start, period_end)
-            prev    = await db_count_pedidos_rescatados(prev_start, prev_end)
+            current = await db_count_rescued_orders(period_start, period_end, tz)
+            prev    = await db_count_rescued_orders(prev_start, prev_end, tz)
     except Exception as exc:
-        log.exception("dashboard.pedidos_rescatados_failed", org_id=org_id)
+        log.exception("dashboard.rescued_orders_failed", org_id=org_id)
         raise HTTPException(status_code=500, detail="Error al calcular pedidos rescatados")
 
     delta_pct = None
@@ -1126,56 +865,6 @@ async def session_alert_waiter(
     return {"success": True}
 
 
-# ── AI PROXY ─────────────────────────────────────────────────────────
-
-class _AIProxyRequest(BaseModel):
-    system: str
-    user: str
-    max_tokens: int = 1000
-
-
-_ai_client: Anthropic | None = None
-
-
-def _get_ai_client() -> Anthropic:
-    global _ai_client
-    if _ai_client is None:
-        _ai_client = Anthropic()
-    return _ai_client
-
-
-@router.post("/api/ai/proxy")
-async def ai_proxy(payload: _AIProxyRequest, request: Request, _user: str = Depends(require_auth)):
-    """
-    Proxy autenticado para llamadas al modelo de IA desde el dashboard.
-    El ANTHROPIC_API_KEY vive solo en el servidor — nunca se expone al cliente.
-    Requiere Bearer token de admin válido.
-    Rate limit: 20 req/min por usuario autenticado.
-    """
-    # ── Rate limit: 20 req/min por usuario ───────────────────────────────────────
-    rl_key = f"ai_proxy:{_user}"
-    allowed = await state_store.rate_limit_check(rl_key, max_requests=20, window_seconds=60)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="Demasiadas solicitudes al proxy de IA. Espera un momento e intenta de nuevo.",
-        )
-
-    max_tok = min(max(1, payload.max_tokens), 1000)  # clamp 1–1000 (conservador)
-    try:
-        client = _get_ai_client()
-        resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=max_tok,
-            system=payload.system,
-            messages=[{"role": "user", "content": payload.user}],
-        )
-        text = resp.content[0].text if resp.content else ""
-        return {"text": text}
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"AI service error: {exc}") from exc
-
-
 # ── CATÁLOGO VISUAL v2 — Image endpoints ──────────────────────────────────────
 
 class _ImageSignRequest(BaseModel):
@@ -1192,14 +881,14 @@ async def sign_image_upload(
     restaurant: dict = Depends(get_current_restaurant),
 ):
     """
-    Retorna parámetros firmados para upload directo browser→Cloudinary.
+    Returns signed parameters for a direct browser→Cloudinary upload.
 
-    El browser hace POST multipart a:
+    The browser does a multipart POST to:
         https://api.cloudinary.com/v1_1/{cloud_name}/image/upload
-    usando estos params + el archivo elegido. Nuestro servidor nunca toca los bytes.
+    using these params + the chosen file. Our server never touches the bytes.
 
-    Rate limit: 30 requests/min por restaurante (Redis cross-worker).
-    Auth: Bearer token de admin/owner del restaurante.
+    Rate limit: 30 requests/min per restaurant (Redis cross-worker).
+    Auth: admin/owner Bearer token for the restaurant.
     """
     from app.services import image_host
 
@@ -1208,7 +897,7 @@ async def sign_image_upload(
     _raw_suffix = (body.folder_suffix or "menu").strip() or "menu"
     folder_suffix = _raw_suffix if _raw_suffix in _FOLDER_SUFFIX_ALLOWLIST else "menu"
 
-    # ── Rate limit: 30 uploads/min por restaurante ────────────────────────────
+    # ── Rate limit: 30 uploads/min per restaurant ────────────────────────────
     rl_key = f"menu_image_sign:{restaurant_id}"
     allowed = await state_store.rate_limit_check(
         key=rl_key, max_requests=30, window_seconds=60
@@ -1243,13 +932,13 @@ async def delete_menu_image(
     restaurant: dict = Depends(get_current_restaurant),
 ):
     """
-    Borra una imagen de Cloudinary por public_id.
+    Deletes a Cloudinary image by public_id.
 
-    Valida ownership: el public_id DEBE comenzar con mesio/r_{restaurant_id}/.
-    Si no pertenece al restaurante autenticado → 403.
-    Si Cloudinary falla (imagen ya no existe, etc.) → 200 igual (idempotente).
+    Validates ownership: public_id MUST start with mesio/r_{restaurant_id}/.
+    If it doesn't belong to the authenticated restaurant → 403.
+    If Cloudinary fails (image no longer exists, etc.) → 200 anyway (idempotent).
 
-    Auth: Bearer token de admin/owner del restaurante.
+    Auth: admin/owner Bearer token for the restaurant.
     """
     from app.services import image_host
 
@@ -1259,7 +948,7 @@ async def delete_menu_image(
     if not public_id:
         raise HTTPException(status_code=422, detail="public_id es requerido.")
 
-    # ── Ownership check: verificar antes de intentar borrar ───────────────────
+    # ── Ownership check: verify before attempting to delete ───────────────────
     expected_prefix = f"mesio/r_{restaurant_id}/"
     if not public_id.startswith(expected_prefix):
         log.warning(
@@ -1273,13 +962,13 @@ async def delete_menu_image(
             detail="No puedes borrar esta imagen.",
         )
 
-    # ── Borrar de Cloudinary (idempotente: si ya no existe, igual 200) ────────
+    # ── Delete from Cloudinary (idempotent: 200 even if it no longer exists) ────────
     success = image_host.delete_image(public_id, restaurant_id)
 
     if not success:
-        # delete_image retorna False tanto si ownership falla (ya verificado arriba)
-        # como si Cloudinary falla o la imagen no existe. En ambos casos loguear
-        # y retornar 200 para mantener idempotencia — el recurso ya no existe.
+        # delete_image returns False both when ownership fails (already checked above)
+        # and when Cloudinary fails or the image doesn't exist. In both cases, log
+        # and return 200 to keep idempotency — the resource no longer exists.
         log.warning(
             "menu.image.delete.cloudinary_noop",
             restaurant_id=restaurant_id,
@@ -1324,11 +1013,11 @@ async def get_dishes_missing_photos(
         except Exception:
             raw_menu = {}
 
-    # Fallback: if the dict for some reason doesn't carry the menu, look it
-    # up by whatsapp_number. Mirrors the pattern in dashboard_data().
-    if not raw_menu and restaurant.get("whatsapp_number"):
+    # Fallback: if the dict for some reason doesn't carry the menu, read
+    # the org's base carta.
+    if not raw_menu and restaurant.get("org_id"):
         try:
-            raw_menu = await db.db_get_menu(restaurant["whatsapp_number"]) or {}
+            raw_menu = await db.db_get_menu(int(restaurant["org_id"])) or {}
         except Exception as exc:
             log.warning(
                 "menu.missing_photos.fallback_lookup_failed",
@@ -1363,93 +1052,3 @@ async def get_dishes_missing_photos(
         "missing_count": len(missing),
         "missing":       missing,
     }
-
-
-# ── Catalog v2: menu engineering analytics (Fase 5b) ─────────────────────────
-
-@router.get("/api/menu/analytics")
-async def menu_analytics(
-    days: int = 30,
-    restaurant: dict = Depends(get_current_restaurant),
-):
-    """
-    Return per-dish event counts and menu-engineering quadrant matrix.
-    Auth: admin/owner Bearer token.
-    Query param: days (default 30, max 365).
-    """
-    from app.repositories import menu_analytics_repo
-
-    days = max(1, min(days, 365))
-    restaurant_id = restaurant["id"]
-
-    with tenant_scope(restaurant_id):
-        per_dish = await menu_analytics_repo.get_dish_analytics(restaurant_id, days)
-        matrix   = await menu_analytics_repo.get_menu_engineering_matrix(restaurant_id, days)
-
-    return {"per_dish": per_dish, "matrix": matrix}
-
-
-@router.get("/api/menu/analytics/export")
-async def menu_analytics_export(
-    days: int = 30,
-    restaurant: dict = Depends(get_current_restaurant),
-):
-    """
-    Export menu engineering data as CSV download.
-    Aggregates per_dish stats + quadrant classification from get_menu_engineering_matrix.
-    Auth: admin/owner Bearer token.
-    """
-    import io
-    import csv
-    from fastapi.responses import StreamingResponse
-    from app.repositories import menu_analytics_repo
-
-    days = max(1, min(days, 365))
-    restaurant_id = restaurant["id"]
-
-    with tenant_scope(restaurant_id):
-        per_dish = await menu_analytics_repo.get_dish_analytics(restaurant_id, days)
-        matrix   = await menu_analytics_repo.get_menu_engineering_matrix(restaurant_id, days)
-
-    # Build quadrant lookup: dish_name -> quadrant label
-    quad_lookup: dict[str, str] = {}
-    for q_name, label in (
-        ("stars", "Star"),
-        ("puzzles", "Puzzle"),
-        ("plowhorses", "Plowhorse"),
-        ("dogs", "Dog"),
-    ):
-        for entry in matrix.get(q_name, []) or []:
-            quad_lookup[entry["dish_name"]] = label
-
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow([
-        "Plato",
-        "Vistas",
-        "Apertura modal",
-        "Agregados al carrito",
-        "Pedidos",
-        "Conversión vista→carrito (%)",
-        "Conversión carrito→pedido (%)",
-        "Cuadrante",
-    ])
-    for row in per_dish:
-        writer.writerow([
-            row.get("dish_name", ""),
-            row.get("views", 0),
-            row.get("modal_opens", 0),
-            row.get("add_to_carts", 0),
-            row.get("orders", 0),
-            round((row.get("cart_conversion_rate", 0) or 0) * 100, 2),
-            round((row.get("order_conversion_rate", 0) or 0) * 100, 2),
-            quad_lookup.get(row.get("dish_name", ""), ""),
-        ])
-
-    buf.seek(0)
-    filename = f"menu-engineering-{restaurant_id}-{days}d.csv"
-    return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )

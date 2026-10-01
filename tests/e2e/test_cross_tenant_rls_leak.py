@@ -38,7 +38,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
     seed_restaurant,
     truncate_e2e_data,
@@ -50,10 +50,10 @@ from app.services.tenant_context import bypass_tenant_scope
 log = get_logger(__name__)
 
 
-# ── App fixture (no wa_capture needed — no bot turns) ─────────────────────────
+# ── App fixture (no bot_replies needed — no bot turns) ─────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app_rls(wa_capture):
+async def e2e_app_rls(bot_replies):
     """FastAPI app via ASGI transport without bot turns."""
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
@@ -69,7 +69,7 @@ async def e2e_app_rls(wa_capture):
 
 # ── Helper: seed one delivery order directly in DB ────────────────────────────
 
-async def _seed_delivery_order(pool: asyncpg.Pool, org_id: int, bot_number: str) -> str:
+async def _seed_delivery_order(pool: asyncpg.Pool, org_id: int, location_id: int) -> str:
     """
     Insert a minimal delivery order for the given org directly in DB.
     Uses bypass_tenant_scope so we can write for both orgs from the same function.
@@ -90,7 +90,7 @@ async def _seed_delivery_order(pool: asyncpg.Pool, org_id: int, bot_number: str)
                 INSERT INTO orders (
                     id, phone, items, order_type, address, notes,
                     subtotal, delivery_fee, total, status, paid,
-                    payment_url, bot_number, payment_method,
+                    payment_url, location_id, payment_method,
                     base_order_id, sub_number, org_id, channel,
                     created_at
                 ) VALUES (
@@ -114,12 +114,12 @@ async def _seed_delivery_order(pool: asyncpg.Pool, org_id: int, bot_number: str)
                 status,                # $10 status
                 False,                 # $11 paid
                 "",                    # $12 payment_url
-                bot_number,            # $13 bot_number
+                location_id,           # $13 location_id
                 "Nequi",               # $14 payment_method
                 None,                  # $15 base_order_id
                 1,                     # $16 sub_number
                 org_id,                # $17 org_id  (tenant key)
-                "whatsapp",            # $18 channel
+                "web",                 # $18 channel
                 created_at,            # $19 created_at
             )
     log.info("e2e.rls.order_seeded", order_id=order_id, org_id=org_id, phone=phone)
@@ -133,7 +133,7 @@ async def _seed_delivery_order(pool: asyncpg.Pool, org_id: int, bot_number: str)
 async def test_admin_cannot_see_other_tenant_orders(
     test_pool: asyncpg.Pool,
     e2e_app_rls: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Proves Fase 1 RLS blindaje works end-to-end for delivery orders.
@@ -153,14 +153,14 @@ async def test_admin_cannot_see_other_tenant_orders(
     rest_A = await seed_restaurant(
         pool,
         name="E2E RLS Tenant A",
-        bot_number_raw="+570E2ETENANTA",
+        key="+570E2ETENANTA",
         num_branches=1,
         branch_latlons=[(4.710989, -74.072092)],
     )
     rest_B = await seed_restaurant(
         pool,
         name="E2E RLS Tenant B",
-        bot_number_raw="+570E2ETENANTB",
+        key="+570E2ETENANTB",
         num_branches=1,
         branch_latlons=[(4.609710, -74.081741)],
     )
@@ -171,7 +171,7 @@ async def test_admin_cannot_see_other_tenant_orders(
     # Critical: the two orgs MUST be distinct — otherwise the test proves nothing.
     assert org_id_A != org_id_B, (
         f"seed_restaurant returned the same org_id ({org_id_A}) for both tenants. "
-        f"Check that the bot_number is truly unique per call."
+        f"Check that the key is truly unique per call."
     )
     log.info("e2e.rls.orgs_seeded", org_id_A=org_id_A, org_id_B=org_id_B)
 
@@ -195,8 +195,8 @@ async def test_admin_cannot_see_other_tenant_orders(
         pass
 
     # ── Seed one order per org directly in DB ─────────────────────────────────
-    order_id_A = await _seed_delivery_order(pool, org_id_A, rest_A["whatsapp_number"])
-    order_id_B = await _seed_delivery_order(pool, org_id_B, rest_B["whatsapp_number"])
+    order_id_A = await _seed_delivery_order(pool, org_id_A, rest_A["principal_location_id"])
+    order_id_B = await _seed_delivery_order(pool, org_id_B, rest_B["principal_location_id"])
 
     log.info(
         "e2e.rls.orders_seeded",
@@ -270,12 +270,19 @@ async def test_admin_cannot_see_other_tenant_orders(
         "CRITICAL: tenant isolation broken — org_B reads org_A data."
     )
 
-    # ── Assertion C: admin_A PATCH order_B → non-200 ─────────────────────────
+    # ── Assertion C: admin_A mutates order_B → non-200 ───────────────────────
+    # Was PATCH /api/delivery/orders/{id}/status — that org-wide endpoint was
+    # deleted in chunk 9 (docs/claude/delivery-web.md; WhatsApp delivery/
+    # pickup retired). Its sede-scoped successor is
+    # app/routes/staff_delivery.py, which resolves the caller's own org+sede
+    # (X-Location-ID for an admin) and 404s on any order outside it via
+    # `_require_owned_order` — arguably a stronger tenant-isolation guarantee
+    # than the old ownership check, so we exercise that instead.
+    location_id_A = rest_A["branches"][0]["id"]
     log.info("e2e.rls.cross_tenant_patch_attempt", actor="admin_A", target_order=order_id_B)
-    patch_resp = await client.patch(
-        f"/api/delivery/orders/{order_id_B}/status",
-        json={"status": "confirmado"},
-        headers=headers_A,
+    patch_resp = await client.post(
+        f"/api/staff/delivery/orders/{order_id_B}/en-route",
+        headers={**headers_A, "X-Location-ID": str(location_id_A)},
     )
     log.info(
         "e2e.rls.cross_tenant_patch_result",

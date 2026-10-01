@@ -38,8 +38,8 @@ _QUICK_ACTIONS = [
         "type": "action",
         "title": "Ver MRR",
         "subtitle": "Ingresos recurrentes mensuales",
-        "url": "/internal/analytics#mrr",
-        "keywords": ["mrr", "analytics", "ingresos", "revenue", "facturación", "billing"],
+        "url": "/internal",
+        "keywords": ["mrr", "ingresos", "revenue", "facturación", "billing"],
     },
     {
         "type": "action",
@@ -133,7 +133,7 @@ async def hq_search(
                     o.id,
                     o.name,
                     o.plan_code,
-                    o.whatsapp_number,
+                    o.slug,
                     (
                         SELECT MAX(ord.created_at)
                         FROM orders ord
@@ -141,7 +141,7 @@ async def hq_search(
                         WHERE ord.org_id = o.id
                     ) AS last_order_at
                 FROM organizations o
-                WHERE o.name ILIKE $1 OR o.whatsapp_number LIKE $1
+                WHERE o.name ILIKE $1 OR o.slug ILIKE $1
                 ORDER BY o.name
                 LIMIT 10
                 """,
@@ -156,10 +156,10 @@ async def hq_search(
                     activity = "sin actividad"
 
                 plan = (row["plan_code"] or "sin plan").capitalize()
-                wa = row["whatsapp_number"] or ""
+                slug = row["slug"] or ""
                 subtitle_parts = [plan]
-                if wa:
-                    subtitle_parts.append(wa)
+                if slug:
+                    subtitle_parts.append(f"/pedir/{slug}")
                 subtitle_parts.append(activity)
                 subtitle = " · ".join(subtitle_parts)
 

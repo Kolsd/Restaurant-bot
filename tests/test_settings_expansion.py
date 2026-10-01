@@ -43,7 +43,6 @@ def _make_restaurant(extra_features: dict | None = None) -> dict:
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10 # 5-30",
         "latitude": 4.711,
         "longitude": -74.072,
@@ -56,6 +55,10 @@ def _make_user() -> dict:
         "username": "owner_test",
         "restaurant_name": "El Fogón",
         "branch_id": RESTAURANT_ID,
+        # P0 fix (2026-09): get_current_restaurant resolves ONLY via the
+        # explicit org_id/location_id fields.
+        "org_id": RESTAURANT_ID,
+        "location_id": RESTAURANT_ID,
         "role": "owner",
         "password_hash": "$2b$12$placeholder",
     }
@@ -70,11 +73,32 @@ def _auth_patches(monkeypatch, restaurant: dict | None = None):
     monkeypatch.setattr("app.routes.deps.verify_token",
                         AsyncMock(return_value="owner_test"))
     monkeypatch.setattr(db, "db_get_user", AsyncMock(return_value=_make_user()))
-    monkeypatch.setattr(db, "db_get_restaurant_by_id",
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id",
+                        AsyncMock(return_value=restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id",
                         AsyncMock(return_value=restaurant))
     monkeypatch.setattr(db, "db_check_module",
                         AsyncMock(return_value=False))
     return restaurant
+
+
+def _set_restaurant_sequence(monkeypatch, values: list):
+    """Wire a SHARED AsyncMock (single side_effect iterator) onto BOTH
+    db_get_restaurant_by_org_id and db_get_restaurant_by_location_id.
+
+    P0 fix (2026-09): get_current_restaurant's first lookup goes through
+    db_get_restaurant_by_location_id (the fixtures set location_id ==
+    org_id == RESTAURANT_ID), while settings_routes' explicit re-fetch
+    (to return authoritative state) goes through db_get_restaurant_by_org_id.
+    Sharing ONE mock object across both names preserves the original
+    "first call = pre-update state, second call = post-update state"
+    sequencing regardless of which underlying function each step calls.
+    """
+    from app.services import database as db
+    shared = AsyncMock(side_effect=values)
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id", shared)
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id", shared)
+    return shared
 
 
 # ── GET /api/settings ─────────────────────────────────────────────────────────
@@ -124,7 +148,7 @@ def test_post_settings_saves_name(monkeypatch):
     from app.repositories import restaurant_repo
     from app.services.tenant_context import tenant_scope
 
-    db.db_get_restaurant_by_id = AsyncMock(side_effect=[restaurant, updated])
+    _set_restaurant_sequence(monkeypatch, [restaurant, updated])
     merge_mock = AsyncMock(return_value=updated["features"])
     loc_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
@@ -182,7 +206,7 @@ def test_post_settings_saves_nit_city_cuisine(monkeypatch):
     merged_features.update({"nit": "900000001-5", "city": "Medellín", "cuisine_type": "criolla"})
     updated = _make_restaurant({"nit": "900000001-5", "city": "Medellín", "cuisine_type": "criolla"})
 
-    db.db_get_restaurant_by_id = AsyncMock(side_effect=[restaurant, updated])
+    _set_restaurant_sequence(monkeypatch, [restaurant, updated])
     merge_mock = AsyncMock(return_value=merged_features)
     loc_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
@@ -215,7 +239,7 @@ def test_post_settings_saves_notifications(monkeypatch):
     merged_features["notifications"] = notif
     updated = _make_restaurant({"notifications": notif})
 
-    db.db_get_restaurant_by_id = AsyncMock(side_effect=[restaurant, updated])
+    _set_restaurant_sequence(monkeypatch, [restaurant, updated])
     merge_mock = AsyncMock(return_value=merged_features)
     loc_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
@@ -243,7 +267,7 @@ def test_post_settings_saves_opening_hours(monkeypatch):
     hours = {"lun": {"open": "08:00", "close": "22:00"}, "dom": {"open": "10:00", "close": "20:00"}}
     updated = _make_restaurant()
 
-    db.db_get_restaurant_by_id = AsyncMock(side_effect=[restaurant, updated])
+    _set_restaurant_sequence(monkeypatch, [restaurant, updated])
     merge_mock = AsyncMock(return_value=restaurant["features"])
     loc_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
@@ -274,7 +298,7 @@ def test_post_settings_returns_complete_shape(monkeypatch):
     from app.services import database as db
     from app.repositories import restaurant_repo
 
-    db.db_get_restaurant_by_id = AsyncMock(side_effect=[restaurant, restaurant])
+    _set_restaurant_sequence(monkeypatch, [restaurant, restaurant])
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features",
                         AsyncMock(return_value=restaurant["features"]))
     monkeypatch.setattr(restaurant_repo, "db_update_location", AsyncMock(return_value=None))
@@ -315,7 +339,6 @@ def _pause_auth_patches(monkeypatch, role: str = "owner", features: dict | None 
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10",
         "features": feats,
     }
@@ -323,6 +346,10 @@ def _pause_auth_patches(monkeypatch, role: str = "owner", features: dict | None 
         "username": "owner_test",
         "restaurant_name": "El Fogón",
         "branch_id": RESTAURANT_ID,
+        # P0 fix (2026-09): get_current_restaurant resolves ONLY via the
+        # explicit org_id/location_id fields.
+        "org_id": RESTAURANT_ID,
+        "location_id": RESTAURANT_ID,
         "role": role,
         "password_hash": "$2b$12$placeholder",
     }
@@ -332,7 +359,9 @@ def _pause_auth_patches(monkeypatch, role: str = "owner", features: dict | None 
     monkeypatch.setattr("app.routes.deps.verify_token",
                         AsyncMock(return_value="owner_test"))
     monkeypatch.setattr(db, "db_get_user", AsyncMock(return_value=user))
-    monkeypatch.setattr(db, "db_get_restaurant_by_id",
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id",
+                        AsyncMock(return_value=restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id",
                         AsyncMock(return_value=restaurant))
     monkeypatch.setattr(db, "db_check_module",
                         AsyncMock(return_value=False))
@@ -355,16 +384,11 @@ def test_pause_sets_bot_active_false(monkeypatch):
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10",
         "features": paused_features,
     }
 
-    from app.services import database as db
-    db.db_get_restaurant_by_id = AsyncMock(side_effect=[
-        _pause_auth_patches.__wrapped__(monkeypatch) if hasattr(_pause_auth_patches, "__wrapped__") else paused_restaurant,
-        paused_restaurant,
-    ])
+    _set_restaurant_sequence(monkeypatch, [paused_restaurant, paused_restaurant])
 
     merge_mock = AsyncMock(return_value=paused_features)
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
@@ -394,11 +418,11 @@ def test_unpause_sets_bot_active_true(monkeypatch):
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10",
         "features": active_features,
     }
-    db.db_get_restaurant_by_id = AsyncMock(return_value=active_restaurant)
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value=active_restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id", AsyncMock(return_value=active_restaurant))
 
     merge_mock = AsyncMock(return_value=active_features)
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
@@ -429,11 +453,11 @@ def test_pause_stores_timestamp_and_user(monkeypatch):
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10",
         "features": paused_features,
     }
-    db.db_get_restaurant_by_id = AsyncMock(return_value=paused_restaurant)
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value=paused_restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id", AsyncMock(return_value=paused_restaurant))
 
     merge_mock = AsyncMock(return_value=paused_features)
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
@@ -467,11 +491,11 @@ def test_pause_tenant_isolation(monkeypatch):
         "org_id": RESTAURANT_ID,
         "location_id": RESTAURANT_ID,
         "name": "El Fogón",
-        "whatsapp_number": "573001234567",
         "address": "Calle 10",
         "features": {"bot_active": False, "paused_at": "2026-04-20T12:00:00Z"},
     }
-    db.db_get_restaurant_by_id = AsyncMock(return_value=paused_restaurant)
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value=paused_restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id", AsyncMock(return_value=paused_restaurant))
 
     merge_mock = AsyncMock(return_value=paused_restaurant["features"])
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)

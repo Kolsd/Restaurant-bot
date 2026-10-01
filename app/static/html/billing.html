@@ -30,13 +30,13 @@
         <div class="page-head" style="margin-bottom:0;">
           <div>
             <h1 class="page-title">Mi Plan</h1>
-            <p class="page-sub">Gestiona tu suscripción a Mesio, revisa el consumo del período y configura la recarga automática.</p>
+            <p class="page-sub">Gestiona tu suscripción a Mesio y revisa el consumo del período.</p>
           </div>
         </div>
 
         <div id="mi-plan-loading" class="mi-plan-skeleton" aria-busy="true" aria-label="Cargando plan"></div>
 
-        <!-- A) Plan actual card -->
+        <!-- A) Current plan card -->
         <div class="card mi-plan-card" id="plan-current-card" style="display:none;">
           <div class="card-head">
             <span class="card-title">Plan actual</span>
@@ -48,16 +48,16 @@
                 <div class="plan-name" id="plan-name-display">—</div>
                 <div class="plan-price-row">
                   <span class="plan-price" id="plan-price-display">—</span>
-                  <span class="plan-iva-pill">+IVA</span>
                 </div>
                 <div class="plan-renewal" id="plan-renewal-display" style="margin-top:6px;font-size:13px;color:var(--text-3);"></div>
+                <div id="plan-founder-display" style="margin-top:4px;font-size:13px;color:var(--brand);"></div>
               </div>
               <div class="plan-addons-list" id="plan-addons-display" aria-label="Complementos activos"></div>
             </div>
           </div>
         </div>
 
-        <!-- B) Uso del período -->
+        <!-- B) Period usage -->
         <div class="card" id="plan-usage-section-card" style="display:none;">
           <div class="card-head">
             <span class="card-title">Uso del período actual</span>
@@ -67,60 +67,7 @@
           </div>
         </div>
 
-        <!-- C) Auto-recarga -->
-        <div class="card" id="plan-autorecharge-card" style="display:none;">
-          <div class="card-head">
-            <span class="card-title">Auto-recarga de conversaciones</span>
-          </div>
-          <div class="card-body">
-            <div class="toggle-row" style="margin-bottom:16px;">
-              <div>
-                <div class="toggle-label">Activar auto-recarga</div>
-                <div class="toggle-sub" id="autorecharge-desc">Cuando se agoten las conversaciones del plan, Mesio compra automáticamente packs de 100 conversaciones extra a $50.000 COP cada uno. Cobramos a tu método de pago configurado.</div>
-              </div>
-              <label class="switch" aria-label="Auto-recarga de conversaciones">
-                <input type="checkbox" id="toggle-autorecharge" role="switch" aria-checked="false">
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <!-- Max packs input — shown when toggle is ON -->
-            <div id="autorecharge-maxpacks-row" style="display:none;">
-              <div class="form-group" style="max-width:280px;">
-                <label class="form-label" for="input-max-packs">Máximo de packs por mes (1–5)</label>
-                <input class="form-input" type="number" id="input-max-packs" min="1" max="5" value="5" aria-describedby="maxpacks-hint">
-                <div class="form-hint" id="maxpacks-hint">Esto limita el cobro extra a máximo $250.000 COP por mes.</div>
-              </div>
-            </div>
-
-            <!-- Warning — shown when toggle is OFF -->
-            <div id="autorecharge-off-warning" class="mi-plan-warning" role="status">
-              Sin auto-recarga, cuando llegues al 100% del plan el bot redirigira a un humano hasta el siguiente periodo de cobro.
-            </div>
-
-            <div style="margin-top:16px;">
-              <button class="m-btn m-btn--primary" id="btn-save-autorecharge" type="button">Guardar</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- D) Comprar pack manual -->
-        <div class="card" id="plan-buypack-card" style="display:none;">
-          <div class="card-head">
-            <span class="card-title">Recarga manual</span>
-          </div>
-          <div class="card-body">
-            <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;line-height:1.6;">
-              Compra un pack de 100 conversaciones extra de inmediato, independientemente de la auto-recarga.
-            </p>
-            <div class="plan-packs-count" id="packs-count-display"></div>
-            <button class="m-btn m-btn--secondary" id="btn-buy-pack" type="button">
-              Comprar 100 conversaciones extra ($50.000 +IVA)
-            </button>
-          </div>
-        </div>
-
-        <!-- E) Bajada de plan programada (shown only when a pending downgrade exists) -->
+        <!-- E) Scheduled plan downgrade (shown only when a pending downgrade exists) -->
         <div class="card" id="plan-downgrade-banner" style="display:none;" role="status" aria-live="polite">
           <div class="card-head">
             <span class="card-title" style="color:var(--warning,#e67e22);">Bajada de plan programada</span>
@@ -131,7 +78,7 @@
           </div>
         </div>
 
-        <!-- F) Cambiar plan (bajar) -->
+        <!-- F) Change plan (downgrade) -->
         <div class="card" id="plan-downgrade-card" style="display:none;">
           <div class="card-head">
             <span class="card-title">Cambiar de plan</span>
@@ -148,7 +95,7 @@
               </select>
             </div>
 
-            <!-- Sucursal picker — shown when downgrade would reduce sede count -->
+            <!-- Branch picker — shown when downgrade would reduce location count -->
             <div id="downgrade-location-picker" style="display:none;">
               <p style="font-size:13px;font-weight:600;margin-bottom:8px;">
                 Elige cuál sucursal conservar activa:
@@ -168,13 +115,16 @@
         </div>
       </section>
 
-      <!-- Modal: cambiar plan -->
+      <!-- Modal: change plan -->
       <div class="m-modal-overlay" id="modal-change-plan" role="dialog" aria-modal="true" aria-labelledby="modal-plan-title">
         <div class="m-modal-box">
           <h3 id="modal-plan-title">Cambiar de plan</h3>
           <div id="modal-plans-grid" class="plans-grid" aria-label="Planes disponibles">
             <!-- Rendered by JS -->
           </div>
+          <p style="margin-top:16px;font-size:13px;color:var(--text-2);">
+            Para subir de plan escríbenos a <a href="https://wa.me/573144914554?text=Hola%2C%20quiero%20cambiar%20mi%20plan%20de%20Mesio" target="_blank" rel="noopener noreferrer">soporte por WhatsApp</a> y lo activamos el mismo día. Para bajar de plan usa la sección "Cambiar de plan" de esta página.
+          </p>
           <div style="margin-top:20px;text-align:right;">
             <button class="m-btn m-btn--ghost" id="btn-close-plan-modal" type="button">Cerrar</button>
           </div>
@@ -195,7 +145,7 @@
         <button class="seg-btn" data-tab-target="log">Historial</button>
       </div>
 
-      <!-- ══ TAB: CONFIGURACIÓN ══ -->
+      <!-- ══ TAB: CONFIGURATION ══ -->
       <div id="tab-config" class="tab-section active">
 
         <!-- Status card -->
@@ -318,7 +268,7 @@
 
       </div><!-- /tab-config -->
 
-      <!-- ══ TAB: EMITIR ══ -->
+      <!-- ══ TAB: ISSUE ══ -->
       <div id="tab-emit" class="tab-section">
         <div class="card">
           <div class="card-head">
@@ -326,7 +276,7 @@
           </div>
           <div class="card-body">
             <p class="text-mute" style="font-size:13px;margin-bottom:16px;line-height:1.65;">
-              Ingresa el ID de un pedido (WhatsApp o mesa) para emitirlo manualmente al sistema contable configurado.
+              Ingresa el ID de un pedido (mesa o domicilio) para emitirlo manualmente al sistema contable configurado.
               Útil para pedidos del pasado o para reemitir en caso de error.
             </p>
             <div class="form-grid">

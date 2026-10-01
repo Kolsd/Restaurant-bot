@@ -1,15 +1,13 @@
 """
 Team routes: branch CRUD and user/team management for restaurant owners and admins.
 """
-import time
-import json
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
 from app.services.auth import hash_password
 from app.services import database as db
 from app.repositories import restaurant_repo
-from app.routes.deps import get_current_user
+from app.routes.deps import get_current_user, may_span_locations, resolve_sede_filter
 from app.services.tenant_context import tenant_scope
 from app.services.logging import get_logger
 
@@ -33,9 +31,7 @@ class TeamInviteRequest(BaseModel):
 
 class CreateBranchRequest(BaseModel):
     name: str
-    whatsapp_number: str = ""
     address: str
-    menu: dict = {}
     latitude: float = None
     longitude: float = None
 
@@ -49,84 +45,59 @@ async def list_team_branches(request: Request):
     if "owner" not in roles_list:
         raise HTTPException(status_code=403, detail="Acceso restringido a dueños")
 
-    my_restaurant_id = user.get("branch_id")
-    if not my_restaurant_id:
+    # P0 fix (2026-09): db_get_branches expects an org_id (its docstring is
+    # explicit about this) — the old user["branch_id"] is mixed-kind and,
+    # for any user whose branch_id actually held a location_id, silently
+    # returned zero rows instead of the org's branches.
+    org_id = user.get("org_id")
+    if not org_id:
         return {"branches": []}
 
-    with tenant_scope(my_restaurant_id):
-        branches = await restaurant_repo.db_get_branches(my_restaurant_id)
+    with tenant_scope(int(org_id)):
+        branches = await restaurant_repo.db_get_branches(int(org_id))
     return {"branches": branches}
 
 
 @router.post("/api/team/branches")
 async def create_branch(request: Request, body: CreateBranchRequest):
+    """Add a sede to the owner's organization.
+
+    A sede is a `locations` row of the org: the carta and features are the
+    org's (plus that sede's own overrides, 0093), so nothing is copied.
+    Fixed 2026-09-25: this created a whole new ORGANIZATION through the
+    legacy `db_create_restaurant` (a copy of the menu and features) and then
+    tried to re-parent its sede by a WhatsApp number that sede never had, so
+    the owner never got the sede — and since 0034 it 500'd outright on an
+    ON CONFLICT with no matching unique index.
+    """
     from app.routes.dashboard import geocode_address
     user = await get_current_user(request)
     roles_list = [r.strip() for r in (user.get("role") or "").split(",")]
     if "owner" not in roles_list:
         raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
 
-    my_restaurant_id = user.get("branch_id")
-    if not my_restaurant_id:
-        raise HTTPException(status_code=400, detail="Tu usuario no tiene un branch_id (Matriz) asignado.")
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Tu usuario no tiene una organización asignada.")
+    org_id = int(org_id)
 
-    wa_number = body.whatsapp_number.strip()
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="La sede necesita un nombre.")
 
-    with tenant_scope(my_restaurant_id):
-        matriz_row = await restaurant_repo.db_get_matriz_details(my_restaurant_id)
-    if not matriz_row:
-        raise HTTPException(status_code=404, detail="No se encontró la Casa Matriz.")
-
-    if not wa_number:
-        wa_number = f"{matriz_row['whatsapp_number']}_b{int(time.time())}"
-
-    menu_heredado = matriz_row['menu']
-    if isinstance(menu_heredado, str):
-        try:
-            menu_heredado = json.loads(menu_heredado)
-            if isinstance(menu_heredado, str):
-                menu_heredado = json.loads(menu_heredado)
-        except Exception:
-            menu_heredado = {}
-    elif not menu_heredado:
-        menu_heredado = {}
-
-    features_heredado = matriz_row['features']
-    if isinstance(features_heredado, str):
-        try:
-            features_heredado = json.loads(features_heredado)
-            if isinstance(features_heredado, str):
-                features_heredado = json.loads(features_heredado)
-        except Exception:
-            features_heredado = {}
-    elif not features_heredado:
-        features_heredado = {}
-
-    lat = body.latitude
-    lon = body.longitude
-    display = ""
-
+    lat, lon, display = body.latitude, body.longitude, ""
     if lat is None or lon is None:
         lat, lon, display = await geocode_address(body.address)
 
-    await db.db_create_restaurant(
-        name=body.name,
-        whatsapp_number=wa_number,
-        address=body.address,
-        menu=menu_heredado,
-        latitude=lat,
-        longitude=lon,
-        features=features_heredado
-    )
-
-    await restaurant_repo.db_set_branch_parent(
-        wa_number,
-        my_restaurant_id,
-        matriz_row.get('wa_phone_id', ''),
-        matriz_row.get('wa_access_token', ''),
-    )
-
-    return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
+    with tenant_scope(org_id):
+        location = await restaurant_repo.db_create_location(
+            org_id, name, address=body.address, latitude=lat, longitude=lon,
+        )
+    log.info("team.branch_created", org_id=org_id, location_id=location["id"])
+    return {
+        "success": True, "location_id": location["id"],
+        "latitude": lat, "longitude": lon, "display_name": display,
+    }
 
 
 @router.delete("/api/team/branches/{branch_id}")
@@ -136,18 +107,22 @@ async def delete_branch(branch_id: int, request: Request):
     if "owner" not in roles_list:
         raise HTTPException(status_code=403, detail="Solo el dueño puede eliminar sucursales")
 
-    my_main_id = user.get("branch_id")
-    if not my_main_id:
-        raise HTTPException(status_code=403, detail="Tu usuario no tiene una Casa Matriz asignada")
+    # P0 fix (2026-09): resolve ownership via the explicit org_id directly —
+    # no DB round-trip to guess it, and no risk of the old branch_id guess
+    # resolving to an unrelated org. `branch_id` (path param) is a
+    # LOCATION id, verified below via db_get_restaurant_by_location_id.
+    my_org_id = user.get("org_id")
+    if not my_org_id:
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene una organización asignada")
+    my_org_id = int(my_org_id)
 
-    if branch_id == my_main_id:
-        raise HTTPException(status_code=400, detail="No puedes eliminar la Casa Matriz desde aquí.")
+    # Wave-2 model has no "Matriz" — this guard only protects the caller's
+    # own explicitly-assigned location, when they have one.
+    my_location_id = user.get("location_id")
+    if my_location_id and branch_id == int(my_location_id):
+        raise HTTPException(status_code=400, detail="No puedes eliminar tu propia sucursal asignada desde aquí.")
 
-    # Wave-2 ownership: resolve the org_id of the authenticated owner, then
-    # compare against the target branch's org_id (both via VIEW normalization).
-    my_rest = await db.db_get_restaurant_by_id(my_main_id)
-    my_org_id = (my_rest or {}).get("org_id") or my_main_id
-    branch_row = await db.db_get_restaurant_by_id(branch_id)
+    branch_row = await db.db_get_restaurant_by_location_id(branch_id)
     if not branch_row or branch_row.get("org_id") != my_org_id:
         log.warning(
             "team.delete_branch_idor_attempt",
@@ -156,7 +131,17 @@ async def delete_branch(branch_id: int, request: Request):
         )
         raise HTTPException(status_code=404, detail="La sucursal no existe o no pertenece a tu cuenta.")
 
-    deleted = await restaurant_repo.db_delete_branch(branch_id, my_main_id)
+    # db_delete_branch re-verifies ownership itself via a real sibling
+    # location id from the same org (never the target branch_id itself —
+    # that would make its internal check trivially true).
+    parent_location_id = my_location_id
+    if not parent_location_id:
+        default_loc = await restaurant_repo.db_get_default_location(my_org_id)
+        parent_location_id = default_loc["id"] if default_loc else None
+    if not parent_location_id:
+        raise HTTPException(status_code=404, detail="La sucursal no existe o no pertenece a tu cuenta.")
+
+    deleted = await restaurant_repo.db_delete_branch(branch_id, parent_location_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="La sucursal no existe o no pertenece a tu cuenta.")
     return {"success": True}
@@ -168,20 +153,28 @@ async def delete_branch(branch_id: int, request: Request):
 async def list_team_users(request: Request, branch_id: int = None):
     user = await get_current_user(request)
 
-    branch_header = request.headers.get("X-Branch-ID")
-    if not branch_id and branch_header and branch_header.isdigit():
-        branch_id = int(branch_header)
-    elif not branch_id:
-        branch_id = user.get("branch_id")
+    # P0 fix (2026-09): resolve the caller's org via the explicit org_id
+    # field directly (no DB round-trip, no branch_id guess). `branch_id`
+    # (query param or X-Branch-ID header) is always a LOCATION id and is
+    # verified below to belong to the caller's own org before use.
+    my_org_id = user.get("org_id")
+    if not my_org_id:
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene una organización asignada")
+    my_org_id = int(my_org_id)
 
-    my_main_location_id = user.get("branch_id") or user.get("restaurant_id")
+    # Sede scoping (PM 2026-09-20). Only owner/admin may list another sede's
+    # team or the org-wide roster; anyone else sees their own sede. Until now
+    # ANY authenticated account — a waiter, a cook — could list every employee
+    # of every sede just by omitting the filter.
+    if may_span_locations(user):
+        branch_header = request.headers.get("X-Branch-ID")
+        if not branch_id and branch_header and branch_header.isdigit():
+            branch_id = int(branch_header)
+    else:
+        branch_id = resolve_sede_filter(request, user)
 
-    # Wave-2 ownership: resolve the org_id of the authenticated owner, then
-    # compare against the target branch's org_id (both via VIEW normalization).
-    if branch_id and branch_id != my_main_location_id:
-        my_rest = await db.db_get_restaurant_by_id(my_main_location_id)
-        my_org_id = (my_rest or {}).get("org_id") or my_main_location_id
-        branch_row = await db.db_get_restaurant_by_id(branch_id)
+    if branch_id:
+        branch_row = await db.db_get_restaurant_by_location_id(branch_id)
         if not branch_row or branch_row.get("org_id") != my_org_id:
             log.warning(
                 "team.users_idor_attempt",
@@ -190,7 +183,7 @@ async def list_team_users(request: Request, branch_id: int = None):
             )
             raise HTTPException(status_code=403, detail="No autorizado para ver usuarios de esta sucursal")
 
-    users = await restaurant_repo.db_get_team_users(branch_id)
+    users = await restaurant_repo.db_get_team_users(my_org_id, location_id=branch_id)
     return {"users": users}
 
 
@@ -206,31 +199,40 @@ async def team_invite(request: Request, body: TeamInviteRequest):
     if not is_owner and not is_admin:
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    branch_id = body.branch_id if is_owner else creator.get("branch_id")
+    # P0 fix (2026-09): resolve the creator's own org via the explicit
+    # org_id field directly — no DB round-trip, no branch_id guess.
+    my_org_id = creator.get("org_id")
+    if not my_org_id:
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene una organización asignada")
+    my_org_id = int(my_org_id)
 
-    if not branch_id and is_owner:
-        branch_id = creator.get("branch_id")
+    # branch_id here is a LOCATION id: body.branch_id comes from an owner's
+    # branch-picker (populated from db_get_branches, which returns location
+    # rows), and the admin fallback is their own explicitly-assigned sede.
+    branch_id = body.branch_id if is_owner else creator.get("location_id")
+    if not branch_id:
+        branch_id = creator.get("location_id")
+    if not branch_id:
+        # No specific sede resolvable — fall back to the org's own
+        # deterministic default location (never a "primary" judgement call).
+        default_loc = await restaurant_repo.db_get_default_location(my_org_id)
+        branch_id = default_loc["id"] if default_loc else None
 
     if not branch_id:
         raise HTTPException(status_code=400, detail="Sucursal requerida")
+    branch_id = int(branch_id)
 
     # Verify the branch belongs to this owner's tenant (prevents cross-tenant invite)
-    # Wave-2: compare org_id — parent_restaurant_id column was dropped in 0038.
-    my_location_id = creator.get("branch_id") or creator.get("restaurant_id")
-    if branch_id != my_location_id:
-        my_rest = await db.db_get_restaurant_by_id(my_location_id)
-        my_org_id = (my_rest or {}).get("org_id") or my_location_id
-        branch_check = await db.db_get_restaurant_by_id(branch_id)
-        if not branch_check or branch_check.get("org_id") != my_org_id:
-            log.warning(
-                "team.invite_idor_attempt",
-                requested_branch_id=branch_id,
-                user_location_id=my_location_id,
-                user_org_id=my_org_id,
-            )
-            raise HTTPException(status_code=403, detail="No autorizado para esta sucursal")
+    branch_check = await db.db_get_restaurant_by_location_id(branch_id)
+    if not branch_check or branch_check.get("org_id") != my_org_id:
+        log.warning(
+            "team.invite_idor_attempt",
+            requested_branch_id=branch_id,
+            user_org_id=my_org_id,
+        )
+        raise HTTPException(status_code=403, detail="No autorizado para esta sucursal")
 
-    branch = await db.db_get_restaurant_by_id(branch_id)
+    branch = branch_check
 
     if body.role in ("admin", "gerente"):
         if not body.password:
@@ -238,6 +240,7 @@ async def team_invite(request: Request, body: TeamInviteRequest):
         success = await db.db_create_user(
             body.username, hash_password(body.password), branch["name"],
             role=body.role, branch_id=branch_id, parent_user=creator["username"],
+            org_id=my_org_id, location_id=branch_id,
         )
         if not success:
             raise HTTPException(status_code=400, detail="Usuario ya existe")
@@ -250,13 +253,23 @@ async def team_invite(request: Request, body: TeamInviteRequest):
         if not roles:
             roles = ["mesero"]
         pin_hash = _pin_ctx.hash(body.pin)
+        # P0 fix (2026-09): db_create_staff's first positional arg becomes
+        # staff.org_id (INSERT INTO staff (org_id, ...)) — it MUST be the
+        # org_id, not the location_id. Passing branch_id (a location id)
+        # here used to corrupt staff.org_id for every non-admin team member
+        # invited this way, silently working only when the Matriz invariant
+        # (org_id == location_id) happened to hold.
         await db.db_create_staff(
-            restaurant_id=branch_id,
+            restaurant_id=my_org_id,
             name=body.username,
             role=roles[0],
             pin_hash=pin_hash,
             phone=body.phone,
             roles=roles,
+            # branch_id was resolved and checked against my_org_id above.
+            # Without it the staff member had no sede, and every
+            # sede-scoped section (the cashier's Domicilios) refused them.
+            location_id=branch_id,
         )
 
     return {"success": True}
@@ -269,9 +282,13 @@ async def delete_user(user_id: str, request: Request):
     if "owner" not in role and "admin" not in role:
         raise HTTPException(status_code=403, detail="No autorizado")
 
+    # P0 fix (2026-09): compare the explicit org_id directly — no DB
+    # round-trip, no branch_id guess.
+    my_org_id = creator.get("org_id")
+
     target = await db.db_get_user(user_id)
     if target:
-        if "admin" in role and "owner" not in role and target.get("branch_id") != creator.get("branch_id"):
+        if "admin" in role and "owner" not in role and target.get("org_id") != my_org_id:
             raise HTTPException(status_code=403, detail="No autorizado")
         await restaurant_repo.db_delete_user_by_username(user_id)
         return {"success": True}
@@ -281,10 +298,7 @@ async def delete_user(user_id: str, request: Request):
     from app.repositories import staff_repo as _sr
     staff_row = await _sr.db_get_staff_profile(user_id)
     if staff_row:
-        creator_location_id = creator.get("branch_id") or creator.get("restaurant_id")
-        my_rest = await db.db_get_restaurant_by_id(creator_location_id)
-        my_org_id = (my_rest or {}).get("org_id") or creator_location_id
-        if staff_row.get("org_id") != my_org_id:
+        if not my_org_id or staff_row.get("org_id") != my_org_id:
             log.warning(
                 "team.delete_user_idor_attempt",
                 user_id=user_id,

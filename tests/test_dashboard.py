@@ -20,6 +20,7 @@ Covers:
 import json
 import pytest
 from datetime import datetime, date
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock, patch
 
@@ -149,12 +150,16 @@ def test_get_tz_returns_configured_timezone():
     assert get_tz(restaurant) == "America/Bogota"
 
 
-def test_get_tz_defaults_to_utc_when_absent():
-    """No timezone key in features → 'UTC'."""
-    assert get_tz({"features": {}}) == "UTC"
-    assert get_tz({}) == "UTC"
-    # features key present but empty string → JSON parse fails → UTC
-    assert get_tz({"features": "{}"}) == "UTC"
+def test_get_tz_defaults_to_bogota_when_absent():
+    """No timezone anywhere → 'America/Bogota', the default the settings
+    screen shows (UTC put every evening sale on the next day)."""
+    assert get_tz({"features": {}}) == "America/Bogota"
+    assert get_tz({}) == "America/Bogota"
+    assert get_tz({"features": "{}"}) == "America/Bogota"
+
+
+def test_get_tz_falls_back_to_the_sede_timezone():
+    assert get_tz({"features": {}, "timezone": "America/Lima"}) == "America/Lima"
 
 
 def test_get_tz_parses_json_string_features():
@@ -166,12 +171,10 @@ def test_get_tz_parses_json_string_features():
     assert get_tz(restaurant) == "America/Mexico_City"
 
 
-def test_get_tz_invalid_json_string_defaults_to_utc():
-    """Corrupted features string → safe fallback to UTC."""
+def test_get_tz_invalid_json_string_defaults_to_bogota():
+    """Corrupted features string → safe fallback, no exception."""
     restaurant = {"features": "{not valid json!!!"}
-    # Should not raise; should return UTC
-    result = get_tz(restaurant)
-    assert result == "UTC"
+    assert get_tz(restaurant) == "America/Bogota"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -193,20 +196,30 @@ def test_dashboard_sync_uses_restaurant_timezone(client, monkeypatch):
 
     captured_calls = {}
 
-    async def mock_get_orders(date_from, date_to, bot_number=None):
+    async def mock_get_orders(date_from, date_to, org_id=None):
         captured_calls["date_from"] = date_from
         captured_calls["date_to"]   = date_to
         return []
 
-    async def mock_get_reservations(date_from, date_to, bot_number=None):
+    async def mock_get_reservations(date_from, date_to, org_id=None):
         return []
 
-    async def mock_get_conversations(bot_number=None, date_from=None, date_to=None):
+    async def mock_get_conversations(org_id=None, date_from=None, date_to=None):
         return []
 
+    bogota_today = str(datetime.now(ZoneInfo("America/Bogota")).date())
+
+    async def mock_sales_daily(date_from, date_to, location_id=None, tz="UTC"):
+        captured_calls["sales_range"] = (date_from, date_to)
+        captured_calls["sales_tz"] = tz
+        # One table round of 41.000 today — the headline must show it.
+        return {bogota_today: {"total": Decimal("41000"), "count": 1}}
+
+    from app.repositories import stats_repo
     monkeypatch.setattr(db_mod, "db_get_orders_range",       mock_get_orders)
     monkeypatch.setattr(db_mod, "db_get_reservations_range", mock_get_reservations)
     monkeypatch.setattr(db_mod, "db_get_all_conversations",  mock_get_conversations)
+    monkeypatch.setattr(stats_repo, "db_sales_daily",        mock_sales_daily)
 
     r = client.get(
         "/api/dashboard/sync?period=today",
@@ -215,6 +228,14 @@ def test_dashboard_sync_uses_restaurant_timezone(client, monkeypatch):
     assert r.status_code == 200
 
     # The date used must be the local Bogota date, not necessarily UTC
-    bogota_today = str(datetime.now(ZoneInfo("America/Bogota")).date())
     assert captured_calls.get("date_from") == bogota_today
     assert captured_calls.get("date_to")   == bogota_today
+    assert captured_calls.get("sales_range") == (bogota_today, bogota_today)
+    # ...and the sales are bucketed on Bogota days too.
+    assert captured_calls.get("sales_tz") == "America/Bogota"
+
+    # Revenue/orders come from sales (table rounds included), not `orders` only.
+    body = r.json()
+    assert body["stats"]["orders"]["revenue"] == 41000
+    assert body["stats"]["orders"]["total"] == 1
+    assert body["chart"]["revenue"] == [41000]

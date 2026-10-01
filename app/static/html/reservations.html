@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Reservaciones</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/reservations.css">
+</head>
+<body data-active="reservaciones">
+
+<div class="app">
+  <aside class="sidebar" data-active="reservaciones"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="row" style="gap: 6px;">
+        <a href="/dashboard" style="text-decoration:none;color:inherit;" class="topbar-crumb">Mesio</a>
+        <span class="sep topbar-crumb">/</span>
+        <span class="topbar-title">Reservaciones</span>
+      </div>
+      <div class="topbar-right">
+        <div class="search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><circle cx="7" cy="7" r="5"/><path d="M11 11l3 3"/></svg>
+          <input placeholder="Buscar por nombre o teléfono…" aria-label="Buscar reservaciones">
+          <span class="kbd">⌘K</span>
+        </div>
+        <button class="icon-btn" aria-label="Notificaciones"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 10V7a4 4 0 018 0v3l1.5 1.5v.5h-11V11L4 10zM6.5 13.5a1.5 1.5 0 003 0"/></svg></button>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Reservaciones</div>
+          <div class="page-sub">Gestiona tu agenda del salón. Las reservas que toma el bot aparecen aquí — confírmalas o reasígnalas.</div>
+        </div>
+        <div class="row">
+          <div class="day-nav">
+            <button aria-label="Día anterior">‹</button>
+            <span class="day-label">Viernes 18 abr</span>
+            <button aria-label="Día siguiente">›</button>
+          </div>
+          <button class="btn"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M5 3V1M11 3V1M2 6h12"/></svg>Hoy</button>
+          <button class="btn primary">+ Nueva reserva</button>
+        </div>
+      </div>
+
+      <!-- Stats strip -->
+      <div class="stat-strip">
+        <div>
+          <div class="lbl">Total del día</div>
+          <div class="val">28</div>
+          <div class="sub">96 personas</div>
+        </div>
+        <div>
+          <div class="lbl">Confirmadas</div>
+          <div class="val" style="color: var(--brand);">22</div>
+          <div class="sub">78.5%</div>
+        </div>
+        <div>
+          <div class="lbl">Pendientes</div>
+          <div class="val" style="color: var(--warning-text);">4</div>
+          <div class="sub">Esperando cliente</div>
+        </div>
+        <div>
+          <div class="lbl">Canceladas</div>
+          <div class="val" style="color: var(--text-3);">2</div>
+          <div class="sub">7.1%</div>
+        </div>
+        <div>
+          <div class="lbl">No-show · 7d</div>
+          <div class="val" style="color: var(--danger);">6%</div>
+          <div class="sub metric-delta down">▼ 1.2 pts</div>
+        </div>
+        <div>
+          <div class="lbl">Ocupación pico</div>
+          <div class="val">92%</div>
+          <div class="sub">8:30 PM</div>
+        </div>
+      </div>
+
+      <!-- Timeline -->
+      <div class="card flush">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Agenda del día</div>
+            <div class="card-sub">Todas las reservas ordenadas por hora</div>
+          </div>
+          <div class="row">
+            <button class="btn sm ghost">Filtrar ▾</button>
+          </div>
+        </div>
+
+        <div class="timeline">
+          <div style="padding:24px;color:var(--text-3);font-size:13px;grid-column: 1 / -1;">Cargando reservas&hellip;</div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/sidebar.js"></script>
+<script src="/static/js/pages/reservations.js"></script>
+</body>
+</html>

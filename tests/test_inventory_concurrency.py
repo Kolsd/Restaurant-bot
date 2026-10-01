@@ -166,7 +166,6 @@ def _order_payload(order_id, phone, bot_number, dish_name, qty=1):
         "paid":           False,
         "payment_url":    "",
         "payment_method": "efectivo",
-        "bot_number":     bot_number,
         "base_order_id":  None,
         "sub_number":     1,
     }
@@ -200,7 +199,7 @@ async def test_last_unit_only_one_winner():
                 pool,
                 restaurant_id=1,
                 conversation_id=phone_a,
-                cart={"items": [{"name": dish, "quantity": 1}], "bot_number": bot},
+                cart={"items": [{"name": dish, "quantity": 1}]},
                 order_payload=_order_payload("ORD-A", phone_a, bot, dish, qty=1),
             )
             assert remaining[0] == 0.0, "Stock should be 0 after first order"
@@ -211,7 +210,7 @@ async def test_last_unit_only_one_winner():
                     pool,
                     restaurant_id=1,
                     conversation_id=phone_b,
-                    cart={"items": [{"name": dish, "quantity": 1}], "bot_number": bot},
+                    cart={"items": [{"name": dish, "quantity": 1}]},
                     order_payload=_order_payload("ORD-B", phone_b, bot, dish, qty=1),
                 )
 
@@ -244,7 +243,7 @@ async def test_shared_ingredient_stock_never_negative():
                 pool,
                 restaurant_id=2,
                 conversation_id="+573000000001",
-                cart={"items": [{"name": dish, "quantity": 1}], "bot_number": bot},
+                cart={"items": [{"name": dish, "quantity": 1}]},
                 order_payload=_order_payload("ORD-C1", "+573000000001", bot, dish, qty=1),
             )
 
@@ -254,7 +253,7 @@ async def test_shared_ingredient_stock_never_negative():
                     pool,
                     restaurant_id=2,
                     conversation_id="+573000000002",
-                    cart={"items": [{"name": dish, "quantity": 1}], "bot_number": bot},
+                    cart={"items": [{"name": dish, "quantity": 1}]},
                     order_payload=_order_payload("ORD-C2", "+573000000002", bot, dish, qty=1),
                 )
 
@@ -275,20 +274,18 @@ async def test_for_update_called_on_read_in_update_item():
     """
     conn = AsyncMock()
     existing_row = MagicMock()
-    existing_row.__iter__ = lambda s: iter({
-        "id": 1, "org_id": 5, "restaurant_id": 5, "name": "Papa", "unit": "kg",
+    # location_id: stock rows belong to ONE sede since migration 0090, and
+    # db_update_inventory_item syncs the dish's availability for that sede.
+    _EXISTING = {
+        "id": 1, "org_id": 5, "restaurant_id": 5, "location_id": 9,
+        "name": "Papa", "unit": "kg",
         "current_stock": 10.0, "min_stock": 1.0,
         "linked_dishes": json.dumps(["Papas Fritas"]),
         "cost_per_unit": 500.0,
-    }.items())
-    existing_row.keys = lambda: ["id", "org_id", "restaurant_id", "name", "unit",
-                                  "current_stock", "min_stock", "linked_dishes", "cost_per_unit"]
-    existing_row.__getitem__ = lambda s, k: {
-        "id": 1, "org_id": 5, "restaurant_id": 5, "name": "Papa", "unit": "kg",
-        "current_stock": 10.0, "min_stock": 1.0,
-        "linked_dishes": json.dumps(["Papas Fritas"]),
-        "cost_per_unit": 500.0,
-    }[k]
+    }
+    existing_row.__iter__ = lambda s: iter(_EXISTING.items())
+    existing_row.keys = lambda: list(_EXISTING.keys())
+    existing_row.__getitem__ = lambda s, k: _EXISTING[k]
 
     updated_row = MagicMock()
     updated_row.__iter__ = lambda s: iter({
@@ -436,7 +433,7 @@ async def test_insufficient_stock_does_not_call_history_insert():
                     pool,
                     restaurant_id=9,
                     conversation_id="+573001234567",
-                    cart={"items": [{"name": dish, "quantity": 1}], "bot_number": bot},
+                    cart={"items": [{"name": dish, "quantity": 1}]},
                     order_payload=_order_payload("ORD-FAIL", "+573001234567", bot, dish, qty=1),
                 )
 

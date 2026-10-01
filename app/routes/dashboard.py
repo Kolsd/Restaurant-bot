@@ -4,7 +4,7 @@ the geocode helper, and the service worker.
 
 Business logic is split into:
   - app.routes.auth_routes   → /api/auth/*, /api/admin/*
-  - app.routes.settings_routes → /api/settings, /api/dashboard/*, /api/ai/proxy,
+  - app.routes.settings_routes → /api/settings, /api/dashboard/*,
                                   /api/orders/{id}/status, /api/table-sessions/*
   - app.routes.team_routes   → /api/team/*
 """
@@ -15,12 +15,12 @@ import re as _re
 import urllib.parse
 import httpx
 from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from pathlib import Path
 from pydantic import BaseModel, field_validator
 
 from app.services import database as db
-from app.repositories import restaurant_repo
+from app.repositories import delivery_repo, restaurant_repo
 from app.services import state_store
 from app.services.logging import get_logger
 from app.services.tenant_context import bypass_tenant_scope
@@ -35,9 +35,9 @@ STATIC = Path(__file__).parent.parent / "static"
 
 async def geocode_address(address: str) -> tuple:
     """
-    Geocodifica una dirección. Usa Nominatim (OpenStreetMap) como primario,
-    con sesgo a Colombia, y sin API key requerida.
-    Retorna (lat, lon, display_name) o (None, None, None).
+    Geocodes an address. Uses Nominatim (OpenStreetMap) as the primary provider,
+    biased toward Colombia, with no API key required.
+    Returns (lat, lon, display_name) or (None, None, None).
     """
     headers = {"User-Agent": "Mesio-Bot/1.0 (contacto@mesioai.com)"}
     query = address if any(c in address.lower() for c in ("colombia", "bogotá", "medellin", "cali")) else f"{address}, Colombia"
@@ -83,16 +83,6 @@ async def reset_password_page():
 async def dashboard_page():
     return (STATIC / "html" / "dashboard.html").read_text(encoding="utf-8")
 
-@router.get("/demo", response_class=HTMLResponse)
-async def demo_money_shot_page():
-    """Money-shot split-screen demo: WhatsApp ↔ Dashboard reacting in real time. GTM critical."""
-    return (STATIC / "html" / "demo.html").read_text(encoding="utf-8")
-
-@router.get("/dashboard-demo", response_class=HTMLResponse)
-async def dashboard_demo_page():
-    """Redesigned full-dashboard demo: 11-section sidebar, AI insight, live ticker, trust block. GTM landing."""
-    return (STATIC / "html" / "dashboard-demo.html").read_text(encoding="utf-8")
-
 @router.get("/landing", response_class=HTMLResponse)
 async def landing_page():
     return (STATIC / "html" / "landing.html").read_text(encoding="utf-8")
@@ -119,20 +109,20 @@ async def superadmin_internal_alias():
     p = STATIC / "html" / "internal" / "superadmin.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
-@router.get("/staff")
-async def staff_portal_redirect(request: Request):
-    r = request.query_params.get("r", "")
-    target = f"/login?r={r}" if r else "/login"
-    return RedirectResponse(url=target, status_code=302)
+@router.get("/staff", response_class=HTMLResponse)
+async def staff_app_page():
+    """Unified Staff App shell — one page for every operational role.
 
-@router.get("/mesero", response_class=HTMLResponse)
-async def mesero_page():
-    return (STATIC / "html" / "mesero.html").read_text(encoding="utf-8")
-
-@router.get("/caja", response_class=HTMLResponse)
-async def caja_page():
-    p = STATIC / "html" / "caja.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Caja no disponible</h1>")
+    Replaces the old one-HTML-per-role pages (/waiter, /cashier, /kitchen,
+    /bar, /courier, /staff-hq / /staff-clock), which are removed with no
+    redirects (product decision, 2026-09-14). Served unconditionally, same
+    as every operational page before it — the auth guard runs client-side
+    in app/static/js/staff/staff-shell.js (localStorage token check), and
+    the real, server-enforced session gate is GET /api/staff/sections
+    (app/routes/auth_routes.py::staff_visible_sections), which the shell
+    calls on mount to decide which sections to show.
+    """
+    return (STATIC / "html" / "staff.html").read_text(encoding="utf-8")
 
 @router.get("/crm", response_class=HTMLResponse)
 async def crm_page():
@@ -146,39 +136,77 @@ async def crm_internal_alias():
     p = STATIC / "html" / "internal" / "crm.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
-@router.get("/catalog", response_class=HTMLResponse)
-async def catalog_page():
-    p = STATIC / "html" / "catalog.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Catálogo no disponible</h1>")
 
-@router.get("/privacidad", response_class=HTMLResponse)
-async def privacidad_page():
-    return (STATIC / "html" / "privacidad.html").read_text(encoding="utf-8")
+@router.get("/chat/{table_id}", response_class=HTMLResponse)
+async def diner_chat_page(table_id: str):
+    """Diner-facing chat surface — opened via the QR code at the table.
 
-@router.get("/terminos", response_class=HTMLResponse)
-async def terminos_page():
-    return (STATIC / "html" / "terminos.html").read_text(encoding="utf-8")
+    Mirrors the existing /menu/{table_id} pattern (app/routes/tables.py):
+    the HTML is served verbatim and table_id is read client-side from the
+    URL path (see diner-session.js::dinerGetTableToken). The bot presents
+    the carta and takes the order INSIDE the conversation via the
+    /api/diner/* endpoints (app/routes/diner.py, blocks protocol) — this
+    is NOT a separate menu-browsing page.
+    """
+    p = STATIC / "html" / "diner-chat.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Chat no disponible</h1>", status_code=404)
+
+@router.get("/pedir/{slug}", response_class=HTMLResponse)
+async def diner_delivery_entry_page(slug: str):
+    """Public delivery/pickup ordering entry point (docs/claude/delivery-web.md
+    chunk 5), ONE public link per organization. Serves the EXACT SAME
+    diner-chat.html/diner-chat.js as /chat/{table_id} — the client-side code
+    tells the two entry points apart from the URL path (see
+    diner-session.js::dinerGetEntryMode) and runs a different bootstrap
+    (GPS + GET /api/diner/org/{slug} + POST /api/diner/order-mode/resolve
+    before ever opening a session) instead of forking a second chat page.
+
+    Unlike /chat/{table_id} (table_id is opaque and never validated
+    server-side before the page renders — the QR itself is the proof of
+    physical presence), THIS is a link the restaurant hands out or publishes,
+    so an unknown slug 404s here instead of silently rendering a broken page
+    that will only fail once the frontend calls the API.
+    """
+    org = await delivery_repo.db_get_org_by_slug(slug.strip())
+    if not org:
+        return HTMLResponse("<h1>Restaurante no encontrado</h1>", status_code=404)
+    p = STATIC / "html" / "diner-chat.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Chat no disponible</h1>", status_code=404)
+
+@router.get("/pedido/{public_code}", response_class=HTMLResponse)
+async def diner_delivery_status_page(public_code: str):
+    """Public customer status page (docs/claude/delivery-web.md chunk 6),
+    `/pedido/{public_code}`. Same "unknown -> 404 here" posture as
+    /pedir/{slug} above: the public_code is a real secret a customer either
+    typed correctly or followed from a link/email, not a QR scan whose mere
+    existence proves anything — so an unknown code 404s at the PAGE level
+    too, not just from the API the page will go on to call.
+
+    Deliberately does NOT enter tenant_scope/bypass_tenant_scope here: this
+    route only needs to know "does ANY order have this code", which
+    db_get_order_by_public_code already resolves entirely on its own
+    (pre-tenant, bypass_tenant_scope internally) — see that function's
+    docstring for why the code space is GLOBAL, not per-org.
+    """
+    order = await delivery_repo.db_get_order_by_public_code(public_code.strip())
+    if not order:
+        return HTMLResponse("<h1>Pedido no encontrado</h1>", status_code=404)
+    p = STATIC / "html" / "pedido.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no disponible</h1>", status_code=404)
+
+
+@router.get("/privacy", response_class=HTMLResponse)
+async def privacy_page():
+    return (STATIC / "html" / "privacy.html").read_text(encoding="utf-8")
+
+@router.get("/terms", response_class=HTMLResponse)
+async def terms_page():
+    return (STATIC / "html" / "terms.html").read_text(encoding="utf-8")
 
 @router.get("/billing", response_class=HTMLResponse)
 async def billing_page():
     p = STATIC / "html" / "billing.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Billing no disponible</h1>")
-
-@router.get("/domiciliario", response_class=HTMLResponse)
-async def domiciliario_page():
-    p = STATIC / "html" / "domiciliario.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no encontrada</h1>", status_code=404)
-
-@router.get("/staff-hq", response_class=HTMLResponse)
-async def staff_hq_page():
-    p = STATIC / "html" / "staff-hq.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
-
-@router.get("/staff-clock", response_class=HTMLResponse)
-async def staff_clock_page():
-    """Alias of /staff-hq for the new design naming convention."""
-    p = STATIC / "html" / "staff-hq.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Staff Clock no disponible</h1>", status_code=404)
 
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page():
@@ -190,19 +218,19 @@ async def floorplan_page():
     p = STATIC / "html" / "floorplan.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Floorplan no disponible</h1>", status_code=404)
 
-@router.get("/equipo", response_class=HTMLResponse)
-async def equipo_page():
-    p = STATIC / "html" / "equipo.html"
+@router.get("/team", response_class=HTMLResponse)
+async def team_page():
+    p = STATIC / "html" / "team.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Equipo no disponible</h1>", status_code=404)
 
-@router.get("/pedidos", response_class=HTMLResponse)
-async def pedidos_page():
-    p = STATIC / "html" / "pedidos.html"
+@router.get("/orders", response_class=HTMLResponse)
+async def orders_page():
+    p = STATIC / "html" / "orders.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Pedidos no disponible</h1>", status_code=404)
 
-@router.get("/reservaciones", response_class=HTMLResponse)
-async def reservaciones_page():
-    p = STATIC / "html" / "reservaciones.html"
+@router.get("/reservations", response_class=HTMLResponse)
+async def reservations_page():
+    p = STATIC / "html" / "reservations.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Reservaciones no disponible</h1>", status_code=404)
 
 @router.get("/menu-admin", response_class=HTMLResponse)
@@ -210,34 +238,14 @@ async def menu_admin_page():
     p = STATIC / "html" / "menu-admin.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Menu Admin no disponible</h1>", status_code=404)
 
-@router.get("/menu-engineering", response_class=HTMLResponse)
-async def menu_engineering_page():
-    p = STATIC / "html" / "menu-engineering.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Menu Engineering no disponible</h1>", status_code=404)
-
 @router.get("/nps", response_class=HTMLResponse)
 async def nps_page():
     p = STATIC / "html" / "nps.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>NPS no disponible</h1>", status_code=404)
 
-@router.get("/fidelizacion", response_class=HTMLResponse)
-async def fidelizacion_page():
-    p = STATIC / "html" / "fidelizacion.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Fidelización no disponible</h1>", status_code=404)
-
-@router.get("/clientes-riesgo", response_class=HTMLResponse)
-async def clientes_riesgo_page():
-    p = STATIC / "html" / "clientes-riesgo.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Clientes en riesgo no disponible</h1>", status_code=404)
-
-@router.get("/nomina", response_class=HTMLResponse)
-async def nomina_page():
-    p = STATIC / "html" / "nomina.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Nómina no disponible</h1>", status_code=404)
-
-@router.get("/sucursales", response_class=HTMLResponse)
-async def sucursales_page():
-    p = STATIC / "html" / "sucursales.html"
+@router.get("/locations", response_class=HTMLResponse)
+async def locations_page():
+    p = STATIC / "html" / "locations.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Sucursales no disponible</h1>", status_code=404)
 
 
@@ -245,179 +253,38 @@ async def sucursales_page():
 
 @router.get("/api/public/restaurant-info")
 async def public_restaurant_info(id: int):
-    """Return the restaurant name for a given restaurant ID (public, read-only)."""
-    restaurant = await db.db_get_restaurant_by_id(id)
+    """Return the restaurant name for a given restaurant ID (public, read-only).
+
+    `id` here is the org_id — this endpoint is only ever called from
+    login.html's `?r=` kiosk/login param, which is always an org id (see
+    static/js/staff/sections/myshift.js's kiosk bootstrap comment — ported
+    verbatim from the old staff-clock.js).
+    """
+    restaurant = await db.db_get_restaurant_by_org_id(id)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
     return {"name": restaurant.get("name", "")}
 
 
-# ── QR-Phone-Claim (Capa 1 de identificación de mesa) ─────────────────
-# Diseño completo: docs/MESA_QR_ARCHITECTURE.md
-# El cliente escanea QR → /menu/{table_id} pide su teléfono → el browser
-# llama a este endpoint para registrar el pre-binding (phone, table). Cuando
-# el cliente envía el primer mensaje al bot, detect_table_context busca
-# por igualdad exacta de phone y abre la sesión sobre la mesa correcta —
-# sin race conditions ni markers visibles en el WhatsApp.
-
-class QrClaimRequest(BaseModel):
-    bot_number: str
-    table_id: str
-    phone: str
-    geo_lat: float | None = None
-    geo_lon: float | None = None
-
-    @field_validator("phone")
-    @classmethod
-    def _phone_digits_only(cls, v: str) -> str:
-        digits = "".join(ch for ch in (v or "") if ch.isdigit())
-        if len(digits) < 7 or len(digits) > 15:
-            raise ValueError("phone must be 7-15 digits")
-        return digits
-
-
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Haversine formula — same as db_resolve_location_by_gps."""
-    from math import radians, sin, cos, asin, sqrt
-    r1, r2 = radians(lat1), radians(lat2)
-    dlat = r2 - r1
-    dlon = radians(lon2 - lon1)
-    a = sin(dlat / 2) ** 2 + cos(r1) * cos(r2) * sin(dlon / 2) ** 2
-    return 6371.0 * 2 * asin(sqrt(a))
-
-
-@router.post("/api/qr-claim")
-async def post_qr_claim(request: Request, body: QrClaimRequest):
-    """Register a pre-binding between a phone and a table QR scan.
-
-    Public endpoint (no auth — scanned by anonymous customers). Rate-limited
-    by IP to prevent abuse: 30 claims/min/IP.
-
-    Returns 201 + claim_id on success. Returns 404 if bot_number doesn't
-    resolve to any org. Returns 422 if phone format is invalid (Pydantic).
-    """
-    client_ip = request.client.host if request.client else "unknown"
-    allowed = await state_store.rate_limit_check(
-        f"qr_claim:{client_ip}", max_requests=30, window_seconds=60,
-    )
-    if not allowed:
-        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
-
-    normalized_bot = body.bot_number.replace("+", "").replace(" ", "").strip()
-
-    # Resolve org/location from bot_number BEFORE entering tenant_scope.
-    # The client menu page knows the bot_number from the URL it loaded.
-    with bypass_tenant_scope("post_qr_claim: pre-resolve org from bot_number"):
-        rest = await restaurant_repo.db_get_restaurant_by_bot_number(normalized_bot)
-    if not rest:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado para ese número")
-
-    org_id = int(rest["id"])
-    location_id = rest.get("location_id")
-
-    # Geo-fence check: 50m radius around the location's coords.
-    geo_verified: bool | None = None
-    if body.geo_lat is not None and body.geo_lon is not None:
-        loc_lat = rest.get("latitude")
-        loc_lon = rest.get("longitude")
-        if loc_lat is not None and loc_lon is not None:
-            try:
-                distance_km = _haversine_km(
-                    float(body.geo_lat), float(body.geo_lon),
-                    float(loc_lat), float(loc_lon),
-                )
-                geo_verified = distance_km <= 0.05  # 50m
-                if not geo_verified:
-                    log.warning(
-                        "qr_claim.geo_far",
-                        org_id=org_id,
-                        table_id=body.table_id,
-                        distance_km=round(distance_km, 3),
-                    )
-            except (TypeError, ValueError):
-                geo_verified = None
-
-    from app.repositories import qr_claims_repo  # noqa: PLC0415
-    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
-
-    with tenant_scope(org_id):
-        claim_id = await qr_claims_repo.create_claim(
-            bot_number=normalized_bot,
-            table_id=body.table_id,
-            phone=body.phone,
-            org_id=org_id,
-            location_id=int(location_id) if location_id else None,
-            geo_verified=geo_verified,
-        )
-
-    return {
-        "ok": True,
-        "claim_id": claim_id,
-        "geo_verified": geo_verified,
-    }
-
-
-@router.get("/api/public/menu/{bot_number}")
-async def get_public_menu(request: Request, bot_number: str):
-    # ── Rate limit: 30 req/min por IP — previene harvesting masivo ─────────────
-    client_ip = request.client.host if request.client else "unknown"
-    allowed = await state_store.rate_limit_check(f"public_menu:{client_ip}", max_requests=30, window_seconds=60)
-    if not allowed:
-        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
-
-    normalized = bot_number.replace("+", "").replace(" ", "").strip()
-    data = await restaurant_repo.db_get_public_menu_data(normalized)
-    if not data:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
-    menu_data = data["menu"]
-    if (not menu_data or menu_data == '{}' or menu_data == "{}") and data["parent_menu"]:
-        menu_data = data["parent_menu"]
-    if isinstance(menu_data, str):
-        try:
-            menu_data = json.loads(menu_data)
-            if isinstance(menu_data, str):
-                menu_data = json.loads(menu_data)
-        except Exception:
-            menu_data = {}
-    elif not menu_data:
-        menu_data = {}
-
-    features = data["features"]
-    if (not features or features == '{}' or features == "{}") and data["parent_features"]:
-        features = data["parent_features"]
-    if isinstance(features, str):
-        try:
-            features = json.loads(features)
-            if isinstance(features, str):
-                features = json.loads(features)
-        except Exception:
-            features = {}
-    elif not features:
-        features = {}
-
-    return {
-        "restaurant_name": data["name"],
-        "menu": menu_data,
-        "availability": data["availability"],
-        "bot_number": bot_number,
-        "locale": features.get("locale", "es-CO"),
-        "currency": features.get("currency", "COP"),
-        "catalog_v2_enabled": bool(features.get("catalog_v2_enabled", True)),
-        "bot_visual_menu": bool(features.get("bot_visual_menu", False)),
-    }
+# ── QR-Phone-Claim (Layer 1 of table identification) ─────────────────
+# Full design: docs/MESA_QR_ARCHITECTURE.md
+# The customer scans a QR → /menu/{table_id} asks for their phone → the browser
+# calls this endpoint to register the pre-binding (phone, table). When
+# the customer sends their first message to the bot, detect_table_context looks
+# up by exact phone match and opens the session on the correct table —
+# no race conditions, no visible markers in WhatsApp.
 
 
 @router.get("/api/geocode")
 async def geocode_endpoint(request: Request, address: str):
     """
-    Proxy geocode a Nominatim. Requiere autenticación (Bearer token de admin/staff).
-    Rate limit: 10 req/min por IP.
+    Geocode proxy to Nominatim. Requires authentication (admin/staff Bearer token).
+    Rate limit: 10 req/min per IP.
     """
     from app.routes.deps import require_auth
     await require_auth(request)
 
-    # ── Rate limit: 10 req/min por IP ────────────────────────────────────────────
+    # ── Rate limit: 10 req/min per IP ────────────────────────────────────────────
     client_ip = request.client.host if request.client else "unknown"
     allowed = await state_store.rate_limit_check(f"geocode:{client_ip}", max_requests=10, window_seconds=60)
     if not allowed:
@@ -437,10 +304,10 @@ async def geocode_endpoint(request: Request, address: str):
 @router.get("/api/geocode/reverse")
 async def geocode_reverse_endpoint(request: Request, lat: float, lon: float):
     """
-    Proxy reverse geocode a Nominatim. Requiere autenticación (Bearer token de admin/staff).
-    Rate limit: 10 req/min por IP (compartido con /api/geocode).
-    El frontend debe usar este endpoint en lugar de llamar a Nominatim directamente.
-    TODO (wave siguiente): migrar dashboard-features.js para usar este endpoint.
+    Reverse geocode proxy to Nominatim. Requires authentication (admin/staff Bearer token).
+    Rate limit: 10 req/min per IP (shared with /api/geocode).
+    The frontend must use this endpoint instead of calling Nominatim directly.
+    TODO (next wave): migrate dashboard-features.js to use this endpoint.
     """
     from app.routes.deps import require_auth
     await require_auth(request)
@@ -468,75 +335,6 @@ async def geocode_reverse_endpoint(request: Request, lat: float, lon: float):
     except Exception:
         pass
     raise HTTPException(status_code=404, detail="No se encontró información para estas coordenadas.")
-
-
-# ── Catalog v2: analytics tracking (fire-and-forget, real DB insert — Fase 5b) ─
-
-_VALID_TRACK_EVENTS = frozenset({"view", "modal_open", "add_to_cart", "ordered"})
-
-
-class MenuTrackBody(BaseModel):
-    dish_name:  str
-    event_type: str
-    bot_number: str
-    phone:      str | None = None
-
-    @field_validator("dish_name")
-    @classmethod
-    def _dish_name_len(cls, v: str) -> str:
-        if not v or not v.strip():
-            raise ValueError("dish_name required")
-        return v.strip()[:255]
-
-    @field_validator("event_type")
-    @classmethod
-    def _valid_event(cls, v: str) -> str:
-        if v not in _VALID_TRACK_EVENTS:
-            raise ValueError(f"event_type must be one of {sorted(_VALID_TRACK_EVENTS)}")
-        return v
-
-    @field_validator("bot_number")
-    @classmethod
-    def _bot_number_len(cls, v: str) -> str:
-        if len(v) > 20:
-            raise ValueError("bot_number max 20 chars")
-        return v
-
-
-@router.post("/api/public/menu/track")
-async def menu_track(body: MenuTrackBody):
-    """
-    Fire-and-forget analytics tracking for catalog v2 events.
-    Rate-limited to 120 req/min per bot_number.
-    Always returns 200 (sendBeacon callers cannot handle 4xx/5xx).
-    """
-    from app.repositories import menu_analytics_repo
-
-    rate_key = f"catalog_track:{body.bot_number}"
-    allowed = await state_store.rate_limit_check(rate_key, max_requests=120, window_seconds=60)
-    if not allowed:
-        log.warning("catalog.track.rate_limited", bot_number=body.bot_number)
-        return {"ok": True}
-
-    # Resolve restaurant_id from bot_number — fire-and-forget on miss
-    restaurant = await restaurant_repo.db_get_restaurant_by_bot_number(body.bot_number)
-    if not restaurant:
-        log.info(
-            "catalog.track.unknown_bot",
-            bot_number=body.bot_number,
-            dish_name=body.dish_name,
-            event_type=body.event_type,
-        )
-        return {"ok": True}
-
-    await menu_analytics_repo.record_event(
-        restaurant_id=restaurant["id"],
-        dish_name=body.dish_name,
-        event_type=body.event_type,
-        phone=body.phone,
-        bot_number=body.bot_number,
-    )
-    return {"ok": True}
 
 
 # ── SEO / Growth routes (Catálogo v2 Fase 6) ─────────────────────────────────
@@ -617,14 +415,15 @@ async def seo_menu_page(slug: str):
     """
     Server-rendered menu page with Open Graph tags.
     OG crawlers (WhatsApp, Facebook) read the meta tags.
-    Humans are redirected immediately to the JS catalog (/menu/{bot_number}).
+    Humans are redirected to the org's ordering page, /pedir/{slug}. (It
+    sent them to the WhatsApp-era catalog, and to itself
+    — an endless refresh — when the org had no number.)
     """
     data = await restaurant_repo.db_get_restaurant_by_slug(slug)
     if not data:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
     name        = data.get("name") or "Restaurante"
-    bot_number  = data.get("whatsapp_number") or ""
     features    = data.get("features") or {}
     if isinstance(features, str):
         try:
@@ -645,9 +444,9 @@ async def seo_menu_page(slug: str):
         og_image = _OG_IMAGE_FALLBACK
 
     canonical   = f"https://{_APP_DOMAIN}/r/{_html.escape(slug)}/menu"
-    redirect_to = f"/menu/{urllib.parse.quote(bot_number)}" if bot_number else f"/r/{slug}/menu"
+    redirect_to = f"/pedir/{urllib.parse.quote(slug)}"
     esc_name    = _html.escape(name)
-    description = _html.escape(f"Menú de {name} — pide por WhatsApp")
+    description = _html.escape(f"Menú de {name} — pide en línea")
 
     html_body = f"""<!DOCTYPE html>
 <html lang="es">
@@ -676,14 +475,13 @@ async def seo_menu_page(slug: str):
 @router.get("/r/{slug}/menu/{dish_slug}", response_class=HTMLResponse)
 async def seo_dish_page(slug: str, dish_slug: str):
     """
-    Server-rendered dish page with per-dish Open Graph tags and WhatsApp CTA.
+    Server-rendered dish page with per-dish Open Graph tags and an order CTA.
     """
     data = await restaurant_repo.db_get_restaurant_by_slug(slug)
     if not data:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
     name        = data.get("name") or "Restaurante"
-    bot_number  = data.get("whatsapp_number") or ""
     features    = data.get("features") or {}
     if isinstance(features, str):
         try:
@@ -719,9 +517,8 @@ async def seo_dish_page(slug: str, dish_slug: str):
     og_desc      = _html.escape((description or "")[:200])
     price_display = _format_price(price, features)
 
-    # WhatsApp pre-filled link
-    wa_text  = urllib.parse.quote(f"Hola, quiero pedir {dish_name}")
-    wa_link  = f"https://wa.me/{urllib.parse.quote(bot_number.replace('+', ''))}?text={wa_text}" if bot_number else "#"
+    # Ordering happens on the org's own web link (delivery / pickup).
+    order_url = f"/pedir/{urllib.parse.quote(slug)}"
 
     # Dish image HTML — XSS-safe: all values escaped
     if image_url:
@@ -747,7 +544,7 @@ async def seo_dish_page(slug: str, dish_slug: str):
     page = page.replace("{{DISH_IMAGE_HTML}}", dish_image_html)
     page = page.replace("{{PRICE_DISPLAY}}", _html.escape(price_display))
     page = page.replace("{{DESCRIPTION_HTML}}", description_html)
-    page = page.replace("{{WA_LINK}}", _html.escape(wa_link))
+    page = page.replace("{{ORDER_URL}}", _html.escape(order_url))
     page = page.replace("{{MENU_URL}}", menu_url)
 
     return HTMLResponse(content=page, status_code=200)
@@ -758,8 +555,18 @@ async def restaurant_sitemap(restaurant_id: int):
     """
     Per-restaurant XML sitemap listing menu page + individual dish pages.
     Cached for 1 hour.
+
+    NOTE (P0 audit 2026-09): no current caller of this route was found in
+    the codebase (the SEO dish pages use slug-based URLs, not this route),
+    so the intended id kind for `restaurant_id` could not be confirmed from
+    a real call site. Treated as a location_id (the `restaurants` VIEW's
+    own PK) — the interpretation that matches the route's pre-Wave-2 naming
+    and the VIEW's `id` column. Low risk: this is a public, read-only,
+    already-public-data endpoint (no auth context, no writes), so a
+    genuine id collision would at worst show a different tenant's already
+    public menu sitemap, not leak private data.
     """
-    data = await db.db_get_restaurant_by_id(restaurant_id)
+    data = await db.db_get_restaurant_by_location_id(restaurant_id)
     if not data:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
@@ -776,7 +583,9 @@ async def restaurant_sitemap(restaurant_id: int):
     availability: dict = {}
     try:
         with bypass_tenant_scope("restaurant_sitemap: public sitemap menu availability lookup"):
-            availability = await db.db_get_menu_availability(restaurant_id) or {}
+            # Brand-level page, no sede chosen yet: a dish stays listed while
+            # at least one sede has it (db_get_menu_availability is per sede).
+            availability = await db.db_get_menu_availability_any_sede(restaurant_id) or {}
     except Exception:
         log.exception("sitemap.availability_load_failed", restaurant_id=restaurant_id)
         # availability is optional — fail open (sitemap still renders all dishes)

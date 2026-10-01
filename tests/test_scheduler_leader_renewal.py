@@ -151,14 +151,6 @@ class TestSchedulerLoopLeaderRenewal:
                 "app.services.scheduler._run_deposit_expiry",
                 new=AsyncMock(),
             ),
-            "occupancy": patch(
-                "app.services.scheduler._run_occupancy_snapshot",
-                new=AsyncMock(),
-            ),
-            "weekly": patch(
-                "app.services.scheduler._run_weekly_owner_reports",
-                new=AsyncMock(),
-            ),
             "bypass": patch(
                 "app.services.scheduler._scheduler_loop.__globals__['bypass_tenant_scope']",
                 # bypass_tenant_scope is imported inside _scheduler_loop, so mock via module
@@ -198,8 +190,6 @@ class TestSchedulerLoopLeaderRenewal:
         mock_alerts = AsyncMock()
         mock_reminders = AsyncMock()
         mock_deposit = AsyncMock()
-        mock_occupancy = AsyncMock()
-        mock_weekly = AsyncMock()
         mock_acquire = AsyncMock(return_value="test-token-abc")
         mock_renew = AsyncMock(side_effect=fake_renew)
         # bypass_tenant_scope must be a context manager
@@ -213,16 +203,14 @@ class TestSchedulerLoopLeaderRenewal:
             patch("app.services.state_store.scheduler_leader_acquire", mock_acquire),
             patch("app.services.scheduler._renew_or_abort", mock_renew),
             patch("app.services.scheduler._run_inactivity_check", mock_inactivity),
-            patch("app.services.scheduler._run_weekly_owner_reports", mock_weekly),
         ):
             # Import check_alerts lazily inside the loop; patch at module level
             import app.services.alerts as alerts_mod
             with patch.object(alerts_mod, "check_alerts", mock_alerts):
-                # Also patch the reservation/deposit/occupancy funcs
+                # Also patch the reservation/deposit funcs
                 with (
                     patch("app.services.scheduler._run_reservation_reminders", mock_reminders),
                     patch("app.services.scheduler._run_deposit_expiry", mock_deposit),
-                    patch("app.services.scheduler._run_occupancy_snapshot", mock_occupancy),
                 ):
                     # Patch bypass_tenant_scope inside the scheduler module namespace
                     import app.services.scheduler as sched_mod
@@ -238,8 +226,6 @@ class TestSchedulerLoopLeaderRenewal:
             "alerts": mock_alerts,
             "reminders": mock_reminders,
             "deposit": mock_deposit,
-            "occupancy": mock_occupancy,
-            "weekly": mock_weekly,
             "renew": mock_renew,
             "renew_call_count": renew_call_count,
         }
@@ -257,7 +243,6 @@ class TestSchedulerLoopLeaderRenewal:
 
         mock_inactivity = AsyncMock()
         mock_alerts = AsyncMock()
-        mock_weekly = AsyncMock()
         mock_acquire = AsyncMock(return_value="tok-abc")
         # All renews return True
         mock_renew = AsyncMock(return_value=True)
@@ -274,7 +259,6 @@ class TestSchedulerLoopLeaderRenewal:
             patch("app.services.state_store.scheduler_leader_acquire", mock_acquire),
             patch("app.services.scheduler._renew_or_abort", mock_renew),
             patch("app.services.scheduler._run_inactivity_check", mock_inactivity),
-            patch("app.services.scheduler._run_weekly_owner_reports", mock_weekly),
             patch.object(alerts_mod, "check_alerts", mock_alerts),
         ):
             try:
@@ -284,7 +268,6 @@ class TestSchedulerLoopLeaderRenewal:
 
         mock_inactivity.assert_awaited_once()
         mock_alerts.assert_awaited_once()
-        mock_weekly.assert_awaited_once()
         # At least 2 renew calls (after inactivity + after alerts)
         assert mock_renew.await_count >= 2
 
@@ -300,7 +283,6 @@ class TestSchedulerLoopLeaderRenewal:
 
         mock_inactivity = AsyncMock()
         mock_alerts = AsyncMock()
-        mock_weekly = AsyncMock()
         mock_acquire = AsyncMock(return_value="tok-abc")
         # First renew (after inactivity) → False → abort
         renew_values = iter([False])
@@ -327,7 +309,6 @@ class TestSchedulerLoopLeaderRenewal:
             patch("app.services.state_store.scheduler_leader_acquire", mock_acquire),
             patch("app.services.scheduler._renew_or_abort", mock_renew),
             patch("app.services.scheduler._run_inactivity_check", mock_inactivity),
-            patch("app.services.scheduler._run_weekly_owner_reports", mock_weekly),
             patch.object(alerts_mod, "check_alerts", mock_alerts),
         ):
             try:
@@ -336,14 +317,13 @@ class TestSchedulerLoopLeaderRenewal:
                 pass
 
         mock_inactivity.assert_awaited_once()
-        # After renew returns False, alerts and weekly must NOT be called
+        # After renew returns False, alerts must NOT be called
         mock_alerts.assert_not_awaited()
-        mock_weekly.assert_not_awaited()
         # Exactly one renew attempted
         assert mock_renew.await_count == 1
 
     async def test_tick_aborts_after_alerts_if_renew_false(self):
-        """If renew returns False after alerts phase, weekly reports are skipped."""
+        """If renew returns False after the alerts phase, the tick stops there."""
         sleep_call = 0
 
         async def fake_sleep(s):
@@ -354,7 +334,6 @@ class TestSchedulerLoopLeaderRenewal:
 
         mock_inactivity = AsyncMock()
         mock_alerts = AsyncMock()
-        mock_weekly = AsyncMock()
         mock_acquire = AsyncMock(return_value="tok-abc")
 
         # First renew True (after inactivity), second renew False (after alerts)
@@ -376,7 +355,6 @@ class TestSchedulerLoopLeaderRenewal:
             patch("app.services.state_store.scheduler_leader_acquire", mock_acquire),
             patch("app.services.scheduler._renew_or_abort", mock_renew),
             patch("app.services.scheduler._run_inactivity_check", mock_inactivity),
-            patch("app.services.scheduler._run_weekly_owner_reports", mock_weekly),
             patch.object(alerts_mod, "check_alerts", mock_alerts),
         ):
             try:
@@ -386,8 +364,6 @@ class TestSchedulerLoopLeaderRenewal:
 
         mock_inactivity.assert_awaited_once()
         mock_alerts.assert_awaited_once()
-        # Weekly must NOT run after second renew fails
-        mock_weekly.assert_not_awaited()
         assert mock_renew.await_count == 2
 
     async def test_non_leader_worker_skips_tick(self):

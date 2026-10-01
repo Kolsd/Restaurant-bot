@@ -5,23 +5,22 @@ Architecture:
 - Uses a REAL Postgres database (TEST_DATABASE_URL or DATABASE_URL_ADMIN with a fresh schema)
 - Uses a REAL Anthropic API
 - Redis is optional (state_store has graceful in-process fallback)
-- Outbound Meta WhatsApp HTTP calls are captured (not forwarded) via httpx patching
-- HMAC webhook signature verification is bypassed via env flag DISABLE_META_SIGNATURE_VERIFY=1
-- The inbox worker is driven manually (drain_inbox) rather than as a background loop
+- The bot's replies are collected by the `bot_replies` fixture
 
 Key design decision:
-  The E2E test calls POST /webhook/meta (through httpx ASGI), which enqueues into
-  webhook_inbox. Then drain_inbox() manually pulls from the queue and dispatches,
-  exactly replicating the inbox_worker logic but controllably within the test.
-  This avoids timing races from a concurrent background loop.
+  A diner message goes through send_diner_message(), which drives agent.chat()
+  inside tenant_scope(org_id) exactly as POST /api/diner/chat does. A
+  `[t:<table_id>]` marker in a test's text stands for "the diner scanned this
+  table's QR": the helper opens the table session the way
+  POST /api/diner/session + diner_chat do, then sends the rest of the text.
+  (Until 2026-09-25 this harness drove the retired WhatsApp webhook + inbox.)
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import json
 import os
+import re
 import time
 
 # .env loading is INTENTIONALLY deferred to fixture scope (see _ensure_dotenv_loaded
@@ -63,7 +62,6 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.services.logging import get_logger
-from app.repositories import inbox_repo
 
 log = get_logger(__name__)
 
@@ -105,11 +103,6 @@ def _same_host_and_db(url_a: str, url_b: str) -> bool:
     return m_a.group(1) == m_b.group(1) and m_a.group(2) == m_b.group(2)
 
 
-def _build_meta_signature(body: bytes, secret: str) -> str:
-    """Build X-Hub-Signature-256 for a given body and secret."""
-    return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-
-
 # ── Database fixture ──────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture(scope="function")
@@ -124,9 +117,6 @@ async def test_pool():
        prevent accidentally running against production).
 
     IMPORTANT: Do NOT use DATABASE_URL_ADMIN (production superuser) as the test DB.
-    If the production inbox worker is running against the same DB, it will race with
-    the test's drain_inbox(), consuming test rows before the test can process them.
-
     The test DB MUST be isolated from the production environment.
 
     Runs alembic upgrade head before yielding the pool.
@@ -154,8 +144,7 @@ async def test_pool():
                 "E2E tests require TEST_DATABASE_URL pointing at a DEDICATED (non-production) "
                 "Postgres database with the Mesio schema. "
                 "Example: export TEST_DATABASE_URL='postgresql://user:pass@localhost/mesio_test'\n"
-                "Do NOT use DATABASE_URL_ADMIN (production DB) — the production inbox worker "
-                "would race with the test drain and consume test rows."
+                "Do NOT use DATABASE_URL_ADMIN (the production DB)."
             )
 
     # Normalize postgres:// → postgresql://
@@ -165,10 +154,6 @@ async def test_pool():
     # Set DATABASE_URL so that app.services.database.get_pool() uses this URL.
     # This must happen BEFORE importing the FastAPI app.
     os.environ["DATABASE_URL"] = url
-    # Disable embedded inbox worker — the test drives it manually
-    os.environ["DISABLE_EMBEDDED_WORKER"] = "1"
-    # Bypass Meta HMAC verification in tests
-    os.environ["DISABLE_META_SIGNATURE_VERIFY"] = "1"
     # Limit LLM response length for faster E2E runs (doesn't change model reasoning)
     os.environ.setdefault("BOT_MAX_TOKENS", "512")
 
@@ -208,12 +193,8 @@ async def test_pool():
 
     async def _jsonb_init(conn):
         """Register jsonb codec so dicts are passed/returned natively (matches app pool)."""
-        await conn.set_type_codec(
-            "jsonb",
-            encoder=_json.dumps,
-            decoder=_json.loads,
-            schema="pg_catalog",
-        )
+        from app.services.database import init_connection  # same jsonb codec as the app pool
+        await init_connection(conn)
 
     pool = await asyncpg.create_pool(
         url,
@@ -269,16 +250,16 @@ async def test_pool():
         pass
 
 
-# ── WA capture fixture ────────────────────────────────────────────────────────
+# ── Bot reply capture ─────────────────────────────────────────────────────────
 
-class WACapture:
-    """Collects outbound WhatsApp messages instead of sending them to Meta."""
+class BotReplies:
+    """The bot's replies to each diner, in order, as send_diner_message saw them."""
 
     def __init__(self):
         self.messages: list[dict] = []
 
-    def append(self, phone: str, text: str, phone_id: str):
-        self.messages.append({"phone": phone, "text": text, "phone_id": phone_id})
+    def append(self, phone: str, text: str):
+        self.messages.append({"phone": phone, "text": text})
 
     def all_texts(self) -> list[str]:
         return [m["text"] for m in self.messages]
@@ -288,73 +269,17 @@ class WACapture:
         return [m["text"] for m in self.messages if _normalize_phone(m["phone"]) == norm]
 
 
+_ACTIVE_REPLIES: list[BotReplies] = []
+
+
 @pytest.fixture()
-def wa_capture():
-    """
-    Captures all outbound WhatsApp messages sent via httpx to graph.facebook.com.
-
-    Patches httpx.AsyncClient at the module level so every POST to
-    graph.facebook.com/*/messages is intercepted. Other HTTP calls pass through.
-    """
-    capture = WACapture()
-
-    class _FakeResponse:
-        status_code = 200
-        text = '{"messages": [{"id": "wamid.fake"}]}'
-
-        def json(self):
-            return {"messages": [{"id": "wamid.fake"}]}
-
-    class _FakeClient:
-        """Minimal async context manager that intercepts graph.facebook.com posts."""
-
-        def __init__(self, *args, **kwargs):
-            self._kwargs = kwargs
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def post(self, url: str, **kwargs) -> _FakeResponse:
-            if "graph.facebook.com" in url and "/messages" in url:
-                # Parse the outbound payload
-                payload = kwargs.get("json", {})
-                phone = payload.get("to", "")
-                msg_type = payload.get("type", "")
-                if msg_type == "text":
-                    text = payload.get("text", {}).get("body", "")
-                elif msg_type == "interactive":
-                    # Extract body text from interactive message
-                    text = (
-                        payload.get("interactive", {})
-                        .get("body", {})
-                        .get("text", "[interactive]")
-                    )
-                else:
-                    text = f"[{msg_type}]"
-                # Extract phone_id from URL: .../v20.0/{phone_id}/messages
-                parts = url.split("/")
-                phone_id = parts[-2] if len(parts) >= 2 else ""
-                capture.append(phone, text, phone_id)
-                log.info(
-                    "wa_capture.intercepted",
-                    phone=phone,
-                    text_preview=text[:80],
-                    phone_id=phone_id,
-                )
-            return _FakeResponse()
-
-        async def get(self, url: str, **kwargs) -> _FakeResponse:
-            return _FakeResponse()
-
-    # Patch httpx.AsyncClient everywhere it is used for WA sends
-    import httpx
-    original_client = httpx.AsyncClient
-
-    with patch("httpx.AsyncClient", _FakeClient):
+def bot_replies():
+    capture = BotReplies()
+    _ACTIVE_REPLIES.append(capture)
+    try:
         yield capture
+    finally:
+        _ACTIVE_REPLIES.remove(capture)
 
 
 # ── Seed helper ───────────────────────────────────────────────────────────────
@@ -363,7 +288,7 @@ async def seed_restaurant(
     pool: asyncpg.Pool,
     *,
     name: str = "E2E Test Restaurant",
-    bot_number_raw: str = "+570000E2ETEST",
+    key: str = "E2ETEST",
     menu: dict | None = None,
     payment_methods: list[str] | None = None,
     features_override: dict | None = None,
@@ -377,35 +302,23 @@ async def seed_restaurant(
     `organizations JOIN locations`. This function writes directly to
     `organizations` + `locations`.
 
-    Schema summary (confirmed against live schema):
-      organizations: id, name, slug, whatsapp_number, menu, features, ...
-      locations:     id, org_id, name, code, address, latitude, longitude,
-                     whatsapp_number (location-level override), active, timezone, ...
-      restaurants VIEW: id=l.id, whatsapp_number=COALESCE(l.whatsapp_number, o.whatsapp_number),
-                        menu=o.menu, features=o.features, ...
-
-    Strategy:
-      - org.whatsapp_number = parent bot_number  (VIEW exposes this via the
-        "sede principal" location whose l.whatsapp_number IS NULL)
-      - each branch location: l.whatsapp_number = bot_number + _b{org_id}{i+1}
-        (the _b suffix convention is required by agent_external.py branch routing)
+    `key` names the test restaurant: its org slug is `e2e-<key>`, so a
+    re-run finds the same org. The principal sede has code 'principal';
+    branch i has code 's<i>'.
 
     Returns:
         {
-          "id": int,                   # org_id — matches db_get_restaurant_by_phone return
-          "whatsapp_number": str,      # normalized bot_number
+          "id": int,                   # org_id — the bot runtime's tenant key
+          "principal_location_id": int,
           "owner_email": str,
           "branches": [
-              {"id": int, "whatsapp_number": str, "lat": float, "lon": float},
+              {"id": int, "lat": float, "lon": float},
               ...                      # id = location_id for each branch location
           ]
         }
 
-    Note on "id":
-      db_get_restaurant_by_phone() does `d["id"] = d["org_id"]` so all bot-runtime
-      code uses org_id as the tenant key. seed_restaurant() returns org_id under "id"
-      to match that convention. Branch "id" values are location_ids (used as
-      X-Branch-ID header in admin API calls).
+    Branch "id" values are location_ids (used as X-Branch-ID header in admin
+    API calls).
     """
     if menu is None:
         menu = {
@@ -427,8 +340,6 @@ async def seed_restaurant(
             (4.609710, -74.081741),
         ]
 
-    bot_number = _normalize_phone(bot_number_raw)
-
     base_features = {
         "bot_active": True,
         "domicilio_active": True,
@@ -446,19 +357,17 @@ async def seed_restaurant(
     if features_override:
         base_features.update(features_override)
 
-    slug = f"e2e-test-{bot_number[-8:]}"
+    slug = "e2e-" + re.sub(r"[^a-z0-9]+", "-", key.lower()).strip("-")
 
     async with pool.acquire() as conn:
         async with conn.transaction():
             # ── Upsert organization ───────────────────────────────────────────
-            # organizations has a partial unique index on whatsapp_number WHERE NOT NULL.
-            # Use ON CONFLICT to update menu/features on re-run.
+            # The slug is unique: update menu/features on re-run.
             org_row = await conn.fetchrow(
                 """
-                INSERT INTO organizations (name, slug, whatsapp_number, menu, features)
-                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
-                ON CONFLICT (whatsapp_number)
-                  WHERE whatsapp_number IS NOT NULL
+                INSERT INTO organizations (name, slug, menu, features)
+                VALUES ($1, $2, $3::jsonb, $4::jsonb)
+                ON CONFLICT (slug)
                   DO UPDATE SET
                     name     = EXCLUDED.name,
                     menu     = EXCLUDED.menu,
@@ -468,21 +377,16 @@ async def seed_restaurant(
                 """,
                 name,
                 slug,
-                bot_number,
                 json.dumps(menu),
                 json.dumps(base_features),
             )
             org_id = org_row["id"]
 
             # ── Upsert "sede principal" location ─────────────────────────────
-            # This location has NO whatsapp_number override so the VIEW resolves
-            # COALESCE(l.whatsapp_number, o.whatsapp_number) = org.whatsapp_number.
-            # It represents the "parent" entry visible in the restaurants VIEW as
-            # whatsapp_number = bot_number.
             existing_principal = await conn.fetchrow(
                 """
                 SELECT id FROM locations
-                WHERE org_id = $1 AND whatsapp_number IS NULL
+                WHERE org_id = $1 AND code = 'principal'
                 ORDER BY id ASC LIMIT 1
                 """,
                 org_id,
@@ -515,11 +419,16 @@ async def seed_restaurant(
 
             # ── Owner user ────────────────────────────────────────────────────
             # users.branch_id = org_id (the tenant key used by auth middleware).
+            # P0 fix (2026-09): also set the explicit org_id/location_id
+            # columns — deps.get_current_restaurant no longer resolves
+            # anything from the ambiguous branch_id column, it requires
+            # users.org_id to be populated (see users_org_location
+            # migration + memory/ambiguous-restaurant-lookup-p0.md).
             owner_email = f"e2e-owner-{org_id}@mesio.test"
             await conn.execute(
                 """
-                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id, org_id, location_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (username) DO NOTHING
                 """,
                 owner_email,
@@ -527,6 +436,8 @@ async def seed_restaurant(
                 name,
                 "owner",
                 org_id,
+                org_id,
+                principal_loc_id,
             )
 
             # ── Subscription usage ────────────────────────────────────────────
@@ -541,21 +452,12 @@ async def seed_restaurant(
             )
 
             # ── Branch locations ──────────────────────────────────────────────
-            # Each branch is a location with its own whatsapp_number override.
-            # The _b{org_id}{i+1} suffix is required by agent_external.py branch routing
-            # (see grep for '_b' in app/services/agent_external.py).
             branches = []
             for i in range(num_branches):
                 lat, lon = branch_latlons[i] if i < len(branch_latlons) else (4.6, -74.1)
-                branch_bot = f"{bot_number}_b{org_id}{i + 1}"
-
-                # Check for existing branch location by whatsapp_number
                 b_existing = await conn.fetchrow(
-                    """
-                    SELECT id FROM locations
-                    WHERE whatsapp_number = $1
-                    """,
-                    branch_bot,
+                    "SELECT id FROM locations WHERE org_id = $1 AND code = $2",
+                    org_id, f"s{i + 1}",
                 )
                 if b_existing:
                     branch_loc_id = b_existing["id"]
@@ -574,8 +476,8 @@ async def seed_restaurant(
                         """
                         INSERT INTO locations
                           (org_id, name, code, address, latitude, longitude,
-                           whatsapp_number, active, timezone)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'America/Bogota')
+                           active, timezone)
+                        VALUES ($1, $2, $3, $4, $5, $6, true, 'America/Bogota')
                         RETURNING id
                         """,
                         org_id,
@@ -584,41 +486,18 @@ async def seed_restaurant(
                         f"Dirección Sucursal {i + 1}, Bogotá (E2E)",
                         lat,
                         lon,
-                        branch_bot,
                     )
                     branch_loc_id = b_row["id"]
 
                 branches.append({
                     "id": branch_loc_id,
-                    "whatsapp_number": branch_bot,
                     "lat": lat,
                     "lon": lon,
                 })
 
-        # ── Sanity check: VIEW must resolve both bot numbers ──────────────────
-        # If this fails the test seeding is wrong — fail fast with a clear message.
-        principal_view_row = await conn.fetchrow(
-            "SELECT id, whatsapp_number FROM restaurants WHERE whatsapp_number = $1",
-            bot_number,
-        )
-        assert principal_view_row is not None, (
-            f"seed_restaurant: 'restaurants' VIEW returned no row for bot_number={bot_number!r}. "
-            f"org_id={org_id}, principal_loc_id={principal_loc_id}. "
-            "Check that the location has whatsapp_number IS NULL so the VIEW COALESCEs to org.whatsapp_number."
-        )
-        for b in branches:
-            branch_view_row = await conn.fetchrow(
-                "SELECT id FROM restaurants WHERE whatsapp_number = $1",
-                b["whatsapp_number"],
-            )
-            assert branch_view_row is not None, (
-                f"seed_restaurant: 'restaurants' VIEW returned no row for branch {b['whatsapp_number']!r}. "
-                f"org_id={org_id}. Branch location insert may have failed."
-            )
-
         return {
             "id": org_id,
-            "whatsapp_number": bot_number,
+            "principal_location_id": principal_loc_id,
             "owner_email": owner_email,
             "branches": branches,
         }
@@ -634,194 +513,66 @@ async def create_admin_token(pool: asyncpg.Pool, username: str) -> str:
     return token
 
 
-# ── Inbox drain helper ────────────────────────────────────────────────────────
+# ── Diner message helper ──────────────────────────────────────────────────────
 
-async def drain_inbox(
-    pool: asyncpg.Pool,
-    max_iterations: int = 30,
-    wait_for_first: float = 3.0,
-) -> int:
-    """
-    Manually drains the webhook_inbox table by running the production
-    claim-then-ack loop (matching inbox_worker.py) until empty or
-    max_iterations is reached.
-
-    Production pattern (3 phases, Rule #4 in CLAUDE.md):
-      Phase 1 — Claim (short transaction, ~ms):
-        SELECT FOR UPDATE SKIP LOCKED → claim_rows (SET next_attempt_at) → COMMIT
-      Phase 2 — Dispatch (no DB connection):
-        asyncio.wait_for(_dispatch(...), timeout=180)
-      Phase 3 — Ack (new short connection, ~ms):
-        mark_processed or mark_failed
-
-    Args:
-        wait_for_first: seconds to wait for at least one row to appear
-            before declaring the queue empty.
-
-    Returns number of items successfully processed.
-    """
-    from app.services import inbox_worker as _iw
-    import time as _time
-
-    total_processed = 0
-    deadline = _time.monotonic() + wait_for_first
-
-    for iteration in range(max_iterations):
-        # Phase 1: claim (short transaction — release conn before dispatch)
-        claimed = []
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                rows = await inbox_repo.fetch_batch(conn, limit=10)
-                if rows:
-                    await inbox_repo.claim_rows(conn, [r["id"] for r in rows])
-                    for r in rows:
-                        claimed.append({
-                            "id": r["id"],
-                            "provider": r["provider"],
-                            "payload": r["payload"],
-                            "attempts": r["attempts"] + 1,
-                        })
-        # conn released here — production pattern (no DB held during dispatch)
-
-        if not claimed:
-            # Wait briefly on first iteration in case the row just landed
-            if iteration == 0 and _time.monotonic() < deadline:
-                await asyncio.sleep(0.5)
-                continue
-            # After processing some items, allow one more poll for follow-on messages
-            if total_processed > 0 and _time.monotonic() < deadline:
-                await asyncio.sleep(0.2)
-                continue
-            break
-
-        # Phase 2: dispatch (no DB connection open — matches production)
-        for item in claimed:
-            inbox_id = item["id"]
-            provider = item["provider"]
-            payload = item["payload"]
-            attempts = item["attempts"]
-            dispatch_error = None
-
-            try:
-                await asyncio.wait_for(
-                    _iw._dispatch(provider, payload),
-                    timeout=180,
-                )
-            except asyncio.TimeoutError:
-                dispatch_error = "dispatch_timeout"
-                log.error("drain_inbox.timeout", inbox_id=inbox_id)
-            except Exception as exc:
-                import traceback
-                dispatch_error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
-                log.error("drain_inbox.dispatch_failed", inbox_id=inbox_id, error=str(exc))
-
-            # Phase 3: ack (new connection — matches production)
-            if dispatch_error is None:
-                async with pool.acquire() as conn:
-                    await inbox_repo.mark_processed(conn, inbox_id)
-                total_processed += 1
-            else:
-                async with pool.acquire() as conn:
-                    await inbox_repo.mark_failed(
-                        conn, inbox_id, dispatch_error, attempts, already_incremented=True
-                    )
-
-    return total_processed
+_TABLE_MARKER_RE = re.compile(r"\[(?:table_id|t):([^\]]+)\]")
 
 
-# ── Inbound simulation helper ─────────────────────────────────────────────────
+async def _scan_table(phone: str, table_id: str, org_id: int) -> None:
+    """What a QR scan does for this diner: sit them at `table_id`."""
+    from app.services import database as db
+    from app.services.tenant_context import tenant_scope
 
-async def simulate_whatsapp_inbound(
+    with tenant_scope(org_id):
+        table = await db.db_get_table_by_id(table_id)
+        assert table, f"e2e: table {table_id!r} not found"
+        session = await db.db_get_active_session(phone, org_id)
+        if session and session.get("table_id") == table["id"]:
+            return
+        if session:
+            await db.db_close_session(
+                phone, org_id, reason="scanned_new_table", closed_by_username="system",
+            )
+        await db.db_create_table_session(
+            phone, org_id, table["id"], table["name"],
+            location_id=table.get("location_id"),
+        )
+
+
+async def send_diner_message(
     client: AsyncClient,
     pool: asyncpg.Pool,
     *,
     phone: str,
     text: str,
-    bot_number: str,
-    wam_id: str | None = None,
-    lat: float | None = None,
-    lon: float | None = None,
+    org_id: int,
 ) -> int:
+    """Send one diner message to the bot; returns 1 once the turn is done.
+
+    `client` and `pool` are unused and kept so the call sites read the same.
     """
-    Send a simulated inbound WhatsApp message to POST /webhook/meta,
-    then drain the inbox worker until the message is processed.
+    from app.services import agent
+    from app.services import database as db
+    from app.services.tenant_context import tenant_scope
 
-    For GPS location messages, set lat and lon (text is ignored for the
-    location payload but we also save coords to the cart directly).
+    normalized_phone = _normalize_phone(phone)
+    org_id = int(org_id)
 
-    Returns number of inbox items processed.
-    """
-    # Generate a unique wam_id if not provided (avoids dedup collisions)
-    if wam_id is None:
-        wam_id = f"wamid.e2e_{uuid.uuid4().hex}"
+    text = text or ""
+    marker = _TABLE_MARKER_RE.search(text)
+    if marker:
+        await _scan_table(normalized_phone, marker.group(1).strip(), org_id)
+        text = (text[:marker.start()] + text[marker.end():]).strip()
 
-    normalized_bot = _normalize_phone(bot_number)
-
-    if lat is not None and lon is not None:
-        # Location message
-        message = {
-            "id": wam_id,
-            "from": _normalize_phone(phone),
-            "type": "location",
-            "location": {"latitude": lat, "longitude": lon},
-        }
-    else:
-        message = {
-            "id": wam_id,
-            "from": _normalize_phone(phone),
-            "type": "text",
-            "text": {"body": text},
-        }
-
-    payload = {
-        "object": "whatsapp_business_account",
-        "entry": [
-            {
-                "id": "e2e_entry",
-                "changes": [
-                    {
-                        "value": {
-                            "metadata": {
-                                "display_phone_number": normalized_bot,
-                                "phone_number_id": "e2e_phone_id",
-                            },
-                            "messages": [message],
-                        }
-                    }
-                ],
-            }
-        ],
-    }
-
-    body_bytes = json.dumps(payload).encode()
-
-    # Build a valid signature (DISABLE_META_SIGNATURE_VERIFY bypasses the check,
-    # but we send a dummy signature so the parser doesn't log noise).
-    app_secret = os.environ.get("META_APP_SECRET", "test_secret_e2e")
-    signature = _build_meta_signature(body_bytes, app_secret)
-
-    resp = await client.post(
-        "/api/webhook/meta",
-        content=body_bytes,
-        headers={
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": signature,
-        },
-    )
-    # The webhook should always return 200 (even on partial failures)
-    assert resp.status_code == 200, f"Webhook returned {resp.status_code}: {resp.text}"
-
-    # Drain the inbox using the production claim-then-ack pattern.
-    # The mesio_e2e_test database is isolated — the Railway production inbox worker
-    # does NOT poll it, so there is no race condition with a competing worker.
-    processed = await drain_inbox(pool)
-    log.info(
-        "simulate_whatsapp_inbound.done",
-        phone=phone,
-        text_preview=(text[:60] if text else f"GPS {lat},{lon}"),
-        inbox_processed=processed,
-    )
-    return processed
+    with tenant_scope(org_id):
+        result = await agent.chat(
+            user_phone=normalized_phone, user_message=text, org_id=org_id,
+        )
+    reply = (result or {}).get("message", "")
+    if reply and _ACTIVE_REPLIES:
+        _ACTIVE_REPLIES[-1].append(phone, reply)
+    log.info("send_diner_message.done", phone=phone, text_preview=text[:60])
+    return 1
 
 
 # ── Truncate volatile E2E tables between tests ────────────────────────────────
@@ -835,7 +586,6 @@ _E2E_VOLATILE_TABLES = [
     "table_checks",
     "waiter_alerts",
     "nps_responses",
-    "webhook_inbox",
 ]
 
 
@@ -846,7 +596,6 @@ async def truncate_e2e_data(pool: asyncpg.Pool, org_id: int) -> None:
 
     Post-Wave-2: volatile tables use org_id (not restaurant_id).
     table_checks has no tenant key — deleted via their parent table_orders.
-    webhook_inbox has no tenant key — deleted by bot_number pattern in payload.
 
     This function is called with both org_id and branch location_ids from tests
     (e.g. truncate_e2e_data(pool, parent_id) and truncate_e2e_data(pool, branch_1_id)).
@@ -875,9 +624,3 @@ async def truncate_e2e_data(pool: asyncpg.Pool, org_id: int) -> None:
             """,
             org_id,
         )
-
-        # webhook_inbox has no tenant key — match by bot_number patterns present
-        # in the payload JSONB.  This deletes all e2e inbox rows regardless of
-        # which org they belong to (acceptable since it's a test-only operation
-        # on an isolated test DB).
-        await conn.execute("DELETE FROM webhook_inbox WHERE payload IS NOT NULL")

@@ -178,14 +178,3 @@ async def tenant_connection() -> AsyncGenerator[asyncpg.Connection, None]:
         if aexit_fn is not None:
             await aexit_fn(None, None, None)
 
-
-@asynccontextmanager
-async def tenant_connection_readonly() -> AsyncGenerator[asyncpg.Connection, None]:
-    """Like tenant_connection() but additionally sets the transaction read-only.
-
-    Useful for analytics/reporting queries where accidental writes must be
-    prevented at the DB level, not only by convention.
-    """
-    async with tenant_connection() as conn:
-        await conn.execute("SET TRANSACTION READ ONLY")
-        yield conn

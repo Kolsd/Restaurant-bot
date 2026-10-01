@@ -97,7 +97,7 @@ async function loadFloorPlan() {
     if (_currentView === 'qr') renderQrGrid();
     if (_selectedTableId) selectTable(_selectedTableId);
     updateRefreshBadge();
-    _populateReservaTables();
+    _populateReservationTables();
   } catch (e) {
     mesioTrackFetch(false);
     console.warn('floor-plan fetch failed:', e);
@@ -266,7 +266,7 @@ function _buildTile(tbl) {
   // Number label
   var numDiv = document.createElement('div');
   numDiv.className = 'tn';
-  numDiv.textContent = tbl.table_number || tbl.id;
+  numDiv.textContent = tbl.number || tbl.id;
   tile.appendChild(numDiv);
 
   // Status + capacity inline: "LIBRE · 4P"
@@ -428,7 +428,7 @@ function _openPropsModal(tableId) {
   var tbl = _tables.find(function (t) { return String(t.id) === String(tableId); });
   if (!tbl) return;
 
-  el('propNum').value      = tbl.table_number || '';
+  el('propNum').value      = tbl.number || '';
   el('propName').value     = tbl.name || '';
   el('propCapacity').value = tbl.capacity || '';
   el('propType').value     = tbl.table_type || 'interior';
@@ -465,7 +465,7 @@ async function _saveProps() {
 async function _deleteTable() {
   if (!_propsTableId) return;
   var tbl = _tables.find(function (t) { return String(t.id) === String(_propsTableId); });
-  var name = tbl ? 'Mesa ' + (tbl.table_number || _propsTableId) : 'esta mesa';
+  var name = tbl ? 'Mesa ' + (tbl.number || _propsTableId) : 'esta mesa';
   var ok = await mesioConfirm('¿Eliminar ' + name + '? Esta acción no se puede deshacer.', { confirmText: 'Eliminar', danger: true });
   if (!ok) return;
   try {
@@ -508,7 +508,7 @@ async function _createTable() {
     }
     var created = await r.json();
     var tableId = created.table_id;
-    var tableName = created.name || ('Mesa ' + tableId);
+    var tableName = 'Mesa ' + (created.name || tableId);
 
     // Step 2: if user filled capacity/type/zone, apply via PUT /api/tables/{id}/properties
     var capacity   = parseInt(el('ntCapacity').value) || null;
@@ -612,7 +612,7 @@ async function selectTable(tableId) {
   var status = (tbl.status || 'free').toLowerCase();
   var numEl = el('dNum');
   if (numEl) {
-    numEl.textContent = 'M' + (tbl.table_number || tbl.id);
+    numEl.textContent = 'M' + (tbl.number || tbl.id);
     var stateColors = { seated: 'fp-sentados-text', eating: 'fp-ocupada-text', billing: 'fp-factura-text', reserved: 'fp-reservada-text' };
     numEl.style.color = 'var(--' + (stateColors[status] || 'fp-libre-text') + ')';
   }
@@ -629,7 +629,7 @@ async function selectTable(tableId) {
       var mins = Math.round((Date.now() - new Date(tbl.opened_at).getTime()) / 60000);
       parts.push('Abierta hace <strong>' + mins + ' min</strong>');
     }
-    // Mesera line — only render if API provides it
+    // Waiter line — only render if API provides it
     var waiterName = tbl.assigned_staff_name || tbl.waiter_name;
     if (waiterName) parts.push('Mesero/a: <strong>' + _escHtml(waiterName) + '</strong>');
     // Last event — only render if API provides it
@@ -732,7 +732,9 @@ function _renderDetailQr(tableId) {
     canvas.textContent = 'QR no disponible';
     return;
   }
-  var url = window.location.origin + '/menu/' + encodeURIComponent(tableId);
+  // The diner's web chat is the product (QR → /chat/{table_id}); /menu/ was
+  // the WhatsApp-era catalog, deleted 2026-09-25.
+  var url = window.location.origin + '/chat/' + encodeURIComponent(tableId);
   try {
     new QRCode(canvas, {
       text: url,
@@ -853,7 +855,7 @@ function renderQrGrid() {
 
     var name = document.createElement('div');
     name.className = 'qr-card-name';
-    name.textContent = 'Mesa ' + (tbl.table_number || tbl.id);
+    name.textContent = 'Mesa ' + (tbl.number || tbl.id);
     card.appendChild(name);
 
     var meta = document.createElement('div');
@@ -880,7 +882,7 @@ function renderQrGrid() {
     qrWrap.appendChild(qrDiv);
     card.appendChild(qrWrap);
 
-    var qrUrl = window.location.origin + '/menu/' + tbl.id;
+    var qrUrl = window.location.origin + '/chat/' + encodeURIComponent(tbl.id);
     // Generate QR client-side via qrcodejs
     if (typeof QRCode !== 'undefined') {
       new QRCode(qrDiv, {
@@ -919,8 +921,8 @@ function renderQrGrid() {
   }
 }
 
-// ── Phase 3: Reserva modal ────────────────────────────────────────
-function _openReservaModal() {
+// ── Phase 3: Reservation modal ────────────────────────────────────────
+function _openReservationModal() {
   // Defaults: today, current time + 1h
   var now = new Date();
   var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -940,7 +942,7 @@ function _openReservaModal() {
   el('reservaModal').classList.add('open');
 }
 
-function _populateReservaTables() {
+function _populateReservationTables() {
   var sel = el('resTable');
   if (!sel) return;
   var current = sel.value;
@@ -949,13 +951,13 @@ function _populateReservaTables() {
     var opt = document.createElement('option');
     opt.value = t.id;
     var cap = t.capacity ? ' (' + t.capacity + 'p)' : '';
-    opt.textContent = 'Mesa ' + (t.table_number || t.id) + (t.zone ? ' — ' + t.zone : '') + cap;
+    opt.textContent = 'Mesa ' + (t.number || t.id) + (t.zone ? ' — ' + t.zone : '') + cap;
     sel.appendChild(opt);
   });
   if (current) sel.value = current;
 }
 
-async function _submitReserva() {
+async function _submitReservation() {
   var name = el('resName').value.trim();
   if (!name) { mesioToast('El nombre del cliente es obligatorio', 'error'); return; }
   var date = el('resDate').value;
@@ -1096,9 +1098,9 @@ function bindAll() {
   var reloadBtn = el('btnEmptyReload');
   if (reloadBtn) reloadBtn.addEventListener('click', function () { loadFloorPlan(); });
 
-  // New reserva
+  // New reservation
   var resBtn = el('newReservaBtn');
-  if (resBtn) resBtn.addEventListener('click', _openReservaModal);
+  if (resBtn) resBtn.addEventListener('click', _openReservationModal);
 
   // View toggle
   var mapBtn = el('viewMap');
@@ -1118,15 +1120,15 @@ function bindAll() {
 
   var btnInvoice = el('btnInvoice');
   if (btnInvoice) btnInvoice.addEventListener('click', function () {
-    if (_selectedTableId) window.location.href = '/caja?table=' + _selectedTableId;
+    if (_selectedTableId) window.location.href = '/cashier?table=' + _selectedTableId;
   });
 
   var btnAddItem = el('btnAddItem');
   if (btnAddItem) btnAddItem.addEventListener('click', function () {
-    if (_selectedTableId) window.location.href = '/caja?table=' + _selectedTableId + '&action=add';
+    if (_selectedTableId) window.location.href = '/cashier?table=' + _selectedTableId + '&action=add';
   });
 
-  // Editar mesa (capacidad, tipo, zona) — abre el modal de propiedades
+  // Edit table (capacity, type, zone) — opens the properties modal
   var btnEditTable = el('btnEditTable');
   if (btnEditTable) btnEditTable.addEventListener('click', function () {
     if (_selectedTableId) _openPropsModal(_selectedTableId);
@@ -1138,13 +1140,13 @@ function bindAll() {
     if (_selectedTableId) window.open('/api/tables/' + _selectedTableId + '/qr-sheet', '_blank');
   });
 
-  // Reserva modal
+  // Reservation modal
   var resCancel = el('reservaModalCancel');
   var resClose  = el('reservaModalClose');
   var resSubmit = el('reservaModalSubmit');
   if (resCancel) resCancel.addEventListener('click', function () { _closeModal('reservaModal'); });
   if (resClose)  resClose.addEventListener('click',  function () { _closeModal('reservaModal'); });
-  if (resSubmit) resSubmit.addEventListener('click', _submitReserva);
+  if (resSubmit) resSubmit.addEventListener('click', _submitReservation);
 
   // Props modal
   var propsCancel = el('propsModalCancel');

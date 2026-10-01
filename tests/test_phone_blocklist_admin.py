@@ -38,6 +38,10 @@ def _make_user(role: str = "owner") -> dict:
         "username": "owner_test",
         "restaurant_name": "Bloqueador SA",
         "branch_id": 99,
+        # P0 fix (2026-09): get_current_restaurant resolves ONLY via the
+        # explicit org_id/location_id fields.
+        "org_id": 99,
+        "location_id": 99,
         "role": role,
         "password_hash": "$2b$12$placeholder",
     }
@@ -49,7 +53,6 @@ def _make_restaurant() -> dict:
         "org_id": 99,
         "location_id": 99,
         "name": "Bloqueador SA",
-        "whatsapp_number": "573000000001",
         "address": "Calle 1",
         "features": {"bot_active": True, "currency": "COP"},
     }
@@ -66,7 +69,12 @@ def _patch_auth(monkeypatch, role: str = "owner"):
     monkeypatch.setattr(db, "db_get_user", AsyncMock(return_value=_make_user(role)))
     monkeypatch.setattr(
         db,
-        "db_get_restaurant_by_id",
+        "db_get_restaurant_by_org_id",
+        AsyncMock(return_value=_make_restaurant()),
+    )
+    monkeypatch.setattr(
+        db,
+        "db_get_restaurant_by_location_id",
         AsyncMock(return_value=_make_restaurant()),
     )
 

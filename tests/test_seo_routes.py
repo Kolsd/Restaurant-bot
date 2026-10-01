@@ -86,7 +86,6 @@ _SAMPLE_RESTAURANT = {
     "id": 1,
     "name": "El Sabor",
     "slug": "el-sabor",
-    "whatsapp_number": "+573001234567",
     "menu": _SAMPLE_MENU,
     "features": {"currency": "COP", "locale": "es-CO"},
     "address": "Calle 1 # 2-3",
@@ -113,8 +112,10 @@ def client(monkeypatch):
         "app.repositories.restaurant_repo.db_get_restaurant_by_slug",
         mock_by_slug,
     )
+    # Sitemap route (P0 fix 2026-09) resolves via db_get_restaurant_by_location_id
+    # — treated as a location_id (see dashboard.py's restaurant_sitemap docstring).
     monkeypatch.setattr(
-        "app.services.database.db_get_restaurant_by_id",
+        "app.services.database.db_get_restaurant_by_location_id",
         mock_by_id,
     )
     # Also patch in routes.dashboard namespace
@@ -123,7 +124,7 @@ def client(monkeypatch):
         mock_by_slug,
     )
     monkeypatch.setattr(
-        "app.routes.dashboard.db.db_get_restaurant_by_id",
+        "app.routes.dashboard.db.db_get_restaurant_by_location_id",
         mock_by_id,
     )
     return TestClient(app)
@@ -146,6 +147,13 @@ class TestMenuPage:
         resp = client.get("/r/el-sabor/menu")
         assert "og:url" in resp.text
         assert "/r/el-sabor/menu" in resp.text
+
+    def test_menu_page_sends_humans_to_the_ordering_page(self, client):
+        """It redirected to the WhatsApp-era /menu/{bot_number} catalog, and to
+        ITSELF — an endless refresh — for an org with no number."""
+        resp = client.get("/r/el-sabor/menu")
+        assert 'content="0; url=/pedir/el-sabor"' in resp.text
+        assert "url=/r/el-sabor/menu" not in resp.text
 
     def test_menu_page_has_restaurant_name(self, client):
         resp = client.get("/r/el-sabor/menu")
@@ -181,9 +189,10 @@ class TestDishPage:
         # Price should appear somewhere (formatted)
         assert "28" in resp.text  # at minimum the raw number
 
-    def test_dish_page_whatsapp_cta(self, client):
+    def test_dish_page_order_cta_points_to_pedir(self, client):
         resp = client.get("/r/el-sabor/menu/bandeja-paisa")
-        assert "wa.me" in resp.text or "WhatsApp" in resp.text
+        assert 'href="/pedir/el-sabor"' in resp.text
+        assert "wa.me" not in resp.text
 
     def test_dish_page_no_image_no_crash(self, client):
         """Dish without image_url should render without error (uses placeholder)."""
@@ -277,7 +286,7 @@ class TestSitemap:
         async def mock_by_id(rid):
             return rest if rid == 1 else None
 
-        monkeypatch.setattr("app.routes.dashboard.db.db_get_restaurant_by_id", mock_by_id)
+        monkeypatch.setattr("app.routes.dashboard.db.db_get_restaurant_by_location_id", mock_by_id)
         c = TestClient(app)
         resp = c.get("/sitemap-1.xml")
         assert "active-dish" in resp.text

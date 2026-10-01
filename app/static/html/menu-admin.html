@@ -42,11 +42,12 @@
             <button class="seg-btn active" data-tab="disp">🍽️ Disponibilidad</button>
             <button class="seg-btn" data-tab="inv">📦 Inventario</button>
             <button class="seg-btn" data-tab="esc">🧪 Escandallos</button>
+            <button class="seg-btn" data-tab="sede">🏪 Carta de esta sede</button>
           </div>
         </div>
       </div>
 
-      <!-- DISPONIBILIDAD -->
+      <!-- AVAILABILITY -->
       <div id="tab-disp">
         <div class="row" style="margin-bottom: 14px; gap: 10px;">
           <span style="font-size: 12px; color: var(--text-3);">Mostrando:</span>
@@ -56,8 +57,41 @@
             <button class="seg-btn">No disponibles</button>
           </div>
           <span id="menu-counter" style="margin-left: auto; font-size: 12px; color: var(--text-3);">— / — disponibles</span>
+          <button class="btn ghost" id="btn-import-carta"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 11V3M5 6l3-3 3 3M3 12v1h10v-1"/></svg>Importar carta</button>
           <button class="btn" id="btn-edit-carta"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>Editar carta</button>
-          <button class="btn primary" id="btn-sync-branches">🔄 Sincronizar sucursales</button>
+        </div>
+
+        <!-- Import a carta from a photo or pasted text. It produces a DRAFT:
+             the result opens in the same editor as "Editar carta" and is only
+             saved when the owner saves there. Nothing here writes a menu. -->
+        <div class="modal-overlay" id="importCartaModal" style="display:none;">
+          <div class="modal" style="max-width:560px;">
+            <div class="modal-head">
+              <h3 class="modal-title">Importar carta</h3>
+              <button class="modal-close" id="importCartaClose" type="button">&times;</button>
+            </div>
+            <div class="modal-body">
+              <p style="font-size:13px;color:var(--text-2);margin:0 0 14px;">
+                Sube una foto de tu carta o pega el texto. Mesio la lee y te deja los platos
+                listos en el editor para que los revises. <strong>No se guarda nada</strong>
+                hasta que tú le des guardar.
+              </p>
+              <div class="form-group">
+                <label for="importCartaFile">Foto de la carta</label>
+                <input type="file" id="importCartaFile" accept="image/jpeg,image/png,image/webp">
+              </div>
+              <div style="text-align:center;font-size:12px;color:var(--text-3);margin:10px 0;">o</div>
+              <div class="form-group">
+                <label for="importCartaText">Pega el texto de la carta</label>
+                <textarea id="importCartaText" rows="8" placeholder="Ajiaco santafereño — 28.000&#10;Bandeja paisa — 32.000"></textarea>
+              </div>
+              <div id="importCartaStatus" style="font-size:13px;margin-top:10px;"></div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn ghost" id="importCartaCancel" type="button">Cancelar</button>
+              <button class="btn primary" id="importCartaGo" type="button">Leer carta</button>
+            </div>
+          </div>
         </div>
 
         <!-- Visual onboarding widget — shows photo coverage and which dishes still need images. -->
@@ -69,7 +103,7 @@
         </div>
       </div>
 
-      <!-- INVENTARIO -->
+      <!-- INVENTORY -->
       <div id="tab-inv" style="display:none;">
         <!-- Inventory alert strip — rendered dynamically by menu-admin.js
              based on agotado / bajo-mínimo items. Hidden when inventory is clean. -->
@@ -103,7 +137,7 @@
         </div>
       </div>
 
-      <!-- ESCANDALLOS -->
+      <!-- RECIPE COSTING -->
       <div id="tab-esc" style="display:none;">
         <div class="row" style="margin-bottom: 14px;">
           <div>
@@ -113,9 +147,23 @@
           <button class="btn primary" id="btn-new-recipe" style="margin-left: auto;">+ Nuevo escandallo</button>
         </div>
 
-        <!-- Escandallos — rendered dynamically from /api/inventory/recipes -->
+        <!-- Recipe costing sheets — rendered dynamically from /api/inventory/recipes -->
         <div id="recipes-container" class="g-2">
           <div style="padding:18px;color:var(--text-3);font-size:13px;">Cargando escandallos&hellip;</div>
+        </div>
+      </div>
+
+      <!-- THIS SEDE'S CARTA — its prices, hidden dishes and own dishes on top of
+           the org's carta (migration 0093). Rendered by menu-sede.js. -->
+      <div id="tab-sede" style="display:none;">
+        <div class="row" style="margin-bottom: 14px;">
+          <div>
+            <div style="font-size: 15px; font-weight: 600;">Carta de esta sede</div>
+            <div style="font-size: 12px; color: var(--text-3); margin-top: 2px;">Cambia precios, oculta platos o agrega platos propios solo para esta sede. La carta general no cambia.</div>
+          </div>
+        </div>
+        <div id="sede-carta-body">
+          <div style="padding:18px;color:var(--text-3);font-size:13px;">Cargando carta de la sede&hellip;</div>
         </div>
       </div>
 
@@ -132,6 +180,15 @@
     </div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
       <input type="hidden" id="invModalId">
+      <!-- Sede picker: stock belongs to ONE sede, so an owner has to say
+           which fridge this is before saving. Hidden for staff, who only
+           have one sede anyway. -->
+      <div id="invModalSedeRow" style="display:none;">
+        <label class="form-label" for="invModalSede">Sede</label>
+        <select class="input" id="invModalSede">
+          <option value="">Elegí una sede…</option>
+        </select>
+      </div>
       <div>
         <label class="form-label" for="invModalName">Nombre</label>
         <input class="input" id="invModalName" placeholder="Ej. Papa criolla">
@@ -164,7 +221,39 @@
   </div>
 </div>
 
-<!-- Recipe (escandallo) create/edit modal -->
+<!-- Traslado de inventario entre sedes -->
+<div id="invXferModal" class="modal-overlay" style="display:none;align-items:center;justify-content:center;">
+  <div class="modal" style="width:420px;max-width:96vw;">
+    <div class="modal-head">
+      <span id="invXferTitle">Trasladar a otra sede</span>
+      <button class="modal-close" id="invXferClose" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+      <input type="hidden" id="invXferId">
+      <p id="invXferFrom" class="muted" style="margin:0;font-size:13px;"></p>
+      <div>
+        <label class="form-label" for="invXferTo">Sede de destino</label>
+        <select class="input" id="invXferTo">
+          <option value="">Elegí una sede…</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label" for="invXferQty">Cantidad</label>
+        <input class="input" type="number" id="invXferQty" min="0" step="0.01" placeholder="0">
+      </div>
+      <div>
+        <label class="form-label" for="invXferNote">Nota (opcional)</label>
+        <input class="input" id="invXferNote" maxlength="200" placeholder="Ej. faltó para el fin de semana">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="invXferCancel">Cancelar</button>
+      <button class="btn primary" id="invXferSave">Trasladar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Recipe (costing sheet) create/edit modal -->
 <div id="recipeModal" class="modal-overlay" style="display:none;align-items:center;justify-content:center;">
   <div class="modal" style="width:520px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;">
     <div class="modal-head">
@@ -222,5 +311,6 @@
 <!-- are defined when menu-admin.js wires the button.                         -->
 <script src="/static/js/dashboard-features.js"></script>
 <script src="/static/js/pages/menu-admin.js"></script>
+<script src="/static/js/pages/menu-sede.js"></script>
 </body>
 </html>

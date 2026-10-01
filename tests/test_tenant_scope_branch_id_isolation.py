@@ -56,7 +56,6 @@ def matriz_org_dict():
         "org_id": ORG_ID,
         "location_id": LOCATION_ID,
         "name": "Test Restaurant",
-        "whatsapp_number": "+57300",
         "parent_restaurant_id": None,
         "features": {},
     }
@@ -100,7 +99,7 @@ def test_create_table_passes_org_id_to_tenant_scope_not_location_id(
         patch("app.routes.tables.require_auth", AsyncMock(return_value=None)),
         patch("app.routes.tables.get_current_user", AsyncMock(return_value=admin_user)),
         patch("app.routes.tables.get_current_restaurant", AsyncMock(return_value=matriz_org_dict)),
-        patch("app.routes.tables.db.db_get_restaurant_by_id",
+        patch("app.routes.tables.db.db_get_restaurant_by_location_id",
               AsyncMock(return_value={**matriz_org_dict, "id": ORG_ID, "location_id": LOCATION_ID})),
         patch("app.routes.tables.db.db_auto_create_table",
               AsyncMock(return_value={"id": "t1", "name": "Mesa 1", "number": 1})),
@@ -198,17 +197,17 @@ def test_set_dish_availability_passes_org_id_to_tenant_scope_AND_repo(
 def test_closed_sessions_resolves_org_id_from_branch_id_for_tenant_scope(
     client, matriz_org_dict, admin_user
 ):
-    """get_dashboard_filters returns a location_id; the route must resolve org_id
-    via db_get_restaurant_by_id BEFORE passing to tenant_scope."""
+    """get_dashboard_filters returns (location_id, org_id, ...); the route must
+    scope with the org_id, never the location id."""
     captured: list = []
 
     patches = _patch_tenant_scope_capture(captured) + [
         patch("app.routes.settings_routes.require_auth", AsyncMock(return_value=None)),
-        # get_dashboard_filters returns (branch_id=LOCATION_ID, bot_number, ...)
+        # get_dashboard_filters returns (branch_id=LOCATION_ID, org_id, ...)
         patch("app.routes.settings_routes.get_dashboard_filters",
-              AsyncMock(return_value=(LOCATION_ID, "+57300", None, None))),
+              AsyncMock(return_value=(LOCATION_ID, ORG_ID, None, None))),
         # db_get_restaurant_by_id returns a dict with `id` normalized to ORG_ID
-        patch("app.routes.settings_routes.db.db_get_restaurant_by_id",
+        patch("app.routes.settings_routes.db.db_get_restaurant_by_location_id",
               AsyncMock(return_value={"id": ORG_ID, "org_id": ORG_ID, "location_id": LOCATION_ID})),
         patch("app.routes.settings_routes.tr.db_get_closed_sessions",
               AsyncMock(return_value=[])),
@@ -226,8 +225,7 @@ def test_closed_sessions_resolves_org_id_from_branch_id_for_tenant_scope(
 
     assert resp.status_code == 200, resp.text
     assert captured == [ORG_ID], (
-        f"tenant_scope received {captured} — expected [{ORG_ID}]. The fix resolves "
-        "org_id from db_get_restaurant_by_id(location_id) before scoping."
+        f"tenant_scope received {captured} — expected [{ORG_ID}]."
     )
 
 
@@ -299,7 +297,7 @@ def test_pos_tables_status_fails_fast_when_location_id_missing(
         "id": ORG_ID,
         "org_id": ORG_ID,
         # location_id intentionally absent — simulates a misconfigured caller
-        "name": "Test", "whatsapp_number": "+57300",
+        "name": "Test",
     }
 
     patches = _patch_tenant_scope_capture(captured_scope) + [

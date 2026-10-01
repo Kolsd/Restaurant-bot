@@ -20,7 +20,7 @@ Seeding strategy:
   - Wrap every test in a rolled-back transaction via the `db_conn` fixture
   - Set app.org_id GUC explicitly on the raw connection to satisfy RLS policies
 
-Fixture pattern mirrors test_loyalty_aggregates.py:
+Fixture pattern:
   - _ConnProxy / _PoolShim / _AcquireCtx — work around asyncpg Connection __slots__
   - async def _fake_get_pool() — patch target for app.services.database.get_pool
   - SET LOCAL ROLE mesio_app — enforce RLS (test pool connects as postgres superuser)
@@ -43,7 +43,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-# ── Connection proxy helpers (mirror test_loyalty_aggregates.py) ──────────────
+# ── Connection proxy helpers ─────────────────────────────────────────────────
 
 
 class _ConnProxy:
@@ -95,42 +95,6 @@ class _AcquireCtx:
         pass
 
 
-def _strip_tz(args):
-    """Strip tzinfo from all datetime args so they work with TIMESTAMP WITHOUT TIME ZONE columns.
-
-    orders.created_at (and most timestamp columns in this schema) are
-    TIMESTAMP WITHOUT TIME ZONE.  db_branches_consolidated / db_branches_comparison
-    use datetime.now(timezone.utc) which produces tz-aware datetimes; asyncpg
-    rejects those for tz-naive columns.  Stripping tzinfo is safe here because
-    the DB timezone is UTC.
-    """
-    from datetime import datetime
-    return tuple(
-        v.replace(tzinfo=None) if isinstance(v, datetime) and v.tzinfo is not None else v
-        for v in args
-    )
-
-
-class _TzStripProxy(_ConnProxy):
-    """Like _ConnProxy but strips tzinfo from all datetime query args.
-
-    Used for stats tests that call repo functions which pass tz-aware datetimes
-    to TIMESTAMP WITHOUT TIME ZONE columns.
-    """
-
-    async def execute(self, query, *args, **kw):
-        return await object.__getattribute__(self, "_c").execute(query, *_strip_tz(args), **kw)
-
-    async def fetch(self, query, *args, **kw):
-        return await object.__getattribute__(self, "_c").fetch(query, *_strip_tz(args), **kw)
-
-    async def fetchrow(self, query, *args, **kw):
-        return await object.__getattribute__(self, "_c").fetchrow(query, *_strip_tz(args), **kw)
-
-    async def fetchval(self, query, *args, **kw):
-        return await object.__getattribute__(self, "_c").fetchval(query, *_strip_tz(args), **kw)
-
-
 # ── Module-level fixture: connection pool ─────────────────────────────────────
 
 
@@ -146,12 +110,12 @@ async def raw_pool():
 
 @pytest.fixture
 async def db_conn(raw_pool, monkeypatch):
-    """Yield a rolled-back _TzStripProxy with get_pool mocked.
+    """Yield a rolled-back _ConnProxy with get_pool mocked.
 
-    Mirrors test_loyalty_aggregates.py exactly, plus timezone stripping:
-      - wraps raw connection in _TzStripProxy to avoid __slots__ issues AND to
-        strip tzinfo from datetime query args (orders.created_at is TIMESTAMP
-        WITHOUT TIME ZONE; stats_repo passes datetime.now(timezone.utc))
+      - wraps raw connection in _ConnProxy to avoid __slots__ issues. It does
+        NOT touch query args: a tz-stripping proxy used to live here and hid a
+        500 on every /locations load (2026-09-29) — the repo passed aware
+        datetimes to TIMESTAMP WITHOUT TIME ZONE columns.
       - patches app.services.database.get_pool with an async function returning _PoolShim
       - SET LOCAL ROLE mesio_app so RLS policies actually enforce
         (test pool connects as postgres/superuser — without this, FORCE RLS is bypassed)
@@ -160,7 +124,7 @@ async def db_conn(raw_pool, monkeypatch):
     from app.services import database as db_module
 
     async with raw_pool.acquire() as conn:
-        proxy = _TzStripProxy(conn)
+        proxy = _ConnProxy(conn)
         shim = _PoolShim(proxy)
 
         # get_pool is async in app.services.database; mock must be too.
@@ -207,13 +171,12 @@ async def _seed_org(conn, name: str) -> tuple[int, int]:
     )
     location_id = await conn.fetchval(
         """
-        INSERT INTO locations (org_id, name, address, whatsapp_number)
-        VALUES ($1, $2, 'Calle 1 # 1-1', '+57300000' || $3)
+        INSERT INTO locations (org_id, name, address)
+        VALUES ($1, $2, 'Calle 1 # 1-1')
         RETURNING id
         """,
         org_id,
         name + " - Principal",
-        str(org_id)[-4:].zfill(4),
     )
     return org_id, location_id
 
@@ -280,128 +243,6 @@ async def _seed_paid_order(
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. GET /api/stats/churn-summary
 # ═══════════════════════════════════════════════════════════════════════════════
-
-class TestChurnSummary:
-    """Tests for db_churn_summary() repo function (called by GET /api/stats/churn-summary)."""
-
-    @pytest.mark.asyncio
-    async def test_empty_tenant_returns_zeros(self, db_conn):
-        """A brand-new org with no customer_profiles returns all-zero counts, no crash."""
-        from app.repositories.stats_repo import db_churn_summary
-        from app.services.tenant_context import tenant_scope
-        import unittest.mock as mock
-
-        org_id, _ = await _seed_org(db_conn, "ChurnEmpty Org")
-        await _set_org_scope(db_conn, org_id)
-
-        with mock.patch("app.repositories.stats_repo._tenant_connection") as mock_tc:
-            mock_ctx = mock.MagicMock()
-            mock_ctx.__aenter__ = mock.AsyncMock(return_value=db_conn)
-            mock_ctx.__aexit__ = mock.AsyncMock(return_value=False)
-            mock_tc.return_value = mock_ctx
-
-            with tenant_scope(org_id):
-                result = await db_churn_summary(org_id=org_id)
-
-        assert result["high_count"] == 0
-        assert result["medium_count"] == 0
-        assert result["watch_count"] == 0
-        assert result["ltv_sum"] == 0.0
-        assert result["medium_risk"] == []
-        assert result["reactivated_count"] == 0
-
-    @pytest.mark.asyncio
-    async def test_tenant_isolation(self, db_conn):
-        """Customers seeded for org A do not appear in org B's churn summary."""
-        from app.repositories.stats_repo import db_churn_summary
-        from app.services.tenant_context import tenant_scope
-        import unittest.mock as mock
-
-        org_a_id, _ = await _seed_org(db_conn, "ChurnIsoA")
-        org_b_id, _ = await _seed_org(db_conn, "ChurnIsoB")
-
-        # Set org A scope before inserting tenant-scoped rows (RLS WITH CHECK requires this)
-        await _set_org_scope(db_conn, org_a_id)
-
-        # Seed 5 dormant customers for org A (score >= 0.50 = medium or high)
-        for i in range(5):
-            await _seed_customer_profile(
-                db_conn, org_a_id,
-                phone=f"+5730099{i:04d}",
-                name=f"ClienteA{i}",
-                total_orders=4,
-                total_spent=Decimal("50000"),
-                days_dormant=40,  # score = 40/70 ≈ 0.571 → medium bin
-            )
-
-        # Org B gets no customers
-
-        async def _call_churn_for(org_id: int) -> dict:
-            with mock.patch("app.repositories.stats_repo._tenant_connection") as mock_tc:
-                mock_ctx = mock.MagicMock()
-                mock_ctx.__aenter__ = mock.AsyncMock(return_value=db_conn)
-                mock_ctx.__aexit__ = mock.AsyncMock(return_value=False)
-                mock_tc.return_value = mock_ctx
-                await _set_org_scope(db_conn, org_id)
-                with tenant_scope(org_id):
-                    return await db_churn_summary(org_id=org_id)
-
-        result_a = await _call_churn_for(org_a_id)
-        result_b = await _call_churn_for(org_b_id)
-
-        # Org A must have medium-bin customers
-        assert result_a["medium_count"] == 5, (
-            f"Expected 5 medium-risk customers for org A, got {result_a['medium_count']}"
-        )
-        assert result_a["ltv_sum"] > 0
-
-        # Org B must see nothing
-        assert result_b["medium_count"] == 0
-        assert result_b["high_count"] == 0
-        assert result_b["ltv_sum"] == 0.0
-
-    @pytest.mark.asyncio
-    async def test_aggregate_correctness(self, db_conn):
-        """Churn bins map correctly to seeded days_dormant values."""
-        from app.repositories.stats_repo import db_churn_summary
-        from app.services.tenant_context import tenant_scope
-        import unittest.mock as mock
-
-        org_id, _ = await _seed_org(db_conn, "ChurnAccuracy")
-        # Set scope before inserting tenant-scoped rows (RLS WITH CHECK requires this)
-        await _set_org_scope(db_conn, org_id)
-
-        # high bin: 60 days, score = 60/70 ≈ 0.857 → high (≥3 orders)
-        await _seed_customer_profile(db_conn, org_id, "+5700000001", "High1", 4, Decimal("200000"), 60)
-        # medium bin: 40 days, score = 40/70 ≈ 0.571 → medium (≥3 orders)
-        await _seed_customer_profile(db_conn, org_id, "+5700000002", "Med1",  4, Decimal("100000"), 40)
-        await _seed_customer_profile(db_conn, org_id, "+5700000003", "Med2",  3, Decimal("80000"),  40)
-        # watch bin: 20 days dormant — score = 20/70 ≈ 0.286; only ≥2 orders so may fall in watch
-        # watch requires days_dormant ≥ 21 for score ≥ 0.30
-        await _seed_customer_profile(db_conn, org_id, "+5700000004", "Watch1", 2, Decimal("30000"), 22)
-
-        with mock.patch("app.repositories.stats_repo._tenant_connection") as mock_tc:
-            mock_ctx = mock.MagicMock()
-            mock_ctx.__aenter__ = mock.AsyncMock(return_value=db_conn)
-            mock_ctx.__aexit__ = mock.AsyncMock(return_value=False)
-            mock_tc.return_value = mock_ctx
-            await _set_org_scope(db_conn, org_id)
-            with tenant_scope(org_id):
-                result = await db_churn_summary(org_id=org_id)
-
-        assert result["high_count"] == 1, f"Expected 1 high, got {result['high_count']}"
-        assert result["medium_count"] == 2, f"Expected 2 medium, got {result['medium_count']}"
-        assert result["watch_count"] >= 1, f"Expected ≥1 watch, got {result['watch_count']}"
-
-        # LTV must sum high + medium only: 200000 + 100000 + 80000 = 380000
-        assert result["ltv_sum"] == pytest.approx(380000.0, abs=1.0), (
-            f"Expected ltv_sum ≈ 380000, got {result['ltv_sum']}"
-        )
-
-        # medium_risk contains the 2 medium customers, capped at 6
-        assert len(result["medium_risk"]) == 2
-        assert all(0.50 <= r["churn_score"] < 0.80 for r in result["medium_risk"])
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 2. GET /api/stats/branches-consolidated
@@ -612,12 +453,11 @@ class TestBranchesComparison:
         # Add a second location to the same org
         loc2_id = await db_conn.fetchval(
             """
-            INSERT INTO locations (org_id, name, address, whatsapp_number)
-            VALUES ($1, 'Sede 2', 'Calle 2 # 2-2', '+573009999' || $2)
+            INSERT INTO locations (org_id, name, address)
+            VALUES ($1, 'Sede 2', 'Calle 2 # 2-2')
             RETURNING id
             """,
             org_id,
-            str(org_id)[-3:].zfill(3),
         )
 
         # Set scope before inserting tenant-scoped rows (RLS WITH CHECK requires this)

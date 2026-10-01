@@ -29,7 +29,7 @@ async def _find(query: str, menu: dict = SAMPLE_MENU):
 
     with patch("app.services.orders.db") as mock_db:
         mock_db.db_get_menu = AsyncMock(return_value=menu)
-        return await find_dish(query, bot_number="5571234567")
+        return await find_dish(query, org_id=1)
 
 
 # ---------------------------------------------------------------------------

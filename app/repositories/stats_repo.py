@@ -13,7 +13,8 @@ All functions require an active tenant_scope() at the call site.
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from app.services.logging import get_logger
@@ -25,6 +26,18 @@ log = get_logger(__name__)
 def _to_date(s: str) -> date:
     """Parse YYYY-MM-DD string to datetime.date (required by asyncpg TIMESTAMPTZ params)."""
     return date.fromisoformat(s)
+
+
+def _local_midnight_utc(day: date, tz: str) -> datetime:
+    """The UTC instant (naive, like the created_at columns) at which `day`
+    starts in the restaurant's timezone."""
+    local = datetime.combine(day, time.min, tzinfo=ZoneInfo(tz))
+    return local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _local_day(created_at: datetime, tz: str) -> date:
+    """The restaurant-local calendar day of a naive-UTC `created_at`."""
+    return created_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz)).date()
 
 
 def _tenant_connection():
@@ -65,28 +78,37 @@ def _prev_period(period_start: str, period_end: str) -> tuple[str, str]:
 
 _CHANNEL_LABELS: dict[str, str] = {
     "whatsapp_bot": "WhatsApp · Bot",
+    "web_chat":     "Chat Mesio",
     "pos":          "Salón · POS",
     "qr_table":     "QR de mesa",
     "delivery":     "Domicilios",
+    "pickup":       "Para recoger",
     "web":          "Web",
     "unknown":      "Sin clasificar",
 }
 
 
 def _classify_channel(channel: str | None, order_type: str | None) -> str:
-    """Map raw channel + order_type to one of our canonical buckets."""
+    """Map raw channel + order_type to one of our canonical buckets.
+
+    A delivery or pickup order is counted as such whatever channel took it:
+    web delivery/pickup orders carry channel "web_chat" like the dine-in
+    chat, and were all lumped into "Chat Mesio"."""
     ch = (channel or "").strip().lower()
     ot = (order_type or "").strip().lower()
 
+    if ot == "domicilio":
+        return "delivery"
+    if ot == "recoger":
+        return "pickup"
     if ch == "whatsapp_bot":
         return "whatsapp_bot"
+    if ch == "web_chat":
+        return "web_chat"
     if ch in ("pos", "salon"):
         return "pos"
     if ch == "qr_table":
         return "qr_table"
-    # Delivery orders without explicit channel → delivery bucket
-    if ot in ("domicilio",):
-        return "delivery"
     if ch in ("web",):
         return "web"
     if ch:
@@ -95,30 +117,25 @@ def _classify_channel(channel: str | None, order_type: str | None) -> str:
     return "unknown"
 
 
-async def db_sales_by_channel(
-    org_id: int,
-    period_start: str,
-    period_end: str,
-    location_id: int | None = None,
-) -> dict:
-    """
-    Aggregate sales by channel for the given org and period.
+async def _fetch_sales_rows(
+    period_start: str, period_end: str, location_id: int | None, tz: str = "UTC",
+) -> tuple[list, list]:
+    """What counts as a sale, in one place: PAID delivery/pickup `orders`
+    plus every non-cancelled salon `table_orders` round. Both the channel
+    card and the dashboard headline read this, so they always agree.
 
-    Combines `orders` (delivery/pickup) and `table_orders` (salon) into one
-    channel breakdown.  Both tables are RLS-protected via org_id; the caller
-    must be inside tenant_scope(org_id).
-    """
-    from datetime import timedelta as _td  # noqa: PLC0415
-
-    ps = _to_date(period_start)
+    The period's days are the restaurant's local days (`tz`): created_at is
+    stored in UTC, and in Colombia a sale at 20:00 is 01:00 UTC the next
+    day."""
+    ps = _local_midnight_utc(_to_date(period_start), tz)
     # Make end date inclusive by querying < (end + 1 day)
-    d_to_inclusive = _to_date(period_end) + _td(days=1)
+    d_to_inclusive = _local_midnight_utc(_to_date(period_end) + timedelta(days=1), tz)
 
     async with _tenant_connection() as conn:
         # ── delivery/pickup orders ──────────────────────────────────────────
         if location_id is not None:
             order_rows = await conn.fetch(
-                """SELECT channel, order_type, total
+                """SELECT channel, order_type, total, created_at
                    FROM orders
                    WHERE created_at >= $1 AND created_at < $2
                      AND paid = TRUE
@@ -127,7 +144,7 @@ async def db_sales_by_channel(
             )
         else:
             order_rows = await conn.fetch(
-                """SELECT channel, order_type, total
+                """SELECT channel, order_type, total, created_at
                    FROM orders
                    WHERE created_at >= $1 AND created_at < $2
                      AND paid = TRUE""",
@@ -138,7 +155,7 @@ async def db_sales_by_channel(
         if location_id is not None:
             table_rows = await conn.fetch(
                 # branch_id-guard-allow: location_id passed by caller; table_orders.branch_id == location_id post-0057
-                """SELECT channel, total
+                """SELECT channel, total, created_at
                    FROM table_orders
                    WHERE created_at >= $1 AND created_at < $2
                      AND status NOT IN ('cancelado')
@@ -147,12 +164,52 @@ async def db_sales_by_channel(
             )
         else:
             table_rows = await conn.fetch(
-                """SELECT channel, total
+                """SELECT channel, total, created_at
                    FROM table_orders
                    WHERE created_at >= $1 AND created_at < $2
                      AND status NOT IN ('cancelado')""",
                 ps, d_to_inclusive,
             )
+    return order_rows, table_rows
+
+
+async def db_sales_daily(
+    period_start: str,
+    period_end: str,
+    location_id: int | None = None,
+    tz: str = "UTC",
+) -> dict[str, dict]:
+    """Sales per restaurant-local day ({"YYYY-MM-DD": {"total": Decimal,
+    "count": int}}) with the same rules as db_sales_by_channel. Days without
+    sales are absent.
+
+    Requires an active tenant_scope(org_id)."""
+    order_rows, table_rows = await _fetch_sales_rows(period_start, period_end, location_id, tz)
+    days: dict[str, dict] = {}
+    for row in [*order_rows, *table_rows]:
+        day = _local_day(row["created_at"], tz).isoformat()
+        d = days.setdefault(day, {"total": Decimal("0"), "count": 0})
+        d["total"] += to_decimal(row["total"])
+        d["count"] += 1
+    return days
+
+
+async def db_sales_by_channel(
+    org_id: int,
+    period_start: str,
+    period_end: str,
+    location_id: int | None = None,
+    tz: str = "UTC",
+) -> dict:
+    """
+    Aggregate sales by channel for the given org and period (restaurant-local
+    days, see _fetch_sales_rows).
+
+    Combines `orders` (delivery/pickup) and `table_orders` (salon) into one
+    channel breakdown.  Both tables are RLS-protected via org_id; the caller
+    must be inside tenant_scope(org_id).
+    """
+    order_rows, table_rows = await _fetch_sales_rows(period_start, period_end, location_id, tz)
 
     # ── aggregate ──────────────────────────────────────────────────────────
     buckets: dict[str, dict] = {}
@@ -359,6 +416,7 @@ async def db_top_dishes(
 async def db_inventory_critical(
     org_id: int,
     ok_limit: int = 3,
+    location_id: int | None = None,
 ) -> dict:
     """
     Returns low-stock ingredients sorted by severity, plus a few OK items.
@@ -370,6 +428,14 @@ async def db_inventory_critical(
 
     Each alert includes `affects_dishes`: list of dish names that use this
     ingredient via dish_recipes.
+
+    `location_id` restricts the stock to ONE sede — a kitchen must see what
+    is in its own fridge, not what another sede has (PM 2026-09-20). Rows
+    with a NULL location_id are included either way: they predate per-sede
+    inventory and belong to the org as a whole, so dropping them would make
+    a single-sede restaurant's stock page go empty. None = every sede, which
+    only an owner/admin ever gets. `dish_recipes` stays org-level — it has no
+    location_id column; a recipe is the same dish everywhere.
     """
     async with _tenant_connection() as conn:
         inv_rows = await conn.fetch(
@@ -377,8 +443,9 @@ async def db_inventory_critical(
                       i.current_stock, i.min_stock
                FROM inventory i
                WHERE i.org_id = $1
+                 AND ($2::bigint IS NULL OR i.location_id = $2 OR i.location_id IS NULL)
                ORDER BY i.name""",
-            org_id,
+            org_id, location_id,
         )
 
         # ── reverse ingredient→dish mapping ────────────────────────────────
@@ -440,9 +507,11 @@ async def db_inventory_critical(
 async def db_live_orders(
     org_id: int,
     limit: int = 20,
+    location_id: int | None = None,
 ) -> dict:
     """
-    Returns a unified live feed of active delivery + table orders.
+    Returns a unified live feed of active delivery + table orders of one
+    sede (`location_id`), or of every sede when None.
 
     Delivery/pickup orders: status NOT IN ('entregado', 'cancelado')
     Table orders: status NOT IN ('cancelado', 'factura_entregada')
@@ -458,9 +527,11 @@ async def db_live_orders(
                       total, created_at, channel, notes
                FROM orders
                WHERE status NOT IN ('entregado', 'cancelado')
+                 AND org_id = $2
+                 AND ($3::bigint IS NULL OR location_id = $3)
                ORDER BY created_at DESC
                LIMIT $1""",
-            limit,
+            limit, org_id, location_id,
         )
 
         # ── salon table orders ──────────────────────────────────────────────
@@ -472,9 +543,11 @@ async def db_live_orders(
                FROM table_orders to2
                LEFT JOIN restaurant_tables rt ON rt.id = to2.table_id
                WHERE to2.status NOT IN ('cancelado', 'factura_entregada')
+                 AND to2.org_id = $2
+                 AND ($3::bigint IS NULL OR to2.location_id = $3)
                ORDER BY to2.created_at DESC
                LIMIT $1""",
-            limit,
+            limit, org_id, location_id,
         )
 
     from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
@@ -693,35 +766,6 @@ async def db_payment_status(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. Customers at risk (wrap marketing_repo)
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def db_customers_at_risk(org_id: int, limit: int = 50) -> dict:
-    """Return at-risk frequent customers (dormant >= 21 days, min 3 orders).
-
-    Wraps marketing_repo.get_at_risk_customers and normalises the response
-    shape to match the documented API contract.
-    """
-    from app.repositories.marketing_repo import get_at_risk_customers  # noqa: PLC0415
-
-    limit = max(1, min(200, limit))
-    rows = await get_at_risk_customers(restaurant_id=org_id, limit=limit)
-
-    customers = []
-    for r in rows:
-        customers.append({
-            "phone":        r["customer_phone"],
-            "name":         r["customer_name"],
-            "total_orders": r["total_orders"],
-            "last_seen":    r["last_order_at"],
-            "days_since":   r["days_since"],
-            "total_spent":  r["total_spent"],  # already quantized float (JSON boundary in marketing_repo)
-        })
-
-    return {"count": len(customers), "customers": customers}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # 7. Staff performance sparkline
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -861,176 +905,6 @@ async def db_staff_performance(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. Tips pool summary
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _current_week_bounds() -> tuple[str, str]:
-    """Return (monday_iso, sunday_iso) for the current week."""
-    today = date.today()
-    monday = today - timedelta(days=today.weekday())
-    sunday = monday + timedelta(days=6)
-    return str(monday), str(sunday)
-
-
-async def db_tips_pool(
-    org_id: int,
-    location_id: int,
-    period_start: str | None,
-    period_end: str | None,
-    branch_id: int | None = None,
-    caller_staff_id: str | None = None,
-) -> dict:
-    """Summarise the tip pool for a period.
-
-    Wraps staff_repo.db_calculate_tips_by_attendance.
-    Returns top-5 entries_preview, pool_total, entries_count, unallocated,
-    and my_pool (tip amount for caller_staff_id, if provided).
-    Default period: current week (Mon–Sun).
-    """
-    from app.repositories.staff_repo import db_calculate_tips_by_attendance  # noqa: PLC0415
-
-    if not period_start or not period_end:
-        period_start, period_end = _current_week_bounds()
-
-    result = await db_calculate_tips_by_attendance(
-        restaurant_id=location_id,
-        period_start=period_start,
-        period_end=period_end,
-        branch_id=branch_id,
-    )
-
-    entries = result.get("entries", [])
-    total_tips = float(result.get("total_tips", 0))
-    unallocated = float(result.get("unallocated", 0))
-
-    # Top 5 preview with pct
-    top5 = entries[:5]
-    preview = []
-    for e in top5:
-        tip_amt = float(e.get("total_tips", 0))
-        pct = round(tip_amt / total_tips * 100, 1) if total_tips else 0.0
-        preview.append({
-            "staff_id":  e.get("staff_id"),
-            "name":      e.get("name"),
-            "role":      e.get("role"),
-            "total_tips": tip_amt,
-            "pct":        pct,
-        })
-
-    # my_pool: tip allocation for the requesting staff member
-    my_pool: float | None = None
-    if caller_staff_id:
-        for e in entries:
-            if str(e.get("staff_id", "")) == str(caller_staff_id):
-                my_pool = float(e.get("total_tips", 0))
-                break
-        if my_pool is None:
-            my_pool = 0.0  # caller had no allocations this period
-
-    return {
-        "period":          {"start": period_start, "end": period_end},
-        "pool_total":      total_tips,
-        "entries_count":   len(entries),
-        "entries_preview": preview,
-        "unallocated":     unallocated,
-        "my_pool":         my_pool,
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 9. Churn summary  (GET /api/stats/churn-summary)
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def db_churn_summary(org_id: int) -> dict:
-    """Aggregate churn risk buckets for the clientes-riesgo page.
-
-    Bins customers by churn_score derived from recency (days_since_last_order):
-      high   — score >= 0.80  (dormant >= 56 days for ≥3-order customers)
-      medium — 0.50 <= score < 0.80  (dormant 21–55 days, ≥3 orders)
-      watch  — 0.30 <= score < 0.50  (dormant 14–20 days, ≥2 orders)
-
-    Score formula:  min(1.0, days_since / 70.0)  — linear ramp, caps at 1.0.
-    Threshold mapping:
-      days >= 56  → score ≥ 0.80  → high
-      days >= 35  → score ≥ 0.50  → medium
-      days >= 21  → score ≥ 0.30  → watch (≥2 orders threshold to include newer customers)
-
-    ltv_sum: sum of total_spent for high + medium bins. DB NUMERIC → Decimal → float.
-    reactivated_count: customers who were dormant (>21d) but have a recent order in
-        last 30 days.
-        # TODO: customer_profiles.last_seen is updated on every order; there is no
-        # "previously_dormant" flag in the current schema.  Counting customers whose
-        # last_seen is in the last 30 days AND who had been dormant before requires
-        # order-level history which customer_profiles does not expose.  Returning 0
-        # until a dedicated "reactivation_events" table or a second latest_order_date
-        # column is added.
-
-    medium_risk: top 6 from the medium bin, ordered by churn_score DESC.
-    """
-    from datetime import date as _date, timedelta as _td  # noqa: PLC0415
-
-    async with _tenant_connection() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT
-                phone,
-                COALESCE(display_name, phone)                              AS name,
-                total_orders,
-                total_spent,
-                EXTRACT(DAY FROM NOW() - last_seen)::INT                   AS days_since,
-                last_seen
-            FROM customer_profiles
-            WHERE org_id       = $1
-              AND total_orders >= 2
-              AND last_seen    <  NOW() - INTERVAL '14 days'
-            ORDER BY last_seen ASC
-            """,
-            org_id,
-        )
-
-    high_count = 0
-    medium_count = 0
-    watch_count = 0
-    ltv_high_medium = Decimal("0")
-    medium_risk_rows: list[dict] = []
-
-    for r in rows:
-        days = int(r["days_since"] or 0)
-        score = min(1.0, days / 70.0)
-        total_orders = int(r["total_orders"] or 0)
-
-        # Enforce minimum order thresholds per bin
-        if score >= 0.80 and total_orders >= 3:
-            high_count += 1
-            ltv_high_medium += to_decimal(r["total_spent"])
-        elif score >= 0.50 and total_orders >= 3:
-            medium_count += 1
-            ltv_high_medium += to_decimal(r["total_spent"])
-            medium_risk_rows.append({
-                "name":         r["name"],
-                "phone":        r["phone"],
-                "churn_score":  round(score, 4),
-                "days_since":   days,
-                "total_visits": total_orders,
-            })
-        elif score >= 0.30 and total_orders >= 2:
-            watch_count += 1
-
-    # Sort medium bin by score DESC, take top 6
-    medium_risk_rows.sort(key=lambda x: -x["churn_score"])
-    medium_risk_top6 = medium_risk_rows[:6]
-
-    return {
-        "high_count":       high_count,
-        "medium_count":     medium_count,
-        "watch_count":      watch_count,
-        "ltv_sum":          float(quantize_money(ltv_high_medium)),  # JSON boundary
-        "reactivated_count": 0,  # TODO: requires order-history or reactivation_events table
-        "medium_risk":      medium_risk_top6,
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # 10. Branches consolidated  (GET /api/stats/branches-consolidated)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1052,7 +926,9 @@ async def db_branches_consolidated(org_id: int, days: int = 7) -> dict:
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td  # noqa: PLC0415
 
     days = max(1, min(365, days))
-    now = _dt.now(_tz.utc)
+    # created_at columns are TIMESTAMP WITHOUT TIME ZONE holding UTC; asyncpg
+    # refuses an aware datetime for them, so every call here used to 500.
+    now = _dt.now(_tz.utc).replace(tzinfo=None)
     window_start = now - _td(days=days)
 
     # 30-day window for NPS and YoY calculations
@@ -1186,16 +1062,16 @@ async def db_branches_consolidated(org_id: int, days: int = 7) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
-    """Per-location metric comparison matrix for the sucursales page.
+    """Per-location metric comparison matrix for the branches page.
 
     Fetches all locations for the org, then computes a set of metrics per location.
     Metrics without a clean data source return null with a TODO comment.
 
     Supported metrics (with real queries):
-      Ventas diarias promedio  — total_sales / days per location
-      Ticket promedio          — avg order total per location
+      Average daily sales      — total_sales / days per location
+      Average ticket           — avg order total per location
       NPS                      — avg score from nps_responses per location (last 30d)
-      Tasa de reserva confirmada — confirmed / total reservations
+      Confirmed reservation rate — confirmed / total reservations
       No-show rate             — no_show / total reservations
       Food cost %              — sum(qty * cost_per_unit) / sum(qty * price) * 100
                                  from orders.items + table_orders.items × dish_recipes
@@ -1203,17 +1079,18 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
                                  or the location has zero matched revenue.
 
     Metrics returning null (pending data sources):
-      Rotación mesas / día     — TODO: requires table_sessions with open/close timestamps
-      Costo nómina / ventas    — TODO: requires payroll_runs linked to sales period
-      Rotación de personal (12m) — TODO: requires staff.termination_date or departure_events table
-      Crecimiento YoY          — TODO: computed at org level in branches_consolidated; per-location
+      Table turnover / day     — TODO: requires table_sessions with open/close timestamps
+      Staff turnover (12m)     — TODO: requires staff.termination_date or departure_events table
+      YoY growth               — TODO: computed at org level in branches_consolidated; per-location
                                        requires historical order data with location_id (available
                                        but not yet back-filled uniformly for all orgs)
     """
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td  # noqa: PLC0415
 
     days = max(1, min(365, days))
-    now = _dt.now(_tz.utc)
+    # created_at columns are TIMESTAMP WITHOUT TIME ZONE holding UTC; asyncpg
+    # refuses an aware datetime for them, so every call here used to 500.
+    now = _dt.now(_tz.utc).replace(tzinfo=None)
     window_start = now - _td(days=days)
     nps_start    = now - _td(days=30)
 
@@ -1487,8 +1364,6 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
         # no recipes defined for the org (food_costs_by_dish is empty), or
         # when a location had zero matched revenue in the window.
         _build_row("Food cost %",                    food_cost_pct_per_loc),
-        # TODO: Costo nómina / ventas — requires payroll_runs joined to a period matching sales window
-        _build_row("Costo nómina / ventas",          [None] * len(locations)),
         _build_row("Tasa de reserva confirmada",     conf_rate_per_loc),
         _build_row("No-show rate",                   noshow_rate_per_loc),
         # TODO: Rotación de personal (12m) — requires staff.termination_date or departure events

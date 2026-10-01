@@ -105,19 +105,6 @@ def test_module_restrictions_empty_dict():
     assert _build_module_restrictions({}) == ""
 
 
-def test_module_restrictions_staff_tips_no_action_prohibition():
-    """
-    staff_tips has no forbidden actions in _MODULE_RULES (it's UI-only).
-    Restriction text should still mention the module but omit the action clause.
-    """
-    from app.services.agent import _build_module_restrictions
-    result = _build_module_restrictions(_features(staff_tips=False))
-
-    assert "RESTRICCIÓN ACTIVA" in result
-    # No action=".." clause expected for staff_tips
-    assert 'action=' not in result
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 6–9. build_system_prompt  (async, no Claude API call)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -208,7 +195,7 @@ async def test_execute_action_order_without_table_is_blocked():
         result = await agent.execute_action(
             parsed=parsed,
             phone="573001234567",
-            bot_number="+573009999999",
+            org_id=4242,
             table_context=None,      # ← no table context
             session_state={},
         )
@@ -252,7 +239,7 @@ async def test_execute_action_order_with_table_proceeds():
         patch.object(agent.db,     "db_save_table_order",    AsyncMock()) as mock_save_order,
         patch.object(agent.db,     "db_session_mark_order",  AsyncMock()),
         patch.object(agent.db,     "db_deduct_inventory_for_order", AsyncMock()),
-        patch.object(agent.db,     "db_get_restaurant_by_bot_number",
+        patch.object(agent.db,     "db_get_restaurant_by_org_id",
                      AsyncMock(return_value={"features": {}})),
         # Patch at the pool level so no real DB is touched for the cart DELETE
         patch.object(agent.db,     "get_pool",
@@ -268,7 +255,7 @@ async def test_execute_action_order_with_table_proceeds():
         result = await agent.execute_action(
             parsed=parsed,
             phone="573001234567",
-            bot_number="+573009999999",
+            org_id=4242,
             table_context=table_ctx,
             session_state={},
         )
@@ -295,7 +282,7 @@ async def test_execute_action_chat_returns_reply():
         result = await agent.execute_action(
             parsed=parsed,
             phone="573001234567",
-            bot_number="+573009999999",
+            org_id=4242,
             table_context=None,
             session_state={},
         )

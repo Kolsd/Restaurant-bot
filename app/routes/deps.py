@@ -47,7 +47,34 @@ async def require_auth(request: Request) -> str:
     return username
 
 async def get_current_user(request: Request) -> dict:
-    """Returns the authenticated user dict or raises 401."""
+    """Returns the authenticated user dict or raises 401.
+
+    Resolved once per request and kept in the request's ASGI `scope`. A route
+    behind `get_current_restaurant_scoped` runs pinned to its tenant, and
+    resolving a staff login a second time from inside it (e.g. to decide the
+    sede) opened a `bypass_tenant_scope` there — TenantContextConflict, a 500
+    on every inventory call made by a PIN-login employee.
+
+    Not `request.state`: that is backed by `scope["state"]`, which the ASGI
+    server may share between requests (asgi-lifespan hands every request the
+    SAME dict) — the e2e harness then served the first caller's user to
+    every later one.
+    """
+    scope = getattr(request, "scope", None)
+    cached = scope.get(_USER_SCOPE_KEY) if isinstance(scope, dict) else None
+    if isinstance(cached, dict):
+        return cached
+    user = await _resolve_current_user(request)
+    if isinstance(scope, dict):
+        scope[_USER_SCOPE_KEY] = user
+    return user
+
+
+_USER_SCOPE_KEY = "mesio.user"
+_ORG_SCOPE_KEY = "mesio.org"
+
+
+async def _resolve_current_user(request: Request) -> dict:
     username = await require_auth(request)
 
     if username.startswith("staff:"):
@@ -64,8 +91,21 @@ async def get_current_user(request: Request) -> dict:
                 # downstream code that treats this value as "restaurant_id" still works.
                 # The JOIN to restaurants is dropped: parent_restaurant_id is unused by
                 # callers (staff is always scoped to an Org/Location, not a legacy branch).
+                # s.location_id — added to `staff` back in migration 0035
+                # (NOT NULL) — was never selected here despite CLAUDE.md
+                # documenting a "default_location_id" as already resolved:
+                # that value is computed ONLY at login time (app/services/
+                # auth.py) and handed to the frontend once; this per-request
+                # auth dependency (used by get_current_user_scoped on every
+                # authenticated call) was hard-coding location_id=None below
+                # regardless, so no staff-scoped endpoint could ever actually
+                # enforce "your own sede" from the JWT alone. Found and fixed
+                # for chunk 4 (docs/claude/delivery-web.md) — the delivery
+                # cashier endpoints are the first callers that need this to
+                # be real. See memory/mesero-location-gap.md for the same gap
+                # previously observed from the waiter-alerts side.
                 query = """
-                    SELECT s.org_id AS restaurant_id, s.role, s.roles,
+                    SELECT s.org_id AS restaurant_id, s.location_id, s.role, s.roles,
                            NULL::int AS parent_restaurant_id
                     FROM staff s
                     WHERE s.id::text = $1
@@ -97,6 +137,10 @@ async def get_current_user(request: Request) -> dict:
                     "username": username,
                     "branch_id": mapped_branch_id,
                     "restaurant_id": staff_member["restaurant_id"],
+                    # Explicit tenant key (P0 fix 2026-09) — staff.org_id is
+                    # always the org id, never ambiguous like users.branch_id.
+                    "org_id": staff_member["restaurant_id"],
+                    "location_id": staff_member["location_id"],
                     "role": combined_role
                 }
 
@@ -106,79 +150,186 @@ async def get_current_user(request: Request) -> dict:
 
     raise HTTPException(status_code=401, detail="User not found")
 
+# ── Sede (location) scoping ──────────────────────────────────────────────────
+#
+# PM decision 2026-09-20: an employee of one sede must never see another
+# sede's data. Two role tiers decide what a caller may ask for:
+#
+#   owner / admin  — manage the whole business: may span every sede of their
+#                    org, and may pick ONE with a header.
+#   everyone else  — including `gerente`, who runs a single sede: pinned to
+#                    their own `location_id`, whatever any header says.
+#
+# `staff_sections.ADMIN_ROLES` is the product-wide "admin" set and includes
+# gerente (it grants every STAFF-APP section), so it is deliberately NOT the
+# set used here — spanning sedes is a narrower privilege than seeing every
+# section of your own.
+
+SEDE_SPANNING_ROLES: frozenset[str] = frozenset({"owner", "admin"})
+
+
+def roles_of(user: dict) -> set[str]:
+    """The caller's normalized role set. `role` is a comma-joined string on
+    both the `users` row and the staff dict built in get_current_user."""
+    from app.services.staff_sections import normalize_role  # noqa: PLC0415
+
+    return {
+        normalize_role(r)
+        for r in (user.get("role") or "").split(",")
+        if r.strip()
+    }
+
+
+def may_span_locations(user: dict) -> bool:
+    """True when the caller may see/choose any sede of their org."""
+    return bool(roles_of(user) & SEDE_SPANNING_ROLES)
+
+
+def resolve_sede_filter(
+    request: Request,
+    user: dict,
+    *,
+    admin_without_header: str = "all",
+    allow_all_sentinel: bool = False,
+) -> int | str | None:
+    """The location_id a staff-facing listing must filter by, or None for
+    "every sede of the org".
+
+    This is the ONE place that decides it. Before it existed, a dozen routes
+    each re-read `X-Branch-ID` (or `X-Location-ID`) with their own rules, and
+    most of them applied NO role check at all: a cook could name another sede
+    in a header, and a cook who named none saw every sede in the org.
+
+    owner/admin: the header wins when it names a sede; with no header they get
+    `admin_without_header` — "all" (None) for screens that have always been
+    usable org-wide, or "own" for screens where a cross-sede view is
+    meaningless and their own sede is the honest default.
+
+    Everyone else: their own `location_id`, always. Raises 403 when they have
+    none, because the alternative is showing them the whole org.
+
+    Both header names are accepted — `X-Location-ID` is the Wave-1 name the
+    newer surfaces use, `X-Branch-ID` the older one `mesioHeaders()` still
+    sends — so callers do not have to care which one the frontend attached.
+
+    `allow_all_sentinel` is for the stats/NPS family, whose repos
+    distinguish "every sede of the org rolled up" (the string "all") from
+    "no sede filter" (None). Only an admin can ever get the sentinel.
+    """
+    if may_span_locations(user):
+        if allow_all_sentinel:
+            raw_all = (request.headers.get("X-Branch-ID") or "").strip()
+            if raw_all == "all":
+                return "all"
+            if raw_all == "matriz":
+                return None
+        for name in ("X-Location-ID", "X-Branch-ID"):
+            raw = (request.headers.get(name) or "").strip()
+            if raw.isdigit():
+                return int(raw)
+        if admin_without_header == "own":
+            own = user.get("location_id")
+            return int(own) if own else None
+        return None
+
+    own = user.get("location_id")
+    if not own:
+        raise HTTPException(
+            status_code=403, detail="Tu usuario no tiene una sede asignada",
+        )
+    return int(own)
+
+
 async def get_current_restaurant(request: Request) -> dict:
-    """Returns the restaurant for the authenticated user or raises 403."""
+    """Returns the restaurant for the authenticated user or raises 403.
+
+    P0 fix (2026-09): previously resolved via `user["branch_id"]`, a column
+    with NO fixed id-kind contract — some writers stored an org_id there,
+    others a location_id, and the now-deleted `db_get_restaurant_by_id`
+    guessed between the two, silently preferring the ORG match whenever a
+    location id collided with an unrelated org's id. That could serve — or
+    tenant_scope() a user into — a completely different tenant.
+
+    This now resolves ONLY through the explicit `org_id` / `location_id`
+    fields on the user dict (backfilled onto `users.org_id` /
+    `users.location_id` by the users_org_location migration, and populated
+    directly on the staff dict in get_current_user above). A user whose
+    org_id could not be resolved (genuine legacy ambiguity) is DENIED —
+    never guessed via name-match or branch_id fallback.
+
+    Sede scoping (PM 2026-09-20: "los empleados de una sede no deben ver otra
+    sede"): `X-Branch-ID` is honoured ONLY for owner/admin, who legitimately
+    manage every sede of the org. It used to be honoured for ANY authenticated
+    caller — a mesero, a cocinero or a cajero of sede A could put sede B's id
+    in a header and this function would hand back sede B's restaurant row,
+    which every downstream route then uses as its tenant + sede context. A
+    `gerente` runs ONE sede (see staff_sections.ADMIN_ROLES and
+    app/routes/location_delivery.py), so they are pinned to their own like any
+    other employee. A mismatching header from such a caller is ignored rather
+    than refused: the sede lives in the browser's localStorage and can go
+    stale, and 403-ing every call of a waiter whose tablet remembers the wrong
+    sede would take the floor down. It is logged so it stays visible.
+    """
     user = await get_current_user(request)
 
-    # 1. Si es Gerente de una sucursal específica
-    if user.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(user["branch_id"])
-        if r:
-            return r
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=403, detail="Restaurant not found")
+    org_id = int(org_id)
 
-    # 2. Si es Staff operativo (resuelve su restaurante principal exacto)
-    if user.get("restaurant_id"):
-        r = await db.db_get_restaurant_by_id(user["restaurant_id"])
-        if r:
-            return r
+    location_id = user.get("location_id")
+    default_rest = None
+    if location_id:
+        default_rest = await db.db_get_restaurant_by_location_id(int(location_id))
+        # Ownership sanity check — a user's own location_id should always
+        # belong to their own org_id, but never trust that without checking.
+        if not default_rest or default_rest.get("org_id") != org_id:
+            default_rest = None
 
-    # 3. Fallback para el Owner/Admin (sin branch_id en su registro de users).
-    # Wave-2: resolve the owner's org by NAME match against organizations,
-    # then return any one location of that org as the default sede dict.
-    # No cross-tenant fallback: if name match fails, raise 403 — much safer
-    # than the old `db_get_all_restaurants()[0]` which returned any tenant
-    # globally and would silently log the user into someone else's data.
-    target_name = (user.get("restaurant_name") or "").lower().strip()
-    if not target_name:
+    if default_rest is None:
+        default_rest = await db.db_get_restaurant_by_org_id(org_id)
+    if default_rest is None:
         raise HTTPException(status_code=403, detail="Restaurant not found")
 
-    all_orgs = await db.db_get_all_orgs(active_only=False)
-    matching_org = next(
-        (o for o in all_orgs if (o.get("name") or "").lower().strip() == target_name),
-        None,
-    )
-    if matching_org is None:
-        raise HTTPException(status_code=403, detail="Restaurant not found")
-
-    # Get any location of this org as the default sede (peers — no "primary").
-    from app.repositories.restaurant_repo import db_get_org_locations  # noqa: PLC0415
-    locations = await db_get_org_locations(matching_org["id"], active_only=True)
-    if not locations:
-        raise HTTPException(status_code=403, detail="Restaurant has no active locations")
-
-    # Default sede = first location ordered by id (deterministic, no judgement).
-    default_loc = locations[0]
-    main_rest = await db.db_get_restaurant_by_id(default_loc["id"])
-    if main_rest is None:
-        raise HTTPException(status_code=403, detail="Restaurant not found")
-
-    # 🛡️ MAGIA MULTI-SUCURSAL: Si el owner envía la cabecera, suplanta la sede.
-    # The selected sede must belong to the SAME org as the authenticated owner —
-    # verified via org_id (not the legacy parent_restaurant_id column).
+    # 🛡️ MAGIA MULTI-SUCURSAL: only an owner/admin may switch sede from the
+    # sidebar. X-Branch-ID ALWAYS carries a location_id, and the selected sede
+    # must belong to the SAME org as the authenticated user — verified via
+    # org_id. See the docstring for why a non-admin's header is dropped
+    # instead of refused.
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit():
         target_id = int(branch_header)
-        target_rest = await db.db_get_restaurant_by_id(target_id)
+        if not may_span_locations(user):
+            if location_id and int(location_id) != target_id:
+                _log.warning(
+                    "auth.sede_override_ignored",
+                    username=user.get("username"),
+                    own_location_id=int(location_id),
+                    requested_location_id=target_id,
+                )
+            return default_rest
+
+        target_rest = await db.db_get_restaurant_by_location_id(target_id)
         if (
             target_rest
             and target_rest.get("org_id")
-            and target_rest.get("org_id") == main_rest.get("org_id")
+            and target_rest.get("org_id") == org_id
         ):
             return target_rest
 
-    return main_rest
+    return default_rest
 
 
 # NOTE: Decision — get_current_restaurant is called as a regular async function
 # from many route files (inventory, stats, tables, nps, etc.), not only via
 # Depends().  Mutating it to a yield-based generator would break all those
 # call sites.  Instead we provide this sibling that wraps the resolved
-# restaurant in tenant_scope() and is used ONLY by loyalty routes (the RLS
-# pilot).  Other routes continue to use the original get_current_restaurant.
+# restaurant in tenant_scope(). Most routes still use the original
+# get_current_restaurant.
 async def get_current_restaurant_scoped(request: Request):
     """Yield-based variant of get_current_restaurant that activates tenant_scope.
 
-    Used by loyalty routes as the RLS pilot.  Entering tenant_scope() pins
+    Entering tenant_scope() pins
     app.restaurant_id for every DB call made within the request lifetime.
     The scope is guaranteed to exit via the finally clause in the `with` block.
 
@@ -201,7 +352,10 @@ async def get_current_user_scoped(request: Request):
     from app.services.tenant_context import tenant_scope
 
     user = await get_current_user(request)
-    rid = user.get("restaurant_id") or user.get("branch_id")
+    # P0 fix (2026-09): prefer the explicit org_id (unambiguous) over the
+    # legacy restaurant_id/branch_id fields, which for admin/owner users
+    # come straight from the mixed-kind users.branch_id column.
+    rid = user.get("org_id") or user.get("restaurant_id") or user.get("branch_id")
     if rid:
         with tenant_scope(int(rid)):
             yield user
@@ -210,6 +364,17 @@ async def get_current_user_scoped(request: Request):
         # Yield without scope; downstream tenant-scoped repo calls will raise
         # TenantNotSetError if reached, which is the correct fail-loud behaviour.
         yield user
+
+
+def require_plan_feature(feature: str) -> Callable:
+    """FastAPI dependency: 403 with the upgrade copy when the caller's plan
+    (trial included) does not include `feature` — see app/services/plans.py."""
+    from app.services import plan_access  # noqa: PLC0415
+
+    async def _check_plan(restaurant: dict = Depends(get_current_restaurant_scoped)) -> None:
+        await plan_access.require_feature(int(restaurant["id"]), feature)
+
+    return _check_plan
 
 
 def require_module(module_name: str) -> Callable:
@@ -247,83 +412,18 @@ def require_module(module_name: str) -> Callable:
 
     return _check_module
 
-# Al final del archivo, después de las funciones existentes
+# At the end of the file, after the existing functions
 
 ROLE_PAGE_MAP = {
-    "/mesero":      {"mesero"},
-    "/caja":        {"caja", "cashier"},
-    "/domiciliario":{"domiciliario", "delivery"},
-    "/cocina":      {"cocina"},
-    "/bar":         {"bar"},
     "/dashboard":   {"owner", "admin", "gerente"},
     "/settings":    {"owner", "admin", "gerente"},
     "/billing":     {"owner", "admin", "gerente"},
-    "/staff":       {"owner", "admin", "gerente"},
+    # /staff (the unified Staff App) has no single allowed-roles set here —
+    # every staff/admin role may load it; which sections it shows per role
+    # is decided by app.services.staff_sections, not this map.
 }
 
 ADMIN_ROLES = {"owner", "admin", "gerente"}
-
-def _extract_roles(role_str: str) -> set:
-    return {r.strip().lower() for r in (role_str or "").split(",") if r.strip()}
-
-async def require_page_access(request: Request, path: str):
-    """
-    Verifica token + rol para servir una página HTML protegida.
-    Redirige a /login si no hay token, a /staff si no tiene el rol.
-    """
-    from app.services.auth import verify_token
-    from app.services import database as db
-
-    token = None
-    # Buscar token en cookie o header
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header.replace("Bearer ", "")
-    # Las páginas HTML no mandan Authorization header — el token vive en localStorage
-    # así que para rutas de página, devolvemos el HTML y dejamos que el JS valide
-    # PERO: podemos leer una cookie si existe
-    token = request.cookies.get("rb_token") or token
-
-    allowed_roles = ROLE_PAGE_MAP.get(path, set())
-    if not allowed_roles:
-        return None  # ruta sin restricción definida, dejar pasar
-
-    if not token:
-        return None  # sin cookie, el JS en el HTML hará el redirect
-
-    username = await verify_token(token)
-    if not username:
-        return None
-
-    # Obtener rol del usuario
-    if username.startswith("staff:"):
-        staff_id = username.replace("staff:", "")
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT role, roles FROM staff WHERE id=$1::uuid", staff_id
-            )
-        if not row:
-            return None
-        roles_list = row.get("roles") or []
-        if not roles_list and row.get("role"):
-            roles_list = [row["role"]]
-        user_roles = {r.lower() for r in roles_list}
-    else:
-        user = await db.db_get_user(username)
-        if not user:
-            return None
-        user_roles = _extract_roles(user.get("role", ""))
-
-    # Admin siempre puede entrar a todo
-    if user_roles & ADMIN_ROLES:
-        return None  # permitir
-
-    # Verificar si tiene algún rol permitido para esta página
-    if not (user_roles & allowed_roles):
-        raise HTTPException(status_code=403, detail="Rol no autorizado para esta página")
-
-    return None
 
 
 # ── Org/Location dependencies (Bloque S3) ────────────────────────────────────
@@ -341,35 +441,19 @@ async def require_page_access(request: Request, path: str):
 async def _resolve_org_id_for_user(user: dict) -> int | None:
     """Resolve the org_id for a user dict.
 
-    Post-0037 (Wave 2): we read org_id directly from canonical sources:
-      - Staff: user["restaurant_id"] is already s.org_id (see deps.get_current_user line ~60).
-      - Admin/users: lookup via db_get_location_by_id(branch_id) → row["org_id"].
-
-    Falls back to int(rid) for Matriz invariant (organizations.id == old
-    restaurants.id, guaranteed by migration 0034). The fallback is logged so
-    we can monitor how many tenants still hit it.
+    P0 fix (2026-09): reads ONLY the explicit `org_id` field — set directly
+    on the staff dict in get_current_user (from staff.org_id, canonical),
+    and backfilled onto `users.org_id` by the users_org_location migration
+    for admin/owner users. The old fallback guessed the org_id from the
+    mixed-kind `users.branch_id` column (via db_get_location_by_id, treating
+    branch_id as if it were always a location id) — for orgs where branch_id
+    actually held an org_id, or where it collided with an unrelated org's
+    location id, that guess could resolve to the WRONG tenant. A user whose
+    org_id genuinely could not be backfilled (logged by the migration) is
+    correctly denied here — never guessed.
     """
-    rid = user.get("restaurant_id") or user.get("branch_id")
-    if not rid:
-        return None
-
-    # Staff: user["restaurant_id"] already comes from staff.org_id (canonical).
-    # The dict produced by get_current_user puts s.org_id under "restaurant_id"
-    # for backward compat; for staff users it IS the org_id directly.
-    if str(user.get("username", "")).startswith("staff:"):
-        return int(rid)
-
-    # Admin/owner: resolve via locations table.
-    # TODO: mover org_id al payload del JWT para evitar este round-trip por request
-    try:
-        loc = await db.db_get_location_by_id(int(rid))
-        if loc and loc.get("org_id"):
-            return int(loc["org_id"])
-    except Exception:
-        _log.exception("auth.deps.location_lookup_failed", branch_id=int(rid))
-
-    _log.warning("auth.org_id_fallback_used", branch_id=int(rid))
-    return int(rid)
+    org_id = user.get("org_id")
+    return int(org_id) if org_id else None
 
 
 async def get_current_org(request: Request) -> dict:
@@ -381,11 +465,12 @@ async def get_current_org(request: Request) -> dict:
     whose restaurant_id is a Sucursal, the mapping table translates to the
     correct parent Org id.
 
-    The result is cached on request.state.mesio_org to avoid duplicate DB
-    lookups when both get_current_org and get_current_location are used as
-    dependencies in the same request.
+    The result is cached in the request's scope (see get_current_user for
+    why not request.state) to avoid duplicate DB lookups when both
+    get_current_org and get_current_location are used as dependencies in
+    the same request.
     """
-    cached = getattr(request.state, "mesio_org", None)
+    cached = request.scope.get(_ORG_SCOPE_KEY)
     if cached is not None:
         return cached
 
@@ -409,13 +494,14 @@ async def get_current_org(request: Request) -> dict:
         org = {
             "id":              r.get("id"),
             "name":            r.get("name"),
-            "whatsapp_number": r.get("whatsapp_number"),
             "features":        feats,
-            "subscription_plan": r.get("subscription_plan", "free"),
+            "subscription_plan": r.get("subscription_plan", "restaurante"),
+            "plan_code":       r.get("plan_code"),
+            "comp_until":      r.get("comp_until"),
             "subscription_status": r.get("subscription_status", "active"),
         }
 
-    request.state.mesio_org = org
+    request.scope[_ORG_SCOPE_KEY] = org
     return org
 
 

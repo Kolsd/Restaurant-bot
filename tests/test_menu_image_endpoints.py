@@ -28,8 +28,9 @@ OTHER_RESTAURANT_PUBLIC_ID = "mesio/r_99/menu/dish_xyz"
 def _make_restaurant(restaurant_id: int = RESTAURANT_ID) -> dict:
     return {
         "id": restaurant_id,
+        "org_id": restaurant_id,
+        "location_id": restaurant_id,
         "name": "Restaurante Test",
-        "whatsapp_number": "+573001234567",
         "features": {},
         "parent_restaurant_id": None,
     }
@@ -42,12 +43,17 @@ def _patch_restaurant_auth(monkeypatch, restaurant_id: int = RESTAURANT_ID):
         "username": "owner_test",
         "restaurant_name": "Restaurante Test",
         "branch_id": restaurant_id,
+        # P0 fix (2026-09): get_current_restaurant resolves ONLY via the
+        # explicit org_id/location_id fields.
+        "org_id": restaurant_id,
+        "location_id": restaurant_id,
         "role": "owner",
         "password_hash": "$2b$12$placeholder",
     }
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="owner_test"))
     monkeypatch.setattr(db, "db_get_user", AsyncMock(return_value=user))
-    monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value=restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value=restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id", AsyncMock(return_value=restaurant))
     return restaurant
 
 

@@ -14,8 +14,8 @@ ONE test that exercises:
   10. Outbound WA message capture asserted (>= 1 message)
 
 Why single location:
-  The reserve action in agent.py calls db_get_available_tables(date, time, guests, bot_number)
-  which resolves the location from the principal whatsapp_number and queries restaurant_tables
+  The reserve action in agent.py calls db_get_available_tables(date, time, guests, org_id)
+  which resolves the org's first sede and queries restaurant_tables
   for that location. Multi-branch GPS routing is not needed for reservation flow.
 
 Why we create a table first:
@@ -47,10 +47,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -88,7 +88,7 @@ MENU = {
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     """
     Yields an httpx.AsyncClient wrapping the real FastAPI app via ASGI transport.
     Lifespan is started and shut down cleanly. DISABLE_EMBEDDED_WORKER=1 prevents
@@ -113,7 +113,7 @@ async def e2e_app(wa_capture):
 async def test_reservation_full_lifecycle(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Full reservation lifecycle:
@@ -140,13 +140,13 @@ async def test_reservation_full_lifecycle(
     pool = test_pool
 
     # ── Seed restaurant ─────────────────────────────────────────────────────────
-    # num_branches=0: single sede only — reservations use the principal bot_number.
-    # The availability query resolves location from whatsapp_number (principal),
+    # num_branches=0: single sede only — reservations use the principal sede.
+    # The availability query resolves the org's first sede (principal),
     # so no branch locations are needed.
     restaurant = await seed_restaurant(
         pool,
         name="E2E Reservation Test Restaurant",
-        bot_number_raw="+570E2ERESERV1",
+        key="+570E2ERESERV1",
         menu=MENU,
         payment_methods=["Efectivo"],
         num_branches=0,  # No branch locations — single sede
@@ -157,7 +157,7 @@ async def test_reservation_full_lifecycle(
         },
     )
     parent_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]  # normalized (no +)
+    org_id = restaurant["id"]
     owner_email = restaurant["owner_email"]
 
     # Clean volatile data from prior runs
@@ -183,7 +183,7 @@ async def test_reservation_full_lifecycle(
     log.info(
         "e2e.reservation_test_start",
         parent_id=parent_id,
-        bot_number=bot_number,
+        org_id=org_id,
         reservation_date=RESERVATION_DATE_STR,
         reservation_time=RESERVATION_TIME,
         guests=RESERVATION_GUESTS,
@@ -201,7 +201,7 @@ async def test_reservation_full_lifecycle(
     #
     # POST /api/tables (no X-Branch-ID header) uses restaurant["location_id"] as the
     # branch_id for the new table, which is the principal location's ID — the same
-    # location that db_get_available_tables resolves via the principal bot_number.
+    # location that db_get_available_tables resolves as the principal sede.
     # The default capacity from migration 0014 is 4, satisfying >= RESERVATION_GUESTS (4).
     log.info("e2e.reservation_create_table", parent_id=parent_id)
     create_table_resp = await client.post(
@@ -228,12 +228,12 @@ async def test_reservation_full_lifecycle(
     )
     log.info("e2e.reservation_turn_1", phone=CUSTOMER_PHONE, text=reservation_text)
     t1_start = time.monotonic()
-    processed_1 = await simulate_whatsapp_inbound(
+    processed_1 = await send_diner_message(
         client,
         pool,
         phone=CUSTOMER_PHONE_RAW,
         text=reservation_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info(
         "e2e.reservation_turn_1_done",
@@ -242,7 +242,7 @@ async def test_reservation_full_lifecycle(
     )
     assert processed_1 >= 1, "Turn 1: inbox item was not processed"
 
-    turn1_replies = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    turn1_replies = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     log.info(
         "e2e.reservation_turn_1_replies",
         count=len(turn1_replies),
@@ -250,7 +250,7 @@ async def test_reservation_full_lifecycle(
     )
     assert len(turn1_replies) >= 1, (
         "Turn 1: bot sent no WA message. "
-        "Check ANTHROPIC_API_KEY, bot_number lookup, and module_reservations feature flag."
+        "Check ANTHROPIC_API_KEY, org lookup, and module_reservations feature flag."
     )
 
     # ── Turn 2 (conditional): Confirm if the bot asks ─────────────────────────
@@ -261,12 +261,12 @@ async def test_reservation_full_lifecycle(
     confirm_text = "Sí, confirmo la reserva"
     log.info("e2e.reservation_turn_2", phone=CUSTOMER_PHONE, text=confirm_text)
     t2_start = time.monotonic()
-    processed_2 = await simulate_whatsapp_inbound(
+    processed_2 = await send_diner_message(
         client,
         pool,
         phone=CUSTOMER_PHONE_RAW,
         text=confirm_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info(
         "e2e.reservation_turn_2_done",
@@ -443,7 +443,7 @@ async def test_reservation_full_lifecycle(
     )
 
     # ── Final WA capture assertion ─────────────────────────────────────────────
-    all_customer_texts = wa_capture.texts_to(CUSTOMER_PHONE_RAW)
+    all_customer_texts = bot_replies.texts_to(CUSTOMER_PHONE_RAW)
     # 2 turns drained → bot must have replied to both.
     # Per CLAUDE.md Rule #8: the LLM path never returns silence to the customer.
     # If count < 2, either drain processed a duplicate (dedup bug) or the bot
@@ -452,18 +452,18 @@ async def test_reservation_full_lifecycle(
         f"Expected >= 2 WA messages to customer (one per drained turn), "
         f"got {len(all_customer_texts)}. "
         f"Messages received: {all_customer_texts}. "
-        "Possible bug: dedup false positive, LLM silent failure, or wa_capture miss."
+        "Possible bug: dedup false positive, LLM silent failure, or bot_replies miss."
     )
     log.info(
         "e2e.reservation_test_passed",
         reservation_id=reservation_id,
         final_status=final_row["status"],
-        total_wa_messages=len(wa_capture.messages),
+        total_wa_messages=len(bot_replies.messages),
         customer_wa_messages=len(all_customer_texts),
         customer_texts_preview=[t[:80] for t in all_customer_texts],
     )
     print(
         f"\n[OK] E2E reservation test passed: reservation {reservation_id} "
         f"completed full lifecycle (bot capture -> admin confirm -> no_show). "
-        f"{len(wa_capture.messages)} WA messages captured."
+        f"{len(bot_replies.messages)} WA messages captured."
     )

@@ -94,7 +94,7 @@
       _email = emailVal;
       showAlert(
         'rp-alert-email',
-        'Si el correo está registrado, te enviamos un código por WhatsApp. Revisá tu celular.',
+        'Si el correo está registrado, te enviamos un código. Revisa tu bandeja de entrada y el spam.',
         'info'
       );
 
@@ -177,7 +177,7 @@
       var errCode = data.error || '';
 
       if (errCode === 'invalid_code') {
-        showAlert('rp-alert-code', 'El código no es correcto. Revisá tu WhatsApp.', '');
+        showAlert('rp-alert-code', 'El código no es correcto. Revisa el que te llegó por correo.', '');
         var codeInput = document.getElementById('rp-code');
         if (codeInput) { codeInput.value = ''; codeInput.focus(); }
         setFieldError('rp-code', 'msg-code', false);

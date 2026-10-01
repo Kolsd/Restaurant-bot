@@ -21,11 +21,9 @@ let _periodEnd   = '';
   const roles   = rawRole.split(',').map(r => r.trim()).filter(Boolean);
   const isAdmin = roles.some(r => ['owner', 'admin', 'gerente'].includes(r));
   if (!isAdmin) {
-    if (roles.includes('mesero'))    { location.href = '/mesero';   return; }
-    if (roles.includes('cocina'))    { location.href = '/cocina';   return; }
-    if (roles.includes('bar'))       { location.href = '/bar';      return; }
-    if (roles.includes('caja'))      { location.href = '/caja';     return; }
-    location.href = '/staff-hq';
+    // Staff App unification: every operational role goes to the unified
+    // /staff shell now, not a dedicated page per role.
+    location.href = '/staff';
   }
 })();
 
@@ -67,21 +65,26 @@ function _setupChrome() {
 
   // User info
   const role     = (localStorage.getItem('rb_role') || '').toLowerCase();
-  const userName = localStorage.getItem('rb_user_name') || localStorage.getItem('rb_username') || 'Usuario';
+  // Login writes rb_name only for staff accounts; an owner account has no
+  // person name, so fall back to the restaurant's name, never "Usuario".
+  const userName = (localStorage.getItem('rb_name') || '').trim();
+  let restaurantName = '';
+  try { restaurantName = (JSON.parse(localStorage.getItem('rb_restaurant') || '{}').name || '').trim(); } catch (e) { /* corrupt key */ }
+  const shownName = userName || restaurantName || 'Mi cuenta';
   const roleLabel = { owner: 'Propietario', admin: 'Administrador', gerente: 'Gerente' }[role.split(',')[0].trim()] || 'Administrador';
 
   const userNameEl = document.getElementById('sb-user-name');
   const userRoleEl = document.getElementById('sb-user-role');
   const userAvaEl  = document.getElementById('sb-user-avatar');
-  if (userNameEl) userNameEl.textContent = userName;
+  if (userNameEl) userNameEl.textContent = shownName;
   if (userRoleEl) userRoleEl.textContent = roleLabel;
-  if (userAvaEl) userAvaEl.textContent   = (userName.split(' ').map(w => w[0]).join('').slice(0, 2) || 'U').toUpperCase();
+  if (userAvaEl) userAvaEl.textContent   = (shownName.split(' ').map(w => w[0]).join('').slice(0, 2) || 'M').toUpperCase();
 
   // Greeting
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Buenos días' : hour < 18 ? 'Buenas tardes' : 'Buenas noches';
   const greetEl  = document.getElementById('page-greeting');
-  if (greetEl) greetEl.textContent = `${greeting}, ${userName.split(' ')[0]}`;
+  if (greetEl) greetEl.textContent = userName ? `${greeting}, ${userName.split(' ')[0]}` : greeting;
 
   // Date subtitle (filled dynamically after first load)
   const subPageEl = document.getElementById('page-sub');
@@ -96,8 +99,6 @@ function _setupChrome() {
   const features = _features();
   if (features.module_reservations === false)   _hideNav('nav-reservaciones');
   if (!features.module_nps)                     _hideNav('nav-nps');
-  if (!features.loyalty)                        _hideNav('nav-loyalty');
-  if (!features.staff_tips)                     _hideNav('nav-payroll');
   if (!(role.includes('owner')))                _hideNav('nav-equipo');
 }
 
@@ -186,8 +187,7 @@ async function _apiFetch(url) {
 // ── Master load ───────────────────────────────────────────────────────────────
 async function _loadAll() {
   await Promise.allSettled([
-    loadPedidosRescatados(),
-    loadDailyInsight(),
+    loadRescuedOrders(),
     loadMetricsRow(),
     loadRevenueChart(),
     loadSalesByChannel(),
@@ -195,17 +195,16 @@ async function _loadAll() {
     loadPaymentStatus(),
     loadTopDishes(),
     loadInventoryCritical(),
-    loadAtRiskBadge(),
   ]);
 }
 
-// ── 0. North-star: Pedidos rescatados (mes actual) ────────────────────────────
-async function loadPedidosRescatados() {
+// ── 0. North-star: Rescued orders (current month) ────────────────────────────
+async function loadRescuedOrders() {
   const countEl = document.getElementById('m-rescatados');
   const deltaEl = document.getElementById('m-rescatados-delta');
   if (!countEl) return;
   try {
-    const data = await _apiFetch('/api/dashboard/pedidos-rescatados?period=mtd');
+    const data = await _apiFetch('/api/dashboard/orders-rescued?period=mtd');
     countEl.textContent = (data.count ?? 0).toLocaleString('es-CO');
     if (deltaEl && data.delta_pct != null) {
       const up = data.delta_pct >= 0;
@@ -215,26 +214,8 @@ async function loadPedidosRescatados() {
       deltaEl.textContent = '';
     }
   } catch (e) {
-    console.warn('[dashboard] loadPedidosRescatados failed', e);
+    console.warn('[dashboard] loadRescuedOrders failed', e);
     if (countEl) countEl.textContent = '—';
-  }
-}
-
-// ── 1. Daily insight banner ───────────────────────────────────────────────────
-async function loadDailyInsight() {
-  const banner = document.getElementById('ai-insight-banner');
-  const textEl = document.getElementById('ai-insight-text');
-  if (!banner || !textEl) return;
-  try {
-    const data = await _apiFetch('/api/stats/daily-insight');
-    if (!data.enabled) { banner.style.display = 'none'; return; }
-    banner.style.display = '';
-    // Sanitise: render insight text safely
-    // Use textContent only — user data may be embedded in the insight
-    textEl.textContent = data.insight || data.text || '';
-  } catch (e) {
-    console.warn('[dashboard] loadDailyInsight failed', e);
-    banner.style.display = 'none';
   }
 }
 
@@ -371,11 +352,23 @@ const CHANNEL_META = {
     svg: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><path d="M3 12H1V6h7l3 3h3v3h-3M7 3h4"/></svg>',
     barColor: 'var(--info,#3b82f6)',
   },
-  table_qr: {
+  qr_table: {
     label: 'QR de mesa',
     bg: '#EDE9FE', color: '#5B21B6',
     svg: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="2" width="10" height="12" rx="1"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>',
     barColor: 'var(--purple,#8b5cf6)',
+  },
+  pickup: {
+    label: 'Para recoger',
+    bg: '#FCE7F3', color: '#9D174D',
+    svg: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5h10l-1 9H4L3 5z"/><path d="M6 5V4a2 2 0 014 0v1"/></svg>',
+    barColor: 'var(--danger,#db2777)',
+  },
+  web_chat: {
+    label: 'Chat Mesio',
+    bg: '#E0F2FE', color: '#075985',
+    svg: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H5l-3 3V3z"/></svg>',
+    barColor: 'var(--info,#3b82f6)',
   },
 };
 
@@ -396,17 +389,17 @@ async function loadSalesByChannel() {
     }
 
     list.innerHTML = '';
-    const maxRev = Math.max(...channels.map(c => c.revenue || 0), 1);
+    const maxRev = Math.max(...channels.map(c => c.total || 0), 1);
 
     channels.forEach(ch => {
       const meta    = CHANNEL_META[ch.channel] || {
-        label: ch.channel_label || ch.channel,
+        label: ch.label || ch.channel,
         bg: '#f0f0e8', color: '#555',
         svg: '',
         barColor: 'var(--brand)',
       };
-      const pct     = totalRev ? Math.round(ch.revenue / totalRev * 100) : 0;
-      const barPct  = Math.round(ch.revenue / maxRev * 100);
+      const pct     = totalRev ? Math.round((ch.total || 0) / totalRev * 100) : 0;
+      const barPct  = Math.round((ch.total || 0) / maxRev * 100);
 
       const item = document.createElement('div');
       item.className = 'chan';
@@ -430,7 +423,7 @@ async function loadSalesByChannel() {
 
       const valEl = document.createElement('div');
       valEl.className   = 'chan-value';
-      valEl.textContent = mesioFmt(ch.revenue || 0);
+      valEl.textContent = mesioFmt(ch.total || 0);
 
       row1.appendChild(nameEl);
       row1.appendChild(valEl);
@@ -515,7 +508,7 @@ async function loadLiveOrders() {
       let nameTxt = '';
       if (o.table_name)   nameTxt = `Mesa ${o.table_name}`;
       else if (o.channel === 'delivery') nameTxt = `Domicilio · ${o.customer_phone || ''}`;
-      else if (o.channel === 'pickup')   nameTxt = `WhatsApp · ${o.customer_phone || ''}`;
+      else if (o.channel === 'pickup')   nameTxt = `Recoger · ${o.customer_phone || ''}`;
       else                               nameTxt = ORDER_TYPE_LABELS[o.order_type] || o.channel || '—';
       nameEl.textContent = nameTxt;
 
@@ -685,7 +678,7 @@ async function loadTopDishes() {
       // Count
       const tdCount = document.createElement('td');
       tdCount.className   = 'num';
-      tdCount.textContent = (dish.count || 0).toLocaleString('es-CO');
+      tdCount.textContent = (dish.sold || 0).toLocaleString('es-CO');
 
       // Margin badge
       const tdMargin = document.createElement('td');
@@ -800,24 +793,6 @@ async function loadInventoryCritical() {
   } catch (e) {
     console.warn('[dashboard] loadInventoryCritical failed', e);
     if (tbody) { tbody.setAttribute('data-error', 'true'); tbody.textContent = 'No se pudo cargar'; }
-  }
-}
-
-// ── 9. At-risk customers badge (/api/stats/customers-at-risk) ─────────────────
-async function loadAtRiskBadge() {
-  const badgeEl = document.getElementById('sb-risk-badge');
-  if (!badgeEl) return;
-  try {
-    const data  = await _apiFetch('/api/stats/customers-at-risk?limit=1');
-    const count = data.count || 0;
-    if (count > 0) {
-      badgeEl.textContent   = String(count);
-      badgeEl.style.display = '';
-    } else {
-      badgeEl.style.display = 'none';
-    }
-  } catch {
-    badgeEl.style.display = 'none';
   }
 }
 

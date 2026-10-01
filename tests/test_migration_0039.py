@@ -28,11 +28,10 @@ def _uid() -> str:
 async def _insert_org_location(conn) -> tuple[int, int]:
     """Insert a minimal org + location. Returns (org_id, location_id)."""
     org_id = await conn.fetchval(
-        """INSERT INTO organizations (name, whatsapp_number)
-           VALUES ($1, $2)
+        """INSERT INTO organizations (name)
+           VALUES ($1)
            RETURNING id""",
         "Test Org " + _uid()[:8],
-        "+57" + str(uuid.uuid4().int)[:10],
     )
     loc_id = await conn.fetchval(
         """INSERT INTO locations (org_id, name, code, active, timezone)
@@ -214,10 +213,10 @@ async def test_table_sessions_null_assigned_staff_insert(db_conn):
     org_id, loc_id = await _insert_org_location(db_conn)
     row = await db_conn.fetchrow(
         """INSERT INTO table_sessions
-               (phone, bot_number, table_id, table_name, org_id, location_id, status, last_activity)
-           VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW())
+               (phone, table_id, table_name, org_id, location_id, status, last_activity)
+           VALUES ($1, $2, $3, $4, $5, 'active', NOW())
            RETURNING assigned_staff_id""",
-        "+5730099999", "+5730000000",
+        "+5730099999",
         f"table-{org_id}-1", f"{org_id}-1",
         org_id, loc_id,
     )

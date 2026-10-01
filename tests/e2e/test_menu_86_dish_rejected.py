@@ -34,9 +34,9 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -75,7 +75,7 @@ _UNAVAIL_KEYWORDS = [
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app(wa_capture):
+async def e2e_app(bot_replies):
     from app.main import app as fastapi_app
     from asgi_lifespan import LifespanManager
 
@@ -95,7 +95,7 @@ async def e2e_app(wa_capture):
 async def test_86d_dish_rejected_by_bot(
     test_pool: asyncpg.Pool,
     e2e_app: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Marks a dish as unavailable in menu_availability, then asks the bot for it.
@@ -114,14 +114,13 @@ async def test_86d_dish_rejected_by_bot(
     restaurant = await seed_restaurant(
         pool,
         name="E2E 86 Dish Restaurant",
-        bot_number_raw="+570E2E86DISH1",
+        key="+570E2E86DISH1",
         menu=MENU,
         payment_methods=PAYMENT_METHODS,
         num_branches=1,
         branch_latlons=[(4.710989, -74.072092)],
     )
     org_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
 
     await truncate_e2e_data(pool, org_id)
 
@@ -137,13 +136,12 @@ async def test_86d_dish_rejected_by_bot(
                 DISH_NAME,
             )
             # Primary key on menu_availability is (dish_name) — not (dish_name, org_id).
-            # The org_id column exists but the unique constraint is on dish_name alone.
+            # Keyed per tenant since migration 0085: (org_id, dish_name).
             await conn.execute(
                 """
-                INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
-                VALUES ($1, $2, FALSE, NOW())
-                ON CONFLICT (dish_name) DO UPDATE SET
-                    org_id    = EXCLUDED.org_id,
+                INSERT INTO menu_availability (dish_name, org_id, location_id, available, updated_at)
+                SELECT $1, $2, l.id, FALSE, NOW() FROM locations l WHERE l.org_id = $2
+                ON CONFLICT (org_id, location_id, dish_name) DO UPDATE SET
                     available = FALSE,
                     updated_at = NOW()
                 """,
@@ -152,14 +150,14 @@ async def test_86d_dish_rejected_by_bot(
             log.info("e2e.86.marked_unavailable", dish=DISH_NAME, org_id=org_id)
 
     # ── Customer asks for the 86'd dish ───────────────────────────────────────
-    await simulate_whatsapp_inbound(
+    await send_diner_message(
         client, pool,
         phone=PHONE_RAW,
         text="Hola, quiero pedir a domicilio 2 empanaditas de carne",
-        bot_number=bot_number,
+        org_id=org_id,
     )
 
-    all_replies = wa_capture.texts_to(PHONE_RAW)
+    all_replies = bot_replies.texts_to(PHONE_RAW)
     combined = " ".join(all_replies).lower()
 
     log.info(
@@ -188,7 +186,7 @@ async def test_86d_dish_rejected_by_bot(
     # ── ASSERTION 2: Bot mentioned unavailability ─────────────────────────────
     assert len(all_replies) >= 1, (
         f"Bot sent no reply to the customer at all. "
-        f"Phone={PHONE_RAW}, bot_number={bot_number}."
+        f"Phone={PHONE_RAW}, org_id={org_id}."
     )
 
     matched = next((kw for kw in _UNAVAIL_KEYWORDS if kw in combined), None)

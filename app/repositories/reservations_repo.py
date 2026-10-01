@@ -3,7 +3,7 @@ Reservations repository — Repository Pattern extraction.
 
 Covers the reservations aggregate:
   - Upsert reservations (add/update by phone+bot+date+time)
-  - Query by range, status, date, bot_number
+  - Query by range, status, date, org
   - Table availability check (exclude ±2h conflicts)
   - Status transitions: confirm, cancel, no_show
   - Stats aggregation
@@ -42,10 +42,11 @@ async def db_add_reservation(
     time_str: str,
     guests: int,
     phone: str,
-    bot_number: str = "",
+    org_id: int,
     notes: str = "",
+    location_id: int | None = None,
 ) -> dict:
-    """Upsert a reservation by phone + bot_number + date + time.
+    """Upsert a reservation by phone + org + date + time.
 
     If a matching row exists, UPDATE name/guests/notes and return it.
     Otherwise INSERT a new row.
@@ -53,8 +54,8 @@ async def db_add_reservation(
     async with _tenant_connection() as conn:
         existing = await conn.fetchrow(
             """SELECT * FROM reservations
-               WHERE phone=$1 AND bot_number=$2 AND "date"=$3 AND "time"=$4""",
-            phone, bot_number, date_str, time_str,
+               WHERE phone=$1 AND org_id=$2 AND "date"=$3 AND "time"=$4""",
+            phone, org_id, date_str, time_str,
         )
         if existing:
             row = await conn.fetchrow(
@@ -67,12 +68,11 @@ async def db_add_reservation(
         else:
             row = await conn.fetchrow(
                 """INSERT INTO reservations
-                   (name, "date", "time", guests, phone, bot_number, notes, status, org_id, created_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending',
-                           NULLIF(current_setting('app.org_id', true), '')::bigint,
-                           NOW())
+                   (name, "date", "time", guests, phone, org_id, notes, status,
+                    location_id, created_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, NOW())
                    RETURNING *""",
-                name, date_str, time_str, guests, phone, bot_number, notes,
+                name, date_str, time_str, guests, phone, org_id, notes, location_id,
             )
         return _serialize(dict(row))
 
@@ -80,19 +80,21 @@ async def db_add_reservation(
 async def db_get_reservations_range(
     date_from: str,
     date_to: str,
-    bot_number: str | None = None,
+    org_id: int | None = None,
+    location_id: int | None = None,
 ) -> list[dict]:
     """Return reservations between date_from and date_to (inclusive).
 
-    Optionally filter by bot_number. Results ordered by date, time.
+    Optionally filter by org_id, and by sede. Results ordered by date, time.
     """
     async with _tenant_connection() as conn:
-        if bot_number is not None:
+        if org_id is not None:
             rows = await conn.fetch(
                 """SELECT * FROM reservations
-                   WHERE "date" BETWEEN $1 AND $2 AND bot_number=$3
+                   WHERE "date" BETWEEN $1 AND $2 AND org_id=$3
+                     AND ($4::bigint IS NULL OR location_id = $4)
                    ORDER BY "date", "time" """,
-                date_from, date_to, bot_number,
+                date_from, date_to, org_id, location_id,
             )
         else:
             rows = await conn.fetch(
@@ -104,16 +106,16 @@ async def db_get_reservations_range(
         return [_serialize(dict(r)) for r in rows]
 
 
-async def db_get_all_reservations(bot_number: str | None = None) -> list[dict]:
-    """Return all reservations, optionally filtered by bot_number.
+async def db_get_all_reservations(org_id: int | None = None) -> list[dict]:
+    """Return all reservations, optionally filtered by org_id.
 
     Results ordered by created_at DESC.
     """
     async with _tenant_connection() as conn:
-        if bot_number is not None:
+        if org_id is not None:
             rows = await conn.fetch(
-                "SELECT * FROM reservations WHERE bot_number=$1 ORDER BY created_at DESC",
-                bot_number,
+                "SELECT * FROM reservations WHERE org_id=$1 ORDER BY created_at DESC",
+                org_id,
             )
         else:
             rows = await conn.fetch(
@@ -163,31 +165,29 @@ async def db_get_available_tables(
     date_str: str,
     time_str: str,
     guests: int,
-    bot_number: str,
+    org_id: int,
     branch_id: int | None = None,
 ) -> list[dict]:
     """Return restaurant tables with sufficient capacity that are not already
     booked within ±2 hours of the requested time on the same date.
 
-    Resolves the restaurant via bot_number unless branch_id is provided.
+    `branch_id` is the sede (a location id of this org); without one, the
+    org's first sede.
     """
     async with _tenant_connection() as conn:
-        # Resolve restaurant_id from bot_number or branch_id
         if branch_id is not None:
-            restaurant_row = await conn.fetchrow(
-                "SELECT id FROM restaurants WHERE id=$1",
-                branch_id,
+            restaurant_id = await conn.fetchval(
+                "SELECT id FROM locations WHERE id=$1 AND org_id=$2",
+                branch_id, org_id,
             )
         else:
-            restaurant_row = await conn.fetchrow(
-                "SELECT id FROM restaurants WHERE whatsapp_number=$1",
-                bot_number,
+            restaurant_id = await conn.fetchval(
+                "SELECT min(id) FROM locations WHERE org_id=$1",
+                org_id,
             )
 
-        if not restaurant_row:
+        if restaurant_id is None:
             return []
-
-        restaurant_id = restaurant_row["id"]
 
         rows = await conn.fetch(
             """SELECT t.* FROM restaurant_tables t
@@ -252,18 +252,18 @@ async def db_cancel_reservation(
 
 
 async def db_get_reservations_by_status(
-    bot_number: str,
+    org_id: int,
     status: str,
     date_from: str | None = None,
     date_to: str | None = None,
     branch_id: int | None = None,
 ) -> list[dict]:
-    """Return reservations filtered by bot_number and status.
+    """Return reservations filtered by org and status.
 
     Optionally narrow by date range and/or branch_id. Ordered by date, time.
     """
-    conditions = ["bot_number=$1", "status=$2"]
-    vals: list = [bot_number, status]
+    conditions = ["org_id=$1", "status=$2"]
+    vals: list = [org_id, status]
     idx = 3
 
     if date_from is not None:
@@ -278,11 +278,7 @@ async def db_get_reservations_by_status(
 
     if branch_id is not None:
         # Resolve restaurant_id for this branch and filter
-        conditions.append(f"""id IN (
-            SELECT res.id FROM reservations res
-            JOIN restaurants r ON r.whatsapp_number = res.bot_number
-            WHERE r.id = ${idx}
-        )""")
+        conditions.append(f"location_id = ${idx}")
         vals.append(branch_id)
         idx += 1
 
@@ -295,7 +291,7 @@ async def db_get_reservations_by_status(
 
 
 async def db_get_reservation_stats(
-    bot_number: str,
+    org_id: int,
     period_start: str,
     period_end: str,
     branch_id: int | None = None,
@@ -305,16 +301,12 @@ async def db_get_reservation_stats(
     Returns a dict with total, confirmed, cancelled, no_shows, avg_party_size,
     no_show_rate (computed in Python).
     """
-    conditions = ['bot_number=$1 AND "date" >= $2 AND "date" <= $3']
-    vals: list = [bot_number, period_start, period_end]
+    conditions = ['org_id=$1 AND "date" >= $2 AND "date" <= $3']
+    vals: list = [org_id, period_start, period_end]
     idx = 4
 
     if branch_id is not None:
-        conditions.append(f"""id IN (
-            SELECT res.id FROM reservations res
-            JOIN restaurants r ON r.whatsapp_number = res.bot_number
-            WHERE r.id = ${idx}
-        )""")
+        conditions.append(f"location_id = ${idx}")
         vals.append(branch_id)
         idx += 1
 
@@ -435,7 +427,7 @@ async def db_create_reservation(
     notes: str | None = None,
     table_id: int | None = None,
     source: str = "manual",
-    bot_number: str = "",
+    location_id: int | None = None,
 ) -> dict:
     """Insert a new reservation row and return the full dict.
 
@@ -447,7 +439,7 @@ async def db_create_reservation(
             """
             INSERT INTO reservations
                 (name, "date", "time", guests, phone, notes, table_id,
-                 source, bot_number, status,
+                 source, location_id, status,
                  org_id, created_at)
             VALUES
                 ($1, $2, $3, $4, $5, $6, $7,
@@ -464,6 +456,6 @@ async def db_create_reservation(
             notes or "",
             table_id,
             source,
-            bot_number,
+            location_id,
         )
         return _serialize(dict(row))

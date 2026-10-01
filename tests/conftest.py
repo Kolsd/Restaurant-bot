@@ -69,6 +69,44 @@ def _clear_rate_limit_state():
     state_store._fb_rate_limits.clear()
 
 
+# ── Reset the real DB pool singleton between tests ────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _reset_real_db_pool():
+    """Discard app.services.database._pool after every test.
+
+    ROOT CAUSE this guards against (confirmed 2026-09-10): app.services.database
+    keeps a single process-global asyncpg.Pool in `_pool`, lazily created by the
+    real (unmocked) get_pool(). pytest-asyncio gives each async test its own
+    short-lived event loop. If ANY test — even a "fully mocked" unit test that
+    forgot to patch one internal DB call (e.g. agent.py's in-transit-order check,
+    which calls tenant_connection() directly and is wrapped in a broad
+    try/except that silently swallows the resulting error) — reaches the real
+    get_pool() path while a real DATABASE_URL/TEST_DATABASE_URL is configured,
+    a genuine asyncpg.Pool gets created and cached in `_pool`, bound to THAT
+    test's event loop. Once that loop closes, the cached pool is permanently
+    broken ("RuntimeError: Event loop is closed") — and because `_pool` is a
+    module global, EVERY later test in the same session that reaches the real
+    get_pool() path (e.g. tests hitting a real endpoint without mocking the
+    repo call) inherits the dead pool and fails, nondeterministically, based on
+    suite ordering. This does not happen with no DB configured at all, which is
+    exactly why it went unnoticed: the failure is invisible unless a real
+    Postgres is attached AND some earlier test happens to leak a real
+    connection first.
+
+    This mirrors the existing reset pattern in test_db_circuit_breaker.py and
+    test_health.py::TestHealthIntegration (both discard `_pool` without an
+    explicit .close() — acceptable in a test process; connections are cleaned
+    up by the OS/Postgres when the leftover Pool object is garbage collected or
+    the process exits) but applies it universally so a missing mock in any one
+    test can no longer poison every other real-DB test that runs after it.
+    """
+    from app.services import database as _db
+    _db._pool = None
+    yield
+    _db._pool = None
+
+
 # ── DB row / pool factory helpers (reused across async suites) ───────────────
 
 def make_row(d: dict):
@@ -120,11 +158,24 @@ def make_pool(conn):
 
 # ── Auth helpers (monkeypatch shortcuts) ─────────────────────────────────────
 
+def stub_plan(monkeypatch, plan_code: str = "pro"):
+    """Make every org the plan checks look at sit on `plan_code` (no trial)."""
+    from app.services import plan_access, plans
+
+    row = {"plan_code": plan_code, "comp_until": None}
+    monkeypatch.setattr(plan_access, "org_plan_row", AsyncMock(return_value=row))
+    monkeypatch.setattr(plan_access, "org_has_feature",
+                        AsyncMock(side_effect=lambda _org, feature: plans.has_feature(row, feature)))
+    monkeypatch.setattr(plan_access, "org_staff_cap",
+                        AsyncMock(return_value=plans.staff_cap(row)))
+
+
 def patch_auth(monkeypatch, *, restaurant_id: int = 1,
                whatsapp_number: str = "+573001234567",
                features: dict = None,
                username: str = "owner_test",
-               role: str = "owner"):
+               role: str = "owner",
+               plan_code: str = "pro"):
     """
     Shortcut: patch verify_token + db_get_user + db_get_restaurant_by_id so that
     any Bearer token is accepted and the given restaurant dict is returned.
@@ -147,13 +198,19 @@ def patch_auth(monkeypatch, *, restaurant_id: int = 1,
         "org_id":           restaurant_id,
         "location_id":      restaurant_id,
         "name":             "Restaurante Test",
-        "whatsapp_number":  whatsapp_number,
         "features":         features,
     }
     user = {
         "username":         username,
         "restaurant_name":  "Restaurante Test",
         "branch_id":        restaurant_id,
+        # P0 fix (2026-09): deps.get_current_restaurant now resolves ONLY
+        # via the explicit org_id/location_id fields (never guessed from
+        # branch_id) — the mocked user dict must carry them or every
+        # get_current_restaurant call denies with 403. Matriz-invariant
+        # convention: org_id == location_id == restaurant_id in this fixture.
+        "org_id":           restaurant_id,
+        "location_id":      restaurant_id,
         "role":             role,
         "password_hash":    "$2b$12$placeholder",
     }
@@ -161,10 +218,15 @@ def patch_auth(monkeypatch, *, restaurant_id: int = 1,
     monkeypatch.setattr("app.routes.deps.verify_token",
                         AsyncMock(return_value=username))
     monkeypatch.setattr(db, "db_get_user", AsyncMock(return_value=user))
-    monkeypatch.setattr(db, "db_get_restaurant_by_id",
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id",
+                        AsyncMock(return_value=restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id",
                         AsyncMock(return_value=restaurant))
     monkeypatch.setattr(db, "db_check_module",
                         AsyncMock(return_value=False))
+    # The plan checks (app/services/plan_access.py): by default the mocked
+    # owner is on Pro, which unlocks every feature.
+    stub_plan(monkeypatch, plan_code)
 
     return restaurant
 

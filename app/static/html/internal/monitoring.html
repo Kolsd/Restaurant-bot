@@ -166,14 +166,6 @@
       color: var(--text-4);
     }
 
-    /* ── Inbox metrics row ── */
-    .inbox-big {
-      font-size: 3rem;
-      font-weight: 800;
-      color: #fff;
-      line-height: 1;
-    }
-
     .badge {
       display: inline-block;
       padding: 2px 8px;
@@ -184,33 +176,6 @@
     .badge-danger  { background: var(--danger-light); color: var(--danger); }
     .badge-success { background: var(--success-light); color: var(--success); }
     .badge-muted   { background: var(--dark-3); color: var(--text-4); }
-
-    /* ── Latency card ── */
-    .latency-row {
-      display: flex;
-      gap: var(--s-5);
-      margin-top: var(--s-2);
-    }
-
-    .latency-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .latency-value {
-      font-size: 1.6rem;
-      font-weight: 700;
-      color: #fff;
-    }
-
-    .latency-label {
-      font-size: 0.65rem;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-4);
-    }
 
     /* ── Business placeholder cards ── */
     .placeholder-card .card-value {
@@ -424,16 +389,6 @@
         <div class="card-sub" id="poolPct" style="margin-top:var(--s-3)">—</div>
       </div>
 
-      <!-- Inbox queue -->
-      <div class="card">
-        <div class="card-label">Inbox Queue</div>
-        <div class="inbox-big" id="inboxDepth">—</div>
-        <div style="margin-top:var(--s-2);display:flex;align-items:center;gap:var(--s-2);">
-          <span class="badge badge-muted" id="deadLetterBadge">— dead</span>
-        </div>
-        <div class="card-sub" id="inboxProcessed">—</div>
-      </div>
-
       <!-- Scheduler heartbeat -->
       <div class="card">
         <div class="card-label">Scheduler</div>
@@ -442,26 +397,6 @@
           <span class="card-value" style="font-size:1.4rem" id="schedulerAge">—</span>
         </div>
         <div class="card-sub" id="schedulerSub">Waiting for data…</div>
-      </div>
-
-      <!-- Error rate + latency -->
-      <div class="card">
-        <div class="card-label">Worker Performance</div>
-        <div class="latency-row">
-          <div class="latency-item">
-            <span class="latency-value" id="latAvg">—</span>
-            <span class="latency-label">Avg ms</span>
-          </div>
-          <div class="latency-item">
-            <span class="latency-value" id="latP95">—</span>
-            <span class="latency-label">p95 ms</span>
-          </div>
-          <div class="latency-item">
-            <span class="latency-value" id="errorRate">—</span>
-            <span class="latency-label">Err %</span>
-          </div>
-        </div>
-        <div class="card-sub" id="latSamples">—</div>
       </div>
 
     </div>
@@ -505,24 +440,6 @@
     </div>
   </section>
 
-  <!-- Top tenants by queue depth (hidden when queue is empty) -->
-  <section id="queue-tenants-section" style="display:none;">
-    <div class="section-title">Top Tenants por Cola</div>
-    <div class="card" style="padding:0;overflow:hidden;">
-      <table class="history-table" id="queueTenantsTable">
-        <thead>
-          <tr>
-            <th>Restaurante</th>
-            <th>Bot Number</th>
-            <th style="text-align:right;">Mensajes Pendientes</th>
-          </tr>
-        </thead>
-        <tbody id="queueTenantBody">
-        </tbody>
-      </table>
-    </div>
-  </section>
-
   <!-- History section -->
   <section>
     <div class="section-title">Poll History (last 20)</div>
@@ -531,18 +448,12 @@
         <thead>
           <tr>
             <th>Time</th>
-            <th>Queue</th>
-            <th>Dead</th>
             <th>DB Used/Total</th>
-            <th>Avg ms</th>
-            <th>p95 ms</th>
-            <th>Err %</th>
-            <th>Processed</th>
           </tr>
         </thead>
         <tbody id="historyBody">
           <tr>
-            <td colspan="8" style="text-align:center;color:var(--dark-3);padding:var(--s-6);">
+            <td colspan="2" style="text-align:center;color:var(--dark-3);padding:var(--s-6);">
               Waiting for first poll…
             </td>
           </tr>
@@ -675,19 +586,6 @@
     return Number(n).toLocaleString();
   }
 
-  function fmtMs(n) {
-    if (n === null || n === undefined) return '—';
-    return Number(n).toFixed(1);
-  }
-
-  /* ── Latency color class ── */
-  function latColor(ms) {
-    if (ms === null || ms === undefined) return '';
-    if (ms < 100)  return 'text-ok';
-    if (ms < 500)  return 'text-warn';
-    return 'text-danger';
-  }
-
   /* ── Pool color class ── */
   function poolColor(pct) {
     if (pct < 60) return '';          // default (fill uses success)
@@ -712,52 +610,6 @@
         ? `${pct}% utilization — ${fmt(free)} free connections`
         : '—';
 
-    // Inbox queue depth
-    const depth = m.inbox_queue_depth;
-    const depthEl = document.getElementById('inboxDepth');
-    depthEl.textContent = depth !== null && depth !== undefined ? fmt(depth) : '—';
-    depthEl.className = 'inbox-big' + (depth > 0 ? ' text-warn' : '');
-
-    // Dead letters badge
-    const dead    = m.inbox_dead_letters ?? 0;
-    const deadBdg = document.getElementById('deadLetterBadge');
-    deadBdg.textContent = fmt(dead) + ' dead';
-    deadBdg.className   = 'badge ' + (dead > 0 ? 'badge-danger' : 'badge-muted');
-
-    // Processed total + error rate
-    const processed = m.inbox_processed_total ?? null;
-    const errors    = m.inbox_errors_total    ?? 0;
-    const errRate   = (processed !== null && processed > 0)
-      ? ((errors / (processed + errors)) * 100).toFixed(2)
-      : '0.00';
-
-    document.getElementById('inboxProcessed').textContent =
-      processed !== null
-        ? `${fmt(processed)} processed · ${fmt(errors)} errors`
-        : '—';
-
-    // Latency
-    const avg     = m.inbox_latency_avg_ms;
-    const p95     = m.inbox_latency_p95_ms;
-    const samples = m.inbox_latency_samples;
-
-    const avgEl = document.getElementById('latAvg');
-    avgEl.textContent  = fmtMs(avg);
-    avgEl.className    = 'latency-value ' + latColor(avg);
-
-    const p95El = document.getElementById('latP95');
-    p95El.textContent  = fmtMs(p95);
-    p95El.className    = 'latency-value ' + latColor(p95);
-
-    const errEl = document.getElementById('errorRate');
-    errEl.textContent = errRate + '%';
-    errEl.className   = 'latency-value ' + (parseFloat(errRate) > 1 ? 'text-warn' : 'text-ok');
-
-    document.getElementById('latSamples').textContent =
-      samples !== null && samples !== undefined
-        ? `${fmt(samples)} latency samples`
-        : '—';
-
     // Scheduler heartbeat
     const sched = m.scheduler || {};
     const schedDot = document.getElementById('schedulerDot');
@@ -777,37 +629,11 @@
       schedSub.className = 'card-sub ' + (healthy ? '' : 'text-danger');
     }
 
-    // Top tenants by queue depth
-    const topTenants = m.queue_top_tenants || [];
-    const tenantSection = document.getElementById('queue-tenants-section');
-    if (tenantSection) {
-      if (topTenants.length > 0) {
-        tenantSection.style.display = '';
-        const tbody = document.getElementById('queueTenantBody');
-        if (tbody) {
-          tbody.innerHTML = '';
-          topTenants.forEach(t => {
-            const tr = document.createElement('tr');
-            const nameTd = document.createElement('td'); nameTd.textContent = t.org_name || '—';
-            const botTd  = document.createElement('td'); botTd.style.fontFamily = 'monospace'; botTd.textContent = t.bot_number || '—';
-            const depthTd = document.createElement('td'); depthTd.style.textAlign = 'right';
-            depthTd.textContent = fmt(t.depth);
-            depthTd.className = t.depth > 5 ? 'text-warn' : '';
-            tr.append(nameTd, botTd, depthTd);
-            tbody.appendChild(tr);
-          });
-        }
-      } else {
-        tenantSection.style.display = 'none';
-      }
-    }
-
     // Business metrics — populate when available, keep "--" until then
     renderBusiness('bizOrders',        'bizOrdersSub',        m.orders_today,           'orders today');
     renderBusiness('bizSessions',      'bizSessionsSub',      m.active_table_sessions,  'open tables');
     renderBusiness('bizConversations', 'bizConversationsSub', m.active_conversations,   'last 30 min');
     renderBusiness('bizRestaurants',   'bizRestaurantsSub',   m.restaurants_total,      'restaurants');
-    renderBusiness('bizStaff',         'bizStaffSub',         m.staff_clocked_in,       'on shift');
   }
 
   function renderBusiness(valueId, subId, value, subText) {
@@ -839,28 +665,14 @@
       const { ts, m } = entry;
       const used   = m.db_pool_used  ?? '—';
       const total  = m.db_pool_size  ?? '—';
-      const errors = m.inbox_errors_total ?? 0;
-      const proc   = m.inbox_processed_total ?? 0;
-      const errRate = proc > 0 ? ((errors / (proc + errors)) * 100).toFixed(2) + '%' : '0.00%';
 
       return `<tr>
         <td class="mono">${ts.toLocaleTimeString()}</td>
-        <td class="mono">${fmt(m.inbox_queue_depth)}</td>
-        <td class="mono${m.inbox_dead_letters > 0 ? ' text-danger' : ''}">${fmt(m.inbox_dead_letters)}</td>
         <td class="mono">${used !== '—' ? used + '/' + total : '—'}</td>
-        <td class="mono${latClass(m.inbox_latency_avg_ms)}">${fmtMs(m.inbox_latency_avg_ms)}</td>
-        <td class="mono${latClass(m.inbox_latency_p95_ms)}">${fmtMs(m.inbox_latency_p95_ms)}</td>
-        <td class="mono">${errRate}</td>
-        <td class="mono">${fmt(proc)}</td>
       </tr>`;
     });
 
     tbody.innerHTML = rows.join('');
-  }
-
-  function latClass(ms) {
-    const c = latColor(ms);
-    return c ? ' ' + c : '';
   }
 
   /* ── Boot ── */

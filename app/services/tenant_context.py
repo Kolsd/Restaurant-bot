@@ -193,7 +193,7 @@ def bypass_tenant_scope_if_unset(reason: str) -> Generator[None, None, None]:
 
     Why this exists: functions like `agent.detect_table_context` were written
     in the pre-RLS era when the bot runtime had no active tenant scope, so
-    they used `bypass_tenant_scope` to do pre-tenant lookups by `bot_number`.
+    they used `bypass_tenant_scope` to do pre-tenant lookups.
     After Phase 1, `inbox_worker._handle_meta_whatsapp` wraps the whole bot
     flow in `tenant_scope(rid)` — now those same functions are called with an
     active scope, and a nested `bypass_tenant_scope` would raise
@@ -202,7 +202,7 @@ def bypass_tenant_scope_if_unset(reason: str) -> Generator[None, None, None]:
     This helper lets shared helpers work in both regimes:
     - Active tenant scope (production via inbox_worker): no-op; the existing
       scope is honored. Reads go through RLS for that tenant, which is
-      correct — the lookup by bot_number is within-tenant once the tenant is
+      correct — the lookup is within-tenant once the tenant is
       known.
     - No tenant scope (legacy `/chat` endpoint, Twilio webhook, tests): real
       bypass is entered; legacy cross-tenant behavior is preserved.

@@ -1,20 +1,23 @@
 """
 app/repositories/north_star_repo.py
 
-North-star metric — "Pedidos Rescatados" (bot-originated orders).
+North-star metric — "Rescued Orders" (bot-originated orders).
 
 Definition (CEO-confirmed 2026-05-07):
-  A "pedido rescatado" = any order created via the WhatsApp bot
-  (channel = 'whatsapp_bot') regardless of status, including cancelled.
-  It represents demand the restaurant captured via Mesio.
+  A "rescued order" = any order created via the bot — WhatsApp
+  (channel = 'whatsapp_bot') OR Mesio's own diner web-chat
+  (channel = 'web_chat', added 2026-09 when WhatsApp stopped being the only
+  bot surface) — regardless of status, including cancelled. It represents
+  demand the restaurant captured via Mesio, independent of which channel
+  the diner happened to use.
 
 Sources:
-  - orders        (delivery / pickup external orders)  channel = 'whatsapp_bot'
-  - table_orders  (in-restaurant mesa orders)          channel = 'whatsapp_bot'
+  - orders        (delivery / pickup external orders)  channel IN _CHANNELS
+  - table_orders  (in-restaurant mesa orders)          channel IN _CHANNELS
 
 Functions:
-  db_count_pedidos_rescatados       — single-tenant, requires active tenant_scope
-  db_count_pedidos_rescatados_global — cross-tenant ranking, requires bypass_tenant_scope
+  db_count_rescued_orders       — single-tenant, requires active tenant_scope
+  db_count_rescued_orders_global — cross-tenant ranking, requires bypass_tenant_scope
 """
 from __future__ import annotations
 
@@ -25,15 +28,20 @@ from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
 
-_CHANNEL = "whatsapp_bot"
+# Every bot-originated channel counts as a "rescued order" — the metric is
+# about demand captured BY THE BOT, not by any one messaging surface.
+_CHANNELS = ("whatsapp_bot", "web_chat")
 
 
-async def db_count_pedidos_rescatados(
+async def db_count_rescued_orders(
     period_start: date,
     period_end: date,
+    tz: str = "UTC",
 ) -> dict:
     """
     Count bot-originated orders for the current tenant in [period_start, period_end].
+
+    The days are the restaurant's local days (`tz`); created_at is naive UTC.
 
     Returns: {"count": int, "delivery": int, "table": int}
 
@@ -46,21 +54,21 @@ async def db_count_pedidos_rescatados(
             """
             SELECT COUNT(*)
             FROM orders
-            WHERE channel = $1
-              AND created_at::date >= $2
-              AND created_at::date <= $3
+            WHERE channel = ANY($1)
+              AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE $4)::date >= $2
+              AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE $4)::date <= $3
             """,
-            _CHANNEL, period_start, period_end,
+            list(_CHANNELS), period_start, period_end, tz,
         )
         table = await conn.fetchval(
             """
             SELECT COUNT(*)
             FROM table_orders
-            WHERE channel = $1
-              AND created_at::date >= $2
-              AND created_at::date <= $3
+            WHERE channel = ANY($1)
+              AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE $4)::date >= $2
+              AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE $4)::date <= $3
             """,
-            _CHANNEL, period_start, period_end,
+            list(_CHANNELS), period_start, period_end, tz,
         )
 
     delivery = int(delivery or 0)
@@ -72,7 +80,7 @@ async def db_count_pedidos_rescatados(
     }
 
 
-async def db_count_pedidos_rescatados_global(
+async def db_count_rescued_orders_global(
     period_start: date,
     period_end: date,
 ) -> list[dict]:
@@ -82,14 +90,13 @@ async def db_count_pedidos_rescatados_global(
     Returns a list sorted descending by total count:
       [{"org_id": int, "org_name": str, "count": int, "delivery": int, "table": int}, ...]
 
-    MUST be called under bypass_tenant_scope (uses get_pool directly — cross-tenant query).
+    MUST be called under bypass_tenant_scope. Uses tenant_connection() (never
+    pool.acquire() directly) so the bypass actually executes
+    `SET LOCAL ROLE mesio_superadmin` — orders/table_orders are RLS tables
+    (migration 0029); without that role switch a pooled connection would read
+    under whatever org_id scope it last had set, not a real cross-tenant view.
     """
-    def _get_pool():
-        from app.services.database import get_pool
-        return get_pool()
-
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT
@@ -99,7 +106,7 @@ async def db_count_pedidos_rescatados_global(
                 0::bigint                               AS table_count
             FROM orders o
             JOIN organizations org ON org.id = o.org_id
-            WHERE o.channel = $1
+            WHERE o.channel = ANY($1)
               AND o.created_at::date >= $2
               AND o.created_at::date <= $3
             GROUP BY o.org_id, org.name
@@ -113,12 +120,12 @@ async def db_count_pedidos_rescatados_global(
                 COUNT(to2.id)
             FROM table_orders to2
             JOIN organizations org ON org.id = to2.org_id
-            WHERE to2.channel = $1
+            WHERE to2.channel = ANY($1)
               AND to2.created_at::date >= $2
               AND to2.created_at::date <= $3
             GROUP BY to2.org_id, org.name
             """,
-            _CHANNEL, period_start, period_end,
+            list(_CHANNELS), period_start, period_end,
         )
 
     # Aggregate UNION results per org_id

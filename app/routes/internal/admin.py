@@ -13,10 +13,16 @@ Endpoints (all under /api/internal/admin, all require verify_superadmin):
   POST /delete-user      → Delete a user
   GET  /users            → List all users
   POST /create-restaurant → Create a new restaurant (legacy)
-  POST /set-subscription → Set subscription status (legacy)
   GET  /restaurant/{id}  → Detail + stats for one restaurant (legacy)
-  POST /update-restaurant → Update restaurant fields (legacy)
   GET  /billing-stats    → Billing aggregate stats
+
+  NOTE (2026-09-12): POST /set-subscription and POST /update-restaurant were
+  DELETED — both took an id the superadmin UI sent as an ORG id but resolved
+  it as a LOCATION id via a subquery against the locations table, a P0
+  cross-tenant write whenever the two ids collided (org ids and location ids
+  are independent sequences over the same integer range). superadmin.html
+  now calls PATCH /organizations/{org_id} directly — it is unambiguously
+  org-scoped. See tests/test_no_legacy_restaurant_field_writes.py.
   POST /fix-branch-ids   → Fix branch IDs (maintenance tool)
   POST /fix-conversations → Fix conversation bot numbers (maintenance tool)
   POST /parse-menu       → Parse PDF/image into JSON menu via Claude
@@ -36,7 +42,6 @@ import os
 import io
 import base64
 import json
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends, Query
@@ -46,7 +51,8 @@ from anthropic import Anthropic
 from app.services.auth import create_user, get_users, hash_password
 from app.services import database as db
 from app.routes.deps import verify_superadmin
-from app.repositories import sessions_repo, restaurant_repo
+from app.repositories import plan_limits_repo, sessions_repo, restaurant_repo
+from app.services import plans
 from app.services.logging import get_logger
 from app.services.tenant_context import bypass_tenant_scope
 from app.services.security import compare_secret
@@ -64,23 +70,15 @@ def _ok(data) -> dict:
     return {"success": True, "data": data}
 
 
-def _err(msg: str, code: int = 400) -> dict:
-    return {"success": False, "error": msg, "code": code}
-
-
 # ── Pydantic models (Org + Location) ────────────────────────────────────────
 
-_PHONE_RE = re.compile(r"^\+?\d[\d\s\-]{6,19}$")
 
 
 class CreateOrgRequest(BaseModel):
     name: str
     slug: Optional[str] = None
-    whatsapp_number: Optional[str] = None
-    wa_phone_id: Optional[str] = None
-    wa_access_token: Optional[str] = None
     features: Optional[dict] = None
-    subscription_plan: Optional[str] = "free"
+    plan_code: Optional[str] = "restaurante"
 
     @field_validator("name")
     @classmethod
@@ -89,30 +87,13 @@ class CreateOrgRequest(BaseModel):
             raise ValueError("name cannot be empty")
         return v.strip()
 
-    @field_validator("whatsapp_number")
-    @classmethod
-    def phone_format(cls, v):
-        if v and not _PHONE_RE.match(v.strip()):
-            raise ValueError("whatsapp_number format invalid")
-        return v.strip() if v else None
-
 
 class PatchOrgRequest(BaseModel):
     name: Optional[str] = None
     slug: Optional[str] = None
-    whatsapp_number: Optional[str] = None
-    wa_phone_id: Optional[str] = None
-    wa_access_token: Optional[str] = None
     features: Optional[dict] = None
-    subscription_plan: Optional[str] = None
+    plan_code: Optional[str] = None
     subscription_status: Optional[str] = None
-
-    @field_validator("whatsapp_number")
-    @classmethod
-    def phone_format(cls, v):
-        if v and not _PHONE_RE.match(v.strip()):
-            raise ValueError("whatsapp_number format invalid")
-        return v.strip() if v else None
 
 
 class CreateLocationRequest(BaseModel):
@@ -121,9 +102,6 @@ class CreateLocationRequest(BaseModel):
     address: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    whatsapp_number: Optional[str] = None
-    wa_phone_id: Optional[str] = None
-    wa_access_token: Optional[str] = None
     active: Optional[bool] = True
     timezone: Optional[str] = "America/Bogota"
 
@@ -148,13 +126,6 @@ class CreateLocationRequest(BaseModel):
             raise ValueError("longitude must be in [-180, 180]")
         return v
 
-    @field_validator("whatsapp_number")
-    @classmethod
-    def phone_format(cls, v):
-        if v and not _PHONE_RE.match(v.strip()):
-            raise ValueError("whatsapp_number format invalid")
-        return v.strip() if v else None
-
 
 class PatchLocationRequest(BaseModel):
     name: Optional[str] = None
@@ -162,9 +133,6 @@ class PatchLocationRequest(BaseModel):
     address: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    whatsapp_number: Optional[str] = None
-    wa_phone_id: Optional[str] = None
-    wa_access_token: Optional[str] = None
     active: Optional[bool] = None
     timezone: Optional[str] = None
     is_primary: Optional[bool] = None
@@ -183,13 +151,6 @@ class PatchLocationRequest(BaseModel):
             raise ValueError("longitude must be in [-180, 180]")
         return v
 
-    @field_validator("whatsapp_number")
-    @classmethod
-    def phone_format(cls, v):
-        if v and not _PHONE_RE.match(v.strip()):
-            raise ValueError("whatsapp_number format invalid")
-        return v.strip() if v else None
-
 
 async def _bypass_internal_admin():
     """FastAPI dependency: enter bypass_tenant_scope for all internal admin routes.
@@ -205,32 +166,42 @@ async def _bypass_internal_admin():
 # ── Pydantic models ──────────────────────────────────────────────────────────
 class AdminLoginRequest(BaseModel): key: str
 class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id: int; admin_key: str = ""
-class CreateRestaurantRequest(BaseModel): admin_key: str = ""; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}; wa_phone_id: str = ""; wa_access_token: str = ""
-class SetSubscriptionRequest(BaseModel): admin_key: str = ""; restaurant_id: int; status: str
-class UpdateRestaurantRequest(BaseModel):
-    admin_key: str = ""; restaurant_id: int
-    name: str = None; address: str = None; whatsapp_number: str = None
-    wa_phone_id: str = None; wa_access_token: str = None
-    features: dict = None; menu: str = None
-
-
-_VALID_PLANS = {"pulso", "restaurante", "pro", "cadena", "comp", "free"}
+# SetSubscriptionRequest / UpdateRestaurantRequest and the routes that used
+# them (POST /set-subscription, POST /update-restaurant) were DELETED
+# 2026-09-12 along with db_update_subscription/db_update_restaurant_fields —
+# see module docstring above for the P0 they carried. superadmin.html was
+# switched to PATCH /organizations/{org_id} (below), which is unambiguously
+# org-scoped.
 
 
 class ChangePlanRequest(BaseModel):
     plan_code: str
-    comp_until: Optional[str] = None  # ISO date "YYYY-MM-DD", only meaningful when plan_code == "comp"
 
     @field_validator("plan_code")
     @classmethod
     def plan_valid(cls, v: str) -> str:
-        if v not in _VALID_PLANS:
-            raise ValueError(f"plan_code must be one of {sorted(_VALID_PLANS)}")
+        if v not in plans.PAYING_PLANS:
+            raise ValueError(f"plan_code must be one of {list(plans.PLAN_ORDER)}")
         return v
 
 
 class SetCompRequest(BaseModel):
     comp_until: Optional[str] = None  # ISO date "YYYY-MM-DD" or null to clear
+
+
+class SetFounderRequest(BaseModel):
+    founder: bool
+
+
+class RecordPaymentRequest(BaseModel):
+    months: int  # 1 = monthly invoice, 12 = annual (pays 10, gets 12)
+
+    @field_validator("months")
+    @classmethod
+    def months_valid(cls, v: int) -> int:
+        if v not in (1, 12):
+            raise ValueError("months must be 1 or 12")
+        return v
 
 
 class ResetPasswordRequest(BaseModel):
@@ -287,7 +258,10 @@ async def admin_get_restaurants(
     # frontend backwards compat — the shape is org-level data which is what
     # the admin actually wants (one entry per tenant). Active orgs only;
     # use active_only=False if you also need cancelled tenants.
-    return {"restaurants": await db.db_get_all_orgs(active_only=False)}
+    orgs = await db.db_get_all_orgs(active_only=False)
+    for org in orgs:
+        org["billing_status"] = plans.billing_status(org.get("comp_until"), org.get("paid_until"))
+    return {"restaurants": orgs}
 
 
 @router.post("/create-user")
@@ -296,7 +270,7 @@ async def admin_create_user(
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
-    rest = await db.db_get_restaurant_by_id(request.restaurant_id)
+    rest = await db.db_get_restaurant_by_org_id(request.restaurant_id)
     if not rest:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
@@ -305,7 +279,10 @@ async def admin_create_user(
         password_hash=hash_password(request.password),
         restaurant_name=rest["name"],
         role="owner",
-        branch_id=request.restaurant_id
+        branch_id=request.restaurant_id,
+        # P0 fix (2026-09): request.restaurant_id is an org_id here (see
+        # db_get_restaurant_by_org_id call above) — set the explicit column.
+        org_id=request.restaurant_id,
     )
 
     if not success:
@@ -331,100 +308,17 @@ async def admin_list_users(
     return {"users": await get_users()}
 
 
-@router.post("/create-restaurant")
-async def admin_create_restaurant(
-    request: CreateRestaurantRequest,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    from app.routes.dashboard import geocode_address
-    try:
-        menu_dict = json.loads(request.menu)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Menú no es JSON válido")
-    lat, lon, _ = await geocode_address(request.address)
-
-    await db.db_create_restaurant(request.name, request.whatsapp_number, request.address, menu_dict, lat, lon, request.features)
-
-    if request.wa_access_token:
-        await restaurant_repo.db_set_restaurant_wa_credentials(
-            request.whatsapp_number, request.wa_phone_id, request.wa_access_token
-        )
-
-    return {"success": True}
-
-
-@router.post("/set-subscription")
-async def admin_set_subscription(
-    request: SetSubscriptionRequest,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    await db.db_update_subscription(request.restaurant_id, request.status)
-    return {"success": True}
-
-
 @router.get("/restaurant/{restaurant_id}")
 async def admin_get_restaurant_detail(
     restaurant_id: int,
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
-    rest = await db.db_get_restaurant_by_id(restaurant_id)
+    rest = await db.db_get_restaurant_by_org_id(restaurant_id)
     if not rest:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-    wa = rest.get("whatsapp_number", "")
-    stats = await restaurant_repo.db_get_restaurant_detail_stats(restaurant_id, wa)
+    stats = await restaurant_repo.db_get_restaurant_detail_stats(restaurant_id)
     return {"restaurant": rest, "stats": stats}
-
-
-@router.post("/update-restaurant")
-async def admin_update_restaurant(
-    request: UpdateRestaurantRequest,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    from app.routes.dashboard import geocode_address
-    rest = await db.db_get_restaurant_by_id(request.restaurant_id)
-    if not rest:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
-    lat = lon = None
-    if request.address is not None:
-        lat, lon, _ = await geocode_address(request.address)
-
-    merged_features = None
-    if request.features is not None:
-        raw = rest.get("features") or {}
-        current = json.loads(raw) if isinstance(raw, str) else dict(raw)
-        if isinstance(current, str):
-            try:
-                current = json.loads(current)
-            except Exception:
-                current = {}
-        current.update(request.features)
-        merged_features = current
-
-    parsed_menu = None
-    if request.menu is not None:
-        try:
-            parsed_menu = json.loads(request.menu)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Menú no es JSON válido")
-
-    await restaurant_repo.db_update_restaurant_fields(
-        request.restaurant_id,
-        name=request.name,
-        address=request.address,
-        latitude=lat,
-        longitude=lon,
-        whatsapp_number=request.whatsapp_number,
-        wa_phone_id=request.wa_phone_id,
-        wa_access_token=request.wa_access_token,
-        features=merged_features,
-        menu=parsed_menu,
-    )
-    return {"success": True, "restaurant": await db.db_get_restaurant_by_id(request.restaurant_id)}
 
 
 @router.get("/billing-stats")
@@ -434,27 +328,6 @@ async def admin_billing_stats(
 ):
     stats = await restaurant_repo.db_get_billing_stats()
     return {"stats": stats}
-
-
-@router.post("/fix-branch-ids")
-async def fix_branch_ids(
-    request: Request,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    fixed = await restaurant_repo.db_fix_branch_ids()
-    return {"success": True, "fixed": fixed}
-
-
-@router.post("/fix-conversations")
-async def fix_conversations_bot_number(
-    request: Request,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    body = await request.json()
-    await restaurant_repo.db_fix_conversations_bot_number(body.get("bot_number", ""))
-    return {"success": True}
 
 
 @router.post("/parse-menu")
@@ -519,16 +392,13 @@ async def create_organization(
     try:
         org = await restaurant_repo.db_create_organization(
             name=body.name,
-            whatsapp_number=body.whatsapp_number,
-            wa_phone_id=body.wa_phone_id,
-            wa_access_token=body.wa_access_token,
             slug=body.slug,
             features=body.features or {},
-            subscription_plan=body.subscription_plan or "free",
+            plan_code=plans.normalize_plan(body.plan_code),
         )
     except asyncpg.UniqueViolationError as exc:
         log.warning("create_organization.conflict", detail=str(exc))
-        raise HTTPException(status_code=409, detail="slug or whatsapp_number already exists")
+        raise HTTPException(status_code=409, detail="slug already exists")
     except Exception as exc:
         log.exception("create_organization.error", detail=str(exc))
         raise HTTPException(status_code=500, detail="Error al crear la organizacion")
@@ -591,14 +461,11 @@ async def update_organization(
         updates["name"] = name
     if body.slug is not None:
         updates["slug"] = body.slug or None
-    if body.whatsapp_number is not None:
-        updates["whatsapp_number"] = body.whatsapp_number or None
-    if body.wa_phone_id is not None:
-        updates["wa_phone_id"] = body.wa_phone_id or None
-    if body.wa_access_token is not None:
-        updates["wa_access_token"] = body.wa_access_token or None
-    if body.subscription_plan is not None:
-        updates["subscription_plan"] = body.subscription_plan
+    if body.plan_code is not None:
+        if body.plan_code not in plans.PAYING_PLANS:
+            raise HTTPException(status_code=400, detail="plan_code inválido")
+        # db_set_plan also keeps a founder's discount on the new plan.
+        await plan_limits_repo.db_set_plan(org_id, body.plan_code)
     if body.subscription_status is not None:
         updates["subscription_status"] = body.subscription_status
     if body.features is not None:
@@ -607,12 +474,17 @@ async def update_organization(
         updates["features"] = current
 
     if not updates:
-        return _ok({"org": org})
+        # A plan-only change already landed through db_set_plan above.
+        return _ok({"org": await restaurant_repo.db_get_org_by_id(org_id)})
 
     try:
         updated = await restaurant_repo.db_update_organization(org_id, **updates)
     except asyncpg.UniqueViolationError:
-        raise HTTPException(status_code=409, detail="slug or whatsapp_number already exists")
+        raise HTTPException(status_code=409, detail="slug already exists")
+    except ValueError as exc:
+        # Cross-tenant dish image (validate_dish_image_ownership) — only
+        # reachable if a future caller adds `menu` to PatchOrgRequest.
+        raise HTTPException(status_code=400, detail=str(exc))
 
     return _ok({"org": updated})
 
@@ -692,24 +564,18 @@ async def create_location(
     _bypass: None = Depends(_bypass_internal_admin),
 ):
     """Create a new (non-primary) Location under an Org."""
-    import asyncpg  # noqa: PLC0415
-
     org = await restaurant_repo.db_get_org_by_id(org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organizacion no encontrada")
 
     kwargs: dict = {}
-    for field in ("code", "address", "latitude", "longitude",
-                  "whatsapp_number", "wa_phone_id", "wa_access_token",
-                  "active", "timezone"):
+    for field in ("code", "address", "latitude", "longitude", "active", "timezone"):
         val = getattr(body, field)
         if val is not None:
             kwargs[field] = val
 
     try:
         loc = await restaurant_repo.db_create_location(org_id=org_id, name=body.name, **kwargs)
-    except asyncpg.UniqueViolationError:
-        raise HTTPException(status_code=409, detail="whatsapp_number already assigned to another location")
     except Exception as exc:
         log.exception("create_location.error", org_id=org_id, detail=str(exc))
         raise HTTPException(status_code=500, detail="Error al crear la sede")
@@ -730,16 +596,12 @@ async def update_location(
     Post-Wave-2: is_primary is vestigial and will be dropped in migration 0038.
     The is_primary field in the request body is silently ignored.
     """
-    import asyncpg  # noqa: PLC0415
-
     loc = await restaurant_repo.db_get_location_by_id(location_id)
     if not loc:
         raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     updates: dict = {}
-    for field in ("name", "code", "address", "latitude", "longitude",
-                  "whatsapp_number", "wa_phone_id", "wa_access_token",
-                  "active", "timezone"):
+    for field in ("name", "code", "address", "latitude", "longitude", "active", "timezone"):
         val = getattr(body, field)
         if val is not None:
             updates[field] = val
@@ -747,10 +609,7 @@ async def update_location(
     if not updates:
         return _ok({"location": loc})
 
-    try:
-        updated = await restaurant_repo.db_update_location(location_id, **updates)
-    except asyncpg.UniqueViolationError:
-        raise HTTPException(status_code=409, detail="whatsapp_number conflict")
+    updated = await restaurant_repo.db_update_location(location_id, **updates)
 
     return _ok({"location": updated})
 
@@ -849,10 +708,10 @@ async def change_org_plan(
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
-    """Change an org's plan_code.
+    """Move an org to one of the four paying plans.
 
-    - Switching to 'comp': optionally sets comp_until (default = today + 30 days).
-    - Switching FROM 'comp' to a paying plan: clears comp_until.
+    Free days are separate (PATCH .../comp) and untouched here. A founder
+    keeps 40% off, recomputed on the new plan's list price.
     """
     from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
 
@@ -860,56 +719,24 @@ async def change_org_plan(
     if not org:
         raise HTTPException(status_code=404, detail="Organizacion no encontrada")
 
-    old_plan = org.get("plan_code") or org.get("subscription_plan") or "free"
+    old_plan = org.get("plan_code")
     new_plan = body.plan_code
-
-    # Resolve comp_until
-    comp_until_val: Optional[str] = None
-    if new_plan == "comp":
-        if body.comp_until:
-            comp_until_val = body.comp_until
-        else:
-            comp_until_val = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
-
-    updates: dict = {"plan_code": new_plan}
-    if new_plan == "comp":
-        updates["comp_until"] = comp_until_val
-    else:
-        # Switching away from comp — clear comp_until
-        updates["comp_until"] = None
-
-    # Execute the update via raw SQL (plan_code and comp_until are not in the
-    # whitelisted _ALLOWED_ORG_FIELDS of db_update_organization — keep it direct here)
-    from app.services.database import get_pool  # noqa: PLC0415
-    pool = await get_pool()
-    with bypass_tenant_scope("change_org_plan_superadmin"):
-        async with pool.acquire() as conn:
-            if new_plan == "comp":
-                await conn.execute(
-                    "UPDATE organizations SET plan_code=$1, comp_until=$2::timestamptz, updated_at=NOW() WHERE id=$3",
-                    new_plan, comp_until_val, org_id,
-                )
-            else:
-                await conn.execute(
-                    "UPDATE organizations SET plan_code=$1, comp_until=NULL, updated_at=NOW() WHERE id=$2",
-                    new_plan, org_id,
-                )
+    await plan_limits_repo.db_set_plan(org_id, new_plan)
 
     actor = request.headers.get("X-Superadmin-User", "superadmin")
     ip = request.client.host if request.client else None
-    with bypass_tenant_scope("change_org_plan_audit"):
-        await db_log_audit_event(
-            actor=actor,
-            action="org.plan_changed",
-            target_type="organization",
-            target_id=str(org_id),
-            org_id=org_id,
-            payload={"old_plan": old_plan, "new_plan": new_plan, "comp_until": comp_until_val},
-            request_ip=ip,
-        )
+    await db_log_audit_event(
+        actor=actor,
+        action="org.plan_changed",
+        target_type="organization",
+        target_id=str(org_id),
+        org_id=org_id,
+        payload={"old_plan": old_plan, "new_plan": new_plan},
+        request_ip=ip,
+    )
 
-    log.info("change_org_plan", org_id=org_id, old=old_plan, new=new_plan, comp_until=comp_until_val)
-    return _ok({"org_id": org_id, "old_plan": old_plan, "new_plan": new_plan, "comp_until": comp_until_val})
+    log.info("change_org_plan", org_id=org_id, old=old_plan, new=new_plan)
+    return _ok({"org_id": org_id, "old_plan": old_plan, "new_plan": new_plan})
 
 
 @router.patch("/organizations/{org_id}/comp")
@@ -920,10 +747,11 @@ async def set_org_comp(
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
-    """Set or clear comp_until for an org.
+    """Set or clear an org's free days (comp_until) on top of its plan.
 
-    Body: {"comp_until": "YYYY-MM-DD"} → sets plan_code='comp' + comp_until.
-    Body: {"comp_until": null}         → clears comp_until + reverts plan_code to 'free'.
+    Body: {"comp_until": "YYYY-MM-DD"} → free until that date (trial, friends & family).
+    Body: {"comp_until": null}         → billed from now on.
+    The plan itself never changes here.
     """
     from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
 
@@ -931,44 +759,106 @@ async def set_org_comp(
     if not org:
         raise HTTPException(status_code=404, detail="Organizacion no encontrada")
 
-    old_plan = org.get("plan_code") or "free"
-    from app.services.database import get_pool  # noqa: PLC0415
-    pool = await get_pool()
-
+    comp_until = None
     if body.comp_until is not None:
-        new_plan = "comp"
-        with bypass_tenant_scope("set_org_comp_superadmin"):
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    "UPDATE organizations SET plan_code='comp', comp_until=$1::timestamptz, updated_at=NOW() WHERE id=$2",
-                    body.comp_until, org_id,
-                )
-    else:
-        # Clearing comp — revert to free unless they had a paid plan before
-        revert_plan = old_plan if old_plan != "comp" else "free"
-        new_plan = revert_plan
-        with bypass_tenant_scope("clear_org_comp_superadmin"):
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    "UPDATE organizations SET plan_code=$1, comp_until=NULL, updated_at=NOW() WHERE id=$2",
-                    revert_plan, org_id,
-                )
+        try:
+            comp_until = datetime.fromisoformat(body.comp_until).replace(tzinfo=timezone.utc)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="comp_until debe ser YYYY-MM-DD") from exc
+    await plan_limits_repo.db_set_comp_until(org_id, comp_until)
 
     actor = request.headers.get("X-Superadmin-User", "superadmin")
     ip = request.client.host if request.client else None
-    with bypass_tenant_scope("set_org_comp_audit"):
-        await db_log_audit_event(
-            actor=actor,
-            action="org.comp_changed",
-            target_type="organization",
-            target_id=str(org_id),
-            org_id=org_id,
-            payload={"old_plan": old_plan, "new_plan": new_plan, "comp_until": body.comp_until},
-            request_ip=ip,
-        )
+    await db_log_audit_event(
+        actor=actor,
+        action="org.comp_changed",
+        target_type="organization",
+        target_id=str(org_id),
+        org_id=org_id,
+        payload={"plan": org.get("plan_code"), "comp_until": body.comp_until},
+        request_ip=ip,
+    )
 
-    log.info("set_org_comp", org_id=org_id, comp_until=body.comp_until, new_plan=new_plan)
-    return _ok({"org_id": org_id, "new_plan": new_plan, "comp_until": body.comp_until})
+    log.info("set_org_comp", org_id=org_id, comp_until=body.comp_until)
+    return _ok({"org_id": org_id, "plan": org.get("plan_code"), "comp_until": body.comp_until})
+
+
+@router.post("/organizations/{org_id}/payment")
+async def record_org_payment(
+    org_id: int,
+    body: RecordPaymentRequest,
+    request: Request,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
+    """Record a payment Mesio received outside the product (billing manual,
+    docs/claude/status.md #14c): paid_until moves forward 1 or 12 months
+    from where the org's coverage ends. Re-opens a paused account."""
+    from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
+
+    org = await restaurant_repo.db_get_org_by_id(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organizacion no encontrada")
+
+    paid_until = await plan_limits_repo.db_record_payment(org_id, body.months)
+    status = plans.billing_status(org.get("comp_until"), paid_until)
+
+    actor = request.headers.get("X-Superadmin-User", "superadmin")
+    ip = request.client.host if request.client else None
+    await db_log_audit_event(
+        actor=actor,
+        action="org.payment_recorded",
+        target_type="organization",
+        target_id=str(org_id),
+        org_id=org_id,
+        payload={"months": body.months, "paid_until": paid_until.isoformat()},
+        request_ip=ip,
+    )
+
+    log.info("record_org_payment", org_id=org_id, months=body.months, paid_until=paid_until.isoformat())
+    return _ok({"org_id": org_id, "paid_until": paid_until.isoformat(), "billing_status": status})
+
+
+@router.patch("/organizations/{org_id}/founder")
+async def set_org_founder(
+    org_id: int,
+    body: SetFounderRequest,
+    request: Request,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
+    """Put an org in or out of the founder program (40% off, frozen for life).
+
+    409 when all plans.FOUNDER_SPOTS spots are taken.
+    """
+    from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
+
+    org = await restaurant_repo.db_get_org_by_id(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organizacion no encontrada")
+
+    try:
+        price = await plan_limits_repo.db_set_founder(org_id, body.founder)
+    except plan_limits_repo.FounderSpotsTaken as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Los {plans.FOUNDER_SPOTS} cupos del programa fundador ya están asignados",
+        ) from exc
+
+    actor = request.headers.get("X-Superadmin-User", "superadmin")
+    ip = request.client.host if request.client else None
+    await db_log_audit_event(
+        actor=actor,
+        action="org.founder_changed",
+        target_type="organization",
+        target_id=str(org_id),
+        org_id=org_id,
+        payload={"founder": body.founder, "founder_price_cop": price},
+        request_ip=ip,
+    )
+
+    log.info("set_org_founder", org_id=org_id, founder=body.founder, founder_price_cop=price)
+    return _ok({"org_id": org_id, "founder": body.founder, "founder_price_cop": price})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

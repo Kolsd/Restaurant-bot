@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Registro — Mesio</title>
-<meta name="description" content="Regístrate en Mesio y empieza tu prueba gratis de 14 días. Sin tarjeta de crédito.">
+<meta name="description" content="Regístrate en Mesio y empieza tu prueba gratis de 15 días. Sin tarjeta de crédito.">
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -159,7 +159,7 @@
 
     <div id="signup-form-section">
       <h1>Prueba Mesio gratis</h1>
-      <p class="sub">14 días sin costo ni tarjeta de crédito. Te contactamos en menos de 24 h.</p>
+      <p class="sub">15 días sin costo ni tarjeta de crédito. Entras y configuras tu restaurante de inmediato.</p>
 
       <form id="signup-form" novalidate>
         <div class="form-row">
@@ -183,7 +183,7 @@
 
         <div class="form-row">
           <div class="form-group">
-            <label for="sg-telefono">WhatsApp</label>
+            <label for="sg-telefono">Teléfono</label>
             <input type="tel" id="sg-telefono" name="telefono" placeholder="+57 321 000 0000" autocomplete="tel" required maxlength="30">
             <div class="field-error" id="err-telefono"></div>
           </div>
@@ -194,32 +194,46 @@
           </div>
         </div>
 
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sg-password">Contraseña</label>
+            <input type="password" id="sg-password" name="password" placeholder="Mínimo 8 caracteres" autocomplete="new-password" required minlength="8" maxlength="200">
+            <div class="field-error" id="err-password"></div>
+          </div>
+          <div class="form-group">
+            <label for="sg-password2">Repite la contraseña</label>
+            <input type="password" id="sg-password2" name="password2" placeholder="Mínimo 8 caracteres" autocomplete="new-password" required minlength="8" maxlength="200">
+            <div class="field-error" id="err-password2"></div>
+          </div>
+        </div>
+
         <div class="form-group">
           <label for="sg-plan">Plan de interés</label>
           <select id="sg-plan" name="plan" required>
             <option value="">Selecciona un plan...</option>
-            <option value="Pulso">Pulso — $149.000/mes · 1 sede, hasta 500 conv/mes</option>
-            <option value="Restaurante">Restaurante — $299.000/mes · 1 sede, hasta 1.500 conv/mes</option>
-            <option value="Pro">Pro — $549.000/mes · hasta 3 sedes, conv ilimitadas</option>
-            <option value="Cadena">Cadena — $899.000/mes · sedes ilimitadas, todos los módulos</option>
+            <option value="Esencial">Esencial — $119.000/mes por sede</option>
+            <option value="Restaurante">Restaurante — $249.000/mes por sede</option>
+            <option value="Pro">Pro — $349.000/mes por sede</option>
+            <option value="Cadena">Cadena — $299.000/mes por sede, desde 3 sedes</option>
           </select>
           <div class="field-error" id="err-plan"></div>
-          <div class="field-hint">Todos los precios + IVA. Puedes cambiar de plan en cualquier momento.</div>
+          <div class="field-hint">La prueba es del plan Restaurante completo. Puedes cambiar de plan cuando quieras.</div>
         </div>
 
-        <button type="submit" class="signup-submit" id="signup-btn">Solicitar acceso gratis</button>
+        <button type="submit" class="signup-submit" id="signup-btn">Crear mi cuenta gratis</button>
         <p class="signup-legal">
-          Al registrarte aceptas los <a href="/terminos">Términos de servicio</a> y la
-          <a href="/privacidad">Política de privacidad</a> de Mesio.
+          Al registrarte aceptas los <a href="/terms">Términos de servicio</a> y la
+          <a href="/privacy">Política de privacidad</a> de Mesio.
         </p>
       </form>
     </div>
 
     <div class="signup-success" id="signup-success">
       <div class="check-icon">✅</div>
-      <h2>¡Listo! Te contactamos pronto</h2>
-      <p>Recibimos tu solicitud. Un asesor de Mesio te escribirá por WhatsApp en menos de 24 horas para activar tu prueba gratuita.</p>
-      <a href="/" class="btn btn-primary btn-sm">Volver al inicio</a>
+      <h2>¡Tu cuenta está lista!</h2>
+      <p id="success-detail">Ya puedes entrar y empezar a configurar tu carta.</p>
+      <p>Tu usuario es <strong id="success-username"></strong> y tu contraseña, la que acabas de elegir.</p>
+      <a href="/login" class="btn btn-primary btn-sm">Entrar a Mesio</a>
     </div>
 
   </div>
@@ -230,8 +244,8 @@
     <div class="foot-bot">
       <div>© 2026 Mesio · Bogotá, Colombia · NIT en trámite</div>
       <div class="foot-legal">
-        <a href="/terminos">Términos</a>
-        <a href="/privacidad">Privacidad</a>
+        <a href="/terms">Términos</a>
+        <a href="/privacy">Privacidad</a>
       </div>
     </div>
   </div>
@@ -253,7 +267,7 @@ function _showFieldError(fieldId, msg) {
   el.style.display = msg ? 'block' : 'none';
 }
 function _clearErrors() {
-  ['nombre','restaurante','email','telefono','ciudad','plan'].forEach(function(f) {
+  ['nombre','restaurante','email','telefono','ciudad','plan','password','password2'].forEach(function(f) {
     _showFieldError(f, '');
   });
 }
@@ -270,6 +284,15 @@ function _validate(payload) {
   }
   if (!payload.ciudad.trim()) { _showFieldError('ciudad', 'Campo requerido'); ok = false; }
   if (!payload.plan) { _showFieldError('plan', 'Selecciona un plan'); ok = false; }
+  if (payload.password.length < 8) {
+    _showFieldError('password', 'Mínimo 8 caracteres'); ok = false;
+  }
+  // Checked here and not only on the server: a typo in the password is the
+  // one mistake this form cannot let through, because recovering from it
+  // needs an email that the restaurant may not receive.
+  if (payload.password !== payload.password2) {
+    _showFieldError('password2', 'Las contraseñas no coinciden'); ok = false;
+  }
   return ok;
 }
 
@@ -284,37 +307,58 @@ form.addEventListener('submit', async function(e) {
     restaurante: document.getElementById('sg-restaurante').value.trim(),
     ciudad:      document.getElementById('sg-ciudad').value.trim(),
     plan:        document.getElementById('sg-plan').value,
+    // Not trimmed: spaces the owner typed are part of their password, and
+    // trimming here would hash something different from what they type at
+    // the login screen.
+    password:    document.getElementById('sg-password').value,
+    password2:   document.getElementById('sg-password2').value,
   };
 
   if (!_validate(payload)) return;
 
   btn.disabled = true;
-  btn.textContent = 'Enviando...';
+  btn.textContent = 'Creando tu cuenta...';
 
   try {
+    const body = {
+      nombre: payload.nombre, email: payload.email, telefono: payload.telefono,
+      restaurante: payload.restaurante, ciudad: payload.ciudad,
+      plan: payload.plan, password: payload.password,
+    };
     const r = await fetch('/api/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
     const data = await r.json().catch(function() { return {}; });
     if (r.status === 429) {
       btn.disabled = false;
-      btn.textContent = 'Solicitar acceso gratis';
+      btn.textContent = 'Crear mi cuenta gratis';
       alert('Demasiados intentos. Por favor espera 15 minutos e intenta de nuevo.');
+      return;
+    }
+    if (r.status === 409) {
+      btn.disabled = false;
+      btn.textContent = 'Crear mi cuenta gratis';
+      _showFieldError('email', 'Ya existe una cuenta con este correo. Entra desde /login.');
       return;
     }
     if (!r.ok) {
       btn.disabled = false;
-      btn.textContent = 'Solicitar acceso gratis';
+      btn.textContent = 'Crear mi cuenta gratis';
       alert(data.detail || 'Error al registrar. Por favor intenta de nuevo.');
       return;
+    }
+    document.getElementById('success-username').textContent = data.username || payload.email;
+    if (data.trial_days) {
+      document.getElementById('success-detail').textContent =
+        'Tienes ' + data.trial_days + ' días gratis. Ya puedes entrar y empezar a configurar tu carta.';
     }
     formSection.style.display = 'none';
     successEl.style.display   = 'block';
   } catch (err) {
     btn.disabled = false;
-    btn.textContent = 'Solicitar acceso gratis';
+    btn.textContent = 'Crear mi cuenta gratis';
     alert('Error de conexión. Por favor verifica tu internet e intenta de nuevo.');
   }
 });

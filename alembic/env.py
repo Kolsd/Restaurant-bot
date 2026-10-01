@@ -57,10 +57,40 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations using a live synchronous connection."""
+    """Run migrations using a live synchronous connection.
+
+    transaction_per_migration=True: each migration commits in its own
+    transaction instead of the whole run (0001..head) sharing one outer
+    transaction. Two reasons this matters here:
+
+      1. Fail-fast, not fail-everything. Without this, one broken migration
+         at revision N rolled back N-1 good migrations too — a fresh
+         `alembic upgrade head` had to restart from scratch after any fix
+         instead of resuming from N.
+      2. SET LOCAL ROLE containment. Some migrations (e.g. 0071_demo_seed)
+         do `SET LOCAL ROLE mesio_superadmin` to pass RLS WITH CHECK on
+         INSERTs. `SET LOCAL` is scoped to the current transaction — with a
+         single outer transaction for the entire run, that role leaked into
+         every subsequent migration for the rest of the batch (observed:
+         0070/later CREATE TABLE statements failing because they
+         unexpectedly ran as mesio_superadmin, which lacks CREATE on schema
+         public). Per-migration transactions mean the role reverts the
+         moment 0071's transaction commits, regardless of whether the
+         migration itself remembers to RESET ROLE.
+
+    No CREATE INDEX ... CONCURRENTLY migration exists in this repo (0032 and
+    0073 both explicitly avoid it — see their docstrings — because
+    CONCURRENTLY cannot run inside any transaction block, per-migration or
+    not). So there is nothing here that this change could break on that
+    front; verified by grepping alembic/versions for CONCURRENTLY.
+    """
     connectable = create_engine(_database_url, poolclass=pool.NullPool)
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            transaction_per_migration=True,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

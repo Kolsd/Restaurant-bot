@@ -233,3 +233,29 @@ class TestMoneyMul:
 
     def test_str_inputs(self):
         assert money_mul("12.5", "4") == Decimal("50.0")
+
+
+# ── format_money_es: customer-facing amounts ────────────────────────────────
+
+from app.services.money import format_money_es  # noqa: E402
+
+
+def test_format_money_es_cop_uses_dot_thousands_and_no_decimals():
+    assert format_money_es(Decimal("75400"), "COP") == "$ 75.400"
+    assert format_money_es(Decimal("1234567"), "COP") == "$ 1.234.567"
+    assert format_money_es(Decimal("900"), "COP") == "$ 900"
+
+
+def test_format_money_es_rounds_cop_half_even_before_formatting():
+    assert format_money_es(Decimal("75400.5"), "COP") == "$ 75.400"
+    assert format_money_es(Decimal("75401.5"), "COP") == "$ 75.402"
+
+
+def test_format_money_es_two_decimal_currency_uses_comma_decimals():
+    assert format_money_es(Decimal("1234.5"), "USD") == "$ 1.234,50"
+    assert format_money_es(Decimal("0.07"), "USD") == "$ 0,07"
+
+
+def test_format_money_es_negative_and_zero():
+    assert format_money_es(Decimal("-5000"), "COP") == "-$ 5.000"
+    assert format_money_es(Decimal("0"), "COP") == "$ 0"

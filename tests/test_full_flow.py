@@ -108,7 +108,6 @@ def _mock_delivery_order(
         "paid": False,
         "status": status,
         "payment_method": "nequi",
-        "bot_number": "+573009876543",
         "created_at": datetime.now(timezone.utc),
     }
 
@@ -352,11 +351,14 @@ class TestWaiterFlows:
         assert len(data["alerts"]) == 1
 
     def test_dismiss_alert_succeeds(self, client, monkeypatch):
-        """POST /api/waiter-alerts/{id}/dismiss deletes the alert."""
+        """POST /api/waiter-alerts/{id}/dismiss marks the alert dismissed
+        (soft — see the 2026-09 fix: this used to be shadowed by a duplicate
+        DELETE-based function of the same name; "UPDATE 1" is the real
+        asyncpg execute() status string a matching UPDATE returns)."""
         patch_auth(monkeypatch, role="mesero")
 
         conn = AsyncMock()
-        conn.execute = AsyncMock(return_value=None)
+        conn.execute = AsyncMock(return_value="UPDATE 1")
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
 
         resp = client.post(
@@ -396,12 +398,15 @@ class TestWaiterFlows:
         patch_auth(monkeypatch, role="owner")
         table_row = {"id": "table-1", "name": "Mesa 1", "number": 1, "active": True}
         monkeypatch.setattr(db, "db_get_tables", AsyncMock(return_value=[table_row]))
-        # Wave-2: db_get_restaurant_by_id must return org_id + location_id so the
-        # route resolves the sede id without falling back to the Matriz invariant.
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={
+        # Wave-2: db_get_restaurant_by_org_id/_by_location_id must return
+        # org_id + location_id so the route resolves the sede id without
+        # falling back to the Matriz invariant.
+        _rest_mock = AsyncMock(return_value={
             "id": 1, "org_id": 1, "location_id": 1,
             "name": "Test", "parent_restaurant_id": None, "features": {}
-        }))
+        })
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock)
 
         session_row = make_row({"table_id": "table-1", "session_started_at": None,
                                 "has_waiter_alert": False, "has_open_check": False,
@@ -533,8 +538,6 @@ class TestWaiterFlows:
         monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
-        import app.services.loyalty as loyalty_mod
-        monkeypatch.setattr(loyalty_mod, "accrue_on_check", AsyncMock(), raising=False)
 
         resp = client.post(
             "/api/table-orders/order-abc/checks/check-1/pay",
@@ -555,75 +558,16 @@ class TestWaiterFlows:
 # ===========================================================================
 
 class TestDeliveryRiderFlows:
-    """Section C: Delivery rider flows."""
+    """Section C: Delivery rider flows.
 
-    def test_list_delivery_orders(self, client, monkeypatch):
-        """GET /api/delivery/orders returns pending delivery orders."""
-        patch_auth(monkeypatch, role="domiciliario")
-        monkeypatch.setattr(db, "db_get_delivery_orders", AsyncMock(return_value=[
-            _mock_delivery_order()
-        ]))
-
-        resp = client.get(
-            "/api/delivery/orders",
-            headers={"Authorization": "Bearer fake"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "orders" in data
-        assert len(data["orders"]) == 1
-
-    def test_update_status_to_en_camino(self, client, monkeypatch):
-        """PATCH status → en_camino succeeds."""
-        patch_auth(monkeypatch, role="domiciliario")
-        order = _mock_delivery_order(status="listo")
-        monkeypatch.setattr(db, "db_get_order", AsyncMock(return_value=order))
-        monkeypatch.setattr(db, "db_update_order_status", AsyncMock())
-
-        with patch("app.routes.orders_routes.asyncio.create_task"):
-            resp = client.patch(
-                "/api/delivery/orders/del-001/status",
-                json={"status": "en_camino"},
-                headers={"Authorization": "Bearer fake"},
-            )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert data["new_status"] == "en_camino"
-
-    def test_update_status_to_entregado(self, client, monkeypatch):
-        """PATCH status → entregado marks order as delivered."""
-        patch_auth(monkeypatch, role="domiciliario")
-        order = _mock_delivery_order(status="en_camino")
-        monkeypatch.setattr(db, "db_get_order", AsyncMock(return_value=order))
-        monkeypatch.setattr(db, "db_update_order_status", AsyncMock())
-
-        with patch("app.routes.orders_routes.asyncio.create_task"):
-            resp = client.patch(
-                "/api/delivery/orders/del-001/status",
-                json={"status": "entregado"},
-                headers={"Authorization": "Bearer fake"},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["new_status"] == "entregado"
-
-    def test_rider_cannot_cancel_directly(self, client, monkeypatch):
-        """Attempt to set status=cancelado triggers update (business-level, no 400 from route)."""
-        # The /delivery/orders/{id}/status route does not block 'cancelado' at HTTP level;
-        # it simply calls db_update_order_status. We verify it returns 200 and passes the status.
-        patch_auth(monkeypatch, role="domiciliario")
-        order = _mock_delivery_order(status="confirmado")
-        monkeypatch.setattr(db, "db_get_order", AsyncMock(return_value=order))
-        monkeypatch.setattr(db, "db_update_order_status", AsyncMock())
-
-        with patch("app.routes.orders_routes.asyncio.create_task"):
-            resp = client.patch(
-                "/api/delivery/orders/del-001/status",
-                json={"status": "cancelado"},
-                headers={"Authorization": "Bearer fake"},
-            )
-        # Route-level: passes through; KDS-level cancel validation is separate
-        assert resp.status_code == 200
+    The rider tests that hit GET/PATCH /api/delivery/orders* were removed in
+    chunk 9 (docs/claude/delivery-web.md) — those endpoints only ever served
+    the retired WhatsApp delivery/pickup flow and were org-wide (not
+    sede-scoped), leaking every order's customer PII to any staff member.
+    The new sede-scoped rider surface is app/routes/staff_delivery.py
+    (/api/staff/delivery/*). GET /api/orders/{id} is untouched (still a
+    generic order lookup, not delivery-specific) so its tests stay.
+    """
 
     def test_get_single_delivery_order(self, client, monkeypatch):
         """GET /api/orders/{id} returns full order details."""
@@ -652,54 +596,6 @@ class TestDeliveryRiderFlows:
         )
         assert resp.status_code == 200
         assert "Cra 7" in resp.json()["address"]
-
-    def test_update_status_correct_bot_number(self, client, monkeypatch):
-        """bot_number from the order is propagated to WA notification."""
-        patch_auth(monkeypatch, role="domiciliario")
-        order = _mock_delivery_order(status="listo")
-        monkeypatch.setattr(db, "db_get_order", AsyncMock(return_value=order))
-        monkeypatch.setattr(db, "db_update_order_status", AsyncMock())
-
-        captured_bot = []
-
-        async def fake_notify(phone, status, bot_number="", order_type="domicilio"):
-            captured_bot.append(bot_number)
-
-        with patch("app.routes.orders_routes.send_delivery_notification", fake_notify), \
-             patch("app.routes.orders_routes.asyncio.create_task", lambda coro: asyncio.ensure_future(coro)):
-            resp = client.patch(
-                "/api/delivery/orders/del-001/status",
-                json={"status": "en_camino"},
-                headers={"Authorization": "Bearer fake"},
-            )
-        assert resp.status_code == 200
-
-    def test_delivery_unauthenticated_returns_401(self, client, monkeypatch):
-        """Delivery endpoint without valid token → 401."""
-        from fastapi import HTTPException as _HTTPException
-        monkeypatch.setattr(
-            "app.routes.deps.verify_token",
-            AsyncMock(side_effect=_HTTPException(status_code=401, detail="Unauthorized")),
-        )
-
-        resp = client.get("/api/delivery/orders", headers={"Authorization": "Bearer bad"})
-        assert resp.status_code == 401
-
-    def test_multiple_orders_same_restaurant(self, client, monkeypatch):
-        """Multiple delivery orders returned correctly."""
-        patch_auth(monkeypatch, role="domiciliario")
-        orders = [
-            _mock_delivery_order(order_id=f"del-{i}", status="confirmado")
-            for i in range(3)
-        ]
-        monkeypatch.setattr(db, "db_get_delivery_orders", AsyncMock(return_value=orders))
-
-        resp = client.get(
-            "/api/delivery/orders",
-            headers={"Authorization": "Bearer fake"},
-        )
-        assert resp.status_code == 200
-        assert len(resp.json()["orders"]) == 3
 
     def test_order_not_found_returns_404(self, client, monkeypatch):
         """GET /api/orders/{id} for unknown id → 404."""
@@ -748,9 +644,11 @@ class TestCashierFlows:
         conn.execute = AsyncMock(return_value=None)
         conn.fetchrow = AsyncMock(return_value=order_row)
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={
-            "id": 1, "features": {"dian_active": False}
-        }))
+        _rest_mock = AsyncMock(return_value={
+            "id": 1, "org_id": 1, "location_id": 1, "features": {"dian_active": False}
+        })
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock)
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
 
         resp = client.patch(
@@ -784,10 +682,7 @@ class TestCashierFlows:
         monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
-        # Stub out loyalty to avoid side-effects
         import app.routes.tables as tables_mod
-        import app.services.loyalty as loyalty_mod
-        monkeypatch.setattr(loyalty_mod, "accrue_on_check", AsyncMock(), raising=False)
 
         resp = client.post(
             "/api/table-orders/order-abc/checks/check-1/pay",
@@ -851,8 +746,6 @@ class TestCashierFlows:
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         mock_billing = AsyncMock(return_value=None)
         monkeypatch.setattr("app.services.billing.get_billing_config", mock_billing)
-        import app.services.loyalty as loyalty_mod
-        monkeypatch.setattr(loyalty_mod, "accrue_on_check", AsyncMock(), raising=False)
 
         adapter_mock = MagicMock()
         adapter_mock.create_invoice = AsyncMock(return_value={"id": "inv-1"})
@@ -870,7 +763,7 @@ class TestCashierFlows:
         # Adapter was not called because config is None
         adapter_mock.create_invoice.assert_not_called()
 
-    def test_order_passes_to_factura_entregada(self, client, monkeypatch):
+    def test_order_passes_to_invoice_delivered(self, client, monkeypatch):
         """After paying all checks, first table order transitions to factura_entregada."""
         patch_auth(monkeypatch, role="caja", features={"dian_active": False})
         check = _mock_check(total=20000.0)
@@ -884,8 +777,6 @@ class TestCashierFlows:
         monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=first_order))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
-        import app.services.loyalty as loyalty_mod
-        monkeypatch.setattr(loyalty_mod, "accrue_on_check", AsyncMock(), raising=False)
 
         resp = client.post(
             "/api/table-orders/order-abc/checks/check-1/pay",
@@ -922,350 +813,9 @@ class TestCashierFlows:
         )
         assert resp.status_code == 409
 
-    def test_get_open_shifts_summary(self, client, monkeypatch):
-        """GET /api/staff/open-shifts returns current open shifts for admin dashboard."""
-        patch_auth(monkeypatch, role="owner", features={"staff_tips": True})
-        monkeypatch.setattr(db, "db_get_open_shifts", AsyncMock(return_value=[
-            {"id": "s1", "staff_name": "Juan", "clock_in": _now_iso()}
-        ]))
-        # require_module checks this
-        monkeypatch.setattr(db, "db_check_module", AsyncMock(return_value=True))
-
-        resp = client.get(
-            "/api/staff/open-shifts",
-            headers={"Authorization": "Bearer fake"},
-        )
-        assert resp.status_code == 200
-        assert "shifts" in resp.json()
-
-
 # ===========================================================================
 # E. Bot WhatsApp + Anthropic flow
 # ===========================================================================
-
-class TestBotWhatsAppFlows:
-    """Section E: WhatsApp bot + Anthropic LLM flows.
-
-    Tests in this section call the HTTP endpoint /chat or the service layer
-    directly where needed.  All Anthropic and DB calls are mocked.
-    """
-
-    def _build_anthropic_mock(self, reply_text: str):
-        """Build a mock Anthropic client whose messages.create returns reply_text."""
-        content_block = MagicMock()
-        content_block.type = "text"
-        content_block.text = reply_text  # plain text, not JSON
-
-        usage_mock = MagicMock()
-        usage_mock.input_tokens = 100
-        usage_mock.output_tokens = 50
-
-        msg_mock = MagicMock()
-        msg_mock.content = [content_block]
-        msg_mock.usage = usage_mock
-        msg_mock.stop_reason = "end_turn"
-
-        anthropic_mock = MagicMock()
-        anthropic_mock.messages = MagicMock()
-        anthropic_mock.messages.create = AsyncMock(return_value=msg_mock)
-        return anthropic_mock
-
-    def _patch_db_for_chat(self, monkeypatch, bot_number: str = "+573009876543"):
-        """Patch the minimum DB calls that agent.chat() needs."""
-        restaurant = {
-            "id": 1,
-            "name": "Restaurante Test",
-            "whatsapp_number": bot_number,
-            "features": {"locale": "es-CO", "currency": "COP"},
-        }
-        monkeypatch.setattr(db, "db_get_restaurant_by_bot_number",
-                            AsyncMock(return_value=restaurant))
-        monkeypatch.setattr(db, "db_get_history",
-                            AsyncMock(return_value=[]))
-        monkeypatch.setattr(db, "db_save_history", AsyncMock())
-        monkeypatch.setattr(db, "db_check_usage_limits", AsyncMock())
-        monkeypatch.setattr(db, "db_increment_token_usage", AsyncMock())
-        monkeypatch.setattr(db, "db_get_menu", AsyncMock(return_value={}))
-        monkeypatch.setattr(db, "db_get_menu_availability", AsyncMock(return_value={}))
-        monkeypatch.setattr(db, "db_get_active_session",
-                            AsyncMock(return_value=None))
-        monkeypatch.setattr(db, "db_get_all_restaurants",
-                            AsyncMock(return_value=[restaurant]))
-        monkeypatch.setattr(db, "db_get_cart",
-                            AsyncMock(return_value={"items": []}))
-
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value=None)
-        monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
-
-        # Bug 11: /api/chat now requires admin auth — bypass for unit tests
-        import app.routes.deps as _deps_mod  # noqa: PLC0415
-        monkeypatch.setattr(_deps_mod, "require_auth", AsyncMock(return_value=None))
-
-        return restaurant
-
-    def test_bot_responds_to_hola(self, client, monkeypatch):
-        """POST /chat with 'Hola' returns a greeting message."""
-        bot_number = "+573009876543"
-        self._patch_db_for_chat(monkeypatch, bot_number)
-
-        import app.services.agent as agent_mod
-        anthropic_mock = self._build_anthropic_mock("¡Hola! Bienvenido al restaurante.")
-        monkeypatch.setattr(agent_mod, "client", anthropic_mock)
-
-        # Patch state_store so no NPS/checkout flows are triggered
-        monkeypatch.setattr("app.services.agent.state_store.nps_get", AsyncMock(return_value=None))
-        monkeypatch.setattr("app.services.agent.state_store.checkout_get", AsyncMock(return_value=None))
-
-        resp = client.post(
-            "/api/chat",
-            json={"phone": "573001234567", "message": "Hola", "bot_number": bot_number},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert isinstance(data["response"], str)
-
-    def test_bot_returns_menu_on_request(self, client, monkeypatch):
-        """Bot returns non-empty response when customer asks for menu."""
-        bot_number = "+573009876543"
-        self._patch_db_for_chat(monkeypatch, bot_number)
-
-        import app.services.agent as agent_mod
-        anthropic_mock = self._build_anthropic_mock("Aquí está nuestro menú: Hamburguesa $20.000")
-        monkeypatch.setattr(agent_mod, "client", anthropic_mock)
-        monkeypatch.setattr("app.services.agent.state_store.nps_get", AsyncMock(return_value=None))
-        monkeypatch.setattr("app.services.agent.state_store.checkout_get", AsyncMock(return_value=None))
-
-        resp = client.post(
-            "/api/chat",
-            json={"phone": "573001234567", "message": "Cual es el menu?", "bot_number": bot_number},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
-
-    def test_bot_saves_conversation_history(self, client, monkeypatch):
-        """db_save_history is called after a successful bot response."""
-        bot_number = "+573009876543"
-        self._patch_db_for_chat(monkeypatch, bot_number)
-
-        import app.services.agent as agent_mod
-        anthropic_mock = self._build_anthropic_mock("Hola")
-        monkeypatch.setattr(agent_mod, "client", anthropic_mock)
-        monkeypatch.setattr("app.services.agent.state_store.nps_get", AsyncMock(return_value=None))
-        monkeypatch.setattr("app.services.agent.state_store.checkout_get", AsyncMock(return_value=None))
-
-        save_mock = AsyncMock()
-        monkeypatch.setattr(db, "db_save_history", save_mock)
-
-        resp = client.post(
-            "/api/chat",
-            json={"phone": "573001234567", "message": "Buenas tardes", "bot_number": bot_number},
-        )
-        assert resp.status_code == 200
-        save_mock.assert_called_once()
-
-    def test_bot_unknown_restaurant_returns_empty(self, client, monkeypatch):
-        """Bot with no restaurant associated returns empty response."""
-        # Bug 11: /api/chat now requires admin auth — bypass for this test
-        import app.routes.deps as _deps_mod  # noqa: PLC0415
-        monkeypatch.setattr(_deps_mod, "require_auth", AsyncMock(return_value=None))
-
-        monkeypatch.setattr(db, "db_get_restaurant_by_bot_number", AsyncMock(return_value=None))
-        monkeypatch.setattr("app.services.agent.state_store.nps_get", AsyncMock(return_value=None))
-        monkeypatch.setattr("app.services.agent.state_store.checkout_get", AsyncMock(return_value=None))
-        # Prevent get_pool from being called (no DB configured in tests)
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value=None)
-        monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
-
-        resp = client.post(
-            "/api/chat",
-            json={"phone": "573001234567", "message": "Hola", "bot_number": "+00000000000"},
-        )
-        assert resp.status_code == 200
-        assert "no está configurado" in resp.json()["response"] or "soporte" in resp.json()["response"]
-
-    def test_bot_handles_empty_message(self, client, monkeypatch):
-        """Empty message body does not crash the bot."""
-        bot_number = "+573009876543"
-        self._patch_db_for_chat(monkeypatch, bot_number)
-
-        import app.services.agent as agent_mod
-        anthropic_mock = self._build_anthropic_mock("¿En qué te puedo ayudar?")
-        monkeypatch.setattr(agent_mod, "client", anthropic_mock)
-        monkeypatch.setattr("app.services.agent.state_store.nps_get", AsyncMock(return_value=None))
-        monkeypatch.setattr("app.services.agent.state_store.checkout_get", AsyncMock(return_value=None))
-
-        resp = client.post(
-            "/api/chat",
-            json={"phone": "573001234567", "message": "", "bot_number": bot_number},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
-
-    def test_bot_handles_anthropic_exception_gracefully(self, client, monkeypatch):
-        """If Anthropic raises, the server returns a non-2xx error (not a silent crash).
-        The _process_message background function catches exceptions, but direct /chat call
-        propagates them.  We verify the server responds (any HTTP status), not a hang."""
-        bot_number = "+573009876543"
-        self._patch_db_for_chat(monkeypatch, bot_number)
-
-        import app.services.agent as agent_mod
-        bad_client = MagicMock()
-        bad_client.messages = MagicMock()
-        bad_client.messages.create = AsyncMock(side_effect=Exception("Anthropic down"))
-        monkeypatch.setattr(agent_mod, "client", bad_client)
-        monkeypatch.setattr("app.services.agent.state_store.nps_get", AsyncMock(return_value=None))
-        monkeypatch.setattr("app.services.agent.state_store.checkout_get", AsyncMock(return_value=None))
-
-        try:
-            resp = client.post(
-                "/api/chat",
-                json={"phone": "573001234567", "message": "Hola", "bot_number": bot_number},
-            )
-            # If route catches exception: any HTTP status is acceptable
-            assert resp.status_code in (200, 400, 500)
-        except Exception as exc:
-            # starlette TestClient may re-raise server-side exceptions — that's acceptable behavior
-            assert "Anthropic down" in str(exc) or "ExceptionGroup" in type(exc).__name__
-
-    def test_inbox_worker_dispatch_calls_process_message(self, monkeypatch):
-        """inbox_worker._handle_meta_whatsapp calls _process_message with correct args."""
-        from app.services import inbox_worker
-
-        called_with = {}
-
-        async def fake_process(user_phone, user_text, bot_number, phone_id, access_token, **kwargs):
-            called_with.update({
-                "user_phone": user_phone,
-                "user_text": user_text,
-                "bot_number": bot_number,
-            })
-
-        monkeypatch.setattr("app.routes.chat._process_message", fake_process)
-        monkeypatch.setattr(
-            "app.repositories.restaurant_repo.db_get_org_by_phone",
-            AsyncMock(return_value={"id": 1, "name": "Test Org", "wa_access_token": "tok-abc",
-                                   "wa_phone_id": "phone-id-123", "whatsapp_number": "+573009876543",
-                                   "menu": {}, "features": {}, "matched_location_id": None}),
-        )
-
-        payload = {
-            "user_phone": "573001234567",
-            "user_text": "Quiero pedir",
-            "bot_number": "+573009876543",
-            "phone_id": "phone-id-123",
-        }
-
-        asyncio.get_event_loop().run_until_complete(
-            inbox_worker._handle_meta_whatsapp(payload)
-        )
-        assert called_with["user_phone"] == "573001234567"
-        assert called_with["user_text"] == "Quiero pedir"
-
-    def test_bot_uses_correct_restaurant_id_in_db_calls(self, client, monkeypatch):
-        """db_check_usage_limits is called with the correct restaurant_id."""
-        bot_number = "+573009876543"
-        self._patch_db_for_chat(monkeypatch, bot_number)
-
-        import app.services.agent as agent_mod
-        anthropic_mock = self._build_anthropic_mock("Hola")
-        monkeypatch.setattr(agent_mod, "client", anthropic_mock)
-        monkeypatch.setattr("app.services.agent.state_store.nps_get", AsyncMock(return_value=None))
-        monkeypatch.setattr("app.services.agent.state_store.checkout_get", AsyncMock(return_value=None))
-
-        usage_mock = AsyncMock()
-        monkeypatch.setattr(db, "db_check_usage_limits", usage_mock)
-
-        client.post(
-            "/api/chat",
-            json={"phone": "573001234567", "message": "Hola", "bot_number": bot_number},
-        )
-        # db_check_usage_limits should be called with restaurant_id=1
-        usage_mock.assert_called_once_with(1)
-
-    def test_bot_responds_in_spanish(self, client, monkeypatch):
-        """Bot reply text is in Spanish (mock confirms Spanish reply)."""
-        bot_number = "+573009876543"
-        self._patch_db_for_chat(monkeypatch, bot_number)
-
-        import app.services.agent as agent_mod
-        anthropic_mock = self._build_anthropic_mock("¡Hola! ¿En qué te puedo ayudar hoy?")
-        monkeypatch.setattr(agent_mod, "client", anthropic_mock)
-        monkeypatch.setattr("app.services.agent.state_store.nps_get", AsyncMock(return_value=None))
-        monkeypatch.setattr("app.services.agent.state_store.checkout_get", AsyncMock(return_value=None))
-
-        resp = client.post(
-            "/api/chat",
-            json={"phone": "573001234567", "message": "Hello", "bot_number": bot_number},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
-
-    def test_inbox_worker_marks_processed_on_success(self, monkeypatch):
-        """run_worker marks an inbox row as processed after successful dispatch."""
-        from app.services import inbox_worker
-        from app.repositories import inbox_repo
-
-        row = {
-            "id": 99,
-            "provider": "meta_whatsapp",
-            "payload": {
-                "user_phone": "573001234567",
-                "user_text": "Hola",
-                "bot_number": "+573009876543",
-                "phone_id": "pid",
-            },
-            "attempts": 0,
-        }
-
-        mark_processed = AsyncMock()
-        fetch_batch_calls = [0]
-
-        async def fake_fetch_batch(conn, limit=10):
-            if fetch_batch_calls[0] == 0:
-                fetch_batch_calls[0] += 1
-                return [row]
-            return []
-
-        monkeypatch.setattr(inbox_repo, "fetch_batch", fake_fetch_batch)
-        monkeypatch.setattr(inbox_repo, "mark_processed", mark_processed)
-
-        conn = AsyncMock()
-        conn_ctx = AsyncMock()
-        conn_ctx.__aenter__ = AsyncMock(return_value=conn)
-        conn_ctx.__aexit__ = AsyncMock(return_value=False)
-        tx_ctx = AsyncMock()
-        tx_ctx.__aenter__ = AsyncMock(return_value=None)
-        tx_ctx.__aexit__ = AsyncMock(return_value=False)
-        conn.transaction = MagicMock(return_value=tx_ctx)
-
-        pool = AsyncMock()
-        pool.acquire = MagicMock(return_value=conn_ctx)
-        monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=pool))
-
-        async def fake_process(**kwargs):
-            pass
-
-        monkeypatch.setattr("app.routes.chat._process_message", fake_process)
-        monkeypatch.setattr(
-            "app.repositories.restaurant_repo.db_get_org_by_phone",
-            AsyncMock(return_value={"id": 1, "name": "Test Org", "wa_access_token": "tok",
-                                   "wa_phone_id": "pid", "whatsapp_number": "+573009876543",
-                                   "menu": {}, "features": {}, "matched_location_id": None}),
-        )
-
-        stop = asyncio.Event()
-
-        async def run():
-            task = asyncio.create_task(inbox_worker.run_worker(stop))
-            await asyncio.sleep(0.05)
-            stop.set()
-            await task
-
-        asyncio.get_event_loop().run_until_complete(run())
-        mark_processed.assert_called_once_with(conn, 99)
 
 
 # ===========================================================================
@@ -1280,9 +830,11 @@ class TestEndToEndTableFlow:
         patch_auth(monkeypatch, role="owner")
         new_table = {"id": "t-new", "name": "Mesa 5", "number": 5, "active": True}
         monkeypatch.setattr(db, "db_auto_create_table", AsyncMock(return_value=new_table))
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={
-            "id": 1, "parent_restaurant_id": None
-        }))
+        _rest_mock = AsyncMock(return_value={
+            "id": 1, "org_id": 1, "location_id": 1, "parent_restaurant_id": None
+        })
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock)
 
         resp = client.post(
             "/api/tables",
@@ -1303,10 +855,12 @@ class TestEndToEndTableFlow:
 
         table_row = {"id": "t-new", "name": "Mesa 5", "number": 5, "active": True}
         monkeypatch.setattr(db, "db_get_tables", AsyncMock(return_value=[table_row]))
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={
+        _rest_mock = AsyncMock(return_value={
             "id": 1, "org_id": 1, "location_id": 1,
             "name": "Test", "parent_restaurant_id": None, "features": {}
-        }))
+        })
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock)
 
         conn = AsyncMock()
         # Call order: db_get_pending_orders_by_branch first, db_get_active_session_table_ids second.
@@ -1392,7 +946,7 @@ class TestEndToEndTableFlow:
         assert resp.status_code == 200
         update_mock.assert_called_once_with("o-new", "listo")
 
-    def test_mesero_requests_bill_creates_check(self, client, monkeypatch):
+    def test_waiter_requests_bill_creates_check(self, client, monkeypatch):
         """Cashier creates a check for the table's bill."""
         patch_auth(monkeypatch, role="caja")
         ticket = {
@@ -1428,8 +982,6 @@ class TestEndToEndTableFlow:
         monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
-        import app.services.loyalty as loyalty_mod
-        monkeypatch.setattr(loyalty_mod, "accrue_on_check", AsyncMock(), raising=False)
 
         resp = client.post(
             "/api/table-orders/o-new/checks/chk-1/pay",
@@ -1450,21 +1002,23 @@ class TestEndToEndTableFlow:
         order_row = make_row(
             {"phone": "573001234567", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new"}
         )
-        session_row = {"bot_number": "+573009876543", "meta_phone_id": None}
+        session_row = {"org_id": 1}
 
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(side_effect=[order_row, session_row])
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
         monkeypatch.setattr(db, "db_close_table_bill", AsyncMock())
         monkeypatch.setattr(db, "db_get_table_by_id", AsyncMock(return_value={"id": "t-new"}))
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={}))
+        _rest_mock_empty = AsyncMock(return_value={})
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock_empty)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock_empty)
         monkeypatch.setattr(db, "db_get_all_restaurants", AsyncMock(return_value=[{
-            "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
+            "id": 1, "name": "Test"
         }]))
         monkeypatch.setattr(db, "db_mark_session_nps_pending", AsyncMock())
         monkeypatch.setattr(db, "db_cleanup_after_checkout", AsyncMock())
-        monkeypatch.setattr(db, "db_get_restaurant_by_bot_number", AsyncMock(return_value={
-            "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value={
+            "id": 1, "name": "Test"
         }))
 
         with patch("app.routes.tables.asyncio.create_task"):
@@ -1482,19 +1036,21 @@ class TestEndToEndTableFlow:
         order_row = make_row(
             {"phone": "573001234567", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new"}
         )
-        session_row = {"bot_number": "+573009876543", "meta_phone_id": None}
+        session_row = {"org_id": 1}
 
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(side_effect=[order_row, session_row])
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
         monkeypatch.setattr(db, "db_close_table_bill", AsyncMock())
         monkeypatch.setattr(db, "db_get_table_by_id", AsyncMock(return_value={"id": "t-new"}))
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={}))
+        _rest_mock_empty = AsyncMock(return_value={})
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock_empty)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock_empty)
         monkeypatch.setattr(db, "db_get_all_restaurants", AsyncMock(return_value=[{
-            "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
+            "id": 1, "name": "Test"
         }]))
-        monkeypatch.setattr(db, "db_get_restaurant_by_bot_number", AsyncMock(return_value={
-            "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", AsyncMock(return_value={
+            "id": 1, "name": "Test"
         }))
 
         nps_mock = AsyncMock()

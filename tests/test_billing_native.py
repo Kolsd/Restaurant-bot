@@ -1,10 +1,12 @@
 """
-Tests para el Motor de Facturación Nativa DIAN (MesioNativeAdapter).
-Cubre: CUFE, CUDS, payload JSON para proveedor, create_invoice con mocks de DB,
-test_connection, modo mock sin provider_api_url.
-No requiere base de datos ni credenciales reales.
+Tests for the Native DIAN Invoicing Engine (MesioNativeAdapter).
+Covers: CUFE, CUDS, JSON payload for the provider, create_invoice with DB mocks,
+test_connection, mock mode without provider_api_url.
+Does not require a database or real credentials.
 """
 import pytest
+
+from tests.conftest import stub_plan
 from unittest.mock import AsyncMock, patch
 from datetime import date
 
@@ -66,12 +68,12 @@ MOCK_ORDER = {
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 1. CUFE — algoritmo SHA-384
+# 1. CUFE — SHA-384 algorithm
 # ══════════════════════════════════════════════════════════════════════
 
-def test_cufe_longitud_correcta(adapter):
-    """El CUFE debe ser exactamente 96 caracteres hexadecimales (SHA-384)."""
-    cufe = adapter._calcular_cufe(
+def test_cufe_correct_length(adapter):
+    """CUFE must be exactly 96 hexadecimal characters (SHA-384)."""
+    cufe = adapter._calculate_cufe(
         num_fac="SETP990000001", fec_fac="2019-09-10",
         hor_fac="00:31:40-05:00", val_fac="1000000.00",
         val_imp1="190000.00", val_imp2="0.00", val_tot="1190000.00",
@@ -82,8 +84,8 @@ def test_cufe_longitud_correcta(adapter):
     assert all(c in "0123456789abcdef" for c in cufe)
 
 
-def test_cufe_determinista(adapter):
-    """El mismo input siempre produce el mismo CUFE."""
+def test_cufe_deterministic(adapter):
+    """The same input always produces the same CUFE."""
     kwargs = dict(
         num_fac="FE-1001", fec_fac="2024-06-15",
         hor_fac="12:00:00-05:00", val_fac="50000.00",
@@ -91,11 +93,11 @@ def test_cufe_determinista(adapter):
         nit_ofe="900123456", num_adq="222222222",
         cl_tec="clave-tecnica-test",
     )
-    assert adapter._calcular_cufe(**kwargs) == adapter._calcular_cufe(**kwargs)
+    assert adapter._calculate_cufe(**kwargs) == adapter._calculate_cufe(**kwargs)
 
 
-def test_cufe_cambia_con_numero_diferente(adapter):
-    """Dos facturas con diferente número deben tener CUFE diferente."""
+def test_cufe_changes_with_different_number(adapter):
+    """Two invoices with a different number must have a different CUFE."""
     base = dict(
         fec_fac="2024-06-15", hor_fac="12:00:00-05:00",
         val_fac="50000.00", val_imp1="9500.00",
@@ -103,32 +105,32 @@ def test_cufe_cambia_con_numero_diferente(adapter):
         nit_ofe="900123456", num_adq="222222222",
         cl_tec="clave-tecnica",
     )
-    cufe1 = adapter._calcular_cufe(num_fac="FE-1001", **base)
-    cufe2 = adapter._calcular_cufe(num_fac="FE-1002", **base)
+    cufe1 = adapter._calculate_cufe(num_fac="FE-1001", **base)
+    cufe2 = adapter._calculate_cufe(num_fac="FE-1002", **base)
     assert cufe1 != cufe2
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 2. CUDS — código de software
+# 2. CUDS — software code
 # ══════════════════════════════════════════════════════════════════════
 
-def test_cuds_longitud_correcta(adapter):
-    cuds = adapter._calcular_cuds("soft-id-abc", "pin999", "900123456")
+def test_cuds_correct_length(adapter):
+    cuds = adapter._calculate_cuds("soft-id-abc", "pin999", "900123456")
     assert len(cuds) == 96
 
 
-def test_cuds_cambia_con_pin_diferente(adapter):
-    cuds1 = adapter._calcular_cuds("same-id", "pin-a", "900123456")
-    cuds2 = adapter._calcular_cuds("same-id", "pin-b", "900123456")
+def test_cuds_changes_with_different_pin(adapter):
+    cuds1 = adapter._calculate_cuds("same-id", "pin-a", "900123456")
+    cuds2 = adapter._calculate_cuds("same-id", "pin-b", "900123456")
     assert cuds1 != cuds2
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 3. Payload JSON para el Proveedor Tecnológico
+# 3. JSON payload for the Technology Provider
 # ══════════════════════════════════════════════════════════════════════
 
-def test_provider_payload_contiene_campos_obligatorios(adapter):
-    """_build_provider_payload debe retornar un dict con todas las secciones clave."""
+def test_provider_payload_contains_required_fields(adapter):
+    """_build_provider_payload must return a dict with all the key sections."""
     customer = {"nit": "222222222", "name": "Consumidor Final", "email": "", "id_type": "13"}
     payload = adapter._build_provider_payload(
         invoice_number="FE990000001",
@@ -150,7 +152,7 @@ def test_provider_payload_contiene_campos_obligatorios(adapter):
         customer=customer,
         env="test",
     )
-    # Secciones obligatorias
+    # Required sections
     assert "invoice_number" in payload
     assert "cufe" in payload
     assert "cuds" in payload
@@ -159,7 +161,7 @@ def test_provider_payload_contiene_campos_obligatorios(adapter):
     assert "customer" in payload
     assert "items" in payload
     assert "totals" in payload
-    # Valores concretos
+    # Concrete values
     assert payload["invoice_number"] == "FE990000001"
     assert payload["cufe"] == "a" * 96
     assert payload["emitter"]["nit"] == "700085462"
@@ -170,27 +172,27 @@ def test_provider_payload_contiene_campos_obligatorios(adapter):
 
 
 @pytest.mark.asyncio
-async def test_mock_mode_sin_api_url_retorna_cufe_fake(adapter):
-    """Sin provider_api_url configurado _call_provider_api debe retornar mock de éxito."""
+async def test_mock_mode_without_api_url_returns_fake_cufe(adapter):
+    """Without provider_api_url configured, _call_provider_api must return a success mock."""
     payload = {"invoice_number": "FE-TEST-001", "issue_date": "2024-06-15"}
-    # Config sin provider_api_url → modo mock
+    # Config without provider_api_url → mock mode
     result = await adapter._call_provider_api(payload, MOCK_CONFIG)
     assert result["success"] is True
     assert result["mock"] is True
     assert result["dian_status"] == "accepted"
     assert len(result["cufe"]) == 96
-    # El CUFE mock es determinista para el mismo invoice_number + issue_date
+    # The mock CUFE is deterministic for the same invoice_number + issue_date
     result2 = await adapter._call_provider_api(payload, MOCK_CONFIG)
     assert result["cufe"] == result2["cufe"]
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 4. create_invoice — flujo completo con mocks de DB
+# 4. create_invoice — full flow with DB mocks
 # ══════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_create_invoice_flujo_completo(adapter):
-    """create_invoice debe devolver CUFE, número de factura y persistir en DB."""
+async def test_create_invoice_full_flow(adapter):
+    """create_invoice must return CUFE, invoice number, and persist to DB."""
     with (
         patch("app.services.billing.db.db_get_fiscal_resolution", new=AsyncMock(return_value=MOCK_RESOLUTION)),
         patch("app.services.billing.db.db_claim_next_invoice_number", new=AsyncMock(return_value=990000001)),
@@ -200,33 +202,33 @@ async def test_create_invoice_flujo_completo(adapter):
 
     assert result["invoice_number"] == "FE990000001"
     assert len(result["cufe"]) == 96
-    assert result["dian_status"] == "accepted"   # mock retorna accepted
+    assert result["dian_status"] == "accepted"   # mock returns accepted
     assert result["provider_mock"] is True
-    # Verificar cálculo de impuesto IVA 19% sobre precio que ya incluye impuesto
-    # total=119000 → subtotal=100000 (aprox), iva=19000
+    # Verify IVA 19% tax calculation on a price that already includes tax
+    # total=119000 → subtotal=100000 (approx), iva=19000
     assert abs(result["total"] - 119000) < 1
     assert result["tax_pct"] == 19.0
 
 
 @pytest.mark.asyncio
-async def test_create_invoice_sin_restaurant_id_lanza_error(adapter):
-    """Si _restaurant_id no está en config debe lanzar ValueError."""
+async def test_create_invoice_without_restaurant_id_raises_error(adapter):
+    """If _restaurant_id is not in config it must raise ValueError."""
     config_sin_id = {k: v for k, v in MOCK_CONFIG.items() if k != "_restaurant_id"}
     with pytest.raises(ValueError, match="_restaurant_id"):
         await adapter.create_invoice(MOCK_ORDER, config_sin_id)
 
 
 @pytest.mark.asyncio
-async def test_create_invoice_sin_resolucion_lanza_error(adapter):
-    """Si no hay resolución DIAN configurada debe lanzar RuntimeError descriptivo."""
+async def test_create_invoice_without_resolution_raises_error(adapter):
+    """If no DIAN resolution is configured it must raise a descriptive RuntimeError."""
     with patch("app.services.billing.db.db_get_fiscal_resolution", new=AsyncMock(return_value=None)):
         with pytest.raises(RuntimeError, match="resolución DIAN"):
             await adapter.create_invoice(MOCK_ORDER, MOCK_CONFIG)
 
 
 @pytest.mark.asyncio
-async def test_create_invoice_resolucion_vencida(adapter):
-    """Una resolución cuya valid_to es pasada debe rechazarse."""
+async def test_create_invoice_expired_resolution(adapter):
+    """A resolution whose valid_to is in the past must be rejected."""
     resolucion_vencida = {**MOCK_RESOLUTION, "valid_to": "2020-01-01"}
     with patch("app.services.billing.db.db_get_fiscal_resolution", new=AsyncMock(return_value=resolucion_vencida)):
         with pytest.raises(RuntimeError, match="venció"):
@@ -234,8 +236,8 @@ async def test_create_invoice_resolucion_vencida(adapter):
 
 
 @pytest.mark.asyncio
-async def test_create_invoice_ico_calcula_8_pct(adapter):
-    """Con tax_regime='ico' debe aplicar 8% de Impuesto al Consumo."""
+async def test_create_invoice_ico_calculates_8_pct(adapter):
+    """With tax_regime='ico' it must apply 8% Consumption Tax."""
     config_ico = {**MOCK_CONFIG, "tax_regime": "ico", "tax_percentage": 8.0}
     order_ico  = {**MOCK_ORDER, "total": 108000}  # 100000 base + 8% = 108000
 
@@ -248,13 +250,13 @@ async def test_create_invoice_ico_calcula_8_pct(adapter):
 
     assert result["tax_regime"] == "ico"
     assert result["tax_pct"] == 8.0
-    # subtotal ≈ 100000, impuesto ≈ 8000
+    # subtotal ≈ 100000, tax ≈ 8000
     assert abs(result["tax"] - 8000) < 2
 
 
 @pytest.mark.asyncio
-async def test_db_save_fiscal_invoice_se_llama_con_cufe(adapter):
-    """Verifica que db_save_fiscal_invoice recibe el CUFE correcto (no vacío)."""
+async def test_db_save_fiscal_invoice_called_with_cufe(adapter):
+    """Verifies db_save_fiscal_invoice receives the correct (non-empty) CUFE."""
     mock_save = AsyncMock(return_value=99)
     with (
         patch("app.services.billing.db.db_get_fiscal_resolution", new=AsyncMock(return_value=MOCK_RESOLUTION)),
@@ -265,8 +267,8 @@ async def test_db_save_fiscal_invoice_se_llama_con_cufe(adapter):
 
     call_args = mock_save.call_args[0][0]
     assert len(call_args["cufe"]) == 96
-    assert call_args["dian_status"] == "accepted"   # mock retorna accepted
-    assert call_args["dian_response"] is not None    # respuesta del proveedor persistida
+    assert call_args["dian_status"] == "accepted"   # mock returns accepted
+    assert call_args["dian_response"] is not None    # provider response persisted
     # Post-Wave-2: billing.py sends the tenant key under `org_id`, not
     # `restaurant_id`. The integer value is the same (org_id == old
     # restaurant_id for every Matriz, by migration 0034 invariant).
@@ -279,8 +281,8 @@ async def test_db_save_fiscal_invoice_se_llama_con_cufe(adapter):
 # ══════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_connection_config_valida(adapter):
-    """Con config completa y resolución vigente debe retornar status ok."""
+async def test_connection_valid_config(adapter):
+    """With full config and a valid resolution it must return status ok."""
     with patch("app.services.billing.db.db_get_fiscal_resolution", new=AsyncMock(return_value=MOCK_RESOLUTION)):
         result = await adapter.test_connection(MOCK_CONFIG)
 
@@ -289,16 +291,16 @@ async def test_connection_config_valida(adapter):
 
 
 @pytest.mark.asyncio
-async def test_connection_falta_campo_obligatorio(adapter):
-    """Sin restaurant_nit debe lanzar ValueError con el campo faltante."""
+async def test_connection_missing_required_field(adapter):
+    """Without restaurant_nit it must raise ValueError with the missing field."""
     config_incompleto = {k: v for k, v in MOCK_CONFIG.items() if k != "restaurant_nit"}
     with pytest.raises(ValueError, match="restaurant_nit"):
         await adapter.test_connection(config_incompleto)
 
 
 @pytest.mark.asyncio
-async def test_connection_resolucion_vencida(adapter):
-    """test_connection debe informar que la resolución está vencida."""
+async def test_connection_expired_resolution(adapter):
+    """test_connection must report that the resolution has expired."""
     res_vencida = {**MOCK_RESOLUTION, "valid_to": "2020-06-01"}
     with patch("app.services.billing.db.db_get_fiscal_resolution", new=AsyncMock(return_value=res_vencida)):
         with pytest.raises(RuntimeError, match="Resolución DIAN vencida"):
@@ -306,38 +308,40 @@ async def test_connection_resolucion_vencida(adapter):
 
 
 @pytest.mark.asyncio
-async def test_connection_sin_resolucion_informa(adapter):
-    """Sin resolución en DB test_connection debe devolver status sin error fatal."""
+async def test_connection_without_resolution_reports(adapter):
+    """Without a resolution in DB, test_connection must return status without a fatal error."""
     with patch("app.services.billing.db.db_get_fiscal_resolution", new=AsyncMock(return_value=None)):
         result = await adapter.test_connection(MOCK_CONFIG)
     assert "No configurada" in str(result["sample"][0]["resolution"])
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 6. Adapter Pattern — integración con get_adapter y emit_invoice
+# 6. Adapter Pattern — integration with get_adapter and emit_invoice
 # ══════════════════════════════════════════════════════════════════════
 
-def test_providers_list_incluye_mesio_native(client):
-    """El endpoint /providers debe exponer mesio_native."""
+def test_providers_list_includes_mesio_native(client):
+    """The /providers endpoint must expose mesio_native."""
     response = client.get("/api/billing/providers")
     assert response.status_code == 200
     ids = [p["id"] for p in response.json()["providers"]]
     assert "mesio_native" in ids
-    # Los proveedores existentes no deben desaparecer
+    # Existing providers must not disappear
     assert "siigo" in ids
     assert "alegra" in ids
     assert "loggro" in ids
 
 
-def test_set_config_acepta_mesio_native(client, monkeypatch):
-    """POST /api/billing/config debe aceptar provider=mesio_native."""
+def test_set_config_accepts_mesio_native(client, monkeypatch):
+    """POST /api/billing/config must accept provider=mesio_native."""
     from unittest.mock import AsyncMock
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(
         "app.routes.deps.db.db_get_user",
-        AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}),
+        AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1}),
     )
     monkeypatch.setattr("app.routes.billing.save_billing_config", AsyncMock())
+    # DIAN starts at Pro (app/services/plans.py).
+    stub_plan(monkeypatch, "pro")
 
     headers  = {"Authorization": "Bearer token"}
     payload  = {
@@ -358,12 +362,12 @@ def test_set_config_acepta_mesio_native(client, monkeypatch):
 
 
 def test_get_billing_config_not_configured(client, monkeypatch):
-    """GET /api/billing/config sin config devuelve configured=False."""
+    """GET /api/billing/config without config returns configured=False."""
     from unittest.mock import AsyncMock
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(
         "app.routes.deps.db.db_get_user",
-        AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}),
+        AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1}),
     )
     monkeypatch.setattr("app.routes.billing.get_billing_config", AsyncMock(return_value=None))
 
@@ -378,8 +382,8 @@ def test_get_billing_config_not_configured(client, monkeypatch):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_cufe_matches_dian_spec_format(adapter):
-    """CUFE para input fijo es exactamente SHA-384 hex (96 chars hex)."""
-    cufe = adapter._calcular_cufe(
+    """CUFE for a fixed input is exactly SHA-384 hex (96 hex chars)."""
+    cufe = adapter._calculate_cufe(
         num_fac="FE-FIXED-001", fec_fac="2024-01-15",
         hor_fac="10:30:00-05:00", val_fac="100000.00",
         val_imp1="19000.00", val_imp2="0.00", val_tot="119000.00",
@@ -392,7 +396,7 @@ def test_cufe_matches_dian_spec_format(adapter):
 
 
 def test_cufe_changes_with_amount_change(adapter):
-    """Cambiar val_tot manteniendo el resto produce un CUFE diferente."""
+    """Changing val_tot while keeping the rest produces a different CUFE."""
     base = dict(
         num_fac="FE-AMT-001", fec_fac="2024-01-15",
         hor_fac="10:30:00-05:00", val_fac="100000.00",
@@ -400,13 +404,13 @@ def test_cufe_changes_with_amount_change(adapter):
         nit_ofe="900111111", num_adq="800222222",
         cl_tec="clave-amt",
     )
-    cufe_a = adapter._calcular_cufe(val_tot="119000.00", **base)
-    cufe_b = adapter._calcular_cufe(val_tot="120000.00", **base)
+    cufe_a = adapter._calculate_cufe(val_tot="119000.00", **base)
+    cufe_b = adapter._calculate_cufe(val_tot="120000.00", **base)
     assert cufe_a != cufe_b
 
 
 def test_cuds_calculation_format(adapter):
-    """CUDS = SHA-384 hex de software_id + pin + nit (96 chars hex)."""
+    """CUDS = SHA-384 hex of software_id + pin + nit (96 hex chars)."""
     import hashlib
     software_id = "soft-uuid-A"
     pin         = "pin-123"
@@ -414,7 +418,7 @@ def test_cuds_calculation_format(adapter):
     expected    = hashlib.sha384(
         f"{software_id}{pin}{nit}".encode("utf-8")
     ).hexdigest()
-    cuds = adapter._calcular_cuds(software_id, pin, nit)
+    cuds = adapter._calculate_cuds(software_id, pin, nit)
     assert cuds == expected
     assert len(cuds) == 96
     assert all(c in "0123456789abcdef" for c in cuds)
@@ -425,7 +429,7 @@ def test_cuds_calculation_format(adapter):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_get_adapter_returns_correct_class():
-    """Cada provider name resuelve a su clase específica."""
+    """Each provider name resolves to its specific class."""
     from app.services.billing import (
         get_adapter, SiigoAdapter, AlegraAdapter,
         LoggroAdapter, MesioNativeAdapter,
@@ -437,14 +441,14 @@ def test_get_adapter_returns_correct_class():
 
 
 def test_get_adapter_case_insensitive():
-    """get_adapter normaliza el nombre con .lower()."""
+    """get_adapter normalizes the name with .lower()."""
     from app.services.billing import get_adapter, SiigoAdapter
     assert isinstance(get_adapter("SIIGO"), SiigoAdapter)
     assert isinstance(get_adapter("Siigo"), SiigoAdapter)
 
 
 def test_get_adapter_unknown_provider_raises():
-    """Provider desconocido lanza ValueError mencionando los soportados."""
+    """Unknown provider raises ValueError mentioning the supported ones."""
     from app.services.billing import get_adapter
     with pytest.raises(ValueError, match="no soportado"):
         get_adapter("nope")
@@ -456,12 +460,12 @@ def test_get_adapter_unknown_provider_raises():
 
 @pytest.mark.asyncio
 async def test_emit_invoice_reraises_usage_limit_exceeded():
-    """emit_invoice NO captura UsageLimitExceeded — debe propagarla a la ruta
-    para que ésta retorne 429 (no un 200 con success=False)."""
+    """emit_invoice does NOT catch UsageLimitExceeded — it must propagate it to the
+    route so it can return 429 (not a 200 with success=False)."""
     from app.services.billing import emit_invoice
     from app.services.database import UsageLimitExceeded
 
-    # Adapter falso que dispara UsageLimitExceeded
+    # Fake adapter that raises UsageLimitExceeded
     fake_adapter = AsyncMock()
     fake_adapter.create_invoice = AsyncMock(
         side_effect=UsageLimitExceeded("facturas", 5, 5)

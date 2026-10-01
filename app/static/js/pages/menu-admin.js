@@ -10,7 +10,7 @@
     document.querySelectorAll('[data-tab]').forEach(function (b) {
       b.classList.toggle('active', b.dataset.tab === tab);
     });
-    ['disp', 'inv', 'esc'].forEach(function (t) {
+    ['disp', 'inv', 'esc', 'sede'].forEach(function (t) {
       const el = document.getElementById('tab-' + t);
       if (el) el.style.display = t === tab ? '' : 'none';
     });
@@ -20,37 +20,7 @@
     btn.addEventListener('click', function () { switchTab(btn.dataset.tab); });
   });
 
-  // ── Sync branches ─────────────────────────────────────────────────
-  var syncBtn = document.getElementById('btn-sync-branches');
-  if (syncBtn) {
-    syncBtn.addEventListener('click', async function () {
-      var ok = await mesioConfirm(
-        'Sincronizar menú a todas las sucursales. Los cambios locales de cada sucursal se sobreescribirán.',
-        { confirmText: 'Sincronizar', danger: false }
-      );
-      if (!ok) return;
-      syncBtn.disabled = true;
-      try {
-        var res = await fetch('/api/menu/sync-branches', {
-          method: 'POST',
-          headers: mesioHeaders()
-        });
-        if (!res.ok) {
-          var err = await res.json().catch(function () { return {}; });
-          throw new Error(err.detail || 'HTTP ' + res.status);
-        }
-        var data = await res.json();
-        var n = data.branches_updated != null ? data.branches_updated : 'todas las';
-        mesioToast('Menú sincronizado a ' + n + ' sucursales', 'success');
-      } catch (e) {
-        mesioToast('Error al sincronizar: ' + e.message, 'error');
-      } finally {
-        syncBtn.disabled = false;
-      }
-    });
-  }
-
-  // ── Disponibilidad sub-filters ────────────────────────────────────
+  // ── Availability sub-filters ────────────────────────────────────
   // State: 'all' | 'available' | 'unavailable'
   var _menuFilter = 'all';
   var _rawCategories = null; // last full category dict from loadMenu
@@ -171,7 +141,7 @@
           '</div>' +
           '<label class="toggle" style="margin-left:auto;">' +
           '<input type="checkbox"' + (available ? ' checked' : '') + '>' +
-          '<span></span></label>' +
+          '<span class="toggle-slider"></span></label>' +
           '</div>';
       }).join('');
 
@@ -349,6 +319,59 @@
   // ── Inventory modal ────────────────────────────────────────────────
   var _invItems = [];
 
+  // Stock belongs to ONE sede (PM 2026-09-20), so the inventory screen has
+  // to know the org's sedes: to make the owner pick one before adding a
+  // product, and to offer a destination for a transfer. `_invSedes` stays
+  // empty for a single-sede restaurant and for staff, who never choose.
+  var _invSedes = [];
+  var _invCurrentSede = null;
+
+  async function loadInvSedes() {
+    try {
+      // /api/staff/locations, not /api/team/branches: the latter is
+      // owner-only, and a gerente also needs the list to pick a transfer
+      // destination. This one answers for anyone authenticated in the org.
+      var res = await fetch('/api/staff/locations', { headers: mesioHeaders() });
+      if (!res.ok) { _invSedes = []; return; }
+      var data = await res.json();
+      var list = data.branches || data.locations || data || [];
+      _invSedes = Array.isArray(list) ? list : [];
+    } catch (e) {
+      _invSedes = [];
+    }
+  }
+
+  function _fillSedeSelect(selectEl, selectedId, excludeId) {
+    if (!selectEl) return;
+    selectEl.innerHTML = '';
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Elegí una sede…';
+    selectEl.appendChild(placeholder);
+    _invSedes.forEach(function (sede) {
+      if (excludeId != null && String(sede.id) === String(excludeId)) return;
+      var opt = document.createElement('option');
+      opt.value = String(sede.id);
+      // textContent, never innerHTML — the sede name is user data.
+      opt.textContent = sede.name || ('Sede ' + sede.id);
+      if (selectedId != null && String(sede.id) === String(selectedId)) opt.selected = true;
+      selectEl.appendChild(opt);
+    });
+  }
+
+  function _sedeNameById(id) {
+    for (var i = 0; i < _invSedes.length; i++) {
+      if (String(_invSedes[i].id) === String(id)) return _invSedes[i].name || ('Sede ' + id);
+    }
+    return '';
+  }
+
+  // More than one sede AND no single sede pinned by the backend = an owner
+  // looking at everything. That is exactly who must choose before saving.
+  function _mustPickSede() {
+    return _invSedes.length > 1 && _invCurrentSede == null;
+  }
+
   function openInvModal(item, focusStock) {
     var modal = document.getElementById('invModal');
     if (!modal) return;
@@ -363,6 +386,17 @@
       ? (item.low_stock_threshold != null ? item.low_stock_threshold : (item.min_stock != null ? item.min_stock : ''))
       : '';
     document.getElementById('invModalCost').value = item ? (item.cost_per_unit != null ? item.cost_per_unit : '') : '';
+
+    // The sede row only appears when there is a real choice to make: a new
+    // product, several sedes, and no sede already pinned. Editing never
+    // moves a product between sedes — that is what a transfer is for.
+    var sedeRow = document.getElementById('invModalSedeRow');
+    var sedeSel = document.getElementById('invModalSede');
+    var needsSede = !item && _mustPickSede();
+    if (sedeRow) sedeRow.style.display = needsSede ? '' : 'none';
+    if (needsSede) _fillSedeSelect(sedeSel, null, null);
+    else if (sedeSel) sedeSel.value = '';
+
     modal.style.display = 'flex';
     if (focusStock) {
       setTimeout(function () { document.getElementById('invModalStock').focus(); }, 60);
@@ -384,6 +418,16 @@
 
     if (!name) { mesioToast('El nombre es requerido', 'warn'); return; }
 
+    // The backend refuses a create with no sede (400). Catching it here just
+    // saves the round-trip and points at the field.
+    var sedeSel = document.getElementById('invModalSede');
+    var sedeId = (!id && _mustPickSede()) ? (sedeSel ? sedeSel.value : '') : '';
+    if (!id && _mustPickSede() && !sedeId) {
+      mesioToast('Elegí la sede a la que pertenece este producto', 'warn');
+      if (sedeSel) sedeSel.focus();
+      return;
+    }
+
     var saveBtn = document.getElementById('invModalSave');
     if (saveBtn) saveBtn.disabled = true;
 
@@ -391,6 +435,7 @@
       var url = id ? '/api/inventory/' + id : '/api/inventory';
       var method = id ? 'PUT' : 'POST';
       var body = { name: name, unit: unit, current_stock: stock, min_stock: min, cost_per_unit: cost };
+      if (sedeId) body.location_id = parseInt(sedeId, 10);
       var res = await fetch(url, {
         method: method,
         headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
@@ -423,7 +468,7 @@
     });
   }
 
-  // + Agregar producto button
+  // + Add product button
   var addInvBtn = document.getElementById('btn-add-inventory');
   if (addInvBtn) addInvBtn.addEventListener('click', function () { openInvModal(null); });
 
@@ -577,6 +622,9 @@
         '<div>' + statusLabel + '</div>' +
         '<div style="text-align:right;">' +
           '<button class="btn sm ghost" data-inv-action="restock" data-id="' + (item.id || '') + '">Reponer</button> ' +
+          (_invSedes.length > 1
+            ? '<button class="btn sm ghost" data-inv-action="transfer" data-id="' + (item.id || '') + '">Trasladar</button> '
+            : '') +
           '<button class="btn sm ghost" data-inv-action="edit" data-id="' + (item.id || '') + '">Editar</button>' +
         '</div>' +
       '</div>';
@@ -599,6 +647,9 @@
       if (action === 'restock') {
         // Open the inv modal prefilled, focused on stock field
         openInvModal(item || { id: itemId }, true);
+
+      } else if (action === 'transfer') {
+        openInvXferModal(item || { id: itemId });
 
       } else if (action === 'edit') {
         openInvModal(item || { id: itemId }, false);
@@ -624,12 +675,90 @@
     });
   }
 
+  // ── Transfer stock to another sede ─────────────────────────────────
+  //
+  // "Se puede hacer intercambios de inventario por sede" (PM 2026-09-20).
+  // The backend moves it in one transaction and creates the product at the
+  // destination if that sede never stocked it, so this only has to collect
+  // where and how much.
+  var _invXferItem = null;
+
+  function openInvXferModal(item) {
+    var modal = document.getElementById('invXferModal');
+    if (!modal || !item) return;
+    _invXferItem = item;
+
+    var from = item.location_id != null ? _sedeNameById(item.location_id) : '';
+    var stock = +(item.stock || item.current_stock || 0);
+    var fromEl = document.getElementById('invXferFrom');
+    if (fromEl) {
+      fromEl.textContent = (item.name || '') +
+        (from ? ' · en ' + from : '') +
+        ' · disponible ' + stock + ' ' + (item.unit || 'u');
+    }
+    document.getElementById('invXferId').value = item.id || '';
+    document.getElementById('invXferQty').value = '';
+    document.getElementById('invXferNote').value = '';
+    // Never offer the sede the stock already sits in.
+    _fillSedeSelect(document.getElementById('invXferTo'), null, item.location_id);
+    modal.style.display = 'flex';
+  }
+
+  function closeInvXferModal() {
+    var modal = document.getElementById('invXferModal');
+    if (modal) modal.style.display = 'none';
+    _invXferItem = null;
+  }
+
+  async function saveInvXfer() {
+    var itemId = document.getElementById('invXferId').value;
+    var to = document.getElementById('invXferTo').value;
+    var qty = parseFloat(document.getElementById('invXferQty').value);
+    var note = document.getElementById('invXferNote').value.trim();
+
+    if (!to) { mesioToast('Elegí la sede de destino', 'warn'); return; }
+    if (!qty || qty <= 0) { mesioToast('Indicá una cantidad mayor que cero', 'warn'); return; }
+
+    var btn = document.getElementById('invXferSave');
+    if (btn) btn.disabled = true;
+    try {
+      var res = await fetch('/api/inventory/' + itemId + '/transfer', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
+        body: JSON.stringify({ to_location_id: parseInt(to, 10), quantity: qty, note: note })
+      });
+      if (!res.ok) {
+        var err = await res.json().catch(function () { return {}; });
+        throw new Error(err.detail || 'HTTP ' + res.status);
+      }
+      mesioToast('Traslado registrado', 'success');
+      closeInvXferModal();
+      loadInventory();
+    } catch (e) {
+      mesioToast('Error: ' + e.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  var xferCloseBtn = document.getElementById('invXferClose');
+  if (xferCloseBtn) xferCloseBtn.addEventListener('click', closeInvXferModal);
+  var xferCancelBtn = document.getElementById('invXferCancel');
+  if (xferCancelBtn) xferCancelBtn.addEventListener('click', closeInvXferModal);
+  var xferSaveBtn = document.getElementById('invXferSave');
+  if (xferSaveBtn) xferSaveBtn.addEventListener('click', saveInvXfer);
+
   async function loadInventory() {
     try {
+      if (!_invSedes.length) await loadInvSedes();
       var res = await fetch('/api/inventory', { headers: mesioHeaders() });
       if (!res.ok) { return; }
       var data = await res.json();
       var items = data.inventory || data.items || data;
+      // The response says which sede it is scoped to: an int when the caller
+      // is pinned to one (staff, or an owner who picked one), null when they
+      // are seeing every sede.
+      _invCurrentSede = (data && typeof data.location_id === 'number') ? data.location_id : null;
       _invItems = Array.isArray(items) ? items : [];
       _buildCategoryPills(_invItems);
       renderInventory(_invItems);
@@ -838,7 +967,7 @@
     }
   }
 
-  // ── Editar carta — full visual editor ─────────────────────────────
+  // ── Edit menu — full visual editor ─────────────────────────────
   async function openCartaEditor() {
     window._dashHeaders = mesioHeaders();
 
@@ -846,16 +975,23 @@
       var rMenu = await fetch('/api/dashboard/menu', { headers: window._dashHeaders });
       if (!rMenu.ok) throw new Error('HTTP ' + rMenu.status);
       var menu = (await rMenu.json()).menu || {};
-      window.MENU_ITEMS = [];
+      // Collected here, handed over with setMenuItems below: assigning
+      // window.MENU_ITEMS does NOT reach the variable openMenuEditor reads
+      // (a top-level `let` in a classic script is not a window property),
+      // which is why this editor used to open empty.
+      var items = [];
       Object.entries(menu).forEach(function (entry) {
         var cat = entry[0], dishes = entry[1];
         if (!Array.isArray(dishes)) return;
         dishes.forEach(function (d) {
-          window.MENU_ITEMS.push({
+          items.push({
             name:            d.name            || '',
             cat:             cat,
             price:           d.price           != null ? d.price : 0,
             desc:            d.description     || '',
+            // sku must round-trip or a save from here wipes it (the diner
+            // chat's tap-to-cart resolves dishes by it).
+            sku:             d.sku             || null,
             image_url:       d.image_url       || null,
             image_public_id: d.image_public_id || null,
             tags:            d.tags            || [],
@@ -874,17 +1010,193 @@
       return;
     }
 
-    if (typeof openMenuEditor !== 'function') {
+    if (typeof openMenuEditor !== 'function' || typeof window.setMenuItems !== 'function') {
       mesioToast('Editor no disponible (dashboard-features.js no cargó)', 'error');
       return;
     }
+    window.setMenuItems(items);
     openMenuEditor();
   }
 
   var cartaBtn = document.getElementById('btn-edit-carta');
   if (cartaBtn) cartaBtn.addEventListener('click', openCartaEditor);
+  // The general carta is the owner's/admin's (PM 2026-09-21). A gerente
+  // changes their own sede's in the "Carta de esta sede" tab.
+  var _role = (localStorage.getItem('rb_role') || '').toLowerCase();
+  if (cartaBtn && !/owner|admin/.test(_role)) cartaBtn.style.display = 'none';
 
-  // ── Escandallos (recipes) ─────────────────────────────────────────
+  // ── Import a carta from a photo or pasted text ──────────────────────────────
+  // This produces a DRAFT and nothing else. The parsed dishes are loaded into
+  // MENU_ITEMS and handed to the SAME editor as "Editar carta", so they are
+  // only written when the owner saves there. A misread price is then a line to
+  // fix in an unsaved draft, never a price change on a live carta — which is
+  // the whole reason the reader is allowed to be wrong.
+
+  var _importModal   = document.getElementById('importCartaModal');
+  var _importFile    = document.getElementById('importCartaFile');
+  var _importText    = document.getElementById('importCartaText');
+  var _importStatus  = document.getElementById('importCartaStatus');
+  var _importGo      = document.getElementById('importCartaGo');
+  var _importDraft   = null;   // parsed menu, waiting for the owner to open it
+
+  function _importSetStatus(msg, kind) {
+    if (!_importStatus) return;
+    _importStatus.textContent = msg || '';
+    _importStatus.style.color = kind === 'error' ? 'var(--danger)'
+      : kind === 'ok' ? 'var(--brand)' : 'var(--text-3)';
+  }
+
+  function _openImportModal() {
+    if (!_importModal) return;
+    _importDraft = null;
+    if (_importFile) _importFile.value = '';
+    if (_importText) _importText.value = '';
+    if (_importGo) { _importGo.textContent = 'Leer carta'; _importGo.disabled = false; }
+    _importSetStatus('');
+    _importModal.style.display = 'flex';
+  }
+
+  function _closeImportModal() {
+    if (_importModal) _importModal.style.display = 'none';
+  }
+
+  function _readFileAsBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        // "data:image/png;base64,AAAA" → "AAAA"
+        var result = String(reader.result || '');
+        var comma  = result.indexOf(',');
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = function () { reject(new Error('No se pudo leer el archivo')); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function _draftIntoEditor(menu) {
+    var items = [];
+    Object.keys(menu).forEach(function (cat) {
+      var dishes = menu[cat];
+      if (!Array.isArray(dishes)) return;
+      dishes.forEach(function (d) {
+        items.push({
+          name:  d.name  || '',
+          cat:   cat,
+          price: d.price != null ? d.price : 0,
+          desc:  d.description || '',
+          // A draft has no sku, no photo and no ordering yet — those are
+          // assigned when the owner saves, exactly as for a dish typed by
+          // hand. Inventing them here would claim a history the dish lacks.
+          sku: null, image_url: null, image_public_id: null,
+          tags: [], badges: [], allergens: [],
+          featured: false, active: true, sort_order: 999,
+          calories: null, prep_time_min: null,
+        });
+      });
+    });
+    window._dashHeaders = mesioHeaders();
+    if (typeof openMenuEditor !== 'function' || typeof window.setMenuItems !== 'function') {
+      mesioToast('Editor no disponible (dashboard-features.js no cargó)', 'error');
+      return false;
+    }
+    window.setMenuItems(items);
+    openMenuEditor();
+    return true;
+  }
+
+  function _describeDraft(data) {
+    // Everything the reader was unsure about, said before the owner walks
+    // into the editor. Silent warnings are the same as no warnings.
+    var needReview = [];
+    Object.keys(data.menu || {}).forEach(function (cat) {
+      (data.menu[cat] || []).forEach(function (d) {
+        if (d.import_warnings && d.import_warnings.length) needReview.push(d.name);
+      });
+    });
+    var lines = ['Leí ' + data.dish_count + ' plato(s).'];
+    (data.warnings || []).forEach(function (w) { lines.push(w); });
+    if (needReview.length) {
+      var shown = needReview.slice(0, 8).join(', ');
+      lines.push(
+        needReview.length + ' necesitan que revises el precio: ' + shown +
+        (needReview.length > 8 ? '…' : '')
+      );
+    }
+    lines.push('Nada se ha guardado todavía.');
+    return lines.join(' ');
+  }
+
+  async function _runImport() {
+    if (!_importGo) return;
+
+    // Second press: the draft is ready and the owner wants to see it.
+    if (_importDraft) {
+      if (_draftIntoEditor(_importDraft.menu)) _closeImportModal();
+      return;
+    }
+
+    var file = _importFile && _importFile.files && _importFile.files[0];
+    var text = _importText ? _importText.value.trim() : '';
+    if (!file && !text) {
+      _importSetStatus('Sube una foto o pega el texto de la carta.', 'error');
+      return;
+    }
+    if (file && text) {
+      _importSetStatus('Usa una foto o el texto, no ambos.', 'error');
+      return;
+    }
+
+    _importGo.disabled = true;
+    _importSetStatus('Leyendo la carta… puede tardar unos segundos.');
+
+    try {
+      var body;
+      if (file) {
+        body = { image_b64: await _readFileAsBase64(file), image_type: file.type };
+      } else {
+        body = { text: text };
+      }
+      var res = await fetch('/api/menu/import', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
+        body: JSON.stringify(body),
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok) {
+        // The reader failing is normal and survivable: the editor is
+        // untouched and the owner can still type the carta by hand.
+        _importSetStatus(data.detail || 'No pude leer la carta. Puedes escribirla a mano.', 'error');
+        _importGo.disabled = false;
+        return;
+      }
+      _importDraft = data;
+      _importSetStatus(_describeDraft(data), 'ok');
+      _importGo.textContent = 'Abrir en el editor';
+      _importGo.disabled = false;
+    } catch (e) {
+      _importSetStatus('Error de conexión: ' + e.message, 'error');
+      _importGo.disabled = false;
+    }
+  }
+
+  var importBtn = document.getElementById('btn-import-carta');
+  if (importBtn) importBtn.addEventListener('click', _openImportModal);
+  // Same permission as the base carta: a gerente edits their own sede's.
+  if (importBtn && !/owner|admin/.test(_role)) importBtn.style.display = 'none';
+
+  var importClose  = document.getElementById('importCartaClose');
+  var importCancel = document.getElementById('importCartaCancel');
+  if (importClose)  importClose.addEventListener('click', _closeImportModal);
+  if (importCancel) importCancel.addEventListener('click', _closeImportModal);
+  if (_importGo)    _importGo.addEventListener('click', _runImport);
+  if (_importModal) {
+    _importModal.addEventListener('click', function (e) {
+      if (e.target === _importModal) _closeImportModal();
+    });
+  }
+
+  // ── Recipe costing sheets (recipes) ─────────────────────────────────────────
   var _allInventoryForRecipes = []; // populated by loadInventory for the recipe modal select
 
   async function loadRecipes() {
@@ -1156,11 +1468,17 @@
     recipeModalAddLine.addEventListener('click', function () { _addRecipeLine(null, null); });
   }
 
-  // "+ Nuevo escandallo" button
+  // "+ New recipe" button
   var newRecipeBtn = document.getElementById('btn-new-recipe');
   if (newRecipeBtn) {
     newRecipeBtn.addEventListener('click', function () { openRecipeModal(null); });
   }
+
+  // The carta editor (dashboard-features.js) saves on its own; refresh our list.
+  document.addEventListener('mesio:menu-saved', function () {
+    loadMenu();
+    loadPhotoCoverage();
+  });
 
   // ── Boot ──────────────────────────────────────────────────────────
   loadMenu();

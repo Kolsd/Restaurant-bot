@@ -53,54 +53,6 @@ def _make_fetch_pool(rows: list[dict]):
 
 # ── Dead letters ──────────────────────────────────────────────────────────────
 
-class TestDeadLetters:
-    @pytest.mark.asyncio
-    async def test_dead_letters_gt_zero_emits_notification(self, monkeypatch):
-        import app.repositories.internal.notifications_repo as repo
-
-        pool = _make_fetchval_pool(3)
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            result = await repo._fetch_dead_letters()
-
-        assert len(result) == 1
-        n = result[0]
-        assert n["type"] == "deadletter"
-        assert n["severity"] == "high"
-        assert n["count"] == 3
-        assert "3" in n["title"]
-        assert n["id"] == "deadletter:3"
-
-    @pytest.mark.asyncio
-    async def test_dead_letters_zero_emits_nothing(self, monkeypatch):
-        import app.repositories.internal.notifications_repo as repo
-
-        pool = _make_fetchval_pool(0)
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            result = await repo._fetch_dead_letters()
-
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_dead_letters_none_treated_as_zero(self, monkeypatch):
-        import app.repositories.internal.notifications_repo as repo
-
-        pool = _make_fetchval_pool(None)
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            result = await repo._fetch_dead_letters()
-
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_dead_letters_db_error_returns_empty(self, monkeypatch):
-        import app.repositories.internal.notifications_repo as repo
-
-        async def _boom():
-            raise RuntimeError("DB down")
-
-        monkeypatch.setattr(repo, "_get_pool", _boom)
-        result = await repo._fetch_dead_letters()
-        assert result == []
-
 
 # ── Cost runaway ──────────────────────────────────────────────────────────────
 
@@ -113,13 +65,13 @@ class TestCostRunaway:
             {
                 "org_id": 42,
                 "org_name": "Burger Mesio",
-                "plan_code": "pulso",
+                "plan_code": "esencial",
                 "tokens_today": 150_000,  # pulso limit=50_000; 2x=100_000 → over
             }
         ]
         pool = _make_fetch_pool(rows)
 
-        _LIMITS = {"pulso": 50_000, "restaurante": 200_000, "pro": 400_000}
+        _LIMITS = {"esencial": 50_000, "restaurante": 200_000, "pro": 400_000}
 
         with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
             with patch(
@@ -159,7 +111,7 @@ class TestCostRunaway:
             }
         ]
         pool = _make_fetch_pool(rows)
-        _LIMITS = {"pulso": 50_000, "cadena": -1}
+        _LIMITS = {"esencial": 50_000, "cadena": -1}
         original = getattr(cmr_stub, "_PLAN_DAILY_TOKEN_LIMITS", None)
         cmr_stub._PLAN_DAILY_TOKEN_LIMITS = _LIMITS
         try:
@@ -218,7 +170,7 @@ class TestPlanCapWarnings:
             {
                 "org_id": 8,
                 "org_name": "El Asador",
-                "plan_code": "pulso",
+                "plan_code": "esencial",
                 "conversations_used": 90,
                 "conversations_per_month": 100,
             }
@@ -269,7 +221,7 @@ class TestAggregatorSorting:
             "severity": "medium",
             "title": "Churn risk",
             "detail": "detail",
-            "url": "/internal/analytics",
+            "url": "/internal/superadmin",
             "created_at": "2026-05-07T10:00:00Z",
             "count": 1,
             "tenant_id": 2,
@@ -278,7 +230,6 @@ class TestAggregatorSorting:
         async def _empty():
             return []
 
-        monkeypatch.setattr(repo, "_fetch_dead_letters", _empty)
         monkeypatch.setattr(repo, "_fetch_cost_runaway", AsyncMock(return_value=[cost_notif]))
         monkeypatch.setattr(repo, "_fetch_churn_risk", AsyncMock(return_value=[churn_notif]))
         monkeypatch.setattr(repo, "_fetch_new_prospects", _empty)
@@ -298,7 +249,6 @@ class TestAggregatorSorting:
         async def _empty():
             return []
 
-        monkeypatch.setattr(repo, "_fetch_dead_letters", _empty)
         monkeypatch.setattr(repo, "_fetch_cost_runaway", _empty)
         monkeypatch.setattr(repo, "_fetch_churn_risk", _empty)
         monkeypatch.setattr(repo, "_fetch_new_prospects", _empty)
@@ -313,19 +263,17 @@ class TestAggregatorSorting:
         """If one source raises (shouldn't, but in case), others still contribute."""
         import app.repositories.internal.notifications_repo as repo
 
-        dead_notif = {
-            "id": "deadletter:1",
-            "type": "deadletter",
-            "severity": "high",
-            "title": "1 dead letter",
+        prospect_notif = {
+            "id": "prospects:1",
+            "type": "prospects",
+            "severity": "low",
+            "title": "1 prospecto nuevo",
             "detail": "detail",
-            "url": "/internal/monitoring",
+            "url": "/internal/crm",
             "created_at": "2026-05-07T10:00:00Z",
             "count": 1,
             "tenant_id": None,
         }
-
-        monkeypatch.setattr(repo, "_fetch_dead_letters", AsyncMock(return_value=[dead_notif]))
 
         # Simulate a source that already swallows its own exception (returns [])
         # because each source function catches internally.
@@ -334,14 +282,14 @@ class TestAggregatorSorting:
 
         monkeypatch.setattr(repo, "_fetch_cost_runaway", _broken_source)
         monkeypatch.setattr(repo, "_fetch_churn_risk", _broken_source)
-        monkeypatch.setattr(repo, "_fetch_new_prospects", _broken_source)
+        monkeypatch.setattr(repo, "_fetch_new_prospects", AsyncMock(return_value=[prospect_notif]))
         monkeypatch.setattr(repo, "_fetch_suspended_tenants", _broken_source)
         monkeypatch.setattr(repo, "_fetch_plan_cap_warnings", _broken_source)
 
         result = await repo.db_get_notifications()
 
         assert len(result) == 1
-        assert result[0]["type"] == "deadletter"
+        assert result[0]["type"] == "prospects"
 
 
 # ── Endpoint helper ───────────────────────────────────────────────────────────

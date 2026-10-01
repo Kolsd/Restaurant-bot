@@ -1,8 +1,8 @@
 """
-Tests para FASE 5: Split Checks y Pagos Mixtos.
-Cubre: db_create_checks, db_finalize_check_payment,
-       db_get_order_ticket_data, endpoints REST de checks.
-No requiere base de datos ni credenciales reales.
+Tests for PHASE 5: Split Checks and Mixed Payments.
+Covers: db_create_checks, db_finalize_check_payment,
+       db_get_order_ticket_data, checks REST endpoints.
+Does not require a database or real credentials.
 
 Updated for tenant_connection() migration: direct repo calls now require
 an active tenant_scope() or bypass_tenant_scope().  Tests that call repo
@@ -40,8 +40,8 @@ def _make_pool(conn):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_create_checks_inserta_dos_checks():
-    """Crear 2 checks debe hacer DELETE de abiertos + INSERT por cada check."""
+async def test_create_checks_inserts_two_checks():
+    """Creating 2 checks must DELETE the open ones + INSERT each check."""
     from app.services import database as db
 
     check_rows = [
@@ -84,7 +84,7 @@ async def test_create_checks_inserta_dos_checks():
     delete_calls = [c for c in mock_conn.execute.call_args_list if "DELETE" in str(c)]
     assert len(delete_calls) >= 1
 
-    # INSERT llamado 2 veces (una por check)
+    # INSERT called 2 times (one per check)
     insert_calls = [c for c in mock_conn.execute.call_args_list if "INSERT" in str(c)]
     assert len(insert_calls) == 2
 
@@ -94,15 +94,15 @@ async def test_create_checks_inserta_dos_checks():
 
 
 @pytest.mark.asyncio
-async def test_create_checks_id_incluye_chk_numero():
-    """El ID del check debe seguir el patrón {base_order_id}-CHK-{n}."""
+async def test_create_checks_id_includes_chk_number():
+    """The check ID must follow the {base_order_id}-CHK-{n} pattern."""
     from app.services import database as db
 
     inserted_ids = []
 
     async def capture_execute(sql, *args):
         if "INSERT" in sql:
-            inserted_ids.append(args[0])  # primer arg es el check_id
+            inserted_ids.append(args[0])  # first arg is the check_id
         return "INSERT 0 1"
 
     result_row = _make_row({
@@ -137,8 +137,8 @@ async def test_create_checks_id_incluye_chk_numero():
 # ══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_finalize_check_marca_invoiced():
-    """db_finalize_check_payment debe UPDATE el check a status='invoiced'.
+async def test_finalize_check_marks_invoiced():
+    """db_finalize_check_payment must UPDATE the check to status='invoiced'.
 
     Post race-fix: the UPDATE now uses RETURNING id (so fetchrow, not execute)
     and requires status='paying' as a precondition. The mock returns a row to
@@ -150,7 +150,7 @@ async def test_finalize_check_marca_invoiced():
     mock_conn.execute  = AsyncMock()
     # Main UPDATE uses fetchrow now (RETURNING id). Non-None means success.
     mock_conn.fetchrow = AsyncMock(return_value=_make_row({"id": "BASE-001-CHK-1"}))
-    mock_conn.fetchval = AsyncMock(return_value=0)  # 0 checks pendientes → cierra mesa
+    mock_conn.fetchval = AsyncMock(return_value=0)  # 0 pending checks → closes table
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
         __aexit__=AsyncMock(return_value=False),
@@ -188,7 +188,7 @@ async def test_finalize_check_marca_invoiced():
 @pytest.mark.asyncio
 async def test_finalize_check_returns_false_when_not_paying():
     """Race protection: if check is not in 'paying' state, finalize returns False
-    without touching the rest of the transaction (no proposal update, no mesa close)."""
+    without touching the rest of the transaction (no proposal update, no table close)."""
     from app.services import database as db
 
     mock_conn = AsyncMock()
@@ -212,7 +212,7 @@ async def test_finalize_check_returns_false_when_not_paying():
             )
 
     assert result is False
-    # Critical: no follow-up UPDATEs should have run (no proposal_status, no mesa close)
+    # Critical: no follow-up UPDATEs should have run (no proposal_status, no table close)
     follow_up = [c for c in mock_conn.execute.call_args_list
                  if "UPDATE" in str(c) and "table_checks" in str(c)]
     assert follow_up == []
@@ -222,14 +222,14 @@ async def test_finalize_check_returns_false_when_not_paying():
 
 
 @pytest.mark.asyncio
-async def test_finalize_check_cierra_mesa_si_todos_pagados():
-    """Si todos los checks están invoiced, debe cerrar la mesa (UPDATE table_orders)."""
+async def test_finalize_check_closes_table_if_all_paid():
+    """If all checks are invoiced, it must close the table (UPDATE table_orders)."""
     from app.services import database as db
 
     mock_conn = AsyncMock()
     mock_conn.execute  = AsyncMock()
     mock_conn.fetchrow = AsyncMock(return_value=_make_row({"id": "BASE-001-CHK-2"}))
-    mock_conn.fetchval = AsyncMock(return_value=0)  # ningún check pendiente
+    mock_conn.fetchval = AsyncMock(return_value=0)  # no pending checks
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
         __aexit__=AsyncMock(return_value=False),
@@ -245,7 +245,7 @@ async def test_finalize_check_cierra_mesa_si_todos_pagados():
                 fiscal_invoice_id=43,
             )
 
-    # UPDATE table_orders debe haber sido llamado (cierre de mesa)
+    # UPDATE table_orders must have been called (table close)
     close_calls = [c for c in mock_conn.execute.call_args_list
                    if "UPDATE table_orders" in str(c)]
     assert len(close_calls) == 1
@@ -253,13 +253,13 @@ async def test_finalize_check_cierra_mesa_si_todos_pagados():
 
 
 @pytest.mark.asyncio
-async def test_finalize_check_no_cierra_mesa_si_hay_pendientes():
-    """Si aún hay checks open, NO debe cerrar la mesa."""
+async def test_finalize_check_does_not_close_table_if_pending():
+    """If there are still open checks, it must NOT close the table."""
     from app.services import database as db
 
     mock_conn = AsyncMock()
     mock_conn.execute  = AsyncMock()
-    mock_conn.fetchval = AsyncMock(return_value=1)  # 1 check todavía pendiente
+    mock_conn.fetchval = AsyncMock(return_value=1)  # 1 check still pending
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
         __aexit__=AsyncMock(return_value=False),
@@ -285,8 +285,8 @@ async def test_finalize_check_no_cierra_mesa_si_hay_pendientes():
 # ══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_get_order_ticket_data_agrega_items():
-    """db_get_order_ticket_data debe agregar ítems de todas las sub-órdenes."""
+async def test_get_order_ticket_data_aggregates_items():
+    """db_get_order_ticket_data must aggregate items from all sub-orders."""
     from app.services import database as db
 
     items1 = json.dumps([{"name": "Pizza", "price": 45000, "quantity": 2}])
@@ -318,7 +318,7 @@ async def test_get_order_ticket_data_agrega_items():
 
 
 @pytest.mark.asyncio
-async def test_get_order_ticket_data_retorna_none_si_no_existe():
+async def test_get_order_ticket_data_returns_none_if_not_found():
     from app.services import database as db
 
     mock_conn = AsyncMock()
@@ -343,20 +343,21 @@ def _mock_auth(monkeypatch):
     from app.services import database as db_mod
     async def mock_verify_token(token: str): return "caja_user"
     async def mock_get_user(username: str):
-        return {"username": "caja_user", "branch_id": 1, "role": "caja", "restaurant_name": "R"}
+        # P0 fix (2026-09): create_checks/pay_check_single now read the
+        # explicit org_id off the user dict directly (no more resolving it
+        # via a DB lookup on the ambiguous branch_id).
+        return {"username": "caja_user", "branch_id": 1, "org_id": 1,
+                "location_id": 1, "role": "caja", "restaurant_name": "R"}
     async def mock_get_restaurant(request):
-        return {"id": 1, "whatsapp_number": "+57300", "name": "R"}
+        return {"id": 1, "org_id": 1, "location_id": 1, "name": "R"}
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
     monkeypatch.setattr("app.routes.tables.get_current_restaurant", mock_get_restaurant)
-    # Needed for create_checks org_id ownership check (Wave-2)
-    monkeypatch.setattr(db_mod, "db_get_restaurant_by_id",
-                        AsyncMock(return_value={"id": 1, "org_id": 1, "location_id": 1}))
     return db_mod
 
 
-def test_create_checks_endpoint_valida_cantidades(client, monkeypatch):
-    """POST /checks debe retornar 400 si el check excede la qty del ticket."""
+def test_create_checks_endpoint_validates_quantities(client, monkeypatch):
+    """POST /checks must return 400 if the check exceeds the ticket's qty."""
     from app.services import database as db_mod
     db_mod = _mock_auth(monkeypatch)
 
@@ -385,7 +386,7 @@ def test_create_checks_endpoint_valida_cantidades(client, monkeypatch):
 
 
 def test_create_checks_endpoint_ok(client, monkeypatch):
-    """POST /checks con cantidades válidas debe retornar 200 y checks creados."""
+    """POST /checks with valid quantities must return 200 and created checks."""
     from app.services import database as db_mod
     db_mod = _mock_auth(monkeypatch)
 
@@ -418,8 +419,8 @@ def test_create_checks_endpoint_ok(client, monkeypatch):
     assert len(resp.json()["checks"]) == 1
 
 
-def test_pay_check_endpoint_pago_insuficiente(client, monkeypatch):
-    """POST /checks/{id}/pay debe retornar 400 si el pago no cubre el total."""
+def test_pay_check_endpoint_insufficient_payment(client, monkeypatch):
+    """POST /checks/{id}/pay must return 400 if the payment doesn't cover the total."""
     from app.services import database as db_mod
     db_mod = _mock_auth(monkeypatch)
 
@@ -450,7 +451,7 @@ def test_pay_check_endpoint_pago_insuficiente(client, monkeypatch):
     assert "insuficiente" in resp.json()["detail"].lower()
 
 
-def test_pay_check_endpoint_check_ya_cobrado(client, monkeypatch):
+def test_pay_check_endpoint_check_already_paid(client, monkeypatch):
     """POST /checks/{id}/pay returns 409 (Conflict) if the check is already invoiced.
 
     Previously this returned 400; the race-free flow now uses 409 because the
@@ -482,7 +483,7 @@ def test_pay_check_endpoint_check_ya_cobrado(client, monkeypatch):
 
 
 def test_delete_check_endpoint_ok(client, monkeypatch):
-    """DELETE /checks/{id} debe retornar 200 si el check estaba open."""
+    """DELETE /checks/{id} must return 200 if the check was open."""
     from app.services import database as db_mod
     db_mod = _mock_auth(monkeypatch)
 
@@ -497,12 +498,12 @@ def test_delete_check_endpoint_ok(client, monkeypatch):
     assert resp.json()["success"] is True
 
 
-def test_delete_check_endpoint_ya_cobrado(client, monkeypatch):
-    """DELETE /checks/{id} debe retornar 400 si el check ya fue cobrado."""
+def test_delete_check_endpoint_already_paid(client, monkeypatch):
+    """DELETE /checks/{id} must return 400 if the check was already paid."""
     from app.services import database as db_mod
     db_mod = _mock_auth(monkeypatch)
 
-    async def mock_delete(check_id): return False  # no se pudo eliminar
+    async def mock_delete(check_id): return False  # could not be deleted
     monkeypatch.setattr(db_mod, "db_delete_open_check", mock_delete)
 
     resp = client.delete(
@@ -513,7 +514,7 @@ def test_delete_check_endpoint_ya_cobrado(client, monkeypatch):
 
 
 def test_get_check_ticket_endpoint(client, monkeypatch):
-    """GET /checks/{id}/ticket debe retornar los datos del check."""
+    """GET /checks/{id}/ticket must return the check's data."""
     from app.services import database as db_mod
     db_mod = _mock_auth(monkeypatch)
 
@@ -538,7 +539,7 @@ def test_get_check_ticket_endpoint(client, monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. Regresión: tip cap con service_charge (bug fix v10.0)
+# 5. Regression: tip cap with service_charge (bug fix v10.0)
 #
 # Before the fix, the 50% cap was checked against check["total"] alone.
 # After the fix, cap_base = check["total"] + service_charge.
@@ -569,7 +570,7 @@ def _pay_check_mocks(monkeypatch, check_total: float):
 
     async def mock_get_restaurant(request):
         # features={} → dian_active=False, currency=None
-        return {"id": 1, "whatsapp_number": "+57300", "name": "R", "features": {}}
+        return {"id": 1, "name": "R", "features": {}}
 
     def _check_dict(check_id, status="paying"):
         return {

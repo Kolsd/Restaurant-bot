@@ -564,8 +564,8 @@ async def _run_checks(conn, aio_url: str) -> None:
     # -- 6j. VIEW restaurants returns rows with expected shape ------------------
     try:
         rows = await conn.fetch(
-            "SELECT id, name, whatsapp_number, menu, features, "
-            "billing_config, parent_restaurant_id FROM restaurants LIMIT 3"
+            "SELECT id, name, menu, features, "
+            "billing_config, display_name FROM restaurants LIMIT 3"
         )
         if rows:
             _ok("6j", f"VIEW restaurants returns {len(rows)} row(s) with expected columns")

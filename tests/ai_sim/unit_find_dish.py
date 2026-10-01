@@ -72,7 +72,7 @@ FLAT_MENU = {
     ],
 }
 
-# Nested format: {categories: [{name, items}]}  — used by setup_demo.py / seed.py
+# Nested format: {categories: [{name, items}]}  — used by scripts/demo_data.py / seed.py
 NESTED_MENU = {
     "categories": [
         {
@@ -104,13 +104,13 @@ def _make_find_dish(menu_to_return):
     import app.services.database as db_module
     import unittest.mock as mock
 
-    async def _stub_get_menu(_bot_number):
+    async def _stub_get_menu(_org_id):
         return menu_to_return
 
     # Patch db.db_get_menu inside orders module for the duration of the call
-    async def patched_find_dish(dish_name, bot_number="TEST"):
+    async def patched_find_dish(dish_name, org_id=1):
         with mock.patch.object(db_module, "db_get_menu", side_effect=_stub_get_menu):
-            return await orders_module.find_dish(dish_name, bot_number)
+            return await orders_module.find_dish(dish_name, org_id)
 
     return patched_find_dish
 

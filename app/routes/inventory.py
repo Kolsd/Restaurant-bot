@@ -1,22 +1,102 @@
+"""Inventory - stock, recipes and food cost.
+
+Stock is PER SEDE (PM 2026-09-20: "el inventario es uno por sede"). Every
+listing is filtered by the caller's sede through
+`app/routes/deps.py::resolve_sede_filter`, creating an item requires naming
+one, and stock moves between sedes with
+POST /api/inventory/{item_id}/transfer.
+
+Recipes (`dish_recipes`) and food costs stay ORG-level on purpose: a dish is
+made the same way in every sede. Only the stock it consumes is local.
+"""
 from fastapi import APIRouter, Request, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_restaurant_scoped
+from app.services import plans, sede_menu
+from app.repositories import inventory_repo
+from app.repositories.orders_repo import InsufficientStockError
+from app.routes.deps import (
+    require_auth, get_current_restaurant_scoped, get_current_user,
+    may_span_locations, resolve_sede_filter, require_plan_feature,
+)
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
 
-router = APIRouter()
+# Inventory starts at Pro (pricing 2026-09-30, app/services/plans.py).
+router = APIRouter(dependencies=[Depends(require_plan_feature(plans.INVENTORY))])
+
+
+async def _sede_for_read(request: Request) -> int | None:
+    """The sede whose stock the caller may list. None = every sede, which
+    only owner/admin get."""
+    user = await get_current_user(request)
+    sede = resolve_sede_filter(request, user)
+    return sede if isinstance(sede, int) else None
+
+
+async def _sede_for_write(request: Request, org_id: int, requested: int | None) -> int:
+    """The sede a new item belongs to, or 400.
+
+    An owner/admin manages several sedes, so they must SAY which one - the
+    sidebar's "todas las sedes" is not an answer to "where does this stock
+    live" (PM: "si el owner quiere anadir inventario debera escoger la sede
+    primero con un selector de sedes"). Anyone else writes to their own sede
+    and a `location_id` in the body is ignored rather than trusted.
+    """
+    user = await get_current_user(request)
+    if not may_span_locations(user):
+        own = resolve_sede_filter(request, user)
+        return int(own)
+
+    target = requested if requested is not None else resolve_sede_filter(request, user)
+    if not isinstance(target, int):
+        raise HTTPException(
+            status_code=400,
+            detail="Elegi la sede a la que pertenece este producto antes de guardarlo",
+        )
+    owns = await db.db_get_location_by_id(int(target))
+    if not owns or int(owns.get("org_id") or -1) != int(org_id):
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
+    return int(target)
+
+
+async def _owned_item_or_404(request: Request, item_id: int, org_id: int) -> dict:
+    """Fetch an item and refuse it unless the caller's sede may touch it.
+
+    The org_id check alone (all this used to do) let a cook at sede A edit,
+    delete or adjust sede B's stock - same tenant, different fridge.
+    """
+    existing = await db.db_get_inventory_item(item_id)
+    if not existing or existing.get("org_id") != org_id:
+        log.warning("inventory.idor_attempt", item_id=item_id, org_id=org_id)
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    sede = await _sede_for_read(request)
+    item_sede = existing.get("location_id")
+    # An unassigned row (location_id NULL) stays reachable from any sede -
+    # it is visible in every stock list, so it must be editable too.
+    if sede is not None and item_sede is not None and int(item_sede) != sede:
+        log.warning(
+            "inventory.cross_sede_attempt",
+            item_id=item_id, org_id=org_id,
+            item_location_id=item_sede, caller_sede=sede,
+        )
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    return existing
 
 
 class InventoryItemCreate(BaseModel):
     name: str
     unit: str = "unidades"          # unidades, kg, litros, etc.
     current_stock: float
-    min_stock: float = 0            # umbral de alerta
-    linked_dishes: List[str] = []   # nombres exactos de platos del menú
-    cost_per_unit: float = 0        # costo por unidad (opcional)
+    min_stock: float = 0            # alert threshold
+    linked_dishes: List[str] = []   # exact menu dish names
+    cost_per_unit: float = 0        # cost per unit (optional)
+    # The sede this stock lives in. owner/admin must send it; for anyone else
+    # it is ignored in favour of their own sede.
+    location_id: Optional[int] = None
 
 
 class InventoryItemUpdate(BaseModel):
@@ -35,19 +115,23 @@ class StockAdjustment(BaseModel):
 
 @router.get("/api/inventory")
 async def get_inventory(
+    request: Request,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Lista todos los productos del inventario"""
-    items = await db.db_get_inventory(restaurant["id"])
-    return {"items": items}
+    """Stock of the caller's sede (every sede for owner/admin)."""
+    sede = await _sede_for_read(request)
+    items = await db.db_get_inventory(restaurant["id"], location_id=sede)
+    return {"items": items, "location_id": sede}
 
 
 @router.post("/api/inventory")
 async def create_inventory_item(
+    request: Request,
     body: InventoryItemCreate,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Crea un nuevo producto en el inventario"""
+    """Creates a stock item IN a sede. 400 if an owner has not picked one."""
+    location_id = await _sede_for_write(request, restaurant["id"], body.location_id)
     item = await db.db_create_inventory_item(
         restaurant_id=restaurant["id"],
         name=body.name,
@@ -55,7 +139,8 @@ async def create_inventory_item(
         current_stock=body.current_stock,
         min_stock=body.min_stock,
         linked_dishes=body.linked_dishes,
-        cost_per_unit=body.cost_per_unit
+        cost_per_unit=body.cost_per_unit,
+        location_id=location_id,
     )
     return {"success": True, "item": item}
 
@@ -67,12 +152,8 @@ async def update_inventory_item(
     body: InventoryItemUpdate,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Actualiza un producto del inventario"""
-    existing = await db.db_get_inventory_item(item_id)
-    # Wave-2: inventory rows carry org_id (restaurant_id dropped in 0038).
-    if not existing or existing.get("org_id") != restaurant["id"]:
-        log.warning("inventory.update_idor_attempt", item_id=item_id, org_id=restaurant["id"])
-        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    """Updates an inventory product"""
+    await _owned_item_or_404(request, item_id, restaurant["id"])
     item = await db.db_update_inventory_item(item_id, body.dict(exclude_none=True))
     if not item:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
@@ -85,23 +166,21 @@ async def delete_inventory_item(
     item_id: int,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Elimina un producto del inventario"""
-    existing = await db.db_get_inventory_item(item_id)
-    # Wave-2: inventory rows carry org_id (restaurant_id dropped in 0038).
-    if not existing or existing.get("org_id") != restaurant["id"]:
-        log.warning("inventory.delete_idor_attempt", item_id=item_id, org_id=restaurant["id"])
-        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    """Deletes an inventory product"""
+    await _owned_item_or_404(request, item_id, restaurant["id"])
     await db.db_delete_inventory_item(item_id)
     return {"success": True}
 
 
 @router.post("/api/inventory/{item_id}/adjust")
 async def adjust_stock(
+    request: Request,
     item_id: int,
     body: StockAdjustment,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Ajusta el stock manualmente (reposición, merma, etc.)"""
+    """Manually adjusts stock (restock, shrinkage, etc.) in the caller's sede."""
+    await _owned_item_or_404(request, item_id, restaurant["id"])
     result = await db.db_adjust_inventory_stock(
         item_id=item_id,
         quantity_delta=body.quantity,
@@ -113,37 +192,89 @@ async def adjust_stock(
     return {"success": True, "item": result}
 
 
+class StockTransfer(BaseModel):
+    to_location_id: int = Field(..., description="Sede que recibe el producto")
+    quantity: float = Field(..., gt=0, description="Cuanto se traslada")
+    note: str = Field("", max_length=200)
+
+
+@router.post("/api/inventory/{item_id}/transfer")
+async def transfer_stock(
+    request: Request,
+    item_id: int,
+    body: StockTransfer,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Move stock of one product to another sede of the same org.
+
+    PM 2026-09-20: "se puede hacer intercambios de inventario por sede".
+
+    Who may do it follows the same line as everything else here: the SOURCE
+    must be a sede the caller may act on, so a gerente can send stock out of
+    their own sede but cannot reach into another one and pull stock from it.
+    The destination can be any sede of the org - receiving is not a privilege.
+    `_owned_item_or_404` enforces the source side.
+
+    The destination row is the same product at the other sede, matched by
+    name, created there if it does not exist yet (see
+    inventory_repo.db_transfer_inventory). Both sides get an
+    `inventory_history` entry, so each sede's movement log explains where the
+    stock went or came from.
+
+    409 - not enough stock to send. 400 - same sede, or a destination that is
+    not yours. Never a partial move: the repo does it in one transaction with
+    the source row locked.
+    """
+    await _owned_item_or_404(request, item_id, restaurant["id"])
+    try:
+        result = await inventory_repo.db_transfer_inventory(
+            org_id=restaurant["id"],
+            item_id=item_id,
+            to_location_id=body.to_location_id,
+            quantity=body.quantity,
+            note=body.note,
+        )
+    except inventory_repo.SedeTransferError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except InsufficientStockError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    return {"success": True, **result}
+
+
 @router.get("/api/inventory/{item_id}/history")
 async def get_stock_history(
     request: Request,
     item_id: int,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Historial de movimientos de stock"""
-    existing = await db.db_get_inventory_item(item_id)
-    # Wave-2: inventory rows carry org_id (restaurant_id dropped in 0038).
-    if not existing or existing.get("org_id") != restaurant["id"]:
-        log.warning("inventory.history_idor_attempt", item_id=item_id, org_id=restaurant["id"])
-        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    """Stock movement history"""
+    await _owned_item_or_404(request, item_id, restaurant["id"])
     history = await db.db_get_inventory_history(item_id)
     return {"history": history}
 
 
 @router.get("/api/inventory/alerts")
 async def get_inventory_alerts(
+    request: Request,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Productos con stock bajo o agotado"""
-    alerts = await db.db_get_inventory_alerts(restaurant["id"])
+    """Products with low or depleted stock, in the caller's sede."""
+    sede = await _sede_for_read(request)
+    alerts = await db.db_get_inventory_alerts(restaurant["id"], location_id=sede)
     return {"alerts": alerts}
 
 
 @router.get("/api/inventory/menu-items")
 async def get_menu_items_for_linking(
+    request: Request,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Devuelve todos los platos del menú para el selector de vinculación"""
-    menu = await db.db_get_menu(restaurant["whatsapp_number"]) or {}
+    """The dishes a stock item can be linked to: the caller's sede carta,
+    which includes the dishes only that sede sells (migration 0093). With
+    no sede (owner viewing every sede) it is the org's base carta."""
+    sede = await _sede_for_read(request)
+    menu = await sede_menu.get_sede_menu(restaurant["id"], sede)
     dishes = []
     for category, items in menu.items():
         for item in items:
@@ -151,7 +282,7 @@ async def get_menu_items_for_linking(
     return {"dishes": dishes}
 
 
-# ── ESCANDALLOS / RECETAS (FASE 4) ────────────────────────────────────────────
+# ── RECIPES (PHASE 4) ────────────────────────────────────────────
 
 class RecipeLine(BaseModel):
     ingredient_id: int
@@ -167,7 +298,7 @@ class RecipeUpsert(BaseModel):
 async def get_all_recipes(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Lista todos los escandallos con food cost por plato."""
+    """Lists all recipes with food cost per dish."""
     recipes = await db.db_get_all_recipes(restaurant["id"])
     return {"recipes": recipes}
 
@@ -177,7 +308,7 @@ async def get_recipe(
     dish_name: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Devuelve las líneas de ingredientes de un plato."""
+    """Returns a dish's ingredient lines."""
     lines = await db.db_get_dish_recipe(restaurant["id"], dish_name)
     return {"dish_name": dish_name, "lines": lines}
 
@@ -187,7 +318,7 @@ async def upsert_recipe(
     body: RecipeUpsert,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Crea o reemplaza el escandallo completo de un plato."""
+    """Creates or replaces a dish's full recipe."""
     if not body.dish_name.strip():
         raise HTTPException(status_code=400, detail="dish_name no puede estar vacío")
     lines = [{"ingredient_id": l.ingredient_id, "quantity": l.quantity} for l in body.lines]
@@ -200,7 +331,7 @@ async def delete_recipe(
     dish_name: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Elimina todos los ingredientes del escandallo de un plato."""
+    """Deletes all ingredients from a dish's recipe."""
     await db.db_delete_dish_recipe(restaurant["id"], dish_name)
     return {"success": True}
 
@@ -209,6 +340,6 @@ async def delete_recipe(
 async def get_food_costs(
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Food cost de cada plato con desglose por ingrediente."""
+    """Food cost of each dish with a per-ingredient breakdown."""
     costs = await db.db_get_food_costs(restaurant["id"])
     return {"food_costs": costs}

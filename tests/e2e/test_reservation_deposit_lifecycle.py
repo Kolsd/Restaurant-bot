@@ -44,11 +44,10 @@ from httpx import ASGITransport, AsyncClient
 from unittest.mock import patch
 
 from tests.e2e.conftest import (
-    WACapture,
+    BotReplies,
     create_admin_token,
-    drain_inbox,
     seed_restaurant,
-    simulate_whatsapp_inbound,
+    send_diner_message,
     truncate_e2e_data,
     _normalize_phone,
 )
@@ -121,7 +120,7 @@ def _wompi_headers(body_bytes: bytes, secret: str) -> dict:
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture()
-async def e2e_app_deposit(wa_capture):
+async def e2e_app_deposit(bot_replies):
     """
     Yields an httpx.AsyncClient wrapping the real FastAPI app.
 
@@ -159,7 +158,7 @@ async def e2e_app_deposit(wa_capture):
 async def test_reservation_deposit_wompi_lifecycle(
     test_pool: asyncpg.Pool,
     e2e_app_deposit: AsyncClient,
-    wa_capture: WACapture,
+    bot_replies: BotReplies,
 ):
     """
     Full reservation deposit (Wompi prepayment) lifecycle:
@@ -175,10 +174,10 @@ async def test_reservation_deposit_wompi_lifecycle(
     restaurant = await seed_restaurant(
         pool,
         name="E2E Deposit Test Restaurant",
-        bot_number_raw="+570E2EDEPOSIT",
+        key="+570E2EDEPOSIT",
         menu=MENU,
         payment_methods=["Efectivo"],
-        num_branches=0,  # single sede — availability resolves from principal bot_number
+        num_branches=0,  # single sede — availability resolves from the principal sede
         features_override={
             "module_reservations": True,
             "reservation_deposits": True,
@@ -186,7 +185,7 @@ async def test_reservation_deposit_wompi_lifecycle(
         },
     )
     parent_id = restaurant["id"]
-    bot_number = restaurant["whatsapp_number"]
+    org_id = restaurant["id"]
     owner_email = restaurant["owner_email"]
 
     await truncate_e2e_data(pool, parent_id)
@@ -212,7 +211,7 @@ async def test_reservation_deposit_wompi_lifecycle(
     except Exception:
         pass
 
-    log.info("e2e.deposit_test_start", parent_id=parent_id, bot_number=bot_number)
+    log.info("e2e.deposit_test_start", parent_id=parent_id, org_id=org_id)
 
     # ── Admin token + create table ────────────────────────────────────────────
     admin_token = await create_admin_token(pool, owner_email)
@@ -232,25 +231,25 @@ async def test_reservation_deposit_wompi_lifecycle(
     )
     log.info("e2e.deposit_turn_1", text=reservation_text)
     t1 = time.monotonic()
-    processed_1 = await simulate_whatsapp_inbound(
+    processed_1 = await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=reservation_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info("e2e.deposit_turn_1_done", processed=processed_1, elapsed=round(time.monotonic() - t1, 1))
     assert processed_1 >= 1, "Turn 1 was not processed"
-    assert len(wa_capture.texts_to(CUSTOMER_PHONE_RAW)) >= 1, "Bot sent no reply after turn 1"
+    assert len(bot_replies.texts_to(CUSTOMER_PHONE_RAW)) >= 1, "Bot sent no reply after turn 1"
 
     # ── Turn 2 (conditional): confirm ─────────────────────────────────────────
     confirm_text = "Sí, confirmo la reserva"
     log.info("e2e.deposit_turn_2", text=confirm_text)
     t2 = time.monotonic()
-    processed_2 = await simulate_whatsapp_inbound(
+    processed_2 = await send_diner_message(
         client, pool,
         phone=CUSTOMER_PHONE_RAW,
         text=confirm_text,
-        bot_number=bot_number,
+        org_id=org_id,
     )
     log.info("e2e.deposit_turn_2_done", processed=processed_2, elapsed=round(time.monotonic() - t2, 1))
     assert processed_2 >= 1, "Turn 2 was not processed"
@@ -418,5 +417,5 @@ async def test_reservation_deposit_wompi_lifecycle(
         f"  reservation_id={reservation_id}\n"
         f"  deposit: pending → paid (tx_id={tx_id})\n"
         f"  reservation: → confirmed, deposit_paid=True\n"
-        f"  WA messages: {len(wa_capture.texts_to(CUSTOMER_PHONE_RAW))}"
+        f"  WA messages: {len(bot_replies.texts_to(CUSTOMER_PHONE_RAW))}"
     )

@@ -3,16 +3,16 @@ import respx
 from httpx import Response
 from app.services.billing import AlegraClient, SiigoClient, LoggroClient
 
-# Usamos la marca "asyncio" porque tu código usa async/await
+# We use the "asyncio" mark because this code uses async/await
 @pytest.mark.asyncio
 @respx.mock
 async def test_alegra_create_invoice():
-    # 1. MOCK: Interceptamos la llamada a la API de Alegra
+    # 1. MOCK: Intercept the call to the Alegra API
     respx.post("https://app.alegra.com/api/v1/invoices").mock(
         return_value=Response(200, json={"id": 888, "status": "success"})
     )
 
-    # 2. Preparamos nuestro cliente y datos falsos
+    # 2. Prepare our client and fake data
     client = AlegraClient("test@mesio.com", "token_falso")
     
     mock_order = {
@@ -28,17 +28,17 @@ async def test_alegra_create_invoice():
         "currency": "COP"
     }
 
-    # 3. Ejecutamos la función de tu código
+    # 3. Run the function under test
     result = await client.create_invoice(mock_order, mock_config)
 
-    # 4. AFIRMAMOS (Assert) que el resultado sea el esperado
+    # 4. ASSERT that the result is as expected
     assert result["id"] == 888
     assert result["status"] == "success"
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_siigo_create_invoice():
-    # 1. MOCK: Siigo requiere primero un token, y luego crear la factura. Mockeamos ambas rutas.
+    # 1. MOCK: Siigo first requires a token, then invoice creation. We mock both routes.
     respx.post("https://siigo.com/api/auth").mock(
         return_value=Response(200, json={"access_token": "jwt_falso_123"})
     )
@@ -64,13 +64,13 @@ async def test_siigo_create_invoice():
 
     result = await client.create_invoice(mock_order, mock_config)
 
-    # Verificamos que funcionó
+    # Verify it worked
     assert result["id"] == "SIIGO-001"
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_loggro_create_invoice():
-    # 1. MOCK: Interceptamos Loggro
+    # 1. MOCK: Intercept Loggro
     respx.post("https://api.loggro.com/api/v1/invoices").mock(
         return_value=Response(200, json={"invoiceId": "LOG-999", "state": "approved"})
     )

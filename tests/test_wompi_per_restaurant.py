@@ -234,6 +234,10 @@ def _wompi_auth_setup(monkeypatch):
         return {
             "username": "owner_test",
             "branch_id": 1,
+            # P0 fix (2026-09): get_current_restaurant resolves ONLY via the
+            # explicit org_id/location_id fields.
+            "org_id": 1,
+            "location_id": 1,
             "role": "owner",
             "restaurant_name": "Test",
         }
@@ -244,7 +248,6 @@ def _wompi_auth_setup(monkeypatch):
             "org_id": 1,
             "location_id": 1,
             "name": "Test",
-            "whatsapp_number": "+573000000000",
             "address": "",
             "features": dict(state["features"]),
         }
@@ -264,7 +267,8 @@ def _wompi_auth_setup(monkeypatch):
 
     monkeypatch.setattr("app.routes.deps.verify_token", _verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", _get_user)
-    monkeypatch.setattr(db_mod, "db_get_restaurant_by_id", _get_restaurant_by_id)
+    monkeypatch.setattr(db_mod, "db_get_restaurant_by_org_id", _get_restaurant_by_id)
+    monkeypatch.setattr(db_mod, "db_get_restaurant_by_location_id", _get_restaurant_by_id)
     monkeypatch.setattr(db_mod, "db_check_module", _check_module)
     monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", _merge_features)
     monkeypatch.setattr(restaurant_repo, "db_update_location", _update_location)

@@ -145,7 +145,6 @@ async def _seed_reservation(
     org,
     *,
     phone: str = "573001000001",
-    bot_number: str = "573009999999",
     name: str = "Test Customer",
     hours_from_now: int = 12,
     status: str = "confirmed",
@@ -156,11 +155,11 @@ async def _seed_reservation(
     date_s, time_s = _date_time_offset(hours_from_now)
     row = await conn.fetchrow(
         """INSERT INTO reservations
-             (name, "date", "time", guests, phone, bot_number, status,
+             (name, "date", "time", guests, phone, status,
               confirmation_sent, org_id, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
            RETURNING id""",
-        name, date_s, time_s, guests, phone, bot_number, status,
+        name, date_s, time_s, guests, phone, status,
         confirmation_sent, org,
     )
     return row["id"]

@@ -56,7 +56,7 @@ class TestCostRunawayFiresAlert:
         alerts_mod._last_alert.clear()
 
         # pulso daily limit = 50_000; 2× = 100_000. Tenant used 150_000.
-        rows = [_row(org_id=42, org_name="Burger Mesio", plan_code="pulso", tokens_today=150_000)]
+        rows = [_row(org_id=42, org_name="Burger Mesio", plan_code="esencial", tokens_today=150_000)]
         pool = _make_pool_with_rows(rows)
 
         fired: list[dict] = []
@@ -86,7 +86,7 @@ class TestCostRunawayFiresAlert:
         alerts_mod._last_alert.clear()
 
         # pulso daily limit = 50_000; exactly 2× = 100_000.
-        rows = [_row(org_id=7, org_name="Exact Café", plan_code="pulso", tokens_today=100_000)]
+        rows = [_row(org_id=7, org_name="Exact Café", plan_code="esencial", tokens_today=100_000)]
         pool = _make_pool_with_rows(rows)
 
         fired: list[str] = []
@@ -181,7 +181,7 @@ class TestCostRunawayMultipleTenants:
 
         rows = [
             # Over: pulso 50_000 × 2 = 100_000; used 201_000
-            _row(org_id=10, org_name="El Culpable", plan_code="pulso", tokens_today=201_000),
+            _row(org_id=10, org_name="El Culpable", plan_code="esencial", tokens_today=201_000),
             # Under: restaurante 200_000 × 2 = 400_000; used 50_000
             _row(org_id=20, org_name="El Inocente", plan_code="restaurante", tokens_today=50_000),
         ]
@@ -218,7 +218,7 @@ class TestCostRunawayCooldown:
         # Pre-populate cooldown as if already fired just now
         alerts_mod._last_alert[alert_key] = time.monotonic()
 
-        rows = [_row(org_id=42, org_name="Burger Mesio", plan_code="pulso", tokens_today=150_000)]
+        rows = [_row(org_id=42, org_name="Burger Mesio", plan_code="esencial", tokens_today=150_000)]
         pool = _make_pool_with_rows(rows)
 
         fired: list[str] = []
@@ -253,7 +253,7 @@ class TestCostRunawayCooldown:
         today_str = date.today().isoformat()
         expected_key = f"cost_runaway:42:{today_str}"
 
-        rows = [_row(org_id=42, org_name="Burger Mesio", plan_code="pulso", tokens_today=150_000)]
+        rows = [_row(org_id=42, org_name="Burger Mesio", plan_code="esencial", tokens_today=150_000)]
         pool = _make_pool_with_rows(rows)
 
         fired_keys: list[str] = []
@@ -287,11 +287,8 @@ class TestCostRunawayRegisteredInCheckAlerts:
 
         # Stub out all other checks so they don't need real infrastructure
         for check_name in (
-            "_check_dead_letters",
             "_check_pool_exhaustion",
-            "_check_inbox_latency",
-            "_check_queue_depth",
-            "_check_error_rate",
+            "_check_churn_risk",
         ):
             monkeypatch.setattr(alerts_mod, check_name, AsyncMock())
 

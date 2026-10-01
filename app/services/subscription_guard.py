@@ -8,7 +8,7 @@ lets it propagate and replies with a generic technical-error message.
 All guards expect:
   - `org_id` int — the canonical tenant key.
   - `restaurant` dict — must include `subscription_plan` and `features`
-    (as already returned by db_get_restaurant_by_id / db_get_org_by_id).
+    (as already returned by db_get_restaurant_by_org_id / db_get_org_by_id).
 
 Each guard reads usage via subscription_repo, which requires an active
 tenant_scope() (or bypass_tenant_scope) — same as every other tenant repo.

@@ -33,29 +33,29 @@ structlog.configure(
 
 from pathlib import Path
 from starlette.responses import RedirectResponse
-from app.routes.chat import router as chat_router
 from app.routes.orders_routes import router as orders_router
 from app.routes.dashboard import router as dashboard_router
+from app.routes.live_demo import router as live_demo_router
 from app.routes.auth_routes import router as auth_router
 from app.routes.settings_routes import router as settings_router
+from app.routes.sede_menu_routes import router as sede_menu_router
+from app.routes.menu_import_routes import router as menu_import_router
+from app.routes.onboarding_routes import router as onboarding_router
 from app.routes.team_routes import router as team_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
+from app.routes.diner import router as diner_router
+from app.routes.diner_delivery import router as diner_delivery_router
+from app.routes.location_delivery import router as location_delivery_router
 from app.routes.billing import router as billing_router
 from app.routes import nps, inventory
 from app.routes.sync import router as sync_router
 from app.routes.staff import router as staff_router
-from app.routes.staff_webauthn import router as staff_webauthn_router
-from app.routes.staff_comms import router as staff_comms_router
-from app.routes.loyalty import router as loyalty_router
+from app.routes.staff_delivery import router as staff_delivery_router
 from app.routes.reservations import router as reservations_router
-from app.routes.discounts import router as discounts_router
-from app.routes.reviews import router as reviews_router
 from app.routes.health import router as health_router
-from app.routes.marketing import router as marketing_router
 from app.routes.subscription import router as subscription_router
 from app.routes.billing_subscription import router as billing_subscription_router
-from app.routes.demo import router as demo_router
 from app.routes.signup_routes import router as signup_router
 # ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
 from app.routes.internal.crm import router as internal_crm_router
@@ -90,58 +90,30 @@ async def lifespan(app):
 
     await db.db_cleanup_expired_sessions()
 
-    _disable_worker = os.getenv("DISABLE_EMBEDDED_WORKER", "").strip().lower() in ("1", "true", "yes")
-    _inbox_stop_event: asyncio.Event | None = None
-    _inbox_task: asyncio.Task | None = None
-
-    if not _disable_worker:
-        # Start the webhook inbox worker (one per uvicorn worker process).
-        # FOR UPDATE SKIP LOCKED in the worker query makes concurrent workers safe.
-        from app.services.inbox_worker import run_worker
-        _inbox_stop_event = asyncio.Event()
-        _inbox_task = asyncio.create_task(run_worker(_inbox_stop_event))
-        _log.info("inbox_worker_task_created")
-    else:
-        _log.info("inbox_worker_disabled", reason="DISABLE_EMBEDDED_WORKER is set")
-
-    # Warn loudly if ANTHROPIC_API_KEY is missing — the bot will fail silently
-    # on every incoming WhatsApp message without it.
+    # Warn loudly if ANTHROPIC_API_KEY is missing — free text typed in the
+    # diner chat gets no answer without it.
     if not os.getenv("ANTHROPIC_API_KEY"):
         _log.error(
             "startup.missing_critical_key",
             key="ANTHROPIC_API_KEY",
-            hint="Bot will not respond to any WhatsApp message until this is set",
+            hint="The diner chat cannot answer free text until this is set",
         )
 
     _redis_configured = bool(os.getenv("REDIS_URL"))
     _log.info("redis_url_configured", configured=_redis_configured)
 
-    # CRM env vars warning
-    crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID", "").strip()
-    if not crm_phone_id:
-        _log.warning(
-            "startup.crm_phone_id_unset",
-            message="CRM_PHONE_NUMBER_ID not set — inbound WA messages on the CRM support number will not be auto-captured into prospects.",
-        )
-    else:
-        _log.info("startup.crm_phone_id_configured", phone_id_prefix=crm_phone_id[:8])
+    # Turnstile (delivery/pickup diner entry, docs/claude/delivery-web.md) —
+    # logged ONCE here, never per request (app/services/turnstile.py).
+    from app.services.turnstile import log_startup_state as _turnstile_log_startup_state
+    _turnstile_log_startup_state()
 
     _log.info("app.started", version="6.0")
 
     yield
 
     # ── SHUTDOWN ──────────────────────────────────────────────────────
-    if _inbox_stop_event is not None:
-        _inbox_stop_event.set()
-
-    if _inbox_task is not None:
-        try:
-            await asyncio.wait_for(_inbox_task, timeout=10.0)
-            _log.info("inbox_worker_shutdown_clean")
-        except asyncio.TimeoutError:
-            _log.warning("inbox_worker_shutdown_timeout", timeout_seconds=10)
-        except Exception:
-            _log.exception("inbox_worker_shutdown_error")
+    from app.services.realtime import shutdown as realtime_shutdown
+    await realtime_shutdown()
 
     from app.services.redis_client import close_redis
     await close_redis()
@@ -175,10 +147,24 @@ async def security_headers_middleware(request: Request, call_next):
     # Modern browsers ignore this header; explicitly disable to avoid edge-case bugs.
     response.headers["X-XSS-Protection"] = "0"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    # WebAuthn (publickey-credentials-*) required for biometric staff clock-in.
+    # HTML pages are returned by route handlers that read the file and set no
+    # Cache-Control at all, which leaves the browser free to invent one from
+    # Last-Modified (commonly ~10% of the file's age). An old page can then go
+    # on loading old script tags after a deploy. `setdefault` so a handler
+    # that deliberately set its own — and the static mount below, which runs
+    # before this middleware — keeps it.
+    if response.headers.get("content-type", "").startswith("text/html"):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    # geolocation=(self) — NOT (): the delivery/pickup ordering page
+    # (docs/claude/delivery-web.md chunk 5, /pedir/{slug}) calls
+    # navigator.geolocation.getCurrentPosition() from OUR OWN origin to
+    # resolve the sede. An empty allowlist blocks that call in every browser
+    # that enforces Permissions-Policy (Chrome/Edge) with no visible error —
+    # the geolocation prompt just never appears — silently breaking the
+    # entire entry flow. `self` still denies every third-party/iframe embed.
     response.headers["Permissions-Policy"] = (
-        "geolocation=(), microphone=(), camera=(), "
-        "publickey-credentials-get=*, publickey-credentials-create=*"
+        "geolocation=(self), microphone=(), camera=(), "
+        "publickey-credentials-get=(), publickey-credentials-create=()"
     )
     # HSTS — only set over HTTPS to avoid breaking local dev over plain HTTP
     if request.url.scheme == "https":
@@ -188,13 +174,13 @@ async def security_headers_middleware(request: Request, call_next):
         )
     # CSP — permissive baseline; 'unsafe-inline' still required by current frontend.
     # CSP hardening progress (Sprint v11.1):
-    #   - DONE: inline <script>/<style> BLOCKS extracted from mesero.html,
-    #     kitchen.html, caja.html → /static/js/pages/*.js + /static/css/pages/*.css.
+    #   - DONE: inline <script>/<style> BLOCKS extracted from waiter.html,
+    #     kitchen.html, cashier.html → /static/js/pages/*.js + /static/css/pages/*.css.
     #   - PENDING (blocks 'unsafe-inline' removal):
     #     1. Inline <script>/<style> blocks in 15 remaining HTML files
     #        (bar, billing, dashboard, settings, staff-hq, login, etc.)
-    #     2. Inline event handlers (onclick=, etc.) — caja.html alone has 57
-    #     3. Inline style="" attributes — caja.html alone has 201
+    #     2. Inline event handlers (onclick=, etc.) — cashier.html alone has 57
+    #     3. Inline style="" attributes — cashier.html alone has 201
     #   Until those three categories are migrated, dropping 'unsafe-inline'
     #   would break every dashboard page. Tracked as a follow-up sprint.
     # CDN allowlist rationale:
@@ -209,7 +195,9 @@ async def security_headers_middleware(request: Request, call_next):
             "script-src 'self' 'unsafe-inline' "
             "https://cdn.jsdelivr.net "
             "https://unpkg.com "
-            "https://cdnjs.cloudflare.com; "
+            "https://cdnjs.cloudflare.com "
+            "https://challenges.cloudflare.com; "
+            "frame-src 'self' https://challenges.cloudflare.com; "
             "style-src 'self' 'unsafe-inline' "
             "https://cdn.jsdelivr.net "
             "https://unpkg.com "
@@ -217,7 +205,6 @@ async def security_headers_middleware(request: Request, call_next):
             "font-src 'self' data: "
             "https://fonts.gstatic.com; "
             "connect-src 'self' "
-            "https://graph.facebook.com "
             "https://checkout.wompi.co "
             "https://nominatim.openstreetmap.org "
             "https://res.cloudinary.com "
@@ -259,13 +246,27 @@ class _CachedStaticFiles(StaticFiles):
     """StaticFiles with Cache-Control headers tuned per file type.
 
     Strategy:
-      - Images (.png/.jpg/.svg/.webp/.ico/.gif): 7 days. Rarely change.
-      - JS/CSS: 1 day. Browser revalidates with If-Modified-Since (304 if same).
+      - Images (.png/.jpg/.svg/.webp/.ico/.gif): 7 days. Rarely change, and
+        a stale logo is not a broken app.
+      - JS/CSS: `no-cache` — cacheable, but revalidated on every use.
       - sw.js: no-cache + must-revalidate. Stale service workers are a footgun.
       - Everything else: 1 hour conservative.
 
-    StaticFiles already emits Last-Modified, so 304 conditional GETs work for
-    free. This adds explicit max-age so browsers don't heuristically guess.
+    **Why JS/CSS are not cached for a day.** They used to carry
+    `max-age=86400, must-revalidate`, which reads like "revalidate" but does
+    not: `must-revalidate` only governs what happens once a response is
+    STALE, so for 24 hours the browser served its copy without ever asking.
+    A deploy therefore reached a tablet whenever its day happened to end —
+    observed in this very app on 2026-09-23, where a fixed script kept
+    running in its broken version until the cache was forced. `no-cache`
+    keeps the file in the cache and makes the browser revalidate before
+    using it: unchanged files come back as a 304 with no body, so the cost
+    is one conditional request per asset, and a deploy is live immediately.
+
+    The right end state is content-hashed URLs (`app.a1b2c3.js`, cached for
+    a year), which needs the script tags to be generated rather than
+    hand-written in 30 HTML files. Until then, correctness beats the
+    handful of 304s.
     """
 
     _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico", ".gif")
@@ -280,7 +281,7 @@ class _CachedStaticFiles(StaticFiles):
             elif lower.endswith(self._IMAGE_EXTS):
                 response.headers["Cache-Control"] = "public, max-age=604800"
             elif lower.endswith(self._ASSET_EXTS):
-                response.headers["Cache-Control"] = "public, max-age=86400, must-revalidate"
+                response.headers["Cache-Control"] = "public, no-cache"
             else:
                 response.headers["Cache-Control"] = "public, max-age=3600"
         return response
@@ -293,7 +294,7 @@ app.mount("/static", _CachedStaticFiles(directory=str(STATIC_DIR)), name="static
 # DISABLED_MODULES env var is a comma-separated list of module keys to skip.
 # Default is empty — all revenue-bearing modules are ON. Per-plan enforcement
 # comes from plan_limits (db_check_caps in agent.py), not from this gate.
-# To disable specific modules, set: DISABLED_MODULES="loyalty,staff_webauthn"
+# To disable specific modules, set: DISABLED_MODULES="reservations"
 _DEFAULT_DISABLED = ""
 _disabled_modules = {
     m.strip()
@@ -313,9 +314,14 @@ app.include_router(auth_router)
 app.include_router(settings_router)
 app.include_router(team_router)
 app.include_router(stats_router)
-app.include_router(chat_router, prefix="/api")
+app.include_router(sede_menu_router)
+app.include_router(menu_import_router)
+app.include_router(onboarding_router)
 app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)
+app.include_router(diner_router)
+app.include_router(diner_delivery_router)
+app.include_router(location_delivery_router)
 app.include_router(billing_router)
 app.include_router(nps.router)
 app.include_router(inventory.router)
@@ -324,17 +330,11 @@ app.include_router(reservations_router)
 app.include_router(health_router)
 app.include_router(subscription_router)
 app.include_router(billing_subscription_router)
-app.include_router(demo_router)
 app.include_router(signup_router)
 
 # Feature-gated (disabled by default for MVP bot scope)
 _maybe_include("staff", staff_router)
-_maybe_include("staff_webauthn", staff_webauthn_router)
-_maybe_include("staff_comms", staff_comms_router)
-_maybe_include("loyalty", loyalty_router)
-_maybe_include("discounts", discounts_router)
-_maybe_include("reviews", reviews_router)
-_maybe_include("marketing", marketing_router)
+_maybe_include("staff_delivery", staff_delivery_router)
 # ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
 app.include_router(internal_crm_router)
 app.include_router(internal_admin_router)
@@ -344,6 +344,7 @@ app.include_router(internal_ops_router)
 app.include_router(internal_costs_router)
 app.include_router(internal_search_router)
 app.include_router(internal_notifications_router)
+app.include_router(live_demo_router)
 
 # ── Audit middleware (HQ compliance) ─────────────────────────────────────────
 # Records every state-changing /api/internal/* call to hq_audit_log.

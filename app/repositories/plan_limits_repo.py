@@ -28,9 +28,10 @@ from datetime import datetime, timezone, date
 from decimal import Decimal
 from typing import Any
 
+from app.services import plans
 from app.services.logging import get_logger
 from app.services.money import to_decimal, quantize_money
-from app.services.tenant_context import bypass_tenant_scope
+from app.services.tenant_context import bypass_tenant_scope, bypass_tenant_scope_if_unset
 from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
@@ -81,9 +82,17 @@ def _cap_status(used: int | Decimal, cap: int) -> str:
 async def db_get_plan(plan_code: str) -> dict | None:
     """Fetch a single plan by code. Global — no tenant required.
 
-    Uses bypass_tenant_scope("global_lookup_plans").
+    Uses bypass_tenant_scope_if_unset("global_lookup_plans") — the SOFT variant.
+    This function is called both standalone (no scope active) AND from within
+    tenant-scoped call paths (db_set_plan, db_request_downgrade are both
+    "Requires active tenant_scope(org_id)" and both call db_get_plan to validate
+    the target plan exists). A strict bypass_tenant_scope() would raise
+    TenantContextConflict whenever a tenant is already pinned — plan_limits has
+    no RLS policy at all, so there is nothing to bypass in that case; the soft
+    variant simply no-ops and lets the existing scope's connection read the
+    (unfiltered) global table.
     """
-    with bypass_tenant_scope("global_lookup_plans"):
+    with bypass_tenant_scope_if_unset("global_lookup_plans"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM plan_limits WHERE plan_code = $1",
@@ -95,9 +104,11 @@ async def db_get_plan(plan_code: str) -> dict | None:
 async def db_list_plans() -> list[dict]:
     """List all plans ordered by sort_order. Global — no tenant required.
 
-    Uses bypass_tenant_scope("global_lookup_plans").
+    Uses bypass_tenant_scope_if_unset("global_lookup_plans") — see db_get_plan
+    docstring. Called both from unauthenticated routes (no scope) and from
+    scoped routes such as GET /api/billing/plan-options.
     """
-    with bypass_tenant_scope("global_lookup_plans"):
+    with bypass_tenant_scope_if_unset("global_lookup_plans"):
         async with tenant_connection() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM plan_limits ORDER BY sort_order ASC, plan_code ASC"
@@ -108,9 +119,10 @@ async def db_list_plans() -> list[dict]:
 async def db_list_addons() -> list[dict]:
     """List all addon modules ordered by sort_order. Global — no tenant required.
 
-    Uses bypass_tenant_scope("global_lookup_plans").
+    Uses bypass_tenant_scope_if_unset("global_lookup_plans") — see db_get_plan
+    docstring.
     """
-    with bypass_tenant_scope("global_lookup_plans"):
+    with bypass_tenant_scope_if_unset("global_lookup_plans"):
         async with tenant_connection() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM addon_modules ORDER BY sort_order ASC, module_code ASC"
@@ -133,7 +145,7 @@ async def db_get_org_subscription(org_id: int) -> dict:
                    o.auto_recharge_max_packs_per_month,
                    o.current_period_start, o.current_period_convs_used,
                    o.current_period_audio_min_used, o.comp_until,
-                   o.annual_billing,
+                   o.annual_billing, o.founder_price_cop, o.paid_until,
                    pl.display_name AS plan_display_name,
                    pl.monthly_price_cop, pl.conv_cap, pl.audio_min_cap,
                    pl.storage_mb_cap, pl.locations_included, pl.staff_cap,
@@ -167,27 +179,6 @@ async def db_increment_conv_usage(org_id: int, count: int = 1) -> int:
         )
     result = int(new_val or 0)
     log.debug("plan_limits.conv_incremented", org_id=org_id, count=count, new_total=result)
-    return result
-
-
-async def db_increment_audio_usage(org_id: int, minutes: Decimal) -> Decimal:
-    """Atomically increment audio usage (in minutes) for the current period.
-
-    Returns the new current_period_audio_min_used value.
-    # Requires active tenant_scope(org_id).
-    """
-    async with tenant_connection() as conn:
-        new_val = await conn.fetchval(
-            """
-            UPDATE organizations
-               SET current_period_audio_min_used = current_period_audio_min_used + $2
-             WHERE id = $1
-            RETURNING current_period_audio_min_used
-            """,
-            org_id, minutes,
-        )
-    result = to_decimal(new_val)
-    log.debug("plan_limits.audio_incremented", org_id=org_id, minutes=str(minutes), new_total=str(result))
     return result
 
 
@@ -281,109 +272,6 @@ async def db_check_caps(org_id: int) -> dict:
     }
 
 
-async def db_create_pack(
-    org_id: int,
-    credits: int = 100,
-    amount_paid_cop: int = 50_000,
-    fired_automatically: bool = False,
-) -> int:
-    """Insert a new usage_pack for the org.
-
-    expires_at is set to the end of the current billing period
-    (midnight UTC on the last day of the current calendar month).
-
-    Returns the new pack id.
-    # Requires active tenant_scope(org_id).
-    """
-    async with tenant_connection() as conn:
-        pack_id = await conn.fetchval(
-            """
-            INSERT INTO usage_packs
-                (org_id, credits_total, credits_remaining, amount_paid_cop,
-                 fired_automatically, expires_at)
-            VALUES
-                ($1, $2, $2, $3, $4,
-                 DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 second')
-            RETURNING id
-            """,
-            org_id, credits, amount_paid_cop, fired_automatically,
-        )
-    result = int(pack_id)
-    log.info(
-        "plan_limits.pack_created",
-        org_id=org_id, pack_id=result, credits=credits,
-        fired_automatically=fired_automatically,
-    )
-    return result
-
-
-async def db_count_packs_this_period(org_id: int) -> int:
-    """Count usage_packs fired since current_period_start.
-
-    # Requires active tenant_scope(org_id).
-    """
-    async with tenant_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT COALESCE(COUNT(*), 0) AS pack_count,
-                   o.current_period_start
-            FROM organizations o
-            LEFT JOIN usage_packs up ON up.org_id = o.id
-                AND up.fired_at >= o.current_period_start::timestamptz
-            WHERE o.id = $1
-            GROUP BY o.current_period_start
-            """,
-            org_id,
-        )
-    if row is None:
-        return 0
-    return int(row["pack_count"] or 0)
-
-
-async def db_consume_pack_credit(org_id: int, count: int = 1) -> int:
-    """Decrement credits_remaining FIFO across non-expired packs with remaining credits.
-
-    Processes packs oldest first (by fired_at). Skips expired or fully-consumed packs.
-    Returns the actual number of credits consumed (may be less than `count` if not
-    enough credits are available).
-
-    Each credit consumed via an atomic single-statement UPDATE with FOR UPDATE SKIP LOCKED
-    to prevent TOCTOU races between concurrent workers (P0 revenue leak fix).
-
-    # Requires active tenant_scope(org_id).
-    """
-    consumed = 0
-    remaining_to_consume = count
-
-    async with tenant_connection() as conn:
-        for _ in range(remaining_to_consume):
-            async with conn.transaction():
-                row = await conn.fetchrow(
-                    """
-                    UPDATE usage_packs
-                    SET credits_remaining = credits_remaining - 1
-                    WHERE id = (
-                        SELECT id FROM usage_packs
-                        WHERE org_id = $1
-                          AND credits_remaining > 0
-                          AND expires_at > NOW()
-                        ORDER BY fired_at ASC
-                        LIMIT 1
-                        FOR UPDATE SKIP LOCKED
-                    )
-                    RETURNING id, credits_remaining
-                    """,
-                    org_id,
-                )
-            if row is None:
-                break  # No eligible pack — stop consuming
-            consumed += 1
-
-    if consumed > 0:
-        log.info("plan_limits.pack_credits_consumed", org_id=org_id, consumed=consumed, requested=count)
-    return consumed
-
-
 async def db_reset_period(org_id: int) -> None:
     """Reset current period usage counters and advance current_period_start to today.
 
@@ -404,34 +292,6 @@ async def db_reset_period(org_id: int) -> None:
     log.info("plan_limits.period_reset", org_id=org_id)
 
 
-async def db_set_auto_recharge(
-    org_id: int,
-    enabled: bool,
-    max_packs: int = 5,
-) -> None:
-    """Update auto-recharge config for an org.
-
-    Raises ValueError if max_packs > 5 (hard cap per spec).
-    # Requires active tenant_scope(org_id).
-    """
-    if max_packs > 5:
-        raise ValueError(f"max_packs cannot exceed 5, got {max_packs}")
-    if max_packs < 0:
-        raise ValueError(f"max_packs must be >= 0, got {max_packs}")
-
-    async with tenant_connection() as conn:
-        await conn.execute(
-            """
-            UPDATE organizations
-               SET auto_recharge_enabled = $2,
-                   auto_recharge_max_packs_per_month = $3
-             WHERE id = $1
-            """,
-            org_id, enabled, max_packs,
-        )
-    log.info("plan_limits.auto_recharge_updated", org_id=org_id, enabled=enabled, max_packs=max_packs)
-
-
 async def db_set_plan(
     org_id: int,
     plan_code: str,
@@ -447,26 +307,105 @@ async def db_set_plan(
     if plan is None:
         raise ValueError(f"Unknown plan_code: {plan_code!r}")
 
+    # A founder keeps 40% off on whatever plan they move to, frozen at the
+    # list price of the moment (the CASE leaves non-founders at NULL).
+    founder = plans.founder_price(plan_code)
     async with tenant_connection() as conn:
         if active_addons is not None:
             await conn.execute(
                 """
                 UPDATE organizations
-                   SET plan_code = $2, active_addons = $3
+                   SET plan_code = $2, subscription_plan = $2, active_addons = $3,
+                       founder_price_cop = CASE WHEN founder_price_cop IS NULL
+                                                THEN NULL ELSE $4::int END
                  WHERE id = $1
                 """,
-                org_id, plan_code, active_addons,
+                org_id, plan_code, active_addons, founder,
             )
         else:
             await conn.execute(
-                "UPDATE organizations SET plan_code = $2 WHERE id = $1",
-                org_id, plan_code,
+                """
+                UPDATE organizations
+                   SET plan_code = $2, subscription_plan = $2,
+                       founder_price_cop = CASE WHEN founder_price_cop IS NULL
+                                                THEN NULL ELSE $3::int END
+                 WHERE id = $1
+                """,
+                org_id, plan_code, founder,
             )
     log.info(
         "plan_limits.plan_changed",
         org_id=org_id, plan_code=plan_code,
         addons=active_addons,
     )
+
+
+async def db_record_payment(org_id: int, months: int) -> datetime:
+    """Record a payment of `months` months; returns the new paid_until.
+
+    The paid period starts where the org's current coverage ends — the paid
+    period or the free days, whichever is later — or now if both are past,
+    so paying early never loses days.
+    # Requires active tenant_scope(org_id) or bypass for internal admin routes.
+    """
+    async with tenant_connection() as conn:
+        paid_until = await conn.fetchval(
+            """
+            UPDATE organizations
+               SET paid_until = GREATEST(NOW(), COALESCE(paid_until, NOW()),
+                                         COALESCE(comp_until, NOW()))
+                                + make_interval(months => $2)
+             WHERE id = $1
+            RETURNING paid_until
+            """,
+            org_id, months,
+        )
+    if paid_until is None:
+        raise ValueError(f"org_id {org_id} not found")
+    log.info("plan_limits.payment_recorded", org_id=org_id, months=months,
+             paid_until=paid_until.isoformat())
+    return paid_until
+
+
+class FounderSpotsTaken(Exception):
+    """All founder-program spots are already given out."""
+
+
+async def db_set_founder(org_id: int, founder: bool) -> int | None:
+    """Put an org in or out of the founder program; returns its founder price.
+
+    Joining freezes 40% off the org's current plan (plans.founder_price) and
+    is refused once plans.FOUNDER_SPOTS orgs hold it. Leaving clears the
+    price for good — the landing says a founder who cancels loses it.
+    # Requires active tenant_scope(org_id) or bypass for internal admin routes.
+    """
+    async with tenant_connection() as conn:
+        if not founder:
+            await conn.execute(
+                "UPDATE organizations SET founder_price_cop = NULL WHERE id = $1", org_id,
+            )
+            log.info("plan_limits.founder_cleared", org_id=org_id)
+            return None
+        # Serialize concurrent grants so two admins cannot hand out spot 11.
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtext('mesio_founder_spots'))")
+        row = await conn.fetchrow(
+            "SELECT plan_code, founder_price_cop FROM organizations WHERE id = $1", org_id,
+        )
+        if row is None:
+            raise ValueError(f"org_id {org_id} not found")
+        if row["founder_price_cop"] is not None:
+            return int(row["founder_price_cop"])
+        taken = await conn.fetchval(
+            "SELECT COUNT(*) FROM organizations WHERE founder_price_cop IS NOT NULL"
+        )
+        if taken >= plans.FOUNDER_SPOTS:
+            raise FounderSpotsTaken()
+        price = plans.founder_price(row["plan_code"])
+        await conn.execute(
+            "UPDATE organizations SET founder_price_cop = $2 WHERE id = $1", org_id, price,
+        )
+    log.info("plan_limits.founder_set", org_id=org_id, founder_price_cop=price)
+    return price
 
 
 async def db_set_comp_until(
@@ -489,15 +428,9 @@ async def db_set_comp_until(
 # ── Pending plan downgrade ────────────────────────────────────────────────────
 
 # Plan sort order for downgrade validation (lower index = smaller plan).
-_PLAN_ORDER = ["pulso", "restaurante", "pro", "cadena"]
-
-
 def _plan_rank(plan_code: str) -> int:
-    """Return numeric rank of a plan (lower = smaller). Unknown plans get rank 999."""
-    try:
-        return _PLAN_ORDER.index(plan_code.lower())
-    except ValueError:
-        return 999
+    """Return numeric rank of a plan (lower = smaller). Unknown plans rank last."""
+    return plans.plan_rank(plan_code)
 
 
 async def db_request_downgrade(
@@ -530,7 +463,7 @@ async def db_request_downgrade(
         )
         if current_row is None:
             raise ValueError(f"org_id {org_id} not found")
-        current_plan = current_row["plan_code"] or "pulso"
+        current_plan = current_row["plan_code"] or "esencial"
 
         if _plan_rank(new_plan_code) >= _plan_rank(current_plan):
             raise ValueError(
@@ -637,6 +570,12 @@ async def db_apply_due_downgrades() -> list[dict]:
                 """
                 UPDATE organizations
                    SET plan_code                 = pending_plan_code,
+                       subscription_plan         = pending_plan_code,
+                       founder_price_cop         = CASE
+                           WHEN founder_price_cop IS NULL THEN NULL
+                           ELSE (SELECT t.price FROM unnest($1::text[], $2::int[]) AS t(code, price)
+                                  WHERE t.code = pending_plan_code)
+                       END,
                        pending_plan_code         = NULL,
                        pending_plan_effective_at = NULL,
                        pending_kept_location_id  = NULL
@@ -644,6 +583,8 @@ async def db_apply_due_downgrades() -> list[dict]:
                    AND pending_plan_effective_at <= NOW()
                 RETURNING id, plan_code, pending_kept_location_id
                 """,
+                list(plans.PLAN_ORDER),
+                [plans.founder_price(code) for code in plans.PLAN_ORDER],
             )
     results = [_row_to_dict(r) for r in rows]
     if results:

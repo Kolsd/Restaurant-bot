@@ -59,7 +59,7 @@ class TestIsDianEnabled:
 class TestSettingsResponseDefault:
     def test_dian_enabled_defaults_false(self):
         from app.routes.settings_routes import _build_settings_response
-        restaurant = {"id": 1, "name": "Test", "whatsapp_number": "", "address": "",
+        restaurant = {"id": 1, "name": "Test", "address": "",
                       "latitude": None, "longitude": None}
         features = {}
         resp = _build_settings_response(restaurant, features)
@@ -68,7 +68,7 @@ class TestSettingsResponseDefault:
 
     def test_dian_enabled_true_when_set(self):
         from app.routes.settings_routes import _build_settings_response
-        restaurant = {"id": 1, "name": "Test", "whatsapp_number": "", "address": "",
+        restaurant = {"id": 1, "name": "Test", "address": "",
                       "latitude": None, "longitude": None}
         features = {"dian_enabled": True}
         resp = _build_settings_response(restaurant, features)
@@ -144,16 +144,16 @@ class TestBillingEmitGate:
         from app.main import app
 
         # Mock get_current_user to return a valid admin user
-        mock_user = {"branch_id": 1, "role": "owner", "id": 99}
+        mock_user = {"branch_id": 1, "org_id": 1, "role": "owner", "id": 99}
         # Mock db_get_restaurant_by_id to return a restaurant with dian_enabled=False
         mock_restaurant = {
             "id": 1, "name": "Test", "features": {"dian_enabled": False},
-            "whatsapp_number": "test:1", "address": "",
         }
 
         with (
             patch("app.routes.billing.get_current_user", new=AsyncMock(return_value=mock_user)),
-            patch("app.routes.billing.db.db_get_restaurant_by_id", new=AsyncMock(return_value=mock_restaurant)),
+            patch("app.services.plan_access.org_has_feature", new=AsyncMock(return_value=True)),
+            patch("app.routes.billing.db.db_get_restaurant_by_org_id", new=AsyncMock(return_value=mock_restaurant)),
         ):
             client = TestClient(app, raise_server_exceptions=False)
             resp = client.post(
@@ -170,15 +170,15 @@ class TestBillingEmitGate:
         from fastapi.testclient import TestClient
         from app.main import app
 
-        mock_user = {"branch_id": 1, "role": "owner", "id": 99}
+        mock_user = {"branch_id": 1, "org_id": 1, "role": "owner", "id": 99}
         mock_restaurant = {
             "id": 1, "name": "Test", "features": {"dian_enabled": True},
-            "whatsapp_number": "test:1", "address": "",
         }
 
         with (
             patch("app.routes.billing.get_current_user", new=AsyncMock(return_value=mock_user)),
-            patch("app.routes.billing.db.db_get_restaurant_by_id", new=AsyncMock(return_value=mock_restaurant)),
+            patch("app.services.plan_access.org_has_feature", new=AsyncMock(return_value=True)),
+            patch("app.routes.billing.db.db_get_restaurant_by_org_id", new=AsyncMock(return_value=mock_restaurant)),
             patch("app.routes.billing.emit_invoice", new=AsyncMock(return_value={"success": True, "id": "inv-1"})),
             patch("app.services.tenant_context.tenant_scope"),
         ):

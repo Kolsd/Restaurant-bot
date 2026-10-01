@@ -82,7 +82,7 @@ def test_by_channel_default_period(client, patched_auth, monkeypatch):
     """Without period params, endpoint must still call repo (uses last-7-days default)."""
     captured = {}
 
-    async def _mock_channel(org_id, period_start, period_end, location_id=None):
+    async def _mock_channel(org_id, period_start, period_end, location_id=None, tz="UTC"):
         captured["period_start"] = period_start
         captured["period_end"] = period_end
         return MOCK_CHANNEL_RESPONSE
@@ -100,7 +100,12 @@ def test_by_channel_default_period(client, patched_auth, monkeypatch):
 
 def test_classify_channel_mapping():
     """Unit test for the channel→bucket classification helper."""
-    assert stats_repo._classify_channel("whatsapp_bot", "recoger") == "whatsapp_bot"
+    assert stats_repo._classify_channel("whatsapp_bot", None) == "whatsapp_bot"
+    # Delivery/pickup is counted by type, whatever channel took it — web
+    # orders carry "web_chat" like the dine-in chat and were lumped with it.
+    assert stats_repo._classify_channel("web_chat", "domicilio") == "delivery"
+    assert stats_repo._classify_channel("web_chat", "recoger") == "pickup"
+    assert stats_repo._classify_channel("whatsapp_bot", "recoger") == "pickup"
     assert stats_repo._classify_channel("pos", None) == "pos"
     assert stats_repo._classify_channel("qr_table", None) == "qr_table"
     assert stats_repo._classify_channel(None, "domicilio") == "delivery"

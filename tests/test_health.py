@@ -231,15 +231,12 @@ class TestHealthMetrics:
         """Valid auth → 200 with expected keys (infrastructure metrics)."""
         monkeypatch.setenv("ADMIN_KEY", "test-key-123")
 
-        # The metrics endpoint calls get_pool() eight times:
+        # The metrics endpoint calls get_pool() five times:
         #   1. pool stats (get_size / get_idle_size, no acquire)
-        #   2. inbox_queue_depth
-        #   3. inbox_dead_letters
-        #   4. orders_today
-        #   5. active_table_sessions
-        #   6. active_conversations
-        #   7. restaurants_total
-        #   8. staff_clocked_in
+        #   2. orders_today
+        #   3. active_table_sessions
+        #   4. active_conversations
+        #   5. restaurants_total
         def _make_conn_mock(return_value):
             conn = AsyncMock()
             conn.fetchval = AsyncMock(return_value=return_value)
@@ -256,13 +253,10 @@ class TestHealthMetrics:
 
         get_pool_mock = AsyncMock(side_effect=[
             stats_pool,
-            _make_conn_mock(5),   # inbox_queue_depth
-            _make_conn_mock(2),   # inbox_dead_letters
             _make_conn_mock(42),  # orders_today
             _make_conn_mock(3),   # active_table_sessions
             _make_conn_mock(7),   # active_conversations
             _make_conn_mock(10),  # restaurants_total
-            _make_conn_mock(4),   # staff_clocked_in
         ])
 
         with patch(_METRICS_PATCH_TARGET, get_pool_mock):
@@ -273,8 +267,8 @@ class TestHealthMetrics:
         assert "db_pool_size" in body
         assert "db_pool_free" in body
         assert "db_pool_used" in body
-        assert "inbox_queue_depth" in body
-        assert "inbox_dead_letters" in body
+        assert body["orders_today"] == 42
+        assert "inbox_queue_depth" not in body
 
     def test_metrics_pool_values_correct(self, client, monkeypatch):
         """Pool size arithmetic is correct: used = size - free."""
@@ -296,13 +290,10 @@ class TestHealthMetrics:
 
         get_pool_mock = AsyncMock(side_effect=[
             stats_pool,
-            _make_conn_mock(0),  # inbox_queue_depth
-            _make_conn_mock(0),  # inbox_dead_letters
             _make_conn_mock(0),  # orders_today
             _make_conn_mock(0),  # active_table_sessions
             _make_conn_mock(0),  # active_conversations
             _make_conn_mock(0),  # restaurants_total
-            _make_conn_mock(0),  # staff_clocked_in
         ])
 
         with patch(_METRICS_PATCH_TARGET, get_pool_mock):
@@ -341,13 +332,10 @@ class TestHealthMetrics:
 
         get_pool_mock = AsyncMock(side_effect=[
             stats_pool,
-            _make_conn_mock(0),    # inbox_queue_depth
-            _make_conn_mock(0),    # inbox_dead_letters
             _make_conn_mock(17),   # orders_today
             _make_conn_mock(6),    # active_table_sessions
             _make_conn_mock(11),   # active_conversations
             _make_conn_mock(3),    # restaurants_total
-            _make_conn_mock(8),    # staff_clocked_in
         ])
 
         with patch(_METRICS_PATCH_TARGET, get_pool_mock):
@@ -359,7 +347,6 @@ class TestHealthMetrics:
         assert body["active_table_sessions"] == 6
         assert body["active_conversations"] == 11
         assert body["restaurants_total"] == 3
-        assert body["staff_clocked_in"] == 8
 
     def test_metrics_business_counters_fallback_to_none_on_error(self, client, monkeypatch):
         """If a business metric query fails, its value is None and other metrics still present."""
@@ -386,13 +373,10 @@ class TestHealthMetrics:
 
         get_pool_mock = AsyncMock(side_effect=[
             stats_pool,
-            _make_conn_mock(1),    # inbox_queue_depth — ok
-            _make_conn_mock(0),    # inbox_dead_letters — ok
             _make_error_pool(),    # orders_today — fails
             _make_conn_mock(2),    # active_table_sessions — ok
             _make_conn_mock(3),    # active_conversations — ok
             _make_conn_mock(5),    # restaurants_total — ok
-            _make_conn_mock(1),    # staff_clocked_in — ok
         ])
 
         with patch(_METRICS_PATCH_TARGET, get_pool_mock):
@@ -404,4 +388,3 @@ class TestHealthMetrics:
         assert body["active_table_sessions"] == 2    # subsequent metrics still work
         assert body["active_conversations"] == 3
         assert body["restaurants_total"] == 5
-        assert body["staff_clocked_in"] == 1

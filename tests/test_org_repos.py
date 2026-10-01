@@ -53,9 +53,6 @@ def _make_org_row(org_id: int = 1, name: str = "Test Org") -> dict:
         "id": org_id,
         "name": name,
         "slug": "test-org",
-        "whatsapp_number": "573001234567",
-        "wa_phone_id": "phone_id_1",
-        "wa_access_token": "token_1",
         "menu": json.dumps({"Principales": [{"name": "Bandeja", "price": 28000}]}),
         "features": json.dumps({"locale": "es-CO", "currency": "COP"}),
         "subscription_plan": "pro",
@@ -82,9 +79,6 @@ def _make_location_row(
         "address": "Calle 1 #2-3",
         "latitude": lat,
         "longitude": lon,
-        "whatsapp_number": whatsapp_number,
-        "wa_phone_id": None,
-        "wa_access_token": None,
         "active": True,
         "is_primary": is_primary,
         "timezone": "America/Bogota",
@@ -105,96 +99,10 @@ class _FakeRecord(dict):
 # ── Test: db_get_org_by_phone matches organizations.whatsapp_number ──────────
 
 
-async def test_db_get_org_by_phone_matches_organization_number():
-    """When phone matches organizations.whatsapp_number, returns Org dict with
-    matched_location_id=None."""
-    conn = _make_conn()
-    # Location query returns nothing (no override match)
-    conn.fetchrow = AsyncMock(
-        side_effect=[
-            None,  # locations JOIN query
-            _FakeRecord(_make_org_row(org_id=5, name="Org A")),  # organizations query
-        ]
-    )
-    pool = _make_pool(conn)
-
-    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-        from app.repositories.restaurant_repo import db_get_org_by_phone
-
-        result = await db_get_org_by_phone("+57 300 123 4567")
-
-    assert result is not None
-    assert result["id"] == 5
-    assert result["name"] == "Org A"
-    assert result["matched_location_id"] is None
-
-
 # ── Test: db_get_org_by_phone matches locations.whatsapp_number ──────────────
 
 
-async def test_db_get_org_by_phone_matches_location_override_number():
-    """When phone matches a Location's whatsapp_number, returns Org dict with
-    matched_location_id set to that location's id."""
-    conn = _make_conn()
-    # Location query returns a row with location_id = 11 and org data
-    loc_match = _FakeRecord({
-        "location_id": 11,
-        "id": 3,
-        "name": "Cadena Norte",
-        "slug": "cadena-norte",
-        "whatsapp_number": "573009999888",
-        "wa_phone_id": None,
-        "wa_access_token": None,
-        "menu": json.dumps([]),
-        "features": json.dumps({"locale": "es-CO", "currency": "COP"}),
-        "subscription_plan": "pro",
-        "subscription_status": "active",
-        "created_at": None,
-        "updated_at": None,
-    })
-    conn.fetchrow = AsyncMock(return_value=loc_match)
-    pool = _make_pool(conn)
-
-    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-        from app.repositories.restaurant_repo import db_get_org_by_phone
-
-        result = await db_get_org_by_phone("573009999888")
-
-    assert result is not None
-    assert result["id"] == 3
-    assert result["matched_location_id"] == 11
-    # Org's whatsapp_number in result is from organizations row, not the location
-    assert result["name"] == "Cadena Norte"
-
-
 # ── Test: db_get_org_by_phone normalizes phone format ────────────────────────
-
-
-async def test_db_get_org_by_phone_normalizes_phone_format():
-    """Ensure + and spaces are stripped before querying — the SQL also strips,
-    but we test that the normalization path reaches the query with expected form."""
-    conn = _make_conn()
-
-    # Capture the phone argument passed to the first fetchrow call
-    captured_args: list = []
-
-    async def _capturing_fetchrow(sql: str, *args):
-        captured_args.extend(args)
-        return None  # no match
-
-    conn.fetchrow = AsyncMock(side_effect=_capturing_fetchrow)
-    pool = _make_pool(conn)
-
-    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-        from app.repositories.restaurant_repo import db_get_org_by_phone
-
-        await db_get_org_by_phone("+57 300 123 4567")
-
-    # First fetchrow call should receive the normalized phone (no + or spaces)
-    assert captured_args, "No arguments captured — fetchrow was not called"
-    assert "+" not in captured_args[0], f"Phone not normalized: {captured_args[0]!r}"
-    assert " " not in captured_args[0], f"Phone has spaces: {captured_args[0]!r}"
-    assert captured_args[0] == "573001234567"
 
 
 # ── Test: db_get_org_locations returns primary first ─────────────────────────

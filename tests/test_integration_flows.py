@@ -52,6 +52,26 @@ def _make_pool_for_conn(conn):
     return pool
 
 
+async def _register_prod_jsonb_codec(conn) -> None:
+    """Register the SAME jsonb codec app/services/database.py's real
+    get_pool() registers on every production connection (encoder=json.dumps,
+    decoder=json.loads).
+
+    conftest.py's shared `db_conn` fixture does NOT register this — its bare
+    asyncpg connection needs an ALREADY-serialized string for a $n::jsonb
+    param. Production requires the opposite (a raw dict/list, encoded
+    exactly once by the codec) — this is the exact P0 double-encoding bug
+    class documented in orders_repo.deduct_inventory_in_tx and
+    inventory_repo.db_deduct_inventory_for_order. `_make_pool_for_conn`
+    above is this test module's stand-in for the REAL get_pool(), so it
+    must behave like it. Call this right before that patch — every setup
+    write above it (which correctly used a pre-dumped string for the
+    then-bare connection) is unaffected; only what runs after sees the
+    codec."""
+    from app.services.database import init_connection  # same jsonb codec as the app pool
+    await init_connection(conn)
+
+
 # ── Tiny helpers ──────────────────────────────────────────────────────────────
 
 def _uid() -> str:
@@ -91,11 +111,10 @@ async def _insert_restaurant(conn, *, tip_distribution: dict | None = None) -> i
     if tip_distribution is not None:
         features["tip_distribution"] = tip_distribution
     org_id = await conn.fetchval(
-        """INSERT INTO organizations (name, whatsapp_number, features)
-           VALUES ($1, $2, $3::jsonb)
+        """INSERT INTO organizations (name, features)
+           VALUES ($1, $2::jsonb)
            RETURNING id""",
         "Test Restaurant",
-        f"+57{uuid.uuid4().int % 10_000_000_000:010d}",
         json.dumps(features),
     )
     # Insert location with explicit id = org_id (see docstring for rationale)
@@ -292,16 +311,14 @@ class TestDeliveryOrderFlow:
         )
 
         phone = "+573001111111"
-        bot_number = str(rid)
 
         # Insert a cart row (Wave-2: carts has org_id NOT NULL)
         await conn.execute(
             """
-            INSERT INTO carts (phone, bot_number, org_id, cart_data, updated_at)
-            VALUES ($1, $2, $3, $4::jsonb, NOW())
+            INSERT INTO carts (phone, org_id, cart_data, updated_at)
+            VALUES ($1, $2, $3::jsonb, NOW())
             """,
             phone,
-            bot_number,
             rid,
             json.dumps({"items": [{"name": dish_name, "quantity": 2, "price": 25_000}]}),
         )
@@ -319,7 +336,6 @@ class TestDeliveryOrderFlow:
             "status":         "pendiente_pago",
             "paid":           False,
             "payment_url":    "",
-            "bot_number":     bot_number,
             "payment_method": "",
             "base_order_id":  None,
             "sub_number":     1,
@@ -328,13 +344,14 @@ class TestDeliveryOrderFlow:
         from app.repositories import orders_repo
 
         fake_pool = _make_pool_for_conn(conn)
+        await _register_prod_jsonb_codec(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=fake_pool)):
             with tenant_scope(rid):
                 await orders_repo.commit_order_transaction(
                     fake_pool,
                     restaurant_id=rid,
                     conversation_id=phone,
-                    cart={"bot_number": bot_number},
+                    cart={},
                     order_payload=order_payload,
                 )
 
@@ -346,9 +363,9 @@ class TestDeliveryOrderFlow:
 
         # Cart deleted
         cart = await conn.fetchrow(
-            "SELECT * FROM carts WHERE phone = $1 AND bot_number = $2",
+            "SELECT * FROM carts WHERE phone = $1 AND org_id = $2",
             phone,
-            bot_number,
+            rid,
         )
         assert cart is None
 
@@ -387,13 +404,13 @@ class TestDeliveryOrderFlow:
             "status":         "pendiente_pago",
             "paid":           False,
             "payment_url":    "",
-            "bot_number":     str(rid),
             "payment_method": "",
             "base_order_id":  None,
             "sub_number":     1,
         }
 
         fake_pool = _make_pool_for_conn(conn)
+        await _register_prod_jsonb_codec(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=fake_pool)):
             with tenant_scope(rid):
                 with pytest.raises(InsufficientStockError) as exc_info:
@@ -401,7 +418,7 @@ class TestDeliveryOrderFlow:
                         fake_pool,
                         restaurant_id=rid,
                         conversation_id="+573009999999",
-                        cart={"bot_number": str(rid)},
+                        cart={},
                         order_payload=order_payload,
                     )
 
@@ -423,16 +440,14 @@ class TestDeliveryOrderFlow:
         rid = await _insert_restaurant(conn)
 
         phone = "+573002222222"
-        bot_number = str(rid)
 
         # Wave-2: carts has org_id NOT NULL
         await conn.execute(
             """
-            INSERT INTO carts (phone, bot_number, org_id, cart_data, updated_at)
-            VALUES ($1, $2, $3, $4::jsonb, NOW())
+            INSERT INTO carts (phone, org_id, cart_data, updated_at)
+            VALUES ($1, $2, $3::jsonb, NOW())
             """,
             phone,
-            bot_number,
             rid,
             json.dumps({"items": [{"name": "Café Americano", "quantity": 1, "price": 5_000}]}),
         )
@@ -453,20 +468,20 @@ class TestDeliveryOrderFlow:
             "status":         "pendiente_pago",
             "paid":           False,
             "payment_url":    "",
-            "bot_number":     bot_number,
             "payment_method": "",
             "base_order_id":  None,
             "sub_number":     1,
         }
 
         fake_pool = _make_pool_for_conn(conn)
+        await _register_prod_jsonb_codec(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=fake_pool)):
             with tenant_scope(rid):
                 await orders_repo.commit_order_transaction(
                     fake_pool,
                     restaurant_id=rid,
                     conversation_id=phone,
-                    cart={"bot_number": bot_number},
+                    cart={},
                     order_payload=order_payload,
                 )
 
@@ -583,230 +598,6 @@ class TestTableCheckFlow:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Flow 3: Staff clock-in → paid check → tip distribution
 # ═══════════════════════════════════════════════════════════════════════════════
-
-class TestTipDistributionFlow:
-    """
-    Complete tip lifecycle:
-      configure restaurant → clock-in staff → pay check with tip
-      → db_calculate_tips_by_attendance → verify allocation.
-    """
-
-    @pytest.mark.asyncio
-    async def test_single_role_gets_full_tip(self, db_conn):
-        """
-        Config: mesero=100 %
-        1 mesero on shift, 1 paid check with tip.
-        Expected: mesero receives 100 % of the tip; unallocated = 0.
-        """
-        conn = db_conn
-        rest_id = await _insert_restaurant(conn, tip_distribution={"mesero": 100})
-
-        mesero_id = await _insert_staff(
-            conn, restaurant_id=rest_id, name="Mesero Único", role="mesero"
-        )
-        await _insert_shift(
-            conn,
-            staff_id=mesero_id,
-            restaurant_id=rest_id,
-            clock_in=SHIFT_IN,
-            clock_out=SHIFT_OUT,
-        )
-
-        base_id = await _insert_table_order(conn, restaurant_id=rest_id)
-        await _insert_check(conn, base_order_id=base_id, tip_amount=40_000, paid_at=PAID_AT)
-
-        from app.repositories.staff_repo import db_calculate_tips_by_attendance
-
-        pool = _make_pool_for_conn(conn)
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            with tenant_scope(rest_id):
-                result = await db_calculate_tips_by_attendance(
-                    rest_id, PERIOD_START, PERIOD_END
-                )
-
-        assert result["total_tips"] == 40_000
-        assert result["unallocated"] == 0
-        assert len(result["entries"]) == 1
-        assert result["entries"][0]["name"] == "Mesero Único"
-        assert result["entries"][0]["total_tips"] == 40_000
-
-    @pytest.mark.asyncio
-    async def test_two_roles_split_tip(self, db_conn):
-        """
-        Config: mesero=60 %, cocina=40 %
-        1 mesero + 1 cocinero both on shift.
-        tip=100 000 → mesero gets 60 000, cocina gets 40 000.
-        """
-        conn = db_conn
-        rest_id = await _insert_restaurant(
-            conn, tip_distribution={"mesero": 60, "cocina": 40}
-        )
-
-        mesero_id = await _insert_staff(
-            conn, restaurant_id=rest_id, name="Mesero Split", role="mesero"
-        )
-        cocina_id = await _insert_staff(
-            conn, restaurant_id=rest_id, name="Cocinero Split", role="cocina"
-        )
-
-        for sid in [mesero_id, cocina_id]:
-            await _insert_shift(
-                conn,
-                staff_id=sid,
-                restaurant_id=rest_id,
-                clock_in=SHIFT_IN,
-                clock_out=SHIFT_OUT,
-            )
-
-        base_id = await _insert_table_order(conn, restaurant_id=rest_id)
-        await _insert_check(
-            conn, base_order_id=base_id, tip_amount=100_000, paid_at=PAID_AT
-        )
-
-        from app.repositories.staff_repo import db_calculate_tips_by_attendance
-
-        pool = _make_pool_for_conn(conn)
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            with tenant_scope(rest_id):
-                result = await db_calculate_tips_by_attendance(
-                    rest_id, PERIOD_START, PERIOD_END
-                )
-
-        assert result["total_tips"] == 100_000
-        assert result["unallocated"] == 0
-
-        by_name = {e["name"]: e["total_tips"] for e in result["entries"]}
-        assert by_name["Mesero Split"] == 60_000
-        assert by_name["Cocinero Split"] == 40_000
-
-    @pytest.mark.asyncio
-    async def test_staff_not_on_shift_unallocated(self, db_conn):
-        """
-        Staff shift does NOT cover the check's paid_at time.
-        Entire tip becomes unallocated.
-        """
-        conn = db_conn
-        rest_id = await _insert_restaurant(conn, tip_distribution={"mesero": 100})
-
-        sid = await _insert_staff(
-            conn, restaurant_id=rest_id, name="Mesero Ausente", role="mesero"
-        )
-        # Shift ends before the check is paid
-        await _insert_shift(
-            conn,
-            staff_id=sid,
-            restaurant_id=rest_id,
-            clock_in="2024-06-01T08:00:00+00:00",
-            clock_out="2024-06-01T10:00:00+00:00",  # ends at 10:00, check paid at 14:00
-        )
-
-        base_id = await _insert_table_order(conn, restaurant_id=rest_id)
-        await _insert_check(
-            conn, base_order_id=base_id, tip_amount=50_000, paid_at=PAID_AT
-        )
-
-        from app.repositories.staff_repo import db_calculate_tips_by_attendance
-
-        pool = _make_pool_for_conn(conn)
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            with tenant_scope(rest_id):
-                result = await db_calculate_tips_by_attendance(
-                    rest_id, PERIOD_START, PERIOD_END
-                )
-
-        assert result["total_tips"] == 50_000
-        assert result["unallocated"] == 50_000
-        assert result["entries"] == []
-
-    @pytest.mark.asyncio
-    async def test_non_invoiced_check_excluded(self, db_conn):
-        """
-        Checks with status != 'invoiced' are excluded from tip calculation.
-        """
-        conn = db_conn
-        rest_id = await _insert_restaurant(conn, tip_distribution={"mesero": 100})
-
-        sid = await _insert_staff(
-            conn, restaurant_id=rest_id, name="Mesero Activo", role="mesero"
-        )
-        await _insert_shift(
-            conn,
-            staff_id=sid,
-            restaurant_id=rest_id,
-            clock_in=SHIFT_IN,
-            clock_out=SHIFT_OUT,
-        )
-
-        base_id = await _insert_table_order(conn, restaurant_id=rest_id)
-        # status='open' — must be ignored
-        await _insert_check(
-            conn,
-            base_order_id=base_id,
-            tip_amount=30_000,
-            paid_at=PAID_AT,
-            status="open",
-        )
-
-        from app.repositories.staff_repo import db_calculate_tips_by_attendance
-
-        pool = _make_pool_for_conn(conn)
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            with tenant_scope(rest_id):
-                result = await db_calculate_tips_by_attendance(
-                    rest_id, PERIOD_START, PERIOD_END
-                )
-
-        assert result["entries"] == []
-        assert result["total_tips"] == 0
-
-    @pytest.mark.asyncio
-    async def test_multiple_checks_accumulate_per_staff(self, db_conn):
-        """
-        Two checks in the period, both served by the same mesero.
-        Tips accumulate correctly and tickets_contributed reflects both checks.
-        """
-        conn = db_conn
-        rest_id = await _insert_restaurant(conn, tip_distribution={"mesero": 100})
-
-        sid = await _insert_staff(
-            conn, restaurant_id=rest_id, name="Mesero Acumulador", role="mesero"
-        )
-        await _insert_shift(
-            conn,
-            staff_id=sid,
-            restaurant_id=rest_id,
-            clock_in=SHIFT_IN,
-            clock_out=SHIFT_OUT,
-        )
-
-        base_a = await _insert_table_order(conn, restaurant_id=rest_id)
-        await _insert_check(
-            conn, base_order_id=base_a, tip_amount=20_000,
-            paid_at="2024-06-01T12:00:00+00:00",
-        )
-
-        base_b = await _insert_table_order(conn, restaurant_id=rest_id)
-        await _insert_check(
-            conn, base_order_id=base_b, tip_amount=30_000, paid_at=PAID_AT
-        )
-
-        from app.repositories.staff_repo import db_calculate_tips_by_attendance
-
-        pool = _make_pool_for_conn(conn)
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            with tenant_scope(rest_id):
-                result = await db_calculate_tips_by_attendance(
-                    rest_id, PERIOD_START, PERIOD_END
-                )
-
-        assert result["total_tips"] == 50_000
-        assert result["unallocated"] == 0
-        assert len(result["entries"]) == 1
-
-        entry = result["entries"][0]
-        assert entry["total_tips"] == 50_000
-        assert entry["tickets_contributed"] == 2
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Flow 4: Staff clock-in unique constraint

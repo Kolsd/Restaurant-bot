@@ -5,7 +5,13 @@ These replace the legacy {action, items, reply} JSON output format.
 Claude now generates natural reply text directly and calls tools for actions.
 
 Usage:
-    from app.services.agent_tools import TOOLS_SALON, TOOLS_EXTERNAL, ALL_TOOLS
+    from app.services.agent_tools import TOOLS_SALON, ALL_TOOLS
+
+Delivery/pickup order-creation tools (create_delivery_order, create_pickup_order,
+change_payment_method, cancel_order, notify_arrival) were removed in chunk 9 of
+the web delivery wave (docs/claude/delivery-web.md): ordering moved entirely to
+the web channel, and WhatsApp customers now get a deterministic reply instead of
+an LLM tool-use loop, so these tools must never be handed to the model again.
 """
 
 # ---------------------------------------------------------------------------
@@ -91,143 +97,11 @@ _CALL_WAITER = {
     }
 }
 
-_CREATE_DELIVERY_ORDER = {
-    "name": "create_delivery_order",
-    "description": (
-        "Create a delivery order to be sent to the customer's address. "
-        "Use this when the customer wants food delivered to their location. "
-        "Only available in external (delivery/pickup) mode."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "items": {
-                "type": "array",
-                "description": "List of items the customer wants to order.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Name of the menu item exactly as it appears in the menu."
-                        },
-                        "qty": {
-                            "type": "integer",
-                            "description": "Quantity to order.",
-                            "minimum": 1
-                        }
-                    },
-                    "required": ["name", "qty"]
-                },
-                "minItems": 1
-            },
-            "address": {
-                "type": "string",
-                "description": "Full delivery address provided by the customer."
-            },
-            "payment_method": {
-                "type": "string",
-                "description": "Payment method chosen by the customer (e.g. 'efectivo', 'transferencia', 'tarjeta').",
-                "enum": ["efectivo", "transferencia", "tarjeta", "nequi", "daviplata", "wompi"]
-            },
-            "notes": {
-                "type": "string",
-                "description": "Optional special instructions or order notes."
-            },
-            "branch_id": {
-                "type": "integer",
-                "description": "ID of the branch that will fulfill the order. Defaults to 0 (nearest/default branch).",
-                "default": 0
-            }
-        },
-        "required": ["items", "address", "payment_method"]
-    }
-}
-
-_CREATE_PICKUP_ORDER = {
-    "name": "create_pickup_order",
-    "description": (
-        "Create a pickup order for the customer to collect at the restaurant. "
-        "Use this when the customer wants to order for pickup (to-go / para llevar). "
-        "Only available in external (delivery/pickup) mode."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "items": {
-                "type": "array",
-                "description": "List of items the customer wants to order.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Name of the menu item exactly as it appears in the menu."
-                        },
-                        "qty": {
-                            "type": "integer",
-                            "description": "Quantity to order.",
-                            "minimum": 1
-                        }
-                    },
-                    "required": ["name", "qty"]
-                },
-                "minItems": 1
-            },
-            "payment_method": {
-                "type": "string",
-                "description": "Payment method chosen by the customer (e.g. 'efectivo', 'transferencia', 'tarjeta').",
-                "enum": ["efectivo", "transferencia", "tarjeta", "nequi", "daviplata", "wompi"]
-            },
-            "notes": {
-                "type": "string",
-                "description": "Optional special instructions or order notes."
-            },
-            "branch_id": {
-                "type": "integer",
-                "description": "ID of the branch where the customer will pick up. Defaults to 0 (nearest/default branch).",
-                "default": 0
-            },
-            "scheduled_pickup_at": {
-                "type": "string",
-                "description": (
-                    "Optional ISO 8601 datetime when the customer plans to pick up. "
-                    "Only include if the customer specifies a time "
-                    "(e.g. 'en 30 minutos' → now+30min, '7:30 pm' → today 19:30). "
-                    "Use Colombia timezone (UTC-5). Omit if no time was given."
-                )
-            }
-        },
-        "required": ["items", "payment_method"]
-    }
-}
-
-_CHANGE_PAYMENT_METHOD = {
-    "name": "change_payment_method",
-    "description": (
-        "Change the payment method on the customer's existing pending order. "
-        "Use this when the customer has already placed an order and wants to change how they will pay. "
-        "Only available in external (delivery/pickup) mode."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "payment_method": {
-                "type": "string",
-                "description": "The new payment method the customer wants to use (e.g. 'efectivo', 'transferencia', 'tarjeta').",
-                "enum": ["efectivo", "transferencia", "tarjeta", "nequi", "daviplata", "wompi"]
-            }
-        },
-        "required": ["payment_method"]
-    }
-}
-
 _MAKE_RESERVATION = {
     "name": "make_reservation",
     "description": (
         "Make a table reservation at the restaurant. "
-        "Use this when the customer wants to book a table for a future date and time. "
-        "Available in both dine-in (salon) and external modes."
+        "Use this when the customer wants to book a table for a future date and time."
     ),
     "input_schema": {
         "type": "object",
@@ -265,8 +139,7 @@ _END_SESSION = {
     "description": (
         "Close the current session and end the conversation flow. "
         "Use this when the customer explicitly says goodbye, wants to end the chat, "
-        "or when the interaction is naturally complete. "
-        "Available in both dine-in (salon) and external modes."
+        "or when the interaction is naturally complete."
     ),
     "input_schema": {
         "type": "object",
@@ -278,7 +151,7 @@ _END_SESSION = {
 _SEND_DISH_CARD = {
     "name": "send_dish_card",
     "description": (
-        "Envía al cliente una foto del plato con nombre, precio y descripción corta. "
+        "Muestra en el chat la tarjeta del plato: foto, nombre, precio y descripción corta. "
         "Úsalo SOLO cuando el cliente pide ver o recomendaciones de un plato específico "
         "Y el restaurante tiene imágenes configuradas. "
         "Si el plato no tiene foto disponible, NO uses esta tool — responde con texto normal."
@@ -302,43 +175,6 @@ _SEND_DISH_CARD = {
     },
 }
 
-_CANCEL_ORDER = {
-    "name": "cancel_order",
-    "description": (
-        "Cancel the customer's current pending delivery or pickup order. "
-        "Only callable when the customer's most recent order is in status 'pendiente' "
-        "(before the kitchen confirms it). "
-        "If the order is already confirmed or in a later state, this tool returns an error "
-        "message and the customer must contact the restaurant directly. "
-        "Do NOT use this for dine-in (table) orders — those require staff intervention."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "reason": {
-                "type": "string",
-                "description": "Optional customer-provided reason for cancelling (free text)."
-            }
-        },
-        "required": []
-    }
-}
-
-_NOTIFY_ARRIVAL = {
-    "name": "notify_arrival",
-    "description": (
-        "Customer reports they have arrived at the restaurant to pick up their order. "
-        "Only callable when the customer has a pickup order in status 'listo' OR 'en_preparacion'. "
-        "Fires a waiter_alert so staff can hand over the order. "
-        "If there is no active pickup order in those statuses, the tool returns an error message."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
-}
-
 _CANCEL_RESERVATION = {
     "name": "cancel_reservation",
     "description": (
@@ -360,25 +196,6 @@ _CANCEL_RESERVATION = {
         },
         "required": []
     }
-}
-
-_REDEEM_LOYALTY_POINTS = {
-    "name": "redeem_loyalty_points",
-    "description": (
-        "Apply customer's loyalty points as a discount on their current order or "
-        "table check. Use only after the customer confirms they want to redeem. "
-        "Validate balance first via context."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "points": {
-                "type": "integer",
-                "description": "Number of points to redeem (must be > 0 and <= customer balance)",
-            }
-        },
-        "required": ["points"],
-    },
 }
 
 _REMEMBER_CUSTOMER_PREFERENCE = {
@@ -422,29 +239,14 @@ TOOLS_SALON: list[dict] = [
     _CANCEL_RESERVATION,
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
-    _SEND_DISH_CARD,
     # cache_control on the LAST tool caches all tools in this list.
     # Anthropic prompt caching for tools: the cache breakpoint is set on
     # the last tool entry, so all preceding tools are included in the cache.
-    {**_REDEEM_LOYALTY_POINTS, "cache_control": {"type": "ephemeral"}},
+    {**_SEND_DISH_CARD, "cache_control": {"type": "ephemeral"}},
 ]
-"""Tools available in dine-in (salon/table) mode."""
-
-TOOLS_EXTERNAL: list[dict] = [
-    _CREATE_DELIVERY_ORDER,
-    _CREATE_PICKUP_ORDER,
-    _CHANGE_PAYMENT_METHOD,
-    _CANCEL_ORDER,
-    _NOTIFY_ARRIVAL,
-    _MAKE_RESERVATION,
-    _CANCEL_RESERVATION,
-    _END_SESSION,
-    _REMEMBER_CUSTOMER_PREFERENCE,
-    _SEND_DISH_CARD,
-    # cache_control on the LAST tool caches all tools in this list.
-    {**_REDEEM_LOYALTY_POINTS, "cache_control": {"type": "ephemeral"}},
-]
-"""Tools available in external (delivery/pickup) mode."""
+"""Tools available in dine-in (salon/table) mode. Since chunk 9 of the web
+delivery wave, this is also the only tool list the agent ever uses — the old
+"external" (delivery/pickup) mode and its order-creation tools were removed."""
 
 # ---------------------------------------------------------------------------
 # Lookup dict: tool name → definition
@@ -456,17 +258,11 @@ ALL_TOOLS: dict[str, dict] = {
         _PLACE_ORDER,
         _REQUEST_BILL,
         _CALL_WAITER,
-        _CREATE_DELIVERY_ORDER,
-        _CREATE_PICKUP_ORDER,
-        _CHANGE_PAYMENT_METHOD,
-        _CANCEL_ORDER,
-        _NOTIFY_ARRIVAL,
         _MAKE_RESERVATION,
         _CANCEL_RESERVATION,
         _END_SESSION,
         _REMEMBER_CUSTOMER_PREFERENCE,
         _SEND_DISH_CARD,
-        _REDEEM_LOYALTY_POINTS,
     ]
 }
 """Maps every tool name to its definition dict for O(1) lookup."""

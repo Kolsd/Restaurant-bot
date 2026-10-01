@@ -1,15 +1,13 @@
-/* ── NPS & Reseñas page ──────────────────────────────────────────── */
+/* ── NPS page: survey score + read-only feed of answers ───────────── */
 (function () {
   'use strict';
 
   const token = localStorage.getItem('rb_token');
   if (!token) { location.href = '/login'; return; }
 
-  let _restaurantName = '';
-  try {
-    const rb = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-    _restaurantName = rb.name || rb.restaurant_name || '';
-  } catch (_) {}
+  // /api/nps/responses takes a named period, the buttons carry days.
+  const _PERIOD_BY_DAYS = { '7': 'week', '30': 'month', '90': 'semester', '365': 'year' };
+  let _feedPeriod = 'month';
 
   // Period filter
   document.querySelectorAll('.page-head .seg-btn').forEach(function (btn) {
@@ -17,6 +15,7 @@
       document.querySelectorAll('.page-head .seg-btn').forEach(function (b) { b.classList.remove('active'); });
       btn.classList.add('active');
       const days = btn.dataset.days || '30';
+      _feedPeriod = _PERIOD_BY_DAYS[days] || 'month';
       loadNPS(days);
       loadReviews();
     });
@@ -36,23 +35,10 @@
     if (!feed) return;
     feed.querySelectorAll('.review').forEach(function (rev) {
       if (filter === 'all' || filter === 'Todas') { rev.style.display = ''; return; }
-      const status = rev.dataset.status || '';
-      const visible = filter === 'pending' || filter === 'Pendientes' ? status === 'pending'
-        : filter === 'urgent' || filter === 'Urgentes' ? status === 'urgent'
-        : filter === '5star' || filter === '5★' ? rev.dataset.stars === '5'
+      const visible = filter === '5star' || filter === '5★' ? rev.dataset.stars === '5'
         : filter === 'low' || filter === '1-3★' ? parseInt(rev.dataset.stars || '5', 10) <= 3
         : true;
       rev.style.display = visible ? '' : 'none';
-    });
-  }
-
-  // Send survey button
-  const surveyBtn = document.getElementById('btn-send-survey');
-  if (surveyBtn) {
-    surveyBtn.addEventListener('click', function () {
-      if (typeof mesioToast === 'function') {
-        mesioToast('Envío de encuesta no disponible aún', 'info');
-      }
     });
   }
 
@@ -148,40 +134,8 @@
   function sourceChip(source) {
     const map = { google: 'source-google', tripadvisor: 'source-tripadvisor', whatsapp: 'source-wa', internal: 'source-internal' };
     const cls = map[(source || '').toLowerCase()] || 'source-internal';
-    return '<span class="source-chip ' + cls + '">' + _escHtml(source || 'Encuesta') + '</span>';
-  }
-
-  function reviewStatusBadge(rev) {
-    if (rev.owner_reply) return '<span class="badge success">Respondida</span>';
-    if (rev.score <= 3) return '<span class="badge danger">Urgente · ' + rev.score + '★</span>';
-    return '<span class="badge warn">Pendiente</span>';
-  }
-
-  function reviewStatus(rev) {
-    if (rev.owner_reply) return 'responded';
-    if (rev.score <= 3) return 'urgent';
-    return 'pending';
-  }
-
-  function renderReplyBlock(rev) {
-    if (rev.owner_reply) {
-      return '<div class="rev-reply">' +
-        '<div class="rev-reply-head">↳ Respuesta del restaurante</div>' +
-        _escHtml(rev.owner_reply) +
-        '</div>';
-    }
-    // Show action buttons for pending/urgent
-    const idAttr = 'data-review-id="' + rev.id + '"';
-    const comment = _escHtml(rev.comment || rev.review_text || '');
-    const score = rev.score || 0;
-    return '<div class="rev-actions" data-review-id="' + rev.id + '">' +
-      '<button class="btn sm primary" data-action="suggest" ' + idAttr + ' data-score="' + score + '" data-comment="' + comment + '">✨ Sugerir respuesta</button>' +
-      '<textarea class="rev-reply-textarea" placeholder="Escribe tu respuesta…" style="display:none;width:100%;margin-top:8px;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:13px;resize:vertical;min-height:60px;"></textarea>' +
-      '<div style="display:none;gap:6px;margin-top:6px;" class="rev-reply-send-row">' +
-      '<button class="btn sm primary" data-action="save-reply" ' + idAttr + '>Responder</button>' +
-      '<button class="btn sm ghost" data-action="publish" ' + idAttr + '>Publicar</button>' +
-      '</div>' +
-      '</div>';
+    const label = cls === 'source-internal' ? 'Encuesta' : source;
+    return '<span class="source-chip ' + cls + '">' + _escHtml(label) + '</span>';
   }
 
   function renderReviews(reviews) {
@@ -200,10 +154,9 @@
       const score = rev.score || rev.rating || 0;
       const comment = rev.comment || rev.review_text || '';
       const date = typeof mesioDate === 'function' ? mesioDate(rev.created_at || '') : (rev.created_at || '');
-      const status = reviewStatus(rev);
       const stars = parseInt(score, 10);
 
-      return '<div class="review" data-status="' + status + '" data-stars="' + stars + '" data-review-id="' + rev.id + '">' +
+      return '<div class="review" data-stars="' + stars + '" data-review-id="' + rev.id + '">' +
         '<div class="rev-avatar" style="background:var(--brand-light);color:var(--brand);">' + _escHtml(initials) + '</div>' +
         '<div style="flex:1;">' +
         '<div class="rev-name">' + _escHtml(name) + '</div>' +
@@ -213,135 +166,26 @@
         '<span>· ' + _escHtml(date) + '</span>' +
         '</div>' +
         '<div class="rev-body">' + _escHtml(comment) + '</div>' +
-        renderReplyBlock(rev) +
         '</div>' +
-        reviewStatusBadge(rev) +
+        (stars <= 3 ? '<span class="badge danger">' + stars + '★</span>' : '') +
         '</div>';
     }).join('');
 
     feed.setAttribute('data-loaded', 'true');
-    bindReviewActions(feed);
-  }
-
-  // ── Review action wiring ──────────────────────────────────────────
-
-  function bindReviewActions(container) {
-    container.querySelectorAll('[data-action]').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        const action = btn.dataset.action;
-        const id = btn.dataset.reviewId;
-        const actionsBlock = btn.closest('[data-review-id]');
-        if (action === 'suggest') suggestReply(btn, actionsBlock);
-        else if (action === 'save-reply') saveReply(id, actionsBlock);
-        else if (action === 'publish') publishReview(id, btn);
-      });
-    });
-  }
-
-  async function suggestReply(btn, actionsBlock) {
-    const id = btn.dataset.reviewId;
-    const score = btn.dataset.score || '?';
-    const comment = btn.dataset.comment || '';
-    const prompt = 'Tipo: review_reply\nRating: ' + score + '/10\nComentario: ' + comment +
-      '\nRestaurante: ' + _restaurantName;
-
-    if (typeof mesioToast === 'function') mesioToast('Generando respuesta con IA…', 'info', 2000);
-
-    try {
-      const headers = Object.assign({ 'Content-Type': 'application/json' },
-        typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token });
-      const res = await fetch('/api/ai/proxy', {
-        method: 'POST', headers,
-        body: JSON.stringify({ prompt: prompt, max_tokens: 300 })
-      });
-      if (!res.ok) throw new Error('status ' + res.status);
-      const data = await res.json();
-      const text = data.text || data.content || data.reply || '';
-
-      // Show textarea with suggestion
-      const textarea = actionsBlock ? actionsBlock.querySelector('.rev-reply-textarea') : null;
-      const sendRow = actionsBlock ? actionsBlock.querySelector('.rev-reply-send-row') : null;
-      if (textarea) {
-        textarea.value = text;
-        textarea.style.display = '';
-      }
-      if (sendRow) sendRow.style.display = 'flex';
-    } catch (e) {
-      console.error('nps: suggest error', e);
-      if (typeof mesioToast === 'function') mesioToast('Error al generar respuesta IA', 'error');
-    }
-  }
-
-  async function saveReply(id, actionsBlock) {
-    const textarea = actionsBlock ? actionsBlock.querySelector('.rev-reply-textarea') : null;
-    const reply = textarea ? textarea.value.trim() : '';
-    if (!reply) {
-      if (typeof mesioToast === 'function') mesioToast('Escribe una respuesta primero', 'warning');
-      return;
-    }
-    try {
-      const headers = Object.assign({ 'Content-Type': 'application/json' },
-        typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token });
-      const res = await fetch('/api/reviews/' + id + '/reply', {
-        method: 'PUT', headers,
-        body: JSON.stringify({ reply: reply })
-      });
-      if (!res.ok) throw new Error('status ' + res.status);
-      if (typeof mesioToast === 'function') mesioToast('Respuesta guardada', 'success');
-      // Update DOM inline
-      const reviewEl = document.querySelector('.review[data-review-id="' + id + '"]');
-      if (reviewEl) {
-        const body = reviewEl.querySelector('.rev-body');
-        if (body) {
-          const replyDiv = document.createElement('div');
-          replyDiv.className = 'rev-reply';
-          replyDiv.innerHTML = '<div class="rev-reply-head">↳ Tu respuesta</div>' + _escHtml(reply);
-          body.insertAdjacentElement('afterend', replyDiv);
-        }
-        if (actionsBlock) actionsBlock.style.display = 'none';
-        reviewEl.dataset.status = 'responded';
-        const badge = reviewEl.querySelector('.badge:last-child');
-        if (badge) { badge.className = 'badge success'; badge.textContent = 'Respondida'; }
-      }
-    } catch (e) {
-      console.error('nps: save-reply error', e);
-      if (typeof mesioToast === 'function') mesioToast('Error al guardar respuesta', 'error');
-    }
-  }
-
-  async function publishReview(id, btn) {
-    try {
-      const headers = Object.assign({ 'Content-Type': 'application/json' },
-        typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token });
-      const res = await fetch('/api/reviews/' + id + '/publish', {
-        method: 'PUT', headers,
-        body: JSON.stringify({ is_public: true })
-      });
-      if (!res.ok) throw new Error('status ' + res.status);
-      if (typeof mesioToast === 'function') mesioToast('Reseña publicada', 'success');
-      if (btn) btn.textContent = '✓ Publicada';
-    } catch (e) {
-      console.error('nps: publish error', e);
-      if (typeof mesioToast === 'function') mesioToast('Error al publicar reseña', 'error');
-    }
   }
 
   async function loadReviews() {
     try {
       const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-      const res = await fetch('/api/reviews', { headers });
+      const res = await fetch('/api/nps/responses?period=' + _feedPeriod + '&limit=100', { headers });
       if (!res.ok) { return; }
       const data = await res.json();
-      const reviews = data.reviews || data;
+      const reviews = data.responses || [];
       renderReviews(Array.isArray(reviews) ? reviews : []);
     } catch (e) {
-      console.error('nps: reviews error', e);
+      console.error('nps: responses error', e);
     }
   }
-
-  // Also bind existing static review action buttons (before dynamic load)
-  bindReviewActions(document.getElementById('reviews-feed') || document.body);
 
   loadNPS('30');
   loadReviews();

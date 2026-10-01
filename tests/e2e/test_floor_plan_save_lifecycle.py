@@ -91,7 +91,7 @@ async def test_floor_plan_save_reload_round_trips(
     restaurant = await seed_restaurant(
         pool,
         name="E2E FloorPlan Restaurant",
-        bot_number_raw="+570FLOORPLAN1",
+        key="+570FLOORPLAN1",
         num_branches=1,
     )
     org_id = restaurant["id"]
@@ -190,10 +190,10 @@ async def test_floor_plan_cross_tenant_blocked(
 
     # ── Seed two restaurants ───────────────────────────────────────────────────
     rest_a = await seed_restaurant(
-        pool, name="E2E FP Iso A", bot_number_raw="+570FPISOAX1", num_branches=1,
+        pool, name="E2E FP Iso A", key="+570FPISOAX1", num_branches=1,
     )
     rest_b = await seed_restaurant(
-        pool, name="E2E FP Iso B", bot_number_raw="+570FPISOBX1", num_branches=1,
+        pool, name="E2E FP Iso B", key="+570FPISOBX1", num_branches=1,
     )
     org_a, loc_a = rest_a["id"], rest_a["branches"][0]["id"]
     org_b, loc_b = rest_b["id"], rest_b["branches"][0]["id"]

@@ -54,11 +54,10 @@ async def _insert_restaurant(conn) -> int:
     locations.id is a plain SERIAL — explicit id inserts are allowed.
     """
     org_id = await conn.fetchval(
-        """INSERT INTO organizations (name, whatsapp_number)
-           VALUES ($1, $2)
+        """INSERT INTO organizations (name)
+           VALUES ($1)
            RETURNING id""",
         "Restaurante Test " + _uid()[:8],
-        "+57" + str(uuid.uuid4().int)[:10],
     )
     # Force location_id = org_id (see docstring)
     await conn.execute(
@@ -100,17 +99,16 @@ async def _insert_inventory_item(
     return row["id"]
 
 
-async def _insert_cart(conn, phone: str, bot_number: str, restaurant_id: int, items: list[dict]) -> None:
+async def _insert_cart(conn, phone: str, restaurant_id: int, items: list[dict]) -> None:
     """Upsert a cart row.
 
     Wave-2: carts has org_id NOT NULL — must be provided.
     """
     await conn.execute(
-        """INSERT INTO carts (phone, bot_number, org_id, cart_data)
-           VALUES ($1, $2, $3, $4::jsonb)
-           ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data = EXCLUDED.cart_data""",
+        """INSERT INTO carts (phone, org_id, cart_data)
+           VALUES ($1, $2, $3::jsonb)
+           ON CONFLICT (phone, org_id) DO UPDATE SET cart_data = EXCLUDED.cart_data""",
         phone,
-        bot_number,
         restaurant_id,
         json.dumps({"items": items, "order_type": "domicilio", "address": "Calle 1", "notes": ""}),
     )
@@ -119,7 +117,6 @@ async def _insert_cart(conn, phone: str, bot_number: str, restaurant_id: int, it
 def _make_order_payload(
     order_id: str,
     phone: str,
-    bot_number: str,
     items: list[dict],
     *,
     subtotal=Decimal("35000"),
@@ -140,10 +137,31 @@ def _make_order_payload(
         "paid":           False,
         "payment_url":    "",
         "payment_method": "wompi",
-        "bot_number":     bot_number,
         "base_order_id":  None,
         "sub_number":     1,
     }
+
+
+async def _register_prod_jsonb_codec(conn) -> None:
+    """Register the SAME jsonb codec app/services/database.py's real
+    get_pool() registers on every production connection (encoder=json.dumps,
+    decoder=json.loads).
+
+    conftest.py's shared `db_conn` fixture does NOT register this — its bare
+    asyncpg connection uses asyncpg's default jsonb handling, which requires
+    an ALREADY-serialized string. Production requires the opposite (a raw
+    dict/list, encoded exactly once by the codec) — passing a pre-dumped
+    string there double-encodes it (see the P0 note now in both
+    orders_repo.deduct_inventory_in_tx and inventory_repo.
+    db_deduct_inventory_for_order). Since `_make_pool_for_conn` below is
+    this test module's stand-in for the REAL get_pool(), it must behave
+    like it, including this codec — call this right before that patch so
+    every setup INSERT above it (which correctly used a pre-dumped string
+    for the then-bare connection) is unaffected, and only the
+    commit_order_transaction call after it sees the codec.
+    """
+    from app.services.database import init_connection  # same jsonb codec as the app pool
+    await init_connection(conn)
 
 
 def _make_pool_for_conn(conn):
@@ -179,22 +197,22 @@ async def test_happy_path_order_committed(db_conn):
     )
 
     phone = "+57300" + str(uuid.uuid4().int)[:7]
-    bot_number = "+57900" + str(uuid.uuid4().int)[:7]
     order_id = "ORD-" + _uid()
 
     items = [{"name": dish_name, "quantity": 2, "price": 17500}]
-    await _insert_cart(db_conn, phone, bot_number, restaurant_id, items)
+    await _insert_cart(db_conn, phone, restaurant_id, items)
 
     pool = _make_pool_for_conn(db_conn)
-    payload = _make_order_payload(order_id, phone, bot_number, items)
+    payload = _make_order_payload(order_id, phone, items)
 
+    await _register_prod_jsonb_codec(db_conn)
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(restaurant_id):
             await commit_order_transaction(
                 pool,
                 restaurant_id=restaurant_id,
                 conversation_id=phone,
-                cart={"items": items, "bot_number": bot_number},
+                cart={"items": items},
                 order_payload=payload,
             )
 
@@ -210,7 +228,7 @@ async def test_happy_path_order_committed(db_conn):
 
     # Cart must be deleted
     cart = await db_conn.fetchrow(
-        "SELECT 1 FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number
+        "SELECT 1 FROM carts WHERE phone=$1 AND org_id=$2", phone, restaurant_id
     )
     assert cart is None, "Cart was not deleted after successful commit"
 
@@ -232,15 +250,15 @@ async def test_insufficient_stock_raises_and_rolls_back(db_conn):
     )
 
     phone = "+57300" + str(uuid.uuid4().int)[:7]
-    bot_number = "+57900" + str(uuid.uuid4().int)[:7]
     order_id = "ORD-" + _uid()
 
     items = [{"name": dish_name, "quantity": 3, "price": 5000}]
-    await _insert_cart(db_conn, phone, bot_number, restaurant_id, items)
+    await _insert_cart(db_conn, phone, restaurant_id, items)
 
     pool = _make_pool_for_conn(db_conn)
-    payload = _make_order_payload(order_id, phone, bot_number, items, subtotal=Decimal("15000"), total=Decimal("15000"))
+    payload = _make_order_payload(order_id, phone, items, subtotal=Decimal("15000"), total=Decimal("15000"))
 
+    await _register_prod_jsonb_codec(db_conn)
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(restaurant_id):
             with pytest.raises(InsufficientStockError) as exc_info:
@@ -248,7 +266,7 @@ async def test_insufficient_stock_raises_and_rolls_back(db_conn):
                     pool,
                     restaurant_id=restaurant_id,
                     conversation_id=phone,
-                    cart={"items": items, "bot_number": bot_number},
+                    cart={"items": items},
                     order_payload=payload,
                 )
 
@@ -283,17 +301,16 @@ async def test_decimal_coercion_float_inputs(db_conn):
     restaurant_id = await _insert_restaurant(db_conn)
 
     phone = "+57300" + str(uuid.uuid4().int)[:7]
-    bot_number = "+57900" + str(uuid.uuid4().int)[:7]
     order_id = "ORD-" + _uid()
 
     # No items → no inventory deduction needed
     items = []
-    await _insert_cart(db_conn, phone, bot_number, restaurant_id, items)
+    await _insert_cart(db_conn, phone, restaurant_id, items)
 
     # Pass float values — commit_order_transaction must coerce without crashing.
     # Use whole-number floats so they round-trip through the INTEGER column.
     payload = _make_order_payload(
-        order_id, phone, bot_number, items,
+        order_id, phone, items,
         subtotal=35000.0,      # float, whole number
         delivery_fee=3000.0,   # float, whole number
         total=38000.0,         # float, whole number
@@ -306,7 +323,7 @@ async def test_decimal_coercion_float_inputs(db_conn):
                 pool,
                 restaurant_id=restaurant_id,
                 conversation_id=phone,
-                cart={"items": items, "bot_number": bot_number},
+                cart={"items": items},
                 order_payload=payload,
             )
 
@@ -330,22 +347,21 @@ async def test_decimal_coercion_float_inputs(db_conn):
 @pytest.mark.asyncio
 async def test_cart_deleted_on_success(db_conn):
     """
-    After a successful commit, the cart row for (phone, bot_number) is gone.
+    After a successful commit, the cart row for (phone, org_id) is gone.
     Verifies isolation: a second cart for a different phone is untouched.
     """
     restaurant_id = await _insert_restaurant(db_conn)
 
     phone = "+57300" + str(uuid.uuid4().int)[:7]
     other_phone = "+57301" + str(uuid.uuid4().int)[:7]
-    bot_number = "+57900" + str(uuid.uuid4().int)[:7]
     order_id = "ORD-" + _uid()
 
     items = []
-    await _insert_cart(db_conn, phone, bot_number, restaurant_id, items)
-    await _insert_cart(db_conn, other_phone, bot_number, restaurant_id, [{"name": "pizza", "quantity": 1}])
+    await _insert_cart(db_conn, phone, restaurant_id, items)
+    await _insert_cart(db_conn, other_phone, restaurant_id, [{"name": "pizza", "quantity": 1}])
 
     pool = _make_pool_for_conn(db_conn)
-    payload = _make_order_payload(order_id, phone, bot_number, items)
+    payload = _make_order_payload(order_id, phone, items)
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(restaurant_id):
@@ -353,19 +369,19 @@ async def test_cart_deleted_on_success(db_conn):
                 pool,
                 restaurant_id=restaurant_id,
                 conversation_id=phone,
-                cart={"items": items, "bot_number": bot_number},
+                cart={"items": items},
                 order_payload=payload,
             )
 
     # Target cart deleted
     deleted = await db_conn.fetchrow(
-        "SELECT 1 FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number
+        "SELECT 1 FROM carts WHERE phone=$1 AND org_id=$2", phone, restaurant_id
     )
     assert deleted is None, "Target cart was not deleted"
 
     # Bystander cart untouched
     bystander = await db_conn.fetchrow(
-        "SELECT 1 FROM carts WHERE phone=$1 AND bot_number=$2", other_phone, bot_number
+        "SELECT 1 FROM carts WHERE phone=$1 AND org_id=$2", other_phone, restaurant_id
     )
     assert bystander is not None, "Bystander cart was incorrectly deleted"
 
@@ -382,15 +398,15 @@ async def test_cart_not_deleted_on_insufficient_stock(db_conn):
     await _insert_inventory_item(db_conn, restaurant_id, name=dish_name, stock=0)
 
     phone = "+57300" + str(uuid.uuid4().int)[:7]
-    bot_number = "+57900" + str(uuid.uuid4().int)[:7]
     order_id = "ORD-" + _uid()
 
     items = [{"name": dish_name, "quantity": 1, "price": 12000}]
-    await _insert_cart(db_conn, phone, bot_number, restaurant_id, items)
+    await _insert_cart(db_conn, phone, restaurant_id, items)
 
     pool = _make_pool_for_conn(db_conn)
-    payload = _make_order_payload(order_id, phone, bot_number, items)
+    payload = _make_order_payload(order_id, phone, items)
 
+    await _register_prod_jsonb_codec(db_conn)
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(restaurant_id):
             with pytest.raises(InsufficientStockError):
@@ -398,12 +414,12 @@ async def test_cart_not_deleted_on_insufficient_stock(db_conn):
                     pool,
                     restaurant_id=restaurant_id,
                     conversation_id=phone,
-                    cart={"items": items, "bot_number": bot_number},
+                    cart={"items": items},
                     order_payload=payload,
                 )
 
     # Cart must still exist
     cart = await db_conn.fetchrow(
-        "SELECT cart_data FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number
+        "SELECT cart_data FROM carts WHERE phone=$1 AND org_id=$2", phone, restaurant_id
     )
     assert cart is not None, "Cart should not have been deleted on rollback"

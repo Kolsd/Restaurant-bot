@@ -186,9 +186,6 @@ def _scenario_html(result: ScenarioResult) -> str:
         f"table_orders: {len(db.table_orders)} | orders: {len(db.orders)} | "
         f"carts: {len(db.carts)} | waiter_alerts: {len(db.waiter_alerts)} | "
         f"reservations: {len(db.reservations)}\n"
-        f"inbox: total={db.webhook_inbox_stats.get('total',0)} "
-        f"pending={db.webhook_inbox_stats.get('pending',0)} "
-        f"dead={db.webhook_inbox_stats.get('dead_letters',0)}\n"
         f"tokens_used: {db.subscription_usage.get('total_tokens', 0)}"
     )
 

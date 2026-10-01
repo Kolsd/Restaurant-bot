@@ -222,7 +222,7 @@ async def _smoke_async() -> int:
         seed_restaurant,
         truncate_test_data,
         reset_state_store_fallbacks,
-        SIM_BOT_NUMBER,
+        sim_org_id,
     )
     from tests.ai_sim.assertions import snapshot_db_state
     from app.services.tenant_context import tenant_scope, bypass_tenant_scope
@@ -261,23 +261,19 @@ async def _smoke_async() -> int:
             _step(
                 "A: seed_restaurant",
                 True,
-                f"org_id={seed_info['restaurant_id']} bot={seed_info['bot_number']}",
+                f"org_id={seed_info['restaurant_id']}",
             )
         except Exception as exc:
             _step("A: seed_restaurant", False, str(exc))
 
         # ── Step B: tenant_scope plumbing ─────────────────────────────────────
-        # Mirrors the production pattern in inbox_worker._handle_meta_whatsapp.
-        # Resolves org_id from bot_number (requires bypass for cross-tenant lookup),
+        # Mirrors POST /api/diner/chat, which runs agent.chat in tenant_scope.
+        # Resolves the sim org (requires bypass for cross-tenant lookup),
         # then enters tenant_scope(org_id) — no agent.chat() call.
         try:
-            normalized_bot = _norm(SIM_BOT_NUMBER)
             async with pool.acquire() as conn:
                 with bypass_tenant_scope("ai_sim_smoke_resolve_org"):
-                    org_id = await conn.fetchval(
-                        "SELECT id FROM organizations WHERE whatsapp_number = $1",
-                        normalized_bot,
-                    )
+                    org_id = await sim_org_id(conn)
             if org_id is None:
                 _step("B: tenant_scope resolution", False, "org_id is None — seed may have failed")
             else:
@@ -304,7 +300,7 @@ async def _smoke_async() -> int:
             async with pool.acquire() as conn:
                 snap = await snapshot_db_state(
                     conn,
-                    bot_number=normalized_bot,
+                    org_id=org_id,
                     user_phone=normalized_user,
                 )
             _step(
@@ -334,7 +330,7 @@ async def _smoke_async() -> int:
             async with pool.acquire() as conn:
                 snap2 = await snapshot_db_state(
                     conn,
-                    bot_number=normalized_bot,
+                    org_id=org_id,
                     user_phone=normalized_user,
                 )
             # conversations, orders, table_orders, carts must be empty
@@ -433,7 +429,7 @@ async def _main_async(args: argparse.Namespace) -> int:
     try:
         async with pool.acquire() as conn:
             seed_info = await seed_restaurant(conn)
-        print(f"Seeded test restaurant: id={seed_info['restaurant_id']} bot={seed_info['bot_number']}\n")
+        print(f"Seeded test restaurant: id={seed_info['restaurant_id']}\n")
     except Exception as exc:
         print(f"ERROR: Seeding failed: {exc}")
         await pool.close()

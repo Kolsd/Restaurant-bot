@@ -136,7 +136,7 @@ def test_search_returns_tenant_results(client, with_auth):
         "id": 42,
         "name": "Restaurante Test",
         "plan_code": "restaurante",
-        "whatsapp_number": "+573001234567",
+        "slug": "restaurante-test",
         "last_order_at": datetime(2026, 5, 1, 12, 0, 0, tzinfo=timezone.utc),
     })
     mock_conn = AsyncMock()
@@ -162,6 +162,7 @@ def test_search_returns_tenant_results(client, with_auth):
     assert r["id"] == 42
     assert r["title"] == "Restaurante Test"
     assert "restaurante" in r["subtitle"].lower()
+    assert "/pedir/restaurante-test" in r["subtitle"]
     assert r["url"] == "/internal/superadmin#org=42"
 
 
@@ -235,8 +236,8 @@ def test_search_results_capped_at_20(client, with_auth):
     async def _fetch_side_effect(query, *args):
         if "organizations" in query:
             return [_make_asyncpg_row({
-                "id": i, "name": f"Restaurante {i}", "plan_code": "pulso",
-                "whatsapp_number": None, "last_order_at": None,
+                "id": i, "name": f"Restaurante {i}", "plan_code": "esencial",
+                "slug": None, "last_order_at": None,
             }) for i in range(15)]
         return [_make_asyncpg_row({
             "id": i, "owner_name": f"Owner {i}", "phone": f"+57300{i:05d}",

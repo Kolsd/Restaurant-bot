@@ -61,52 +61,6 @@ def _all_execute_sql(conn) -> str:
 
 # ── _sync_staff_shift ─────────────────────────────────────────────────────────
 
-async def test_sync_staff_shift_inserts_org_id_not_restaurant_id():
-    """
-    _sync_staff_shift must INSERT into staff_shifts using the org_id column.
-    The restaurant_id column was dropped from staff_shifts in migration 0037
-    — referencing it now would crash with UndefinedColumnError at runtime.
-    """
-    from app.repositories.restaurant_repo import _sync_staff_shift
-
-    conn = _make_conn()
-    await _sync_staff_shift(
-        conn,
-        restaurant_id=42,
-        data={
-            "id": "shift-uuid-1",
-            "staff_id": "staff-uuid-1",
-            "clock_in": "2026-04-18T09:00:00Z",
-            "clock_out": "2026-04-18T17:00:00Z",
-            "notes": "test",
-        },
-    )
-
-    sql_blob = _all_execute_sql(conn)
-    assert "insert into staff_shifts" in sql_blob
-    assert "org_id" in sql_blob, "INSERT must reference org_id (Wave-2 canonical)"
-    # Must NOT mention the dropped legacy column anywhere in the staff_shifts insert
-    assert "restaurant_id" not in sql_blob, (
-        "INSERT must NOT reference the dropped restaurant_id column"
-    )
-
-
-async def test_sync_staff_shift_passes_tenant_id_as_param():
-    """The tenant integer must be passed as a positional param (no f-strings)."""
-    from app.repositories.restaurant_repo import _sync_staff_shift
-
-    conn = _make_conn()
-    await _sync_staff_shift(
-        conn,
-        restaurant_id=99,
-        data={"id": "x", "staff_id": "y", "clock_in": "2026-04-18T09:00:00Z"},
-    )
-    # The third positional arg to execute (after the SQL) is restaurant_id
-    args = conn.execute.call_args.args
-    # args[0] is the SQL; subsequent are params
-    assert 99 in args[1:], "Tenant id must be passed as a query parameter"
-
-
 # ── _sync_staff ───────────────────────────────────────────────────────────────
 
 async def test_sync_staff_inserts_org_id_not_restaurant_id():
@@ -137,10 +91,12 @@ async def test_sync_staff_inserts_org_id_not_restaurant_id():
 async def test_set_dish_availability_uses_org_id_in_insert_and_on_conflict():
     """
     db_set_dish_availability must:
-      1. INSERT INTO menu_availability (..., org_id, ...) — restaurant_id col dropped
-      2. ON CONFLICT (dish_name, org_id) — the unique constraint was recreated
-         with org_id in 0037b (the legacy (dish_name, restaurant_id) constraint
-         was dropped CASCADE with the column).
+      1. INSERT INTO menu_availability (..., org_id, location_id, ...) —
+         restaurant_id col dropped long ago
+      2. ON CONFLICT (org_id, location_id, dish_name) — the primary key as of
+         migration 0091, which made sold-out state PER SEDE. Before it the key
+         was (org_id, dish_name) and marking a dish sold out at one sede took
+         it off every sede's menu.
     """
     from app.repositories.restaurant_repo import db_set_dish_availability
 
@@ -148,17 +104,35 @@ async def test_set_dish_availability_uses_org_id_in_insert_and_on_conflict():
     pool = _make_pool(conn)
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(11):
-            await db_set_dish_availability(11, "Pizza Margherita", available=False)
+            await db_set_dish_availability(11, "Pizza Margherita", available=False,
+                                           location_id=22)
 
     sql_blob = _all_execute_sql(conn)
     assert "insert into menu_availability" in sql_blob
     assert "org_id" in sql_blob
-    assert "on conflict (dish_name, org_id)" in sql_blob, (
-        "ON CONFLICT must match the post-Wave-2 unique constraint shape"
+    assert "location_id" in sql_blob
+    assert "on conflict (org_id, location_id, dish_name)" in sql_blob, (
+        "ON CONFLICT must match the per-sede primary key from 0091"
     )
     assert "restaurant_id" not in sql_blob, (
         "Neither column list nor ON CONFLICT may reference the dropped column"
     )
+
+
+async def test_set_dish_availability_refuses_to_write_without_a_sede():
+    """No sede means no write. Defaulting to an org-wide row is exactly the
+    behaviour 0091 removed, and such a row is never read back."""
+    import pytest as _pytest
+    from app.repositories.restaurant_repo import db_set_dish_availability
+
+    conn = _make_conn()
+    pool = _make_pool(conn)
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(11):
+            with _pytest.raises(ValueError):
+                await db_set_dish_availability(11, "Pizza Margherita", available=False)
+
+    assert not conn.execute.call_args_list or "menu_availability" not in _all_execute_sql(conn)
 
 
 async def test_set_dish_availability_passes_dish_name_and_tenant_as_params():
@@ -169,7 +143,8 @@ async def test_set_dish_availability_passes_dish_name_and_tenant_as_params():
     pool = _make_pool(conn)
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(33):
-            await db_set_dish_availability(33, "Bandeja Paisa", available=True)
+            await db_set_dish_availability(33, "Bandeja Paisa", available=True,
+                                           location_id=44)
 
     insert_call = next(
         c for c in conn.execute.call_args_list

@@ -11,7 +11,7 @@ Requirements:
 Test matrix
 -----------
   test_request_downgrade_sets_fields       — 3 pending_* cols populated, effective ~7d
-  test_request_downgrade_wrong_direction   — Pulso→Restaurante raises ValueError (not a downgrade)
+  test_request_downgrade_wrong_direction   — Esencial→Restaurante raises ValueError (not a downgrade)
   test_request_downgrade_unknown_plan      — unknown plan_code raises ValueError
   test_request_downgrade_alien_location    — location_id from another org raises ValueError
   test_cancel_downgrade_clears_fields      — cancel returns True and clears the 3 cols
@@ -142,7 +142,7 @@ async def two_orgs(db_conn):
 
     await _set_scope(db_conn, org_a)
     loc_a = await db_conn.fetchval(
-        "INSERT INTO locations (org_id, name, slug) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO locations (org_id, name, code) VALUES ($1, $2, $3) RETURNING id",
         org_a, "Sede Principal A", "sede-a",
     )
 
@@ -156,7 +156,7 @@ async def two_orgs(db_conn):
 
     await _set_scope(db_conn, org_b)
     loc_b = await db_conn.fetchval(
-        "INSERT INTO locations (org_id, name, slug) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO locations (org_id, name, code) VALUES ($1, $2, $3) RETURNING id",
         org_b, "Sede Principal B", "sede-b",
     )
 
@@ -178,9 +178,9 @@ async def test_request_downgrade_sets_fields(db_conn, two_orgs):
     org_a, _, loc_a, _ = two_orgs
 
     with tenant_scope(org_a):
-        result = await db_request_downgrade(org_a, "pulso", loc_a)
+        result = await db_request_downgrade(org_a, "esencial", loc_a)
 
-    assert result["pending_plan_code"] == "pulso"
+    assert result["pending_plan_code"] == "esencial"
     assert result["pending_kept_location_id"] == loc_a
 
     # effective_at should be ~7 days from now (±5 minutes)
@@ -197,7 +197,7 @@ async def test_request_downgrade_sets_fields(db_conn, two_orgs):
     with tenant_scope(org_a):
         pending = await db_get_pending_downgrade(org_a)
     assert pending is not None
-    assert pending["pending_plan_code"] == "pulso"
+    assert pending["pending_plan_code"] == "esencial"
 
 
 @pytest.mark.asyncio
@@ -240,7 +240,7 @@ async def test_request_downgrade_alien_location(db_conn, two_orgs):
     # loc_b belongs to org_b — should be rejected for org_a
     with pytest.raises(ValueError, match="does not belong to org"):
         with tenant_scope(org_a):
-            await db_request_downgrade(org_a, "pulso", loc_b)
+            await db_request_downgrade(org_a, "esencial", loc_b)
 
 
 @pytest.mark.asyncio
@@ -255,7 +255,7 @@ async def test_cancel_downgrade_clears_fields(db_conn, two_orgs):
 
     org_a, _, loc_a, _ = two_orgs
     with tenant_scope(org_a):
-        await db_request_downgrade(org_a, "pulso", loc_a)
+        await db_request_downgrade(org_a, "esencial", loc_a)
 
     with tenant_scope(org_a):
         existed = await db_cancel_downgrade(org_a)
@@ -303,7 +303,7 @@ async def test_apply_due_processes_overdue(db_conn, two_orgs):
         await db_conn.execute(
             """
             UPDATE organizations
-               SET pending_plan_code         = 'pulso',
+               SET pending_plan_code         = 'esencial',
                    pending_plan_effective_at = NOW() - INTERVAL '1 hour',
                    pending_kept_location_id  = $2
              WHERE id = $1
@@ -317,12 +317,12 @@ async def test_apply_due_processes_overdue(db_conn, two_orgs):
     processed_ids = [r.get("id") for r in processed]
     assert org_a in processed_ids, f"org_a not in processed: {processed_ids}"
 
-    # plan_code should now be 'pulso', pending fields cleared
+    # plan_code should now be 'esencial', pending fields cleared
     row = await db_conn.fetchrow(
         "SELECT plan_code, pending_plan_code FROM organizations WHERE id = $1",
         org_a,
     )
-    assert row["plan_code"] == "pulso"
+    assert row["plan_code"] == "esencial"
     assert row["pending_plan_code"] is None
 
 
@@ -339,7 +339,7 @@ async def test_apply_due_leaves_future_alone(db_conn, two_orgs):
         await db_conn.execute(
             """
             UPDATE organizations
-               SET pending_plan_code         = 'pulso',
+               SET pending_plan_code         = 'esencial',
                    pending_plan_effective_at = NOW() + INTERVAL '7 days',
                    pending_kept_location_id  = $2
              WHERE id = $1
@@ -358,7 +358,7 @@ async def test_apply_due_leaves_future_alone(db_conn, two_orgs):
         "SELECT pending_plan_code FROM organizations WHERE id = $1",
         org_a,
     )
-    assert row["pending_plan_code"] == "pulso"
+    assert row["pending_plan_code"] == "esencial"
 
 
 @pytest.mark.asyncio
@@ -373,7 +373,7 @@ async def test_tenant_isolation_pending(db_conn, two_orgs):
     org_a, org_b, loc_a, _ = two_orgs
 
     with tenant_scope(org_a):
-        await db_request_downgrade(org_a, "pulso", loc_a)
+        await db_request_downgrade(org_a, "esencial", loc_a)
 
     # Reading from org_b scope must return None (RLS enforced)
     with tenant_scope(org_b):

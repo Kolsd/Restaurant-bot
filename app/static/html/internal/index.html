@@ -295,18 +295,6 @@
         <div class="hq-kpi-value" id="kpi-prospects" style="display:none"></div>
         <div class="hq-kpi-sub">en el pipeline CRM</div>
       </div>
-      <div class="hq-kpi">
-        <div class="hq-kpi-label">Dead letters</div>
-        <div class="hq-skel" id="kpi-dead-skel"></div>
-        <div class="hq-kpi-value" id="kpi-dead" style="display:none"></div>
-        <div class="hq-kpi-sub">mensajes fallidos</div>
-      </div>
-      <div class="hq-kpi">
-        <div class="hq-kpi-label">Latencia p95 inbox</div>
-        <div class="hq-skel" id="kpi-p95-skel"></div>
-        <div class="hq-kpi-value" id="kpi-p95" style="display:none"></div>
-        <div class="hq-kpi-sub">ms</div>
-      </div>
     </div>
   </div>
 
@@ -330,7 +318,6 @@
       <div class="hq-quicklinks">
         <a href="/internal/superadmin#new-org" class="hq-ql-btn primary">+ Nuevo cliente</a>
         <a href="/internal/crm" class="hq-ql-btn">Ver pipeline CRM</a>
-        <a href="/internal/analytics" class="hq-ql-btn">Analytics</a>
         <a href="/internal/superadmin" class="hq-ql-btn">Buscar tenant</a>
         <a href="/internal/monitoring" class="hq-ql-btn">Monitoreo</a>
         <a href="/internal/costs" class="hq-ql-btn">Costos</a>
@@ -406,9 +393,9 @@
       .catch(() => { /* keep '--' on error */ });
   }
 
-  // ── KPI: pedidos rescatados ───────────────────────────────────────────────────
+  // ── KPI: rescued orders ───────────────────────────────────────────────────
   function _loadRescatados() {
-    return _apiGet('/api/internal/analytics/pedidos-rescatados?period=mtd')
+    return _apiGet('/api/internal/analytics/orders-rescued?period=mtd')
       .then(data => {
         const total = data.total != null ? (data.total).toLocaleString('es-CO') : '—';
         _setSkel('kpi-rescued-skel', 'kpi-rescued', total, 'brand');
@@ -416,7 +403,7 @@
       .catch(() => _setSkel('kpi-rescued-skel', 'kpi-rescued', '—', ''));
   }
 
-  // ── KPI: tenants activos ──────────────────────────────────────────────────────
+  // ── KPI: active tenants ──────────────────────────────────────────────────────
   function _loadActiveToday() {
     return _apiGet('/api/internal/analytics/overview')
       .then(data => {
@@ -428,7 +415,7 @@
       .catch(() => _setSkel('kpi-active-skel', 'kpi-active', '—', ''));
   }
 
-  // ── KPI: prospects nuevos ─────────────────────────────────────────────────────
+  // ── KPI: new prospects ─────────────────────────────────────────────────────
   function _loadProspects() {
     return _apiGet('/api/internal/crm/stats')
       .then(data => {
@@ -436,28 +423,6 @@
         _setSkel('kpi-prospects-skel', 'kpi-prospects', v != null ? v : '—', '');
       })
       .catch(() => _setSkel('kpi-prospects-skel', 'kpi-prospects', '—', ''));
-  }
-
-  // ── KPI: dead letters + p95 ───────────────────────────────────────────────────
-  function _loadOpsMetrics() {
-    return _apiGet('/api/internal/ops/metrics')
-      .then(data => {
-        const dead = data.inbox_dead_letters;
-        const p95  = data.inbox_latency_p95_ms;
-
-        const deadCls = dead > 0 ? 'danger' : '';
-        _setSkel('kpi-dead-skel', 'kpi-dead', dead != null ? dead : '—', deadCls);
-
-        const p95Cls = p95 != null && p95 > 500 ? 'warn' : '';
-        _setSkel('kpi-p95-skel', 'kpi-p95', p95 != null ? Math.round(p95) : '—', p95Cls);
-
-        return { dead, p95 };
-      })
-      .catch(() => {
-        _setSkel('kpi-dead-skel', 'kpi-dead', '—', '');
-        _setSkel('kpi-p95-skel', 'kpi-p95', '—', '');
-        return { dead: null, p95: null };
-      });
   }
 
   // ── Action queue — live from /api/internal/notifications ─────────────────────
@@ -526,7 +491,6 @@
     _loadRescatados(),
     _loadActiveToday(),
     _loadProspects(),
-    _loadOpsMetrics(),
     _loadNotifications(),
   ]);
 </script>

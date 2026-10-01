@@ -158,15 +158,15 @@ async def test_list_plans_seeded(db_conn):
     assert len(plans) >= 4, f"Expected at least 4 plans, got {len(plans)}"
 
     plan_map = {p["plan_code"]: p for p in plans}
-    assert "pulso" in plan_map
+    assert "esencial" in plan_map
     assert "restaurante" in plan_map
     assert "pro" in plan_map
     assert "cadena" in plan_map
 
-    assert plan_map["pulso"]["monthly_price_cop"] == 149_000
-    assert plan_map["restaurante"]["monthly_price_cop"] == 299_000
-    assert plan_map["pro"]["monthly_price_cop"] == 549_000
-    assert plan_map["cadena"]["monthly_price_cop"] == 899_000
+    assert plan_map["esencial"]["monthly_price_cop"] == 119_000
+    assert plan_map["restaurante"]["monthly_price_cop"] == 249_000
+    assert plan_map["pro"]["monthly_price_cop"] == 349_000
+    assert plan_map["cadena"]["monthly_price_cop"] == 299_000
 
 
 @pytest.mark.asyncio
@@ -193,9 +193,9 @@ async def test_get_plan_returns_correct(db_conn):
     plan = await db_get_plan("restaurante")
     assert plan is not None
     assert plan["plan_code"] == "restaurante"
-    assert plan["conv_cap"] == 700
-    assert plan["staff_cap"] == 10
-    assert plan["monthly_price_cop"] == 299_000
+    assert plan["conv_cap"] == 500
+    assert plan["staff_cap"] == 999999  # unlimited users (pricing 2026-09-30)
+    assert plan["monthly_price_cop"] == 249_000
 
 
 @pytest.mark.asyncio
@@ -286,9 +286,9 @@ async def test_check_caps_thresholds(db_conn, org_ids):
     org_a, _ = org_ids
     await _set_scope(db_conn, org_a)
 
-    # Set org to 'pulso' plan: conv_cap=250
+    # Restaurante's soft ceiling is 500 conversations (Esencial has no AI chat)
     await db_conn.execute(
-        "UPDATE organizations SET plan_code = 'pulso' WHERE id = $1", org_a
+        "UPDATE organizations SET plan_code = 'restaurante' WHERE id = $1", org_a
     )
 
     with tenant_scope(org_a):
@@ -299,35 +299,35 @@ async def test_check_caps_thresholds(db_conn, org_ids):
         caps = await db_check_caps(org_a)
         assert caps["conv"]["status"] == "ok", f"Expected ok at 0%, got {caps['conv']['status']}"
 
-        # 125/250 = 50% → warn50
-        await db_conn.execute(
-            "UPDATE organizations SET current_period_convs_used = 125 WHERE id = $1", org_a
-        )
-        caps = await db_check_caps(org_a)
-        assert caps["conv"]["status"] == "warn50", f"Expected warn50 at 50%, got {caps['conv']['status']}"
-
-        # 200/250 = 80% → warn80
-        await db_conn.execute(
-            "UPDATE organizations SET current_period_convs_used = 200 WHERE id = $1", org_a
-        )
-        caps = await db_check_caps(org_a)
-        assert caps["conv"]["status"] == "warn80", f"Expected warn80 at 80%, got {caps['conv']['status']}"
-
-        # 225/250 = 90% → warn90
-        await db_conn.execute(
-            "UPDATE organizations SET current_period_convs_used = 225 WHERE id = $1", org_a
-        )
-        caps = await db_check_caps(org_a)
-        assert caps["conv"]["status"] == "warn90", f"Expected warn90 at 90%, got {caps['conv']['status']}"
-
-        # 250/250 = 100% → exceeded
+        # 250/500 = 50% → warn50
         await db_conn.execute(
             "UPDATE organizations SET current_period_convs_used = 250 WHERE id = $1", org_a
         )
         caps = await db_check_caps(org_a)
+        assert caps["conv"]["status"] == "warn50", f"Expected warn50 at 50%, got {caps['conv']['status']}"
+
+        # 400/500 = 80% → warn80
+        await db_conn.execute(
+            "UPDATE organizations SET current_period_convs_used = 400 WHERE id = $1", org_a
+        )
+        caps = await db_check_caps(org_a)
+        assert caps["conv"]["status"] == "warn80", f"Expected warn80 at 80%, got {caps['conv']['status']}"
+
+        # 450/500 = 90% → warn90
+        await db_conn.execute(
+            "UPDATE organizations SET current_period_convs_used = 450 WHERE id = $1", org_a
+        )
+        caps = await db_check_caps(org_a)
+        assert caps["conv"]["status"] == "warn90", f"Expected warn90 at 90%, got {caps['conv']['status']}"
+
+        # 500/500 = 100% → exceeded
+        await db_conn.execute(
+            "UPDATE organizations SET current_period_convs_used = 500 WHERE id = $1", org_a
+        )
+        caps = await db_check_caps(org_a)
         assert caps["conv"]["status"] == "exceeded", f"Expected exceeded at 100%, got {caps['conv']['status']}"
-        assert caps["conv"]["used"] == 250
-        assert caps["conv"]["cap"] == 250
+        assert caps["conv"]["used"] == 500
+        assert caps["conv"]["cap"] == 500
 
 
 @pytest.mark.asyncio
@@ -339,9 +339,9 @@ async def test_check_caps_comp_overrides(db_conn, org_ids):
     org_a, _ = org_ids
     await _set_scope(db_conn, org_a)
 
-    # Set org to 'pulso' plan (low cap) and spike usage to exceeded level
+    # Restaurante plan with usage spiked past its 500 ceiling
     await db_conn.execute(
-        "UPDATE organizations SET plan_code = 'pulso', current_period_convs_used = 300 WHERE id = $1",
+        "UPDATE organizations SET plan_code = 'restaurante', current_period_convs_used = 600 WHERE id = $1",
         org_a,
     )
     # Set comp_until to 1 hour from now
@@ -357,62 +357,6 @@ async def test_check_caps_comp_overrides(db_conn, org_ids):
     assert caps["comp_active"] is True
     assert caps["conv"]["status"] == "comp"
     assert caps["audio"]["status"] == "comp"
-
-
-# ── Pack consumption tests ────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_consume_pack_credit_fifo(db_conn, org_ids):
-    """db_consume_pack_credit drains FIFO across multiple packs."""
-    from app.services.tenant_context import tenant_scope
-    from app.repositories.plan_limits_repo import db_create_pack, db_consume_pack_credit
-
-    org_a, _ = org_ids
-    await _set_scope(db_conn, org_a)
-
-    with tenant_scope(org_a):
-        # Create two packs of 10 credits each
-        await db_create_pack(org_id=org_a, credits=10, amount_paid_cop=5_000)
-        await db_create_pack(org_id=org_a, credits=10, amount_paid_cop=5_000)
-
-        # Consume 15 → should drain first pack (10) + 5 from second
-        consumed = await db_consume_pack_credit(org_a, count=15)
-        assert consumed == 15, f"Expected 15 consumed, got {consumed}"
-
-        # Remaining across packs should be 5
-        remaining = await db_conn.fetchval(
-            "SELECT COALESCE(SUM(credits_remaining), 0) FROM usage_packs WHERE org_id = $1 AND credits_remaining > 0",
-            org_a,
-        )
-        assert int(remaining) == 5, f"Expected 5 remaining, got {remaining}"
-
-
-@pytest.mark.asyncio
-async def test_consume_pack_credit_skips_expired(db_conn, org_ids):
-    """db_consume_pack_credit skips packs whose expires_at has passed."""
-    from app.services.tenant_context import tenant_scope
-    from app.repositories.plan_limits_repo import db_consume_pack_credit
-
-    org_a, _ = org_ids
-    await _set_scope(db_conn, org_a)
-
-    # Manually insert an expired pack
-    past = datetime.now(tz=timezone.utc) - timedelta(days=1)
-    await db_conn.execute(
-        """
-        INSERT INTO usage_packs
-            (org_id, credits_total, credits_remaining, amount_paid_cop, expires_at)
-        VALUES ($1, 50, 50, 25000, $2)
-        """,
-        org_a, past,
-    )
-
-    with tenant_scope(org_a):
-        # Try to consume from the expired pack — should return 0 consumed
-        consumed = await db_consume_pack_credit(org_a, count=10)
-
-    assert consumed == 0, f"Expected 0 consumed (expired pack), got {consumed}"
 
 
 # ── Period reset test ─────────────────────────────────────────────────────────
@@ -451,14 +395,15 @@ async def test_reset_period(db_conn, org_ids):
 async def test_tenant_isolation(db_conn, org_ids):
     """usage_packs created for org A are invisible to org B via RLS."""
     from app.services.tenant_context import tenant_scope
-    from app.repositories.plan_limits_repo import db_create_pack
-
     org_a, org_b = org_ids
 
-    # Create pack for org A
+    # A pack row for org A (packs are no longer sold, the table stays)
     await _set_scope(db_conn, org_a)
-    with tenant_scope(org_a):
-        await db_create_pack(org_id=org_a, credits=100, amount_paid_cop=50_000)
+    await db_conn.execute(
+        "INSERT INTO usage_packs (org_id, credits_total, credits_remaining, amount_paid_cop, expires_at) "
+        "VALUES ($1, 100, 100, 50000, NOW() + INTERVAL '30 days')",
+        org_a,
+    )
 
     # Query from org B — should see 0 packs
     await _set_scope(db_conn, org_b)
@@ -470,20 +415,3 @@ async def test_tenant_isolation(db_conn, org_ids):
 
     # RLS should filter it out — count must be 0
     assert int(count) == 0, f"RLS breach: org B can see {count} packs belonging to org A"
-
-
-# ── Validation guard test ─────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_set_auto_recharge_rejects_over_5(db_conn, org_ids):
-    """db_set_auto_recharge raises ValueError when max_packs > 5."""
-    from app.services.tenant_context import tenant_scope
-    from app.repositories.plan_limits_repo import db_set_auto_recharge
-
-    org_a, _ = org_ids
-    await _set_scope(db_conn, org_a)
-
-    with tenant_scope(org_a):
-        with pytest.raises(ValueError, match="max_packs cannot exceed 5"):
-            await db_set_auto_recharge(org_id=org_a, enabled=True, max_packs=6)

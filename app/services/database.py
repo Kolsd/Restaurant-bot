@@ -12,13 +12,13 @@ log = get_logger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════
-# EXCEPCIONES DE NEGOCIO
+# BUSINESS EXCEPTIONS
 # ══════════════════════════════════════════════════════════════════════
 
 class UsageLimitExceeded(Exception):
     """
-    Se lanza cuando un restaurante supera su límite diario de tokens o facturas.
-    Los límites se configuran en restaurants.features.plan_limits:
+    Raised when a restaurant exceeds its daily token or invoice limit.
+    Limits are configured in restaurants.features.plan_limits:
       { "daily_tokens": 100000, "daily_invoices": 50 }
     """
     def __init__(self, resource: str, used: int, limit: int):
@@ -144,7 +144,30 @@ def get_circuit_state() -> dict:
 
 _pool = None
 
-SESSION_TTL_HOURS = 72  # V-06: tokens expiran en 72 horas
+SESSION_TTL_HOURS = 72  # V-06: tokens expire in 72 hours
+
+def _encode_jsonb(value) -> str:
+    """A `str` is JSON text the caller already serialized; anything else is
+    a Python value to serialize.
+
+    With a plain `json.dumps` encoder, the many writers that pass
+    `json.dumps(x)` to a `$n::jsonb` parameter had it serialized a second
+    time: carts, conversation history, table checks, org menus and features
+    were stored as JSON *strings* (repaired by migration 0100). No jsonb
+    column here holds a bare string scalar, so a str is always JSON text.
+    """
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+async def init_connection(conn) -> None:
+    """Per-connection setup for the app pool: jsonb in and out as Python objects.
+
+    Public so test pools can use the very same codec.
+    """
+    await conn.set_type_codec(
+        'jsonb', encoder=_encode_jsonb, decoder=json.loads, schema='pg_catalog'
+    )
+
 
 def _normalize_phone(number: str) -> str:
     if not number: return ""
@@ -235,9 +258,7 @@ async def get_pool():
             min_size=2,
             max_size=20,
             command_timeout=30,
-            init=lambda conn: conn.set_type_codec(
-                'jsonb', encoder=json.dumps, decoder=json.loads, schema='pg_catalog'
-            )
+            init=init_connection,
         )
         await _circuit_record_success()
         return _pool
@@ -253,11 +274,6 @@ async def get_pool():
 async def init_pool():
     """Warm up the asyncpg connection pool. No DDL — use Alembic for schema."""
     await get_pool()
-
-
-async def init_db():
-    """Deprecated alias for init_pool(). DDL now lives in Alembic migrations."""
-    await init_pool()
 
 
 # === Reservations: moved to app.repositories.reservations_repo (Apparta integration) ===
@@ -288,13 +304,7 @@ from app.repositories.orders_repo import (
     db_get_orders_range,
     db_get_order,
     db_get_all_orders,
-    db_get_delivery_orders,
-    db_update_pending_order_payment_method,
-    db_attach_order_proof,
     db_update_order_status,
-    db_set_order_eta,
-    db_get_orders_needing_eta_communication,
-    db_mark_eta_communicated,
 )
 
 # === Conversations: moved to app.repositories.conversations_repo (Fase 6) ===
@@ -304,7 +314,6 @@ from app.repositories.conversations_repo import (
     db_get_all_conversations,
     db_delete_conversation,
     db_get_conversation_details,
-    db_toggle_bot,
     db_cleanup_old_conversations,
     db_increment_turns_without_progress,
     db_reset_turns_without_progress,
@@ -317,26 +326,23 @@ from app.repositories.restaurant_repo import (
     db_create_user,
     db_update_user_password,
     db_get_all_users,
-    db_get_restaurant_by_phone,
-    db_get_restaurant_by_bot_number,
     db_get_restaurant_by_name,
-    db_get_restaurant_by_id,
+    db_get_restaurant_by_location_id,
+    db_get_restaurant_by_org_id,
     db_get_all_restaurants,
     db_check_module,
-    db_create_restaurant,
     db_sync_menu_to_branches,
     db_update_menu,
     db_get_menu,
-    db_get_top_dishes,
-    db_update_subscription,
     db_get_branches,
     db_delete_branch,
     db_get_menu_availability,
+    db_get_menu_availability_any_sede,
     db_set_dish_availability,
     db_sync_batch,
     db_get_nps_stats,
     db_get_nps_responses,
-    db_get_recent_nps_for_caja,
+    db_get_recent_nps_for_cashier,
     db_increment_token_usage,
     db_increment_invoice_usage,
     db_check_usage_limits,
@@ -346,7 +352,6 @@ from app.repositories.restaurant_repo import (
 from app.repositories.restaurant_repo import (
     db_get_all_orgs,
     db_get_org_by_id,
-    db_get_org_by_phone,
     db_get_org_locations,
     db_get_default_location,
     db_get_primary_location,  # Deprecated alias — use db_get_default_location
@@ -372,7 +377,6 @@ from app.repositories.conversations_repo import (
     db_get_cart,
     db_save_cart,
     db_clear_cart,
-    db_migrate_cart,
 )
 
 # === Tables/POS: moved to app.repositories.tables_repo (Fase 6) ===
@@ -391,7 +395,7 @@ from app.repositories.tables_repo import (
     db_get_next_sub_number,
     db_get_table_bill,
     db_close_table_bill,
-    db_mark_factura_generada,
+    db_mark_invoice_generated,
     db_get_first_table_order,
     db_cleanup_after_checkout,
     db_get_open_session_by_phone,
@@ -410,7 +414,6 @@ from app.repositories.tables_repo import (
     db_link_participant_session,
     db_create_table_session,
     db_touch_session,
-    db_touch_session_with_phone_id,
     db_session_mark_order,
     db_session_mark_delivered,
     db_mark_session_nps_pending,
@@ -440,8 +443,6 @@ from app.repositories.conversations_repo import (
 from app.repositories.conversations_repo import (
     db_save_nps_waiting,
     db_clear_nps_waiting,
-    db_get_nps_waiting_pending_reminder,
-    db_mark_nps_reminded,
     db_cleanup_expired_nps_waiting,
 )
 
@@ -515,80 +516,15 @@ from app.repositories.tables_repo import (
 # === Staff: moved to app.repositories.staff_repo (Fase 6) ===
 from app.repositories.staff_repo import (
     db_get_staff,
-    db_get_team_staff_by_branch,
     db_get_staff_for_pin_login,
-    db_get_staff_pin_by_id,
     db_get_staff_candidates_by_name,
     db_create_staff,
     db_update_staff,
     db_delete_staff,
-    _record_attendance_deduction,
-    db_clock_in,
-    db_clock_out,
-    db_get_open_shifts,
-    db_get_shifts,
-    db_calculate_tip_pool,
-    db_calculate_tips_by_attendance,
-    db_preview_tip_distribution,
-)
-
-
-# === Loyalty: moved to app.repositories.loyalty_repo (Fase 6) ===
-from app.repositories.loyalty_repo import (
-    db_get_loyalty_balance,
-    db_accrue_loyalty_points,
-    db_redeem_loyalty_points,
-    db_apply_redemption_to_order,
-    db_apply_redemption_to_table_check,
-    db_adjust_loyalty_points,
-    db_get_loyalty_ledger,
-    db_get_loyalty_stats,
-    db_get_phone_for_base_order,
 )
 
 
 # === Conversations (WAM deduplication): moved to app.repositories.conversations_repo (Fase 6) ===
-from app.repositories.conversations_repo import db_is_duplicate_wam
 
 
 # === Staff (advanced): moved to app.repositories.staff_repo (Fase 6) ===
-from app.repositories.staff_repo import (
-    db_save_webauthn_credential,
-    db_get_webauthn_credentials_by_staff,
-    db_get_webauthn_credentials_by_restaurant,
-    db_get_webauthn_credential,
-    db_update_webauthn_sign_count,
-    db_delete_webauthn_credential,
-    db_save_webauthn_challenge,
-    db_consume_webauthn_challenge,
-    db_cleanup_expired_challenges,
-    db_start_break,
-    db_end_break,
-    db_get_breaks_for_shift,
-    db_get_open_break,
-    db_upsert_schedule,
-    db_bulk_upsert_schedules,
-    db_get_schedules,
-    db_delete_schedule,
-    db_edit_shift,
-    db_get_timecard,
-    db_get_overtime_report,
-    db_get_attendance_report,
-    db_list_deduction_items,
-    db_create_deduction_item,
-    db_update_deduction_item,
-    db_delete_deduction_item,
-    db_calculate_payroll,
-    db_save_payroll_run,
-    db_get_payroll_runs,
-    db_get_payroll_run,
-    db_approve_payroll_run,
-    db_list_contract_templates,
-    db_create_contract_template,
-    db_update_contract_template,
-    db_delete_contract_template,
-    db_assign_staff_contract,
-    db_list_overtime_requests,
-    db_upsert_overtime_request,
-    db_review_overtime_request,
-)
