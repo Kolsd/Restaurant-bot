@@ -19,15 +19,26 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Guarded: prod tables partly predate alembic (see 0095), so only backfill
+    # when every column this UPDATE touches really exists.
     op.execute(
         """
-        UPDATE nps_responses n
-           SET location_id = n.branch_id
-          FROM locations l
-         WHERE n.location_id IS NULL
-           AND n.branch_id IS NOT NULL
-           AND l.id = n.branch_id
-           AND l.org_id = n.org_id
+        DO $$
+        BEGIN
+          IF (SELECT count(*) FROM information_schema.columns
+               WHERE table_schema = current_schema()
+                 AND table_name = 'nps_responses'
+                 AND column_name IN ('location_id', 'branch_id', 'org_id')) = 3
+          THEN
+            UPDATE nps_responses n
+               SET location_id = n.branch_id
+              FROM locations l
+             WHERE n.location_id IS NULL
+               AND n.branch_id IS NOT NULL
+               AND l.id = n.branch_id
+               AND l.org_id = n.org_id;
+          END IF;
+        END $$;
         """
     )
 
