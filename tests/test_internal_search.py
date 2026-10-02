@@ -163,7 +163,7 @@ def test_search_returns_tenant_results(client, with_auth):
     assert r["title"] == "Restaurante Test"
     assert "restaurante" in r["subtitle"].lower()
     assert "/pedir/restaurante-test" in r["subtitle"]
-    assert r["url"] == "/internal/superadmin#org=42"
+    assert r["url"] == "/internal/org/42"  # the HQ ficha
 
 
 def test_search_returns_prospect_results(client, with_auth):

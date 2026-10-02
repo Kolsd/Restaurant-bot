@@ -467,3 +467,24 @@ def test_a_team_member_named_superadmin_is_not_mesios_superadmin(client, made):
     assert username_is_allowed("owner.x@ejemplo.com")
     # Real superadmin endpoints refuse an owner's token.
     assert client.get("/api/internal/admin/stats", headers=me["headers"]).status_code == 403
+
+
+def test_the_next_guests_never_inherit_an_unbilled_bill(client, made):
+    """A sitting closed without invoicing (ghost table, inactivity, demo
+    recycle) left rounds behind; db_get_base_order_id picked them up for the
+    next sitting, so new guests saw the old rounds and their order joined
+    that old bill."""
+    me = _owner(client, made)
+    org, loc = me["org_id"], me["location_id"]
+    t = _table(org, loc)
+    _run(_q("INSERT INTO table_sessions (phone, table_id, table_name, status, org_id, location_id, started_at, closed_at) "
+            "VALUES ('web:old', $1, '1', 'closed', $2, $3, NOW() - INTERVAL '3 hours', NOW() - INTERVAL '2 hours')",
+            t, org, loc, fetch="none", org_id=org))
+    old = _round(org, loc, t, f"OLD-{uuid.uuid4().hex[:8]}", 1, [{"name": "Arepa", "qty": 1, "price": 9000}], 9000,
+                 status="listo")
+    _run(_q("UPDATE table_orders SET created_at = NOW() - INTERVAL '150 minutes' WHERE id = $1",
+            old, fetch="none", org_id=org))
+
+    guest = client.post("/api/diner/session", json={"table_id": t}).json()
+    view = client.get("/api/diner/table", params={"token": guest["token"]}).json()
+    assert view["orders"] == [], "the new guests see the previous sitting's rounds"

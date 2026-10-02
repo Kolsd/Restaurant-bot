@@ -721,7 +721,7 @@ async def test_base_order_id_with_active_session_returns_id():
     from app.repositories.tables_repo import db_get_base_order_id
 
     conn = _make_tenant_conn([
-        make_row({"id": "sess-001"}),
+        make_row({"id": "sess-001", "started_at": None}),
         make_row({"base_id": "MESA-AA3E4A"}),
     ])
     pool = make_pool(conn)
@@ -738,7 +738,7 @@ async def test_base_order_id_active_session_without_orders_returns_none():
     from app.repositories.tables_repo import db_get_base_order_id
 
     conn = _make_tenant_conn([
-        make_row({"id": "sess-001"}),
+        make_row({"id": "sess-001", "started_at": None}),
         None,
     ])
     pool = make_pool(conn)

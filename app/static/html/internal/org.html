@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Mesio HQ — Ficha</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/internal/hq-shell.css">
+  <link rel="stylesheet" href="/static/css/internal/org.css">
+</head>
+<body data-page="org" data-hq-sidebar="true">
+  <main class="org-page">
+    <header class="org-head">
+      <div>
+        <div class="org-crumbs"><a href="/internal/superadmin">Restaurantes</a> › <span id="org-crumb">…</span></div>
+        <h1 class="org-title" id="org-name">Cargando…</h1>
+        <div class="org-sub" id="org-sub"></div>
+      </div>
+      <div class="org-actions">
+        <span class="org-updated" id="org-updated"></span>
+        <button type="button" class="org-btn" id="org-refresh">Actualizar</button>
+        <a class="org-btn" id="org-costs" href="#">Costos LLM</a>
+        <a class="org-btn" id="org-superadmin" href="/internal/superadmin">Plan y pagos</a>
+      </div>
+    </header>
+
+    <div class="org-error" id="org-error" hidden></div>
+
+    <section class="org-card">
+      <h2 class="org-h2">Qué atender</h2>
+      <div class="org-hint">Lo que hoy necesita a alguien de Mesio, con dónde mirar y cómo resolverlo.</div>
+      <div id="org-flags" class="org-flags"></div>
+    </section>
+
+    <section class="org-card">
+      <h2 class="org-h2">Negocio</h2>
+      <div id="org-business" class="org-kpis"></div>
+    </section>
+
+    <section class="org-card">
+      <div class="org-row-between">
+        <h2 class="org-h2">Sedes</h2>
+        <div id="org-sede-tabs" class="org-tabs" role="tablist"></div>
+      </div>
+      <div id="org-sede"></div>
+    </section>
+
+    <section class="org-card">
+      <h2 class="org-h2">Usuarios del panel</h2>
+      <div class="org-hint">Dueño, admins y gerentes. Para cambiar una contraseña: Superadmin › Usuarios.</div>
+      <div class="org-table-wrap"><table class="org-table" id="org-users"></table></div>
+    </section>
+  </main>
+
+  <script src="/static/js/mesio-utils.js"></script>
+  <script src="/static/js/internal/org.js"></script>
+  <script src="/static/js/internal/hq-shell.js" defer></script>
+</body>
+</html>

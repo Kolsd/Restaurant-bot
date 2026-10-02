@@ -911,7 +911,7 @@ function renderRestaurantsTable(list) {
       <td>${renderModuleChips(feats)}</td>
       <td><span class="badge ${active?'badge-active':'badge-suspended'}">${active?'Activo':'Suspendido'}</span></td>
       <td style="color:#aaa;font-size:12px;">#${r.id}</td>
-      <td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openDetail(${r.id})">Ver →</button></td>
+      <td style="white-space:nowrap;"><a class="btn btn-primary btn-sm" href="/internal/org/${r.id}" onclick="event.stopPropagation()">Ficha</a> <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openDetail(${r.id})">Editar →</button></td>
     </tr>`;
   }).join('');
 }

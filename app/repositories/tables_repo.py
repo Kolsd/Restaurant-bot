@@ -272,8 +272,10 @@ async def db_update_table_order_status(order_id: str, status: str):
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            "UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1 "
-            "RETURNING id, table_id, org_id, branch_id",
+            # ready_at: first time the round turns "listo" (kitchen time in HQ).
+            "UPDATE table_orders SET status=$2, updated_at=NOW(), "
+            "ready_at = CASE WHEN $2 = 'listo' AND ready_at IS NULL THEN NOW() ELSE ready_at END "
+            "WHERE id=$1 RETURNING id, table_id, org_id, branch_id",
             order_id, status,
         )
 
@@ -292,17 +294,23 @@ async def db_get_base_order_id(table_id: str) -> str | None:
         # Without this check, a new customer at a table with leftover orders from a
         # previous session would get labeled "Adicional #N" instead of starting fresh.
         session_row = await conn.fetchrow(
-            "SELECT id FROM table_sessions WHERE table_id=$1 AND status='active' LIMIT 1",
+            "SELECT id, started_at FROM table_sessions WHERE table_id=$1 AND status='active' "
+            "ORDER BY started_at ASC LIMIT 1",
             table_id,
         )
         if not session_row:
             return None
+        # Only this sitting's rounds. A sitting closed without invoicing (ghost
+        # table, inactivity close, demo recycle) left rounds that are neither
+        # factura_entregada nor cancelled; the next guests inherited that bill —
+        # they saw the old rounds and their own were added to it.
         row = await conn.fetchrow("""
             SELECT COALESCE(base_order_id, id) as base_id
             FROM table_orders
-            WHERE table_id=$1 AND status NOT IN ('factura_entregada', 'cancelado')
+            WHERE table_id=$1 AND status NOT IN ('factura_entregada', 'cancelado', 'cancelled')
+              AND ($2::timestamp IS NULL OR created_at >= $2::timestamp)
             ORDER BY created_at ASC LIMIT 1
-        """, table_id)
+        """, table_id, session_row["started_at"])
         return row['base_id'] if row else None
 
 

@@ -168,7 +168,7 @@ async def hq_search(
                     "id": row["id"],
                     "title": row["name"] or f"Org #{row['id']}",
                     "subtitle": subtitle,
-                    "url": f"/internal/superadmin#org={row['id']}",
+                    "url": f"/internal/org/{row['id']}",
                 })
 
             # ── Prospect search ──────────────────────────────────────────────

@@ -13,6 +13,16 @@ The 5 internal sections (analytics, monitoring, superadmin, crm, costs) now shar
 - `app/static/html/internal/index.html` — HQ landing page.
 - `app/services/audit_middleware.py` — captures every POST/PATCH/PUT/DELETE mutation on `/api/internal/*` (status<400). 21 naming rules. Best-effort, lazy-imports the repo, never breaks the API call.
 
+### Ficha de organización (2026-10-01, HQ control center wave 1)
+
+`/internal/org/{org_id}` (page `html/internal/org.html` + `js/internal/org.js` + `css/internal/org.css`), data from `GET /api/internal/hq/orgs/{org_id}` (`routes/internal/hq.py` → `services/hq_snapshot.py` → `repositories/internal/hq_repo.py`, read-only under bypass). Opened from Superadmin › "Ficha" and from Ctrl+K tenant results.
+
+- **Qué atender**: health flags (org: suspended/paused/overdue/trial_ending; sede: stuck rounds >45 min, web orders open >90 min, waiting acceptance, sittings >6 h, checks open >3 h, proofs to review, delivered unpaid, no activity 7 d, no tables, slow kitchen p90 >30 min, low inventory, NPS negative). Each flag = `RUNBOOK[code]` in `hq_snapshot.py`: severity, title, **where to look**, **how to fix**. Add new situations there.
+- **Negocio**: billing status, plan, price/sede, active sedes, MRR (0 unless billed), LLM cost 30 d (cost_metrics_repo) and margin, last panel login.
+- **Per sede**: operation (orders/sales today in the sede's local day, 7/30 d, ticket, open tables, rounds, delivery/pickup, kitchen p50/p90 from `table_orders.ready_at` (0107, stamped the first time a round turns listo), waiter alerts, last order), adoption (diner sessions, remembered diners, AI chats, reservations, inventory, ops_config answers, web delivery switches), NPS 30 d, staff with last login (`sessions` rows `staff:<id>`).
+- Every per-sede query filters org_id AND location_id. Tests: `tests/test_hq_org_snapshot.py`.
+- Next waves: per-org error log, support actions (reason + audit), alert rules + email.
+
 ### New internal endpoints (post-HQ)
 
 | Endpoint | Purpose |
