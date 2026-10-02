@@ -22,7 +22,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-_PATCH_TARGET = "app.routes.internal.analytics.get_pool"
 _SESSION_PATCH = "app.repositories.sessions_repo.get_session"
 
 ADMIN_KEY = "test-analytics-key"
@@ -34,58 +33,6 @@ def _mock_session(valid_token: str = ADMIN_KEY):
     async def _get_session(token):
         return "mesio:superadmin" if token == valid_token else None
     return AsyncMock(side_effect=_get_session)
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _make_conn(fetchval_returns: list = None, fetch_returns: list = None):
-    """Build a mock connection whose fetchval/fetch return values in sequence."""
-    conn = AsyncMock()
-    if fetchval_returns is not None:
-        conn.fetchval = AsyncMock(side_effect=fetchval_returns)
-    if fetch_returns is not None:
-        conn.fetch = AsyncMock(side_effect=fetch_returns)
-    return conn
-
-
-def _make_pool(conn):
-    """Wrap a mock conn in a minimal async pool context manager."""
-    acquire_cm = AsyncMock()
-    acquire_cm.__aenter__ = AsyncMock(return_value=conn)
-    acquire_cm.__aexit__ = AsyncMock(return_value=False)
-    pool = AsyncMock()
-    pool.acquire = MagicMock(return_value=acquire_cm)
-    return pool
-
-
-def _make_multi_pool(conn_sequence: list):
-    """Return a pool mock that hands out different conns on each acquire()."""
-    pools = []
-    for conn in conn_sequence:
-        acquire_cm = AsyncMock()
-        acquire_cm.__aenter__ = AsyncMock(return_value=conn)
-        acquire_cm.__aexit__ = AsyncMock(return_value=False)
-        pool_i = AsyncMock()
-        pool_i.acquire = MagicMock(return_value=acquire_cm)
-        pools.append(pool_i)
-    get_pool_mock = AsyncMock(side_effect=pools)
-    return get_pool_mock
-
-
-def _const_conn(val):
-    """Conn whose fetchval always returns val."""
-    conn = AsyncMock()
-    conn.fetchval = AsyncMock(return_value=val)
-    return conn
-
-
-def _make_row(d: dict):
-    """Minimal asyncpg Record-like object."""
-    row = MagicMock()
-    row.__getitem__ = lambda s, k: d[k]
-    row.get = lambda k, default=None: d.get(k, default)
-    row.keys = lambda: d.keys()
-    return row
 
 
 # ── 1. test_overview_requires_auth ───────────────────────────────────────────
@@ -114,136 +61,51 @@ class TestOverviewAuth:
 # ── 2. test_overview_returns_data ────────────────────────────────────────────
 
 class TestOverviewData:
+    """The route hands platform_stats_repo's numbers to the HQ home. What the
+    numbers mean (table rounds + web orders, RLS-visible, demo out) is tested
+    against a real DB in tests/test_hq_review_2026_10_02.py; this pins the
+    response contract the home page reads."""
+
     @pytest.fixture(autouse=True)
     def _session_mock(self, mock_superadmin_session):
         """All data tests require a valid superadmin session."""
 
-    def _build_pool_mock(self):
-        """
-        overview calls get_pool() ONCE and then calls pool.acquire() 15 times.
-        We return a single pool whose acquire() hands out a new conn each call.
+    _DATA = {
+        "orders": {"today": 156, "this_week": 892, "this_month": 3421, "avg_daily_30d": 114.0,
+                   "sales_today": __import__("decimal").Decimal("1250000.00"),
+                   "sales_7d": __import__("decimal").Decimal("9000000")},
+        "restaurants": {"total": 45, "sedes": 52, "active_today": 20, "active_7d": 32, "active_30d": 40,
+                        "new_this_week": 3, "new_this_month": 8},
+        "diners_today": 300, "errors_24h": 2,
+        "alerts": {"open": 4, "critical": 1},
+        "billing": {"invoices_today": 45, "invoices_this_month": 1200},
+    }
 
-        Metrics in order:
-          restaurants: total, active_7d, active_30d, new_this_week, new_this_month  (5)
-          orders:      today, this_week, this_month, avg_daily_30d                  (4)
-          conversations: today, this_week, active_now                               (3)
-          billing:     configured_count, invoices_today, invoices_this_month        (3)
-        = 15 acquire() calls total.
-        """
-        vals = [
-            45,    # restaurants.total
-            32,    # active_7d
-            40,    # active_30d
-            3,     # new_this_week
-            8,     # new_this_month
-            156,   # orders.today
-            892,   # orders.this_week
-            3421,  # orders.this_month
-            114.0, # orders.avg_daily_30d
-            423,   # conversations.today
-            2100,  # conversations.this_week
-            12,    # conversations.active_now
-            18,    # billing.configured_count
-            45,    # billing.invoices_today
-            1200,  # billing.invoices_this_month
-        ]
-
-        # Build a sequence of acquire context managers, one per value
-        acquire_cms = []
-        for v in vals:
-            conn = AsyncMock()
-            conn.fetchval = AsyncMock(return_value=v)
-            cm = AsyncMock()
-            cm.__aenter__ = AsyncMock(return_value=conn)
-            cm.__aexit__ = AsyncMock(return_value=False)
-            acquire_cms.append(cm)
-
-        pool = AsyncMock()
-        pool.acquire = MagicMock(side_effect=acquire_cms)
-        return AsyncMock(return_value=pool)
-
-    def test_overview_returns_200_with_structure(self, client, monkeypatch):
+    def _get(self, client, monkeypatch):
+        import copy
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
-        with patch(_PATCH_TARGET, self._build_pool_mock()):
+        with patch("app.repositories.internal.platform_stats_repo.db_platform_overview",
+                   AsyncMock(return_value=copy.deepcopy(self._DATA))) as stub:
             resp = client.get("/api/internal/analytics/overview", headers=AUTH_HEADER)
+        return resp, stub
+
+    def test_overview_returns_the_home_kpis(self, client, monkeypatch):
+        resp, stub = self._get(client, monkeypatch)
         assert resp.status_code == 200
         body = resp.json()
-        assert "restaurants" in body
-        assert "orders" in body
-        assert "conversations" in body
-        assert "billing" in body
+        assert body["orders"]["today"] == 156
+        assert body["restaurants"]["active_today"] == 20
+        assert body["alerts"] == {"open": 4, "critical": 1}
+        assert body["errors_24h"] == 2
+        # "today" is Bogotá's business day, passed as a naive UTC datetime.
+        (day_start,), _ = stub.call_args
+        assert day_start.tzinfo is None and day_start.hour == 5
 
-    def test_overview_restaurants_keys(self, client, monkeypatch):
-        monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
-        with patch(_PATCH_TARGET, self._build_pool_mock()):
-            resp = client.get("/api/internal/analytics/overview", headers=AUTH_HEADER)
-        r = resp.json()["restaurants"]
-        assert "total" in r
-        assert "active_7d" in r
-        assert "active_30d" in r
-        assert "new_this_week" in r
-        assert "new_this_month" in r
-
-    def test_overview_orders_values(self, client, monkeypatch):
-        monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
-        with patch(_PATCH_TARGET, self._build_pool_mock()):
-            resp = client.get("/api/internal/analytics/overview", headers=AUTH_HEADER)
+    def test_money_leaves_as_json_numbers(self, client, monkeypatch):
+        resp, _ = self._get(client, monkeypatch)
         o = resp.json()["orders"]
-        assert o["today"] == 156
-        assert o["this_week"] == 892
-        assert o["this_month"] == 3421
-        assert o["avg_daily_30d"] == 114.0
-
-    def test_overview_billing_keys(self, client, monkeypatch):
-        monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
-        with patch(_PATCH_TARGET, self._build_pool_mock()):
-            resp = client.get("/api/internal/analytics/overview", headers=AUTH_HEADER)
-        b = resp.json()["billing"]
-        assert "configured_count" in b
-        assert "invoices_today" in b
-        assert "invoices_this_month" in b
-
-    def test_overview_individual_metric_failure_returns_none(self, client, monkeypatch):
-        """If the first fetchval fails, its value is None; others still populate."""
-        monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
-
-        # Build 15 acquire CMs: first one errors, rest return a value
-        # Order: total(fail), active_7d=32, active_30d=40, new_this_week=3, new_this_month=8,
-        #        orders.today=0, this_week=0, this_month=0, avg=0.0,
-        #        conv.today=0, conv.week=0, conv.active_now=0,
-        #        billing.configured=0, invoices_today=0, invoices_month=0
-        ok_vals = [32, 40, 3, 8, 0, 0, 0, 0.0, 0, 0, 0, 0, 0, 0]
-
-        acquire_cms = []
-
-        # First CM — conn.fetchval raises
-        err_conn = AsyncMock()
-        err_conn.fetchval = AsyncMock(side_effect=Exception("table missing"))
-        err_cm = AsyncMock()
-        err_cm.__aenter__ = AsyncMock(return_value=err_conn)
-        err_cm.__aexit__ = AsyncMock(return_value=False)
-        acquire_cms.append(err_cm)
-
-        # Remaining 14 CMs — each returns a value
-        for v in ok_vals:
-            conn = AsyncMock()
-            conn.fetchval = AsyncMock(return_value=v)
-            cm = AsyncMock()
-            cm.__aenter__ = AsyncMock(return_value=conn)
-            cm.__aexit__ = AsyncMock(return_value=False)
-            acquire_cms.append(cm)
-
-        pool = AsyncMock()
-        pool.acquire = MagicMock(side_effect=acquire_cms)
-        get_pool_mock = AsyncMock(return_value=pool)
-
-        with patch(_PATCH_TARGET, get_pool_mock):
-            resp = client.get("/api/internal/analytics/overview", headers=AUTH_HEADER)
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["restaurants"]["total"] is None      # failed
-        assert body["restaurants"]["active_7d"] == 32    # subsequent ok
+        assert o["sales_today"] == 1250000.0
+        assert o["sales_7d"] == 9000000.0
 
 
 # ── 3. test_restaurants_list ─────────────────────────────────────────────────

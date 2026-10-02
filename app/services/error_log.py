@@ -29,12 +29,15 @@ log = get_logger(__name__)
 _MAX_MESSAGE = 500
 _PHONE_RE = re.compile(r"\+?\d[\d\s\-]{7,}\d")
 _DIGITS_RE = re.compile(r"\d+")
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _pending: set[asyncio.Task] = set()
 
 
 def clean_message(message: str | None) -> str:
     text = (message or "").strip().replace("\n", " ")
-    text = _PHONE_RE.sub("***", text)
+    # Dates look like phone numbers to the regex ("2026-10-05" became "***"),
+    # and a date is usually the clue in the message.
+    text = _PHONE_RE.sub(lambda m: m.group(0) if _ISO_DATE_RE.fullmatch(m.group(0)) else "***", text)
     return text[:_MAX_MESSAGE]
 
 

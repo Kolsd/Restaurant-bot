@@ -28,7 +28,7 @@
  * Cache-Control fix just removed unless the version bump is disciplined.
  */
 
-const CACHE_VERSION  = 'v96';
+const CACHE_VERSION  = 'v97';
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [

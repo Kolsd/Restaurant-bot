@@ -168,7 +168,7 @@ async def _fetch_sales_rows(
                 """SELECT channel, total, created_at
                    FROM table_orders
                    WHERE created_at >= $1 AND created_at < $2
-                     AND status NOT IN ('cancelado')
+                     AND status NOT IN ('cancelado', 'cancelled')
                      AND branch_id = $3""",
                 ps, d_to_inclusive, location_id,
             )
@@ -177,7 +177,7 @@ async def _fetch_sales_rows(
                 """SELECT channel, total, created_at
                    FROM table_orders
                    WHERE created_at >= $1 AND created_at < $2
-                     AND status NOT IN ('cancelado')""",
+                     AND status NOT IN ('cancelado', 'cancelled')""",
                 ps, d_to_inclusive,
             )
     return order_rows, table_rows
@@ -303,7 +303,7 @@ async def db_top_dishes(
                 """SELECT items
                    FROM table_orders
                    WHERE created_at >= $1 AND created_at < $2
-                     AND status NOT IN ('cancelado')
+                     AND status NOT IN ('cancelado', 'cancelled')
                      AND branch_id = $3""",
                 ps, d_to_inclusive, location_id,
             )
@@ -319,7 +319,7 @@ async def db_top_dishes(
                 """SELECT items
                    FROM table_orders
                    WHERE created_at >= $1 AND created_at < $2
-                     AND status NOT IN ('cancelado')""",
+                     AND status NOT IN ('cancelado', 'cancelled')""",
                 ps, d_to_inclusive,
             )
 
@@ -861,7 +861,7 @@ async def db_staff_performance(
                WHERE waiter_staff_id = $1::uuid
                  AND org_id = $2
                  AND created_at >= $3::date
-                 AND status NOT IN ('cancelado')
+                 AND status NOT IN ('cancelado', 'cancelled')
                GROUP BY 1
                ORDER BY 1 ASC""",
             _uuid, org_id, period_start,

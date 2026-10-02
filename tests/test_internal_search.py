@@ -198,7 +198,9 @@ def test_search_returns_prospect_results(client, with_auth):
     assert len(prospect_results) == 1
     r = prospect_results[0]
     assert r["id"] == 5
-    assert r["title"] == "Carlos Pérez"
+    # The restaurant is what the founder searches for; the owner goes under it.
+    assert r["title"] == "La Parrilla de Carlos"
+    assert "Carlos Pérez" in r["subtitle"]
     assert "demo" in r["subtitle"].lower()
     assert "Bogotá" in r["subtitle"]
     assert r["url"] == "/internal/crm#prospect=5"

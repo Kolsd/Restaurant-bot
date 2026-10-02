@@ -214,35 +214,36 @@ def normalize_menu_shape(menu):
 # ── Superadmin global stats ───────────────────────────────────────────────────
 
 async def db_get_admin_stats() -> dict:
-    """Return global platform counts: restaurants, users, orders, MRR.
+    """Global counts for Superadmin › Resumen: customer businesses (orgs),
+    their active sedes, panel users and every order ever sold through Mesio
+    (table rounds + web orders, cancelled ones out).
 
-    restaurants/users have no RLS policy (they live on organizations/locations/
-    users, none of which are in the RLS table set) so a plain pool connection
-    is fine for those. `orders` DOES have RLS + FORCE (migration 0029) — the
-    pool connects as mesio_app in production, so a bare pool.acquire() with no
-    app.org_id GUC set fails RLS closed and would silently return 0 here
-    instead of the real cross-tenant total. Route that one count through
-    tenant_connection() under bypass_tenant_scope so it actually executes
-    `SET LOCAL ROLE mesio_superadmin` for the query.
+    It counted rows of the `restaurants` view (one per SEDE, so 5 "restaurants"
+    for 4 customers), only web `orders` (table rounds — most of the volume —
+    were missing) and reported a made-up MRR of 99 per restaurant. Orders go
+    through tenant_connection() under bypass so RLS lets them be counted.
     """
     from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        total_rest   = await conn.fetchval("SELECT COUNT(*) FROM restaurants")
-        active_rest  = await conn.fetchval("SELECT COUNT(*) FROM restaurants WHERE subscription_status='active'")
-        total_users  = await conn.fetchval("SELECT COUNT(*) FROM users")
-
-    with bypass_tenant_scope("admin_stats_orders_cross_tenant"):
+    with bypass_tenant_scope("admin_stats_cross_tenant"):
         async with _tenant_connection() as conn:
-            total_orders = await conn.fetchval("SELECT COUNT(*) FROM orders")
-
-    mrr = (active_rest or 0) * 99
+            row = await conn.fetchrow(
+                """SELECT
+                     (SELECT COUNT(*) FROM organizations) AS orgs,
+                     (SELECT COUNT(*) FROM organizations
+                       WHERE COALESCE(subscription_status, 'active') NOT IN ('suspended', 'cancelled')) AS orgs_open,
+                     (SELECT COUNT(*) FROM locations WHERE active) AS sedes,
+                     (SELECT COUNT(*) FROM users) AS users,
+                     (SELECT COUNT(*) FROM table_orders WHERE status NOT IN ('cancelled', 'cancelado'))
+                   + (SELECT COUNT(*) FROM orders WHERE status NOT IN ('cancelado', 'rechazado', 'cancelled'))
+                       AS orders"""
+            )
     return {
-        "total_restaurants":  int(total_rest or 0),
-        "active_restaurants": int(active_rest or 0),
-        "total_orders":       int(total_orders or 0),
-        "mrr":                mrr,
+        "total_restaurants":  int(row["orgs"] or 0),
+        "active_restaurants": int(row["orgs_open"] or 0),
+        "total_sedes":        int(row["sedes"] or 0),
+        "total_users":        int(row["users"] or 0),
+        "total_orders":       int(row["orders"] or 0),
     }
 
 
@@ -289,19 +290,23 @@ async def db_get_restaurant_detail_stats(restaurant_id: int) -> dict:
     from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
     with bypass_tenant_scope("db_get_restaurant_detail_stats: superadmin cross-tenant stats"):
         async with _tenant_connection() as conn:
-            orders_30d   = await conn.fetchrow(
-                "SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS rev "
-                "FROM orders WHERE org_id=$1 AND created_at >= NOW()-INTERVAL '30 days'",
-                restaurant_id,
-            )
-            orders_today = await conn.fetchrow(
-                "SELECT COUNT(*) AS cnt FROM orders WHERE org_id=$1 AND created_at >= CURRENT_DATE",
-                restaurant_id,
-            )
-            table_30d    = await conn.fetchrow(
-                "SELECT COUNT(*) AS cnt FROM table_orders "
-                "WHERE org_id=$1 AND created_at >= NOW()-INTERVAL '30 days' "
-                "AND status <> 'cancelado'",
+            # Web orders + table rounds: the panel showed only web orders, so a
+            # restaurant selling at its tables looked like it sold nothing.
+            sales = await conn.fetchrow(
+                """WITH s AS (
+                       SELECT created_at, total, 'web' AS kind FROM orders
+                        WHERE org_id = $1 AND status NOT IN ('cancelado', 'rechazado', 'cancelled')
+                       UNION ALL
+                       SELECT created_at, total, 'table' FROM table_orders
+                        WHERE org_id = $1 AND status NOT IN ('cancelled', 'cancelado')
+                   )
+                   SELECT COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days') AS cnt_30d,
+                          COALESCE(SUM(total) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days'), 0) AS rev_30d,
+                          COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) AS cnt_today,
+                          COUNT(*) FILTER (WHERE kind = 'table'
+                                             AND created_at >= NOW() - INTERVAL '30 days') AS table_30d,
+                          MAX(created_at) AS last_order
+                     FROM s""",
                 restaurant_id,
             )
             convs        = await conn.fetchval("SELECT COUNT(*) FROM conversations WHERE org_id=$1", restaurant_id)
@@ -321,27 +326,36 @@ async def db_get_restaurant_detail_stats(restaurant_id: int) -> dict:
                 invoices_30d = None
                 invoices_all = 0
 
-            last_order = await conn.fetchval("SELECT MAX(created_at) FROM orders WHERE org_id=$1", restaurant_id)
 
     return {
-        "orders_30d":       int(orders_30d["cnt"])  if orders_30d else 0,
-        "revenue_30d":      float(orders_30d["rev"]) if orders_30d else 0.0,
-        "orders_today":     int(orders_today["cnt"]) if orders_today else 0,
-        "table_orders_30d": int(table_30d["cnt"])   if table_30d else 0,
+        "orders_30d":       int(sales["cnt_30d"]),
+        "revenue_30d":      float(sales["rev_30d"]),  # JSON boundary
+        "orders_today":     int(sales["cnt_today"]),
+        "table_orders_30d": int(sales["table_30d"]),
         "active_convs":     int(convs or 0),
         "users":            int(users_cnt or 0),
         "invoices_30d":     int(invoices_30d["cnt"]) if invoices_30d else 0,
         "invoices_all":     int(invoices_all or 0),
-        "last_order":       last_order.isoformat() if last_order else None,
+        "last_order":       sales["last_order"].isoformat() if sales["last_order"] else None,
     }
 
 
 # ── Billing stats ─────────────────────────────────────────────────────────────
 
 async def db_get_billing_stats() -> list[dict]:
-    """Return per-restaurant fiscal invoice aggregates for the superadmin billing page."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return per-restaurant fiscal invoice aggregates for the superadmin billing page.
+
+    fiscal_invoices has RLS: through a bare pool connection (mesio_app) this
+    read nothing and Superadmin › DIAN always said "Sin folios emitidos".
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    with bypass_tenant_scope("admin_billing_stats_cross_tenant"):
+        return await _billing_stats_rows()
+
+
+async def _billing_stats_rows() -> list[dict]:
+    async with _tenant_connection() as conn:
         table_exists = await conn.fetchval("SELECT to_regclass('fiscal_invoices')")
         if not table_exists:
             return []
@@ -361,6 +375,44 @@ async def db_get_billing_stats() -> list[dict]:
             """
         )
     return [dict(r) for r in rows]
+
+
+# ── Superadmin hard delete guards ────────────────────────────────────────────
+
+async def db_count_recent_sales(*, org_id: int | None = None, location_id: int | None = None,
+                                days: int = 90) -> int:
+    """Table rounds + web orders of an org or a sede in the last `days`.
+
+    Guards the superadmin hard delete. It used to count web `orders` only,
+    over a bare pool connection that RLS shows zero rows to — so the guard
+    always said "no orders" and a selling restaurant could be wiped.
+    Caller must be inside bypass_tenant_scope.
+    """
+    if (org_id is None) == (location_id is None):
+        raise ValueError("pass exactly one of org_id / location_id")
+    col = "org_id" if org_id is not None else "location_id"  # whitelist, not user input
+    key = org_id if org_id is not None else location_id
+    async with _tenant_connection() as conn:
+        n = await conn.fetchval(
+            f"""SELECT (SELECT COUNT(*) FROM orders
+                         WHERE {col} = $1 AND created_at > NOW() - make_interval(days => $2))
+                     + (SELECT COUNT(*) FROM table_orders
+                         WHERE {col} = $1 AND created_at > NOW() - make_interval(days => $2))""",
+            key, days,
+        )
+    return int(n or 0)
+
+
+async def db_hard_delete_organization(org_id: int) -> None:
+    """DELETE the org row (FK cascades). Caller must be inside bypass_tenant_scope."""
+    async with _tenant_connection() as conn:
+        await conn.execute("DELETE FROM organizations WHERE id = $1", org_id)
+
+
+async def db_hard_delete_location(location_id: int) -> None:
+    """DELETE the sede row (FK cascades). Caller must be inside bypass_tenant_scope."""
+    async with _tenant_connection() as conn:
+        await conn.execute("DELETE FROM locations WHERE id = $1", location_id)
 
 
 # ── Maintenance utilities ─────────────────────────────────────────────────────
@@ -1369,8 +1421,14 @@ import re as _re
 
 
 def _slugify(name: str) -> str:
-    """Convert a restaurant or dish name to a URL-safe slug."""
-    s = _re.sub(r'[^a-zA-Z0-9]+', '-', (name or '').lower()).strip('-')
+    """Convert a restaurant or dish name to a URL-safe slug.
+
+    Accents are folded first: "Pizzería" gave "pizzer-a" and "Café" "caf",
+    which is the /pedir/{slug} link a restaurant prints on its QR.
+    """
+    import unicodedata  # noqa: PLC0415
+    folded = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode("ascii")
+    s = _re.sub(r'[^a-zA-Z0-9]+', '-', folded.lower()).strip('-')
     return s or 'restaurant'
 
 
@@ -1999,12 +2057,13 @@ async def db_list_organizations() -> list[dict]:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT o.id, o.name, o.slug,
+                SELECT o.id, o.name, o.slug, o.plan_code,
                        o.subscription_plan, o.subscription_status,
+                       o.comp_until, o.paid_until,
                        o.features, o.created_at, o.updated_at,
                        COUNT(l.id)::int AS location_count
                 FROM organizations o
-                LEFT JOIN locations l ON l.org_id = o.id
+                LEFT JOIN locations l ON l.org_id = o.id AND l.active
                 GROUP BY o.id
                 ORDER BY o.created_at DESC
                 """

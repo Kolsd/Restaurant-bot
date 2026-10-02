@@ -25,6 +25,18 @@ The 5 internal sections (analytics, monitoring, superadmin, crm, costs) now shar
 - **Soporte (wave 3)**: `routes/internal/hq_support.py` + `repositories/internal/hq_support_repo.py`. Ficha › sede › "Soporte en esta sede" lists what can be fixed (`GET /api/internal/hq/orgs/{org}/sedes/{loc}/support`) and acts through `POST /api/internal/hq/support/{org_id}/{close-sitting|cancel-round|cancel-web-order|dismiss-alerts|clear-sold-out|reask-ops|unpause|close-sessions|password-reset}`. Every action: reason ≥ 8 chars, target verified to belong to the org (and sede), ONE `hq_audit_log` row `support.<action>` with org_id + reason + what changed (AuditMiddleware skips `/api/internal/hq/support/`). Never touches amounts or paid flags. Password reset = the user's own email code (same as "¿Olvidaste tu contraseña?"); the old set-password endpoint `POST /api/internal/admin/users/{u}/reset-password` was deleted (PM: Mesio never sets or sees passwords). DIAN: pending invoices are listed, but the retry button waits for a MATIAS sandbox test (re-sending blind could duplicate folios). Tests: `tests/test_hq_support.py`.
 - **Alertas (wave 4, 0109 `hq_alerts`)**: `services/hq_alerts.run_alert_rules` runs every 5 scheduler ticks (and on demand, `POST /api/internal/hq/alerts/run` = "Revisar ahora" on the ficha). For every org except the live demo it builds the snapshot and keeps `hq_alerts` in step: warning/critical flag appears → alert opens (one OPEN row per `code:org:sede`, partial unique index), stays → `last_seen_at`, disappears → resolved on its own. Info flags stay on the ficha only. New critical alerts are emailed ONCE in a digest to `HQ_ALERT_EMAIL` (default miguel@mesioai.com) with where/how + ficha link; `email.delivers_for_real()` gates it — with the console backend they stay `emailed_at NULL` and go out once Resend is configured (the ficha shows a warning). Open alerts feed the HQ inbox (`/api/internal/notifications`, type `hq_alert`, linked to the ficha); the inbox now sorts newest-first within severity (it followed source order before). Rule added: `quiet_during_hours` (critical) = sede open ≥ 3 h by its posted hours, ≥ 10 orders in 7 days, none in the last 3 h. The legacy in-memory `services/alerts.py` (pool exhaustion, cost runaway, churn → log/webhook) still runs. Tests: `tests/test_hq_alerts.py`.
 
+### HQ walk-through 2026-10-02 (every section with the test key)
+
+- **Platform counts** (home KPIs, Monitoring, Ctrl+K, Superadmin stats/detail, DIAN, churn + cost-runaway sources, hard-delete guards) read RLS tables over a bare `pool.acquire()` — as `mesio_app` (prod) that is ZERO rows — and counted web `orders` only. Now `repositories/internal/platform_stats_repo.py` (and repo helpers) go through `tenant_connection()` under bypass; "an order" = table round + web order, cancelled out, live demo out. Any new HQ count: same rule.
+- **Account state** = `plans.account_status(org)`: billing_status, except `subscription_status` suspended/cancelled (Superadmin › Suspender / soft delete) is always suspendido — it now really closes the account (`plans.is_open`) and leaves MRR. The HQ lists show it (`"demo"` for `/demo`).
+- MRR and rescued orders exclude the live demo. Costos › margen = MRR prorated to the range.
+- Notifications: the legacy suspended + billing-attention sources were removed (hq_alerts already carries suspended / overdue / trial_ending); churn is orders-based; every link goes to the ficha.
+- `no_activity_7d` only for sedes older than 7 days. Onboarding tab = the owner's `services/onboarding` checklist + stalled hours.
+- Home: greeting, today's orders/sales, restaurants selling, rescued, prospects 48 h, errors 24 h + open alerts. Monitoring: global error table (`/api/internal/hq/errors`), diners online, scheduler heartbeat falls back to in-process without Redis.
+- CRM: prospects have email (create/edit/convert); convert asks for it and uses it as the owner's login; follow-up dates (were a 500) save and clear; `#prospect=<id>` deep link. Slugs fold accents (`cafe-nandu`, was `caf`).
+- **No passwords from Mesio** (PM 2026-10-02): CRM convert and Superadmin › Crear usuario create the owner with `provisioning.unusable_password_hash()` and email the reset code via `provisioning.send_account_setup` (template `render_account_setup_email`, link `/reset-password#codigo=<email>` opens the code step; the email rides in the fragment). Convert requires the owner email (it is the login). `welcome_message_sent` / `setup_email_sent` are True only when Resend really sent; otherwise the ficha's "Enviar código". `generate_temp_password` and `temp_password` are gone.
+- Tests: `tests/test_hq_review_2026_10_02.py`.
+
 ### New internal endpoints (post-HQ)
 
 | Endpoint | Purpose |
@@ -32,13 +44,11 @@ The 5 internal sections (analytics, monitoring, superadmin, crm, costs) now shar
 | `GET /api/internal/search?q=` | Cmd+K palette — searches tenants + prospects + actions |
 | `GET /api/internal/notifications` | Aggregator of 6 sources (dead letters, cost runaway, churn risk, new prospects, suspended tenants, plan caps) sorted by severity |
 | `GET /api/internal/analytics/mrr` | MRR + paying/comp/free split + by_plan + MoM delta |
-| `GET /api/internal/analytics/restaurants.csv` (also churn-risk.csv, activation.csv) | CSV exports — blob download via fetch + Authorization header |
 | `GET /api/internal/costs/{org_id}/drilldown?period=` | Top-5 most expensive days + cost-per-conv + margin recap per tenant |
 | `GET /api/internal/admin/organizations/{org_id}/onboarding` | 5-stage checklist score (created, menu, staff, billing, first_convo) |
 | `PATCH /api/internal/admin/organizations/{org_id}/plan` | Change plan (Pricing v1) + optional comp_until |
-| `POST /api/internal/admin/users/{username}/reset-password` | Bcrypt hash + delete all sessions for that user |
 | `GET /api/internal/admin/audit-log` | Filterable log of all Mesio team mutations |
-| `POST /api/internal/crm/prospects/{id}/convert` | Onboarding automation — creates org + admin user + welcome WA in 1 click |
+| `POST /api/internal/crm/prospects/{id}/convert` | Creates org + sede + trial + owner (no password: emailed set-your-password code) |
 | `GET /api/internal/crm/loss-reasons` | Top-10 aggregated loss reasons |
 
 ### Security helpers (new, post-audit 2026-05-07)

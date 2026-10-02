@@ -135,9 +135,26 @@ def pauses_on(paid_until: datetime | str | None) -> datetime | None:
     return paid + timedelta(days=PAYMENT_GRACE_DAYS) if paid else None
 
 
+# organizations.subscription_status values Mesio sets by hand from HQ
+# (Superadmin › Suspender, or the soft delete). They override the dates: a
+# suspended or cancelled account is closed whatever comp_until/paid_until say.
+MANUALLY_CLOSED = ("suspended", "cancelled")
+
+
+def account_status(org: dict, now: datetime | None = None) -> str:
+    """billing_status of an org row, except that a manual suspension from HQ
+    (subscription_status suspended/cancelled) is always suspendido."""
+    if (org.get("subscription_status") or "active") in MANUALLY_CLOSED:
+        return SUSPENDED
+    return billing_status(org.get("comp_until"), org.get("paid_until"), now)
+
+
 def is_open(org: dict, now: datetime | None = None) -> bool:
-    """Whether diners can order from the org (anything but suspendido)."""
-    return billing_status(org.get("comp_until"), org.get("paid_until"), now) != SUSPENDED
+    """Whether diners can order from the org (anything but suspendido).
+
+    Before 2026-10-02 HQ's "Suspender" only wrote subscription_status, which
+    nothing read: a suspended account kept taking orders."""
+    return account_status(org, now) != SUSPENDED
 
 
 def effective_plan(plan_code: str | None, comp_until: datetime | str | None,

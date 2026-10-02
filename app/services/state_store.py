@@ -649,10 +649,13 @@ async def scheduler_leader_renew(token: str, ttl_seconds: int = 90) -> bool:
 
 _SCHEDULER_HEARTBEAT_KEY = "mesio:scheduler:heartbeat"
 _SCHEDULER_HEARTBEAT_TTL = 300  # 5 minutes — stale if no tick in >5 min
+_local_heartbeat: int | None = None
 
 
 async def set_scheduler_heartbeat() -> None:
     """Write current UTC timestamp to scheduler heartbeat key. TTL 5 min. Best-effort."""
+    global _local_heartbeat
+    _local_heartbeat = int(time.time())
     r = await _rc.get_redis()
     if r is None:
         return
@@ -663,9 +666,13 @@ async def set_scheduler_heartbeat() -> None:
 
 
 async def get_scheduler_heartbeat() -> int | None:
-    """Return last tick UNIX timestamp, or None if Redis unavailable or key expired."""
+    """Return last tick UNIX timestamp, or None if expired (or Redis is down in a multi-worker run)."""
     r = await _rc.get_redis()
     if r is None:
+        # Single process without Redis (local runs): the scheduler lives in
+        # this same process, so its last tick is right here.
+        if _local_heartbeat and time.time() - _local_heartbeat < _SCHEDULER_HEARTBEAT_TTL:
+            return _local_heartbeat
         return None
     try:
         val = await r.get(_SCHEDULER_HEARTBEAT_KEY)

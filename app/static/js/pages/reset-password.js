@@ -252,4 +252,23 @@
 
   document.getElementById('btn-back-to-email').addEventListener('click', _resetToEmailView);
 
+  /* ── Deep link from the "crea tu contraseña" email ──────────────────
+     /reset-password#codigo=<email> — the owner already has a code, so open
+     straight on the code step. The email rides in the fragment, which never
+     reaches the server. */
+  var m = /^#codigo=(.+)$/.exec(window.location.hash || '');
+  if (m) {
+    var linked = '';
+    try { linked = decodeURIComponent(m[1]).trim(); } catch (e) { linked = ''; }
+    if (linked.indexOf('@') > 0) {
+      _email = linked;
+      var emailField = document.getElementById('rp-email');
+      if (emailField) emailField.value = linked;
+      showView('code');
+      showAlert('rp-alert-code', 'Escribe el código que te llegó a ' + linked + ' y crea tu contraseña.', 'info');
+      var codeField = document.getElementById('rp-code');
+      if (codeField) codeField.focus();
+    }
+  }
+
 }());

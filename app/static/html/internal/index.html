@@ -262,7 +262,7 @@
 
   <!-- Page header -->
   <div>
-    <div class="hq-page-title">Buenos días ☀️</div>
+    <div class="hq-page-title" id="hq-greeting">Hola</div>
     <div class="hq-page-sub" id="hq-dateline">Cargando…</div>
   </div>
 
@@ -275,26 +275,38 @@
 
   <!-- KPI row -->
   <div>
-    <div class="hq-card-title" style="padding:0 0 4px">KPIs de hoy</div>
+    <div class="hq-card-title" style="padding:0 0 4px">Hoy en la plataforma</div>
     <div class="hq-kpi-row">
+      <div class="hq-kpi">
+        <div class="hq-kpi-label">Pedidos hoy</div>
+        <div class="hq-skel" id="kpi-orders-skel"></div>
+        <div class="hq-kpi-value brand" id="kpi-orders" style="display:none"></div>
+        <div class="hq-kpi-sub" id="kpi-orders-sub">mesas + domicilios</div>
+      </div>
+      <div class="hq-kpi">
+        <div class="hq-kpi-label">Restaurantes vendiendo</div>
+        <div class="hq-skel" id="kpi-active-skel"></div>
+        <div class="hq-kpi-value" id="kpi-active" style="display:none"></div>
+        <div class="hq-kpi-sub" id="kpi-active-sub">con al menos 1 pedido hoy</div>
+      </div>
       <div class="hq-kpi">
         <div class="hq-kpi-label">Pedidos rescatados (mes)</div>
         <div class="hq-skel" id="kpi-rescued-skel"></div>
-        <div class="hq-kpi-value brand" id="kpi-rescued" style="display:none"></div>
-        <div class="hq-kpi-sub">vs 0 ayer</div>
+        <div class="hq-kpi-value" id="kpi-rescued" style="display:none"></div>
+        <div class="hq-kpi-sub" id="kpi-rescued-sub">QR, chat y link de pedidos</div>
       </div>
       <div class="hq-kpi">
-        <div class="hq-kpi-label">Tenants activos hoy</div>
-        <div class="hq-skel" id="kpi-active-skel"></div>
-        <div class="hq-kpi-value" id="kpi-active" style="display:none"></div>
-        <div class="hq-kpi-sub">con al menos 1 conv</div>
-      </div>
-      <div class="hq-kpi">
-        <div class="hq-kpi-label">Prospects nuevos (48h)</div>
+        <div class="hq-kpi-label">Prospectos nuevos (48h)</div>
         <div class="hq-skel" id="kpi-prospects-skel"></div>
         <div class="hq-kpi-value" id="kpi-prospects" style="display:none"></div>
-        <div class="hq-kpi-sub">en el pipeline CRM</div>
+        <div class="hq-kpi-sub" id="kpi-prospects-sub">en el CRM</div>
       </div>
+      <a class="hq-kpi" href="/internal/monitoring" style="text-decoration:none;color:inherit;">
+        <div class="hq-kpi-label">Errores (24 h)</div>
+        <div class="hq-skel" id="kpi-errors-skel"></div>
+        <div class="hq-kpi-value" id="kpi-errors" style="display:none"></div>
+        <div class="hq-kpi-sub" id="kpi-errors-sub">servidor + bot</div>
+      </a>
     </div>
   </div>
 
@@ -316,7 +328,7 @@
     <div class="hq-card">
       <div class="hq-card-title">Acceso rápido</div>
       <div class="hq-quicklinks">
-        <a href="/internal/superadmin#new-org" class="hq-ql-btn primary">+ Nuevo cliente</a>
+        <a href="/internal/superadmin?action=new" class="hq-ql-btn primary">+ Nuevo cliente</a>
         <a href="/internal/crm" class="hq-ql-btn">Ver pipeline CRM</a>
         <a href="/internal/superadmin" class="hq-ql-btn">Buscar tenant</a>
         <a href="/internal/monitoring" class="hq-ql-btn">Monitoreo</a>
@@ -368,6 +380,9 @@
     el.textContent = now.toLocaleDateString('es-CO', {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
     });
+    const h = now.getHours();
+    const g = document.getElementById('hq-greeting');
+    if (g) g.textContent = h < 12 ? 'Buenos días ☀️' : h < 19 ? 'Buenas tardes 🌤️' : 'Buenas noches 🌙';
   }
   _setDateline();
 
@@ -382,45 +397,65 @@
           el.textContent = n != null ? ('$' + Math.round(n).toLocaleString('es-CO') + ' COP') : '--';
           el.classList.remove('placeholder');
         }
-        if (deltaEl && data.delta_pct != null) {
-          const pct = data.delta_pct;
-          const sign = pct >= 0 ? '↑' : '↓';
-          const color = pct >= 0 ? '#10b981' : '#ef4444';
-          deltaEl.innerHTML = '<span style="color:' + color + ';font-weight:600;">' +
-            sign + ' ' + Math.abs(pct).toFixed(1) + '% vs mes pasado</span>';
+        if (deltaEl) {
+          const parts = [
+            (data.paying_count || 0) + ' pagando',
+            (data.comp_count || 0) + ' en prueba',
+            (data.free_count || 0) + ' suspendidas',
+          ];
+          deltaEl.textContent = parts.join(' · ');
+          if (data.delta_pct != null && data.mrr_last_month_cop > 0) {
+            const pct = data.delta_pct;
+            const span = document.createElement('span');
+            span.style.cssText = 'font-weight:600;margin-left:8px;color:' + (pct >= 0 ? '#10b981' : '#ef4444');
+            span.textContent = (pct >= 0 ? '↑ ' : '↓ ') + Math.abs(pct).toFixed(1) + '% vs mes pasado';
+            deltaEl.appendChild(span);
+          }
         }
       })
       .catch(() => { /* keep '--' on error */ });
   }
 
-  // ── KPI: rescued orders ───────────────────────────────────────────────────
+  const _cop = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
+  function _sub(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
+
+  // ── KPI: rescued orders (north star) ──────────────────────────────────────
   function _loadRescatados() {
     return _apiGet('/api/internal/analytics/orders-rescued?period=mtd')
       .then(data => {
         const total = data.total != null ? (data.total).toLocaleString('es-CO') : '—';
-        _setSkel('kpi-rescued-skel', 'kpi-rescued', total, 'brand');
+        _setSkel('kpi-rescued-skel', 'kpi-rescued', total, '');
+        const top = (data.ranking || [])[0];
+        if (top) _sub('kpi-rescued-sub', 'Más: ' + top.org_name + ' (' + top.count + ')');
       })
       .catch(() => _setSkel('kpi-rescued-skel', 'kpi-rescued', '—', ''));
   }
 
-  // ── KPI: active tenants ──────────────────────────────────────────────────────
-  function _loadActiveToday() {
+  // ── KPIs from the platform overview (sales, restaurants, errors) ──────────
+  function _loadOverview() {
     return _apiGet('/api/internal/analytics/overview')
       .then(data => {
-        const v = (data.restaurants || {}).active_today ??
-                  (data.restaurants || {}).active_7d ??
-                  null;
-        _setSkel('kpi-active-skel', 'kpi-active', v != null ? v : '—', '');
+        const o = data.orders || {}, r = data.restaurants || {};
+        _setSkel('kpi-orders-skel', 'kpi-orders', (o.today ?? '—').toLocaleString('es-CO'), 'brand');
+        _sub('kpi-orders-sub', _cop.format(o.sales_today || 0) + ' vendidos · ' + (data.diners_today || 0) + ' comensales');
+        _setSkel('kpi-active-skel', 'kpi-active', (r.active_today ?? 0) + ' / ' + (r.total ?? 0), '');
+        _sub('kpi-active-sub', (r.active_7d ?? 0) + ' vendieron en 7 días · ' + (r.sedes ?? 0) + ' sedes');
+        const errs = data.errors_24h || 0;
+        _setSkel('kpi-errors-skel', 'kpi-errors', errs, errs > 0 ? 'warn' : '');
+        const al = data.alerts || {};
+        _sub('kpi-errors-sub', (al.open || 0) + ' alertas abiertas' + (al.critical ? ' (' + al.critical + ' críticas)' : ''));
       })
-      .catch(() => _setSkel('kpi-active-skel', 'kpi-active', '—', ''));
+      .catch(() => {
+        ['kpi-orders', 'kpi-active', 'kpi-errors'].forEach(id => _setSkel(id + '-skel', id, '—', ''));
+      });
   }
 
   // ── KPI: new prospects ─────────────────────────────────────────────────────
   function _loadProspects() {
     return _apiGet('/api/internal/crm/stats')
       .then(data => {
-        const v = (data.prospects || data).new_48h ?? (data.prospects || data).new_count ?? null;
-        _setSkel('kpi-prospects-skel', 'kpi-prospects', v != null ? v : '—', '');
+        _setSkel('kpi-prospects-skel', 'kpi-prospects', data.new_48h ?? '—', '');
+        _sub('kpi-prospects-sub', (data.follow_ups || 0) + ' seguimientos para hoy');
       })
       .catch(() => _setSkel('kpi-prospects-skel', 'kpi-prospects', '—', ''));
   }
@@ -489,7 +524,7 @@
   Promise.allSettled([
     _loadMrr(),
     _loadRescatados(),
-    _loadActiveToday(),
+    _loadOverview(),
     _loadProspects(),
     _loadNotifications(),
   ]);

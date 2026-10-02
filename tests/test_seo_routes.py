@@ -26,7 +26,8 @@ def test_slugify_basic():
 
 def test_slugify_special_chars():
     from app.repositories.restaurant_repo import _slugify
-    assert _slugify("Café & Brunch!") == "caf-brunch"
+    assert _slugify("Café & Brunch!") == "cafe-brunch"
+    assert _slugify("Pizzería Ñandú") == "pizzeria-nandu"
 
 
 def test_slugify_empty():

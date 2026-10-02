@@ -24,7 +24,10 @@ Order matters and is not arbitrary:
                      own password on self-serve signup precisely so that a
                      missing RESEND_API_KEY degrades the welcome mail into
                      a nicety instead of locking them out of the account
-                     they just created.
+                     they just created. An account Mesio opens (CRM
+                     convert) has no password at all: its email carries the
+                     code the owner creates one with — Mesio never sets,
+                     sees or relays a password (PM decision 2026-10-02).
 
 Steps 1-4 are not one database transaction: the repo functions each open
 their own connection, and stitching them into one would mean reaching past
@@ -36,18 +39,14 @@ exists and what does not, instead of a bare 500.
 from __future__ import annotations
 
 import os
-import random
 import re
-import string
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
-
-# Excludes 0/O/l/1/I — a temp password gets read off a screen or a phone call.
-_SAFE_CHARS = "".join(c for c in (string.ascii_letters + string.digits) if c not in "0Ol1I")
 
 # The trial the landing page advertises. It is the promise, so it is the
 # default; a caller may shorten it but should not have to know the number.
@@ -81,10 +80,9 @@ class ProvisionedTenant:
     location: dict
     username: str
     user_created: bool
-    # Set only when this module generated the password (CRM convert). None
-    # when the owner chose their own — we never learn it and never echo it.
-    temp_password: str | None
     comp_until: datetime | None
+    # Self-serve: the welcome email. Mesio-opened: the set-your-password
+    # code, True only when it really left (Resend configured).
     welcome_email_sent: bool
 
     @property
@@ -95,11 +93,6 @@ class ProvisionedTenant:
     def location_id(self) -> int | None:
         loc_id = self.location.get("id") if self.location else None
         return int(loc_id) if loc_id is not None else None
-
-
-def generate_temp_password(length: int = 8) -> str:
-    """Alphanumeric password without confusable characters."""
-    return "".join(random.SystemRandom().choice(_SAFE_CHARS) for _ in range(length))
 
 
 def username_from(email: str | None, restaurant_name: str) -> str:
@@ -113,8 +106,51 @@ def username_from(email: str | None, restaurant_name: str) -> str:
         local = email.split("@")[0]
         if local:
             return local[:60]
-    slug = re.sub(r"[^a-z0-9.]", "", (restaurant_name or "").lower().replace(" ", "."))
+    folded = unicodedata.normalize("NFKD", restaurant_name or "").encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9.]", "", folded.lower().replace(" ", "."))
     return slug[:20] or "owner"
+
+
+def setup_url(email: str) -> str:
+    """Absolute link to create the password: /reset-password, already on the
+    "I have a code" step for this email. The email rides in the #fragment,
+    which never reaches a server log."""
+    from urllib.parse import quote  # noqa: PLC0415
+    app_domain = os.getenv("APP_DOMAIN", "").strip() or "mesio.app"
+    return f"https://{app_domain}/reset-password#codigo={quote(email)}"
+
+
+def unusable_password_hash() -> str:
+    """Hash of a random secret nobody ever sees, for accounts Mesio opens:
+    the owner gets in only by creating their own password with an emailed
+    code. Mesio never sets or sees a password (PM decision 2026-10-02)."""
+    import secrets  # noqa: PLC0415
+
+    from app.services.password_hash import hash_password  # noqa: PLC0415
+    return hash_password(secrets.token_urlsafe(32))
+
+
+async def send_account_setup(email: str, restaurant_name: str | None) -> bool:
+    """Email a new owner their set-your-password code (the reset code, same
+    15-minute TTL). True only when an email really left (Resend configured).
+    Never raises; never logs the code."""
+    import asyncpg  # noqa: PLC0415
+
+    from app.repositories.password_reset_repo import db_create_password_reset  # noqa: PLC0415
+    from app.services.email import delivers_for_real, send_email  # noqa: PLC0415
+    from app.services.email_templates import render_account_setup_email  # noqa: PLC0415
+
+    try:
+        code = await db_create_password_reset(email)
+        subject, html, text = render_account_setup_email(
+            restaurant_name=restaurant_name or "tu restaurante", username=email,
+            code=code, setup_url=setup_url(email),
+        )
+        sent = await send_email(to=email, subject=subject, html=html, text=text)
+    except (asyncpg.PostgresError, OSError):
+        log.exception("provisioning.account_setup_failed", email_prefix=email[:3] + "***")
+        return False
+    return bool(sent) and delivers_for_real()
 
 
 def login_url() -> str:
@@ -140,8 +176,9 @@ async def create_tenant(
     """Create an organization, its first sede, its trial and its owner.
 
     `password` is the owner's own when the caller has one (self-serve
-    signup, where the person typed it) and None when it should be generated
-    and handed back for someone to relay (CRM convert).
+    signup, where the person typed it). None means Mesio opens the account
+    (CRM convert): `owner_email` is then required, the account gets an
+    unusable hash, and the owner is emailed a code to create their password.
 
     `allow_username_suffix` decides what happens when the login name is
     taken. The CRM convert wants a working account no matter what, so it
@@ -166,10 +203,12 @@ async def create_tenant(
     if not final_username:
         raise ProvisioningError("validate", "No se pudo derivar un usuario.")
 
-    generated_password = None
-    if not password:
-        generated_password = generate_temp_password()
-        password = generated_password
+    # No password from the caller = an account Mesio opens (CRM convert):
+    # it gets an unusable hash and the owner creates their own password with
+    # an emailed code. Mesio never generates, shows or emails one.
+    mesio_opened = not password
+    if mesio_opened and "@" not in owner_email:
+        raise ProvisioningError("validate", "Falta el email del dueño: con él crea su contraseña.")
 
     # ── 0. Is the login name free? ───────────────────────────────────────
     # Asked BEFORE anything is written. The org is created first and the
@@ -239,7 +278,7 @@ async def create_tenant(
             log.exception("provisioning.trial_failed", org_id=org_id)
 
     # ── 4. Owner ─────────────────────────────────────────────────────────
-    pw_hash = hash_password(password)   # never log `password`
+    pw_hash = unusable_password_hash() if mesio_opened else hash_password(password)   # never log `password`
     user_created = False
     try:
         # branch_id carries the ORG id here (owner of the whole org, not of
@@ -292,13 +331,13 @@ async def create_tenant(
 
     # ── 5. Welcome email (best effort) ───────────────────────────────────
     welcome_sent = False
-    if send_welcome_email and owner_email and "@" in owner_email:
+    if mesio_opened:
+        # Not optional: without this code the owner has no way in.
+        welcome_sent = await send_account_setup(owner_email, restaurant_name)
+    elif send_welcome_email and owner_email and "@" in owner_email:
         welcome_sent = await _send_welcome_email(
             restaurant_name=restaurant_name,
             username=final_username,
-            # Only a password WE generated goes in an email. One the owner
-            # chose is not ours to put in an inbox.
-            temp_password=generated_password,
             to=owner_email,
             org_id=org_id,
         )
@@ -318,7 +357,6 @@ async def create_tenant(
         location=location,
         username=final_username,
         user_created=True,
-        temp_password=generated_password,
         comp_until=comp_until,
         welcome_email_sent=welcome_sent,
     )
@@ -345,7 +383,6 @@ async def _send_welcome_email(
     *,
     restaurant_name: str,
     username: str,
-    temp_password: str | None,
     to: str,
     org_id: int,
 ) -> bool:
@@ -357,10 +394,9 @@ async def _send_welcome_email(
         subject, html, text = render_welcome_email(
             restaurant_name=restaurant_name,
             username=username,
-            # The template shows a credentials block; when the owner picked
-            # their own password there is nothing to show, so it says so
-            # rather than printing an empty box.
-            temp_password=temp_password or "(la que elegiste al registrarte)",
+            # The owner picked their own password at signup; Mesio-opened
+            # accounts get render_account_setup_email instead.
+            temp_password="(la que elegiste al registrarte)",
             login_url=login_url(),
         )
         return await send_email(to=to, subject=subject, html=html, text=text)

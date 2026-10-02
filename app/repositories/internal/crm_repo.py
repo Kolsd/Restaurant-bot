@@ -99,6 +99,8 @@ async def db_create_prospect(
     priority: str = "medium",
     revenue_est: int = 0,
     tags: List[str] = None,
+    email: str = "",
+    next_follow_up: Optional[datetime] = None,
 ) -> dict:
     pool = await _get_pool()
     async with pool.acquire() as conn:
@@ -106,13 +108,14 @@ async def db_create_prospect(
             """
             INSERT INTO prospects
               (restaurant_name, owner_name, phone, city, neighborhood, category,
-               instagram, google_maps, source, stage, priority, revenue_est, tags)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               instagram, google_maps, source, stage, priority, revenue_est, tags,
+               email, next_follow_up)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
             RETURNING *
             """,
             restaurant_name, owner_name, phone, city, neighborhood, category,
             instagram, google_maps, source, stage, priority, revenue_est,
-            tags or [],
+            tags or [], email or None, next_follow_up,
         )
         return _serialize(dict(row))
 
@@ -324,23 +327,28 @@ async def db_get_crm_stats() -> dict:
         total = await conn.fetchval(
             "SELECT COUNT(*) FROM prospects WHERE archived=FALSE"
         )
+        # Contacted = got past the first stage or has a logged contact. It
+        # counted outbound WhatsApp interactions, which stopped existing with
+        # WhatsApp (2026-09-25): always 0.
         contacted = await conn.fetchval(
             """
-            SELECT COUNT(DISTINCT p.id)
-            FROM prospects p
-            JOIN prospect_interactions pi ON p.id = pi.prospect_id
-            WHERE p.archived=FALSE
-              AND pi.direction='outbound'
-              AND pi.status='sent'
+            SELECT COUNT(*) FROM prospects
+            WHERE archived=FALSE
+              AND (stage <> 'prospecto' OR last_contact_at IS NOT NULL)
             """
         )
+        # Overdue follow-ups are the most urgent ones; the old filter
+        # (due in the next 24 h only) dropped them the moment they were late.
         follow_ups = await conn.fetchval(
             """
             SELECT COUNT(*) FROM prospects
             WHERE next_follow_up <= NOW() + INTERVAL '24 hours'
-            AND next_follow_up >= NOW()
+            AND stage NOT IN ('cerrado', 'perdido')
             AND archived=FALSE
             """
+        )
+        new_48h = await conn.fetchval(
+            "SELECT COUNT(*) FROM prospects WHERE archived=FALSE AND created_at > NOW() - INTERVAL '48 hours'"
         )
 
     converted = stage_counts.get("cerrado", 0)
@@ -350,5 +358,6 @@ async def db_get_crm_stats() -> dict:
         "contacted": contacted or 0,
         "converted": converted,
         "follow_ups": follow_ups or 0,
+        "new_48h": new_48h or 0,
         "conversion_rate": round((converted / total * 100) if total else 0, 1),
     }

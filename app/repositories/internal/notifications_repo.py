@@ -39,9 +39,12 @@ async def _fetch_cost_runaway() -> list[dict]:
     try:
         from app.repositories.cost_metrics_repo import _PLAN_DAILY_TOKEN_LIMITS  # noqa: PLC0415
 
+        from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+
         today = date.today()
-        pool = await _get_pool()
-        async with pool.acquire() as conn:
+        # subscription_usage has RLS: a bare pool connection (mesio_app)
+        # read no rows, so this alert could never fire.
+        async with tenant_connection() as conn:
             rows = await conn.fetch(
                 """
                 SELECT
@@ -80,7 +83,7 @@ async def _fetch_cost_runaway() -> list[dict]:
                         f"Org #{org_id} ({plan}): {tokens_today:,} tokens hoy "
                         f"({pct}% del límite diario de {daily_limit:,})."
                     ),
-                    "url": "/internal/costs",
+                    "url": f"/internal/org/{org_id}",
                     "created_at": _now_iso(),
                     "count": 1,
                     "tenant_id": org_id,
@@ -93,50 +96,46 @@ async def _fetch_cost_runaway() -> list[dict]:
 
 
 async def _fetch_churn_risk() -> list[dict]:
-    """Tenants with recent avg conversation volume < 50% of their baseline."""
+    """Restaurants whose last 7 days of orders (table rounds + web orders)
+    fell under half of their daily average of the 14 days before.
+
+    It read `conversations` — WhatsApp-era, and empty for Esencial, which
+    has no AI chat — over a bare mesio_app connection where RLS hides every
+    row: it never fired. Sales are what a restaurant losing interest stops
+    producing, whatever its plan.
+    """
     try:
-        pool = await _get_pool()
-        async with pool.acquire() as conn:
+        from app.services.live_demo import DEMO_SLUG  # noqa: PLC0415
+        from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+
+        async with tenant_connection() as conn:
             rows = await conn.fetch(
                 """
-                WITH daily AS (
-                    SELECT
-                        o.id AS org_id,
-                        o.name AS org_name,
-                        (c.created_at::date) AS day,
-                        COUNT(*) AS cnt
-                    FROM conversations c
-                    JOIN organizations o ON o.id = c.org_id
-                    WHERE c.created_at >= CURRENT_DATE - INTERVAL '21 days'
-                    GROUP BY o.id, o.name, c.created_at::date
+                WITH sales AS (
+                    SELECT org_id, created_at FROM table_orders
+                     WHERE created_at >= NOW() - INTERVAL '21 days'
+                       AND status NOT IN ('cancelled', 'cancelado')
+                    UNION ALL
+                    SELECT org_id, created_at FROM orders
+                     WHERE created_at >= NOW() - INTERVAL '21 days'
+                       AND status NOT IN ('cancelado', 'rechazado', 'cancelled')
                 ),
-                baseline AS (
-                    SELECT org_id, org_name,
-                        AVG(cnt)::float AS baseline_avg
-                    FROM daily
-                    WHERE day < CURRENT_DATE - INTERVAL '7 days'
-                    GROUP BY org_id, org_name
-                ),
-                recent AS (
+                per_org AS (
                     SELECT org_id,
-                        AVG(cnt)::float AS recent_avg
-                    FROM daily
-                    WHERE day >= CURRENT_DATE - INTERVAL '7 days'
-                    GROUP BY org_id
+                           COUNT(*) FILTER (WHERE created_at <  NOW() - INTERVAL '7 days') / 14.0 AS baseline_avg,
+                           COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days') / 7.0  AS recent_avg
+                      FROM sales GROUP BY org_id
                 )
-                SELECT
-                    b.org_id,
-                    b.org_name,
-                    b.baseline_avg,
-                    COALESCE(r.recent_avg, 0) AS recent_avg
-                FROM baseline b
-                LEFT JOIN recent r ON r.org_id = b.org_id
-                WHERE b.baseline_avg >= $1
-                  AND COALESCE(r.recent_avg, 0) < $2 * b.baseline_avg
-                ORDER BY (COALESCE(r.recent_avg, 0) / NULLIF(b.baseline_avg, 0)) ASC NULLS LAST
+                SELECT p.org_id, o.name AS org_name, p.baseline_avg::float, p.recent_avg::float
+                  FROM per_org p JOIN organizations o ON o.id = p.org_id
+                 WHERE p.baseline_avg >= $1
+                   AND p.recent_avg < $2 * p.baseline_avg
+                   AND COALESCE(o.slug, '') <> $3
+                 ORDER BY p.recent_avg / NULLIF(p.baseline_avg, 0) ASC
                 """,
                 _CHURN_BASELINE_MIN,
                 _CHURN_RATIO_THRESHOLD,
+                DEMO_SLUG,
             )
 
         results = []
@@ -145,20 +144,18 @@ async def _fetch_churn_risk() -> list[dict]:
             org_name = row["org_name"] or f"Org #{org_id}"
             baseline = float(row["baseline_avg"])
             recent = float(row["recent_avg"])
-            ratio = recent / baseline if baseline > 0 else 0.0
-            drop_pct = round((1.0 - ratio) * 100, 1)
+            drop_pct = round((1.0 - recent / baseline) * 100) if baseline > 0 else 100
             results.append(
                 {
                     "id": f"churn:{org_id}",
                     "type": "churn",
                     "severity": "medium",
-                    "title": f"{org_name} muestra señal de churn",
+                    "title": f"{org_name}: los pedidos cayeron {drop_pct}%",
                     "detail": (
-                        f"Baseline 14d = {baseline:.1f} conv/día, "
-                        f"últimos 7d = {recent:.1f} conv/día. "
-                        f"Caída del {drop_pct}%."
+                        f"{recent:.1f} pedidos/día los últimos 7 días contra "
+                        f"{baseline:.1f} las dos semanas anteriores. Llamar al dueño."
                     ),
-                    "url": "/internal/superadmin",
+                    "url": f"/internal/org/{org_id}",
                     "created_at": _now_iso(),
                     "count": 1,
                     "tenant_id": org_id,
@@ -203,100 +200,11 @@ async def _fetch_new_prospects() -> list[dict]:
         return []
 
 
-async def _fetch_suspended_tenants() -> list[dict]:
-    """Organizations with subscription_status = 'suspended'."""
-    try:
-        pool = await _get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT id, name FROM organizations WHERE subscription_status = 'suspended' ORDER BY id"
-            )
-
-        results = []
-        for row in rows:
-            org_id = row["id"]
-            org_name = row["name"] or f"Org #{org_id}"
-            results.append(
-                {
-                    "id": f"suspended:{org_id}",
-                    "type": "suspended",
-                    "severity": "medium",
-                    "title": f"{org_name} está suspendido",
-                    "detail": f"Org #{org_id} tiene subscription_status = 'suspended'. Acción requerida.",
-                    "url": f"/internal/superadmin",
-                    "created_at": _now_iso(),
-                    "count": 1,
-                    "tenant_id": org_id,
-                }
-            )
-        return results
-    except Exception:
-        log.exception("notifications_repo.suspended_tenants_error")
-        return []
-
-
-_TRIAL_WARNING_DAYS = 3
-
-
-async def _fetch_billing_attention() -> list[dict]:
-    """Orgs whose subscription needs Mesio this week (billing is manual):
-    a trial ending within _TRIAL_WARNING_DAYS (call them before it pauses),
-    a payment overdue in its grace days, and paused accounts."""
-    from app.services import plans  # noqa: PLC0415
-
-    try:
-        pool = await _get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT id, name, comp_until, paid_until
-                FROM organizations
-                WHERE comp_until IS NOT NULL OR paid_until IS NOT NULL
-                ORDER BY id
-                """
-            )
-
-        now = datetime.now(tz=timezone.utc)
-        results = []
-        for row in rows:
-            org_id = row["id"]
-            org_name = row["name"] or f"Org #{org_id}"
-            status = plans.billing_status(row["comp_until"], row["paid_until"], now)
-            if status == plans.TRIAL:
-                days = (row["comp_until"] - now).days
-                if days >= _TRIAL_WARNING_DAYS:
-                    continue
-                kind, severity = "trial_ending", "medium"
-                title = f"La prueba de {org_name} termina en {days + 1} día(s)"
-                detail = "Escríbele para elegir plan: al terminar la prueba sin pago, la cuenta se pausa."
-            elif status == plans.OVERDUE:
-                kind, severity = "payment_overdue", "high"
-                title = f"{org_name} tiene el pago vencido"
-                detail = (f"Pagado hasta {row['paid_until'].date().isoformat()}. "
-                          f"Se pausa {plans.PAYMENT_GRACE_DAYS} días después.")
-            elif status == plans.SUSPENDED:
-                kind, severity = "account_paused", "high"
-                title = f"{org_name} está pausada"
-                detail = "Sus clientes no pueden pedir por QR ni por su link hasta registrar un pago."
-            else:
-                continue
-            results.append(
-                {
-                    "id": f"{kind}:{org_id}",
-                    "type": kind,
-                    "severity": severity,
-                    "title": title,
-                    "detail": detail,
-                    "url": "/internal/superadmin",
-                    "created_at": _now_iso(),
-                    "count": 1,
-                    "tenant_id": org_id,
-                }
-            )
-        return results
-    except Exception:
-        log.exception("notifications_repo.billing_attention_error")
-        return []
+# _fetch_suspended_tenants and _fetch_billing_attention were removed
+# 2026-10-02: the HQ alerts (hq_snapshot flags suspended / overdue /
+# trial_ending, kept open by the scheduler) say the same thing with where to
+# look and how to fix, and both sources showed up twice in the action queue.
+# The first one also read subscription_status alone, not the billing state.
 
 
 async def _fetch_plan_cap_warnings() -> list[dict]:
@@ -345,7 +253,7 @@ async def _fetch_plan_cap_warnings() -> list[dict]:
                         f"Org #{org_id} ({row['plan_code']}): "
                         f"{used:,}/{limit:,} conversaciones ({pct}% del plan mensual)."
                     ),
-                    "url": "/internal/superadmin",
+                    "url": f"/internal/org/{org_id}",
                     "created_at": _now_iso(),
                     "count": 1,
                     "tenant_id": org_id,
@@ -375,6 +283,8 @@ async def _fetch_hq_alerts() -> list[dict]:
     for a in rows:
         org = a.get("org_name") or f"Org #{a['org_id']}"
         sede = a.get("location_name")
+        if sede and sede.strip().lower() == org.strip().lower():
+            sede = None  # one-sede orgs named like their sede: "Demo Mesio · Demo Mesio"
         out.append({
             "id": f"hq_alert:{a['id']}",
             "type": "hq_alert",
@@ -406,9 +316,7 @@ async def db_get_notifications() -> list[dict]:
         _fetch_cost_runaway(),
         _fetch_churn_risk(),
         _fetch_new_prospects(),
-        _fetch_suspended_tenants(),
         _fetch_plan_cap_warnings(),
-        _fetch_billing_attention(),
         _fetch_hq_alerts(),
         return_exceptions=False,  # each source already catches its own exceptions
     )

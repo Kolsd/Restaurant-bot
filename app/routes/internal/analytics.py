@@ -11,12 +11,9 @@ Endpoints (all require Authorization: Bearer <ADMIN_KEY>):
   GET /api/internal/analytics/orders-rescued  → north-star, cross-tenant
 """
 
-from datetime import date
-
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from app.services.database import get_pool
 from app.services.logging import get_logger
 from app.routes.deps import verify_superadmin
 from app.services.tenant_context import bypass_tenant_scope
@@ -30,195 +27,20 @@ router = APIRouter(tags=["analytics"])
 
 @router.get("/api/internal/analytics/overview")
 async def analytics_overview(_: None = Depends(verify_superadmin)):
+    """Platform KPIs for the HQ home: sales (table rounds + web orders),
+    restaurants selling, diners, errors and open alerts — demo excluded.
 
-    pool = await get_pool()
-    result: dict = {}
+    "Today" is Bogotá's business day, like the restaurants' own dashboards.
+    """
+    from app.repositories.internal import platform_stats_repo  # noqa: PLC0415
+    from app.services.hq_snapshot import DEFAULT_TZ, local_day_start_utc  # noqa: PLC0415
 
     with bypass_tenant_scope("internal_analytics_cross_tenant"):
+        data = await platform_stats_repo.db_platform_overview(local_day_start_utc(DEFAULT_TZ))
+    for key in ("sales_today", "sales_7d"):
+        data["orders"][key] = float(data["orders"][key])  # JSON boundary
+    return data
 
-        # ── Restaurants ───────────────────────────────────────────────────────────
-        restaurants: dict = {}
-        try:
-            async with pool.acquire() as conn:
-                restaurants["total"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM restaurants"
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.restaurants_total", exc_type=type(exc).__name__)
-            restaurants["total"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                # Count distinct orgs (not locations) that had conversation activity.
-                # A multi-sede org should count once, not once per location.
-                restaurants["active_7d"] = await conn.fetchval(
-                    """
-                    SELECT COUNT(DISTINCT c.org_id)
-                    FROM conversations c
-                    WHERE c.updated_at > NOW() - INTERVAL '7 days'
-                    """
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.active_7d", exc_type=type(exc).__name__)
-            restaurants["active_7d"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                # Same org-level dedup for 30-day window.
-                restaurants["active_30d"] = await conn.fetchval(
-                    """
-                    SELECT COUNT(DISTINCT c.org_id)
-                    FROM conversations c
-                    WHERE c.updated_at > NOW() - INTERVAL '30 days'
-                    """
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.active_30d", exc_type=type(exc).__name__)
-            restaurants["active_30d"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                restaurants["new_this_week"] = await conn.fetchval(
-                    """
-                    SELECT COUNT(*)
-                    FROM restaurants
-                    WHERE created_at > NOW() - INTERVAL '7 days'
-                    """
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.new_this_week", exc_type=type(exc).__name__)
-            restaurants["new_this_week"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                restaurants["new_this_month"] = await conn.fetchval(
-                    """
-                    SELECT COUNT(*)
-                    FROM restaurants
-                    WHERE created_at > date_trunc('month', NOW())
-                    """
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.new_this_month", exc_type=type(exc).__name__)
-            restaurants["new_this_month"] = None
-
-        result["restaurants"] = restaurants
-
-        # ── Orders ────────────────────────────────────────────────────────────────
-        orders: dict = {}
-        try:
-            async with pool.acquire() as conn:
-                orders["today"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM orders WHERE created_at::date = CURRENT_DATE"
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.orders_today", exc_type=type(exc).__name__)
-            orders["today"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                orders["this_week"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM orders WHERE created_at > NOW() - INTERVAL '7 days'"
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.orders_week", exc_type=type(exc).__name__)
-            orders["this_week"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                orders["this_month"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM orders WHERE created_at > date_trunc('month', NOW())"
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.orders_month", exc_type=type(exc).__name__)
-            orders["this_month"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                avg = await conn.fetchval(
-                    """
-                    SELECT ROUND(COUNT(*)::numeric / 30, 1)
-                    FROM orders
-                    WHERE created_at > NOW() - INTERVAL '30 days'
-                    """
-                )
-                orders["avg_daily_30d"] = float(avg) if avg is not None else None  # JSON boundary
-        except Exception as exc:
-            log.exception("analytics.overview.orders_avg_daily", exc_type=type(exc).__name__)
-            orders["avg_daily_30d"] = None
-
-        result["orders"] = orders
-
-        # ── Conversations ─────────────────────────────────────────────────────────
-        conversations: dict = {}
-        try:
-            async with pool.acquire() as conn:
-                conversations["today"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM conversations WHERE updated_at::date = CURRENT_DATE"
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.conversations_today", exc_type=type(exc).__name__)
-            conversations["today"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                conversations["this_week"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM conversations WHERE updated_at > NOW() - INTERVAL '7 days'"
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.conversations_week", exc_type=type(exc).__name__)
-            conversations["this_week"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                conversations["active_now"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM conversations WHERE updated_at > NOW() - INTERVAL '30 minutes'"
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.conversations_active_now", exc_type=type(exc).__name__)
-            conversations["active_now"] = None
-
-        result["conversations"] = conversations
-
-        # ── Billing ───────────────────────────────────────────────────────────────
-        billing: dict = {}
-        try:
-            async with pool.acquire() as conn:
-                billing["configured_count"] = await conn.fetchval(
-                    """
-                    SELECT COUNT(*)
-                    FROM restaurants
-                    WHERE features->>'billing_provider' IS NOT NULL
-                    """
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.billing_configured", exc_type=type(exc).__name__)
-            billing["configured_count"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                billing["invoices_today"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM fiscal_invoices WHERE created_at::date = CURRENT_DATE"
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.invoices_today", exc_type=type(exc).__name__)
-            billing["invoices_today"] = None
-
-        try:
-            async with pool.acquire() as conn:
-                billing["invoices_this_month"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM fiscal_invoices WHERE created_at > date_trunc('month', NOW())"
-                )
-        except Exception as exc:
-            log.exception("analytics.overview.invoices_month", exc_type=type(exc).__name__)
-            billing["invoices_this_month"] = None
-
-        result["billing"] = billing
-
-    return result
-
-
-# ── Per-restaurant breakdown ──────────────────────────────────────────────────
 
 # ── MRR ───────────────────────────────────────────────────────────────────────
 

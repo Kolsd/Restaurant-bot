@@ -420,7 +420,7 @@
       </div>
 
       <div class="card placeholder-card">
-        <div class="card-label">Active Conversations</div>
+        <div class="card-label">Diners online</div>
         <div class="card-value" id="bizConversations">--</div>
         <div class="coming-soon" id="bizConversationsSub">--</div>
       </div>
@@ -432,11 +432,26 @@
       </div>
 
       <div class="card placeholder-card">
-        <div class="card-label">Staff Clocked In</div>
-        <div class="card-value" id="bizStaff">--</div>
-        <div class="coming-soon" id="bizStaffSub">--</div>
+        <div class="card-label">Errors (1 h)</div>
+        <div class="card-value" id="bizErrors">--</div>
+        <div class="coming-soon" id="bizErrorsSub">--</div>
       </div>
 
+    </div>
+  </section>
+
+  <!-- Platform errors (platform_errors, migration 0108) -->
+  <section>
+    <div class="section-title">Errores de la plataforma
+      <select id="errHours" style="margin-left:8px;font-size:12px;background:transparent;color:inherit;border:1px solid var(--dark-3);border-radius:6px;padding:2px 6px;">
+        <option value="24">24 h</option><option value="168">7 días</option>
+      </select>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table class="history-table">
+        <thead><tr><th>Último</th><th>Veces</th><th>Fuente</th><th>Restaurante</th><th>Dónde</th><th>Error</th><th>Request id</th></tr></thead>
+        <tbody id="errBody"><tr><td colspan="7" style="text-align:center;padding:var(--s-6);">Cargando…</td></tr></tbody>
+      </table>
     </div>
   </section>
 
@@ -566,6 +581,7 @@
 
       renderMetrics(data);
       addHistory(ts, data);
+      loadErrors();
       mesioTrackFetch(true);
 
     } catch {
@@ -573,6 +589,59 @@
       mesioTrackFetch(false);
     }
   }
+
+  /* ── Platform errors ── */
+  // One row per error fingerprint across every restaurant: what broke, how
+  // often, where, and the request id to search in Railway's logs.
+  async function loadErrors() {
+    const body = document.getElementById('errBody');
+    const hours = document.getElementById('errHours').value;
+    try {
+      const resp = await fetch('/api/internal/hq/errors?hours=' + hours, {
+        headers: { 'Authorization': `Bearer ${adminKey}` }
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      const names = {};
+      (data.by_org || []).forEach(o => { names[o.org_id] = o.org_name; });
+      body.textContent = '';
+      const groups = data.groups || [];
+      if (!groups.length) {
+        const tr = body.insertRow(); const td = tr.insertCell();
+        td.colSpan = 7; td.style.cssText = 'text-align:center;padding:var(--s-6);';
+        td.textContent = '✓ Sin errores en este periodo.';
+        return;
+      }
+      groups.forEach(g => {
+        const tr = body.insertRow();
+        const cells = [
+          g.last_at ? new Date(g.last_at).toLocaleString('es-CO') : '—',
+          String(g.count),
+          g.source === 'bot' ? 'Bot' : 'Servidor',
+          g.org_id ? (names[g.org_id] || ('Org #' + g.org_id)) : '—',
+          [g.method, g.route].filter(Boolean).join(' ') || '—',
+          [g.error_type, g.message].filter(Boolean).join(': ').slice(0, 160),
+          g.last_request_id || '—',
+        ];
+        cells.forEach((text, i) => {
+          const td = tr.insertCell();
+          if (i === 3 && g.org_id) {
+            const a = document.createElement('a');
+            a.href = '/internal/org/' + g.org_id; a.textContent = text; a.style.color = 'inherit';
+            td.appendChild(a);
+          } else {
+            td.textContent = text;
+          }
+          if (i === 6) td.style.fontFamily = 'monospace';
+        });
+      });
+    } catch (e) {
+      body.textContent = '';
+      const td = body.insertRow().insertCell(); td.colSpan = 7;
+      td.textContent = 'No se pudieron cargar los errores.';
+    }
+  }
+  document.getElementById('errHours').addEventListener('change', loadErrors);
 
   /* ── Status indicator ── */
   function setStatus(state, label) {
@@ -618,7 +687,7 @@
     if (sched.last_tick_at === null || sched.last_tick_at === undefined) {
       schedDot.className = 'heartbeat-dot';
       schedAge.textContent = '—';
-      schedSub.textContent = 'Redis unavailable — heartbeat requires Redis';
+      schedSub.textContent = 'Sin latido en 5 min (late cada 60 s): ¿scheduler caído o recién arrancó?';
     } else {
       const age = sched.last_tick_age_seconds;
       const healthy = sched.healthy;
@@ -630,10 +699,11 @@
     }
 
     // Business metrics — populate when available, keep "--" until then
-    renderBusiness('bizOrders',        'bizOrdersSub',        m.orders_today,           'orders today');
+    renderBusiness('bizOrders',        'bizOrdersSub',        m.orders_today,           'table rounds + web, Bogotá day');
     renderBusiness('bizSessions',      'bizSessionsSub',      m.active_table_sessions,  'open tables');
-    renderBusiness('bizConversations', 'bizConversationsSub', m.active_conversations,   'last 30 min');
-    renderBusiness('bizRestaurants',   'bizRestaurantsSub',   m.restaurants_total,      'restaurants');
+    renderBusiness('bizConversations', 'bizConversationsSub', m.active_diners,          'diner chats seen, last 30 min');
+    renderBusiness('bizRestaurants',   'bizRestaurantsSub',   m.restaurants_total,      'customers (demo excluded)');
+    renderBusiness('bizErrors',        'bizErrorsSub',        m.errors_1h,              'server + bot errors');
   }
 
   function renderBusiness(valueId, subId, value, subText) {

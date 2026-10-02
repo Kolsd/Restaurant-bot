@@ -48,7 +48,7 @@ from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends
 from pydantic import BaseModel, field_validator
 from anthropic import Anthropic
 
-from app.services.auth import create_user, get_users, hash_password
+from app.services.auth import get_users
 from app.services import database as db
 from app.routes.deps import verify_superadmin
 from app.repositories import plan_limits_repo, sessions_repo, restaurant_repo
@@ -164,7 +164,11 @@ async def _bypass_internal_admin():
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
 class AdminLoginRequest(BaseModel): key: str
-class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id: int; admin_key: str = ""
+class CreateUserRequest(BaseModel):
+    """An owner login for an org. No password: Mesio never sets or sees one
+    (PM decision 2026-10-02); the email receives a code to create it."""
+    username: str
+    restaurant_id: int
 # SetSubscriptionRequest / UpdateRestaurantRequest and the routes that used
 # them (POST /set-subscription, POST /update-restaurant) were DELETED
 # 2026-09-12 along with db_update_subscription/db_update_restaurant_fields —
@@ -227,6 +231,13 @@ async def admin_logout_session(req: Request):
     return {"success": True}
 
 
+def _hq_status(org: dict) -> str:
+    """Account state for the HQ lists; the live demo is never billed and
+    read "Al día" next to real customers."""
+    from app.services.live_demo import DEMO_SLUG  # noqa: PLC0415
+    return "demo" if org.get("slug") == DEMO_SLUG else plans.account_status(org)
+
+
 @router.get("/stats")
 async def admin_get_stats(
     _: None = Depends(verify_superadmin),
@@ -248,7 +259,7 @@ async def admin_get_restaurants(
     # use active_only=False if you also need cancelled tenants.
     orgs = await db.db_get_all_orgs(active_only=False)
     for org in orgs:
-        org["billing_status"] = plans.billing_status(org.get("comp_until"), org.get("paid_until"))
+        org["billing_status"] = _hq_status(org)
     return {"restaurants": orgs}
 
 
@@ -258,13 +269,19 @@ async def admin_create_user(
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
+    from app.repositories.sessions_repo import username_is_allowed  # noqa: PLC0415
+    from app.services.provisioning import send_account_setup, unusable_password_hash  # noqa: PLC0415
+
+    email = request.username.strip().lower()
+    if "@" not in email or not username_is_allowed(email):
+        raise HTTPException(status_code=400, detail="El usuario debe ser el email del dueño: ahí le llega el código para crear su contraseña.")
     rest = await db.db_get_restaurant_by_org_id(request.restaurant_id)
     if not rest:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
     success = await db.db_create_user(
-        username=request.username,
-        password_hash=hash_password(request.password),
+        username=email,
+        password_hash=unusable_password_hash(),
         restaurant_name=rest["name"],
         role="owner",
         branch_id=request.restaurant_id,
@@ -275,7 +292,8 @@ async def admin_create_user(
 
     if not success:
         raise HTTPException(status_code=400, detail="El usuario ya existe")
-    return {"success": True}
+    sent = await send_account_setup(email, rest.get("name"))
+    return {"success": True, "username": email, "setup_email_sent": sent}
 
 
 @router.post("/delete-user")
@@ -360,8 +378,10 @@ async def list_organizations(
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
-    """List all Orgs with location_count."""
+    """List all Orgs with their active location_count and account state."""
     orgs = await restaurant_repo.db_list_organizations()
+    for org in orgs:
+        org["billing_status"] = _hq_status(org)
     return _ok({"organizations": orgs, "total": len(orgs)})
 
 
@@ -489,29 +509,17 @@ async def delete_organization(
     Soft: sets subscription_status='cancelled' + deactivates all locations.
     Hard: only if no orders in last 90 days and ?hard=true. Cascades via FK.
     """
-    from app.services.database import get_pool  # noqa: PLC0415
-
     org = await restaurant_repo.db_get_org_by_id(org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organizacion no encontrada")
 
     if hard:
-        pool = await get_pool()
-        with bypass_tenant_scope("delete_organization_hard_check"):
-            async with pool.acquire() as conn:
-                recent = await conn.fetchval(
-                    "SELECT COUNT(*) FROM orders WHERE org_id = $1 AND created_at > NOW() - INTERVAL '90 days'",
-                    org_id,
-                )
-        if recent and recent > 0:
+        if await restaurant_repo.db_count_recent_sales(org_id=org_id):
             raise HTTPException(
                 status_code=409,
                 detail="No se puede eliminar: existen pedidos en los ultimos 90 dias. Usa soft-delete.",
             )
-        pool = await get_pool()
-        with bypass_tenant_scope("delete_organization_hard"):
-            async with pool.acquire() as conn:
-                await conn.execute("DELETE FROM organizations WHERE id = $1", org_id)
+        await restaurant_repo.db_hard_delete_organization(org_id)
         log.info("delete_organization.hard", org_id=org_id)
         return _ok({"deleted": True, "hard": True, "org_id": org_id})
 
@@ -653,29 +661,17 @@ async def delete_location(
     Soft delete (default): sets active=false.
     Hard delete: only if no orders in last 90 days.
     """
-    from app.services.database import get_pool  # noqa: PLC0415
-
     loc = await restaurant_repo.db_get_location_by_id(location_id)
     if not loc:
         raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     if hard:
-        pool = await get_pool()
-        with bypass_tenant_scope("delete_location_hard_check"):
-            async with pool.acquire() as conn:
-                recent = await conn.fetchval(
-                    "SELECT COUNT(*) FROM orders WHERE location_id = $1 AND created_at > NOW() - INTERVAL '90 days'",
-                    location_id,
-                )
-        if recent and recent > 0:
+        if await restaurant_repo.db_count_recent_sales(location_id=location_id):
             raise HTTPException(
                 status_code=409,
                 detail="No se puede eliminar: existen pedidos en los ultimos 90 dias.",
             )
-        pool = await get_pool()
-        with bypass_tenant_scope("delete_location_hard"):
-            async with pool.acquire() as conn:
-                await conn.execute("DELETE FROM locations WHERE id = $1", location_id)
+        await restaurant_repo.db_hard_delete_location(location_id)
         log.info("delete_location.hard", location_id=location_id)
         return _ok({"deleted": True, "hard": True, "location_id": location_id})
 
@@ -853,197 +849,65 @@ async def set_org_founder(
 # Onboarding checklist  (per-org activation tracking)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_STALL_HOURS = {
-    "menu":         24,   # ⚠️ if menu not uploaded within 24h of creation
-    "staff":        48,   # ⚠️ if no staff within 48h
-    "billing":     168,   # ⚠️ if billing not configured within 7 days
-    "first_convo": 168,   # ⚠️ if no conversation within 7 days
-}
+# Hours after signup before a missing step is called "stalled" in HQ.
+_STALL_HOURS = {"menu": 24, "tables": 48, "first_order": 168}
 
 
 @router.get("/organizations/{org_id}/onboarding")
 async def get_org_onboarding(
     org_id: int,
     _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
 ):
-    """Return onboarding checklist for an org — 5 stages with done/stalled flags.
+    """Where an account is in its setup — the owner's own checklist
+    (services/onboarding: carta, mesas, equipo, primer pedido) read for HQ,
+    plus how long each missing required step has been pending.
 
-    All queries are cross-tenant (superadmin context). Best-effort: individual
-    stage queries that fail return done=False rather than crashing the whole call.
-
-    Stages:
-      1. created      — always done (org exists)
-      2. menu         — organizations.menu is non-empty
-      3. staff        — staff table has >= 1 row for this org
-      4. billing      — wompi public_key set OR dian_enabled=true in features
-      5. first_convo  — conversations table has >= 1 row for this org
+    It used to have its own five WhatsApp-era stages: menu read from a
+    `locations.menu` column that no longer exists (always "not done"),
+    staff/conversations over a bare connection RLS hides (always 0),
+    "billing" meant Wompi/DIAN keys and "first conversation" a WhatsApp chat.
     """
-    from app.services.database import get_pool  # noqa: PLC0415
+    from app.services.onboarding import get_checklist  # noqa: PLC0415
+    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
 
-    org = await restaurant_repo.db_get_org_by_id(org_id)
+    with bypass_tenant_scope("internal_admin_onboarding_org"):
+        org = await restaurant_repo.db_get_org_by_id(org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organizacion no encontrada")
 
-    created_at_raw = org.get("created_at")
-    # Normalize to datetime (asyncpg may return datetime directly or ISO str)
-    if isinstance(created_at_raw, str):
-        from datetime import datetime as _dt  # noqa: PLC0415
-        try:
-            created_at = _dt.fromisoformat(created_at_raw.rstrip("Z"))
-        except Exception:
-            created_at = None
-    else:
-        created_at = created_at_raw  # already datetime
+    # Read exactly like the owner's page does: scoped to this one tenant.
+    with tenant_scope(org_id):
+        checklist = await get_checklist(org_id, None)
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    created_at = org.get("created_at")
+    if isinstance(created_at, str):
+        created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    if created_at is not None and created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    age_h = (datetime.now(timezone.utc) - created_at).total_seconds() / 3600 if created_at else 0
 
-    def _stalled(done: bool, key: str) -> bool:
-        """True if not done AND enough hours have elapsed since creation."""
-        if done:
-            return False
-        if created_at is None:
-            return False
-        hours = _STALL_HOURS.get(key, 24)
-        elapsed = (now - created_at).total_seconds() / 3600
-        return elapsed > hours
-
-    pool = await get_pool()
-
-    # Stage 1 — always done
     stages = [{
-        "key":     "created",
-        "name":    "Cuenta creada",
-        "done":    True,
-        "at":      created_at_raw if isinstance(created_at_raw, str) else (
-            created_at.isoformat() if created_at else None
-        ),
-        "stalled": False,
+        "key": "created", "name": "Cuenta creada", "done": True,
+        "detail": "", "optional": False, "stalled": False,
+        "at": created_at.isoformat() if created_at else None,
     }]
+    for step in checklist["steps"]:
+        stall_after = _STALL_HOURS.get(step["key"])
+        stages.append({
+            "key": step["key"], "name": step["title"], "done": step["done"],
+            "detail": step["detail"], "optional": step["optional"], "at": None,
+            "stalled": bool(not step["done"] and not step["optional"]
+                            and stall_after is not None and age_h > stall_after),
+        })
 
-    # Stage 2 — menu
-    try:
-        with bypass_tenant_scope("onboarding_check_menu"):
-            async with pool.acquire() as conn:
-                menu_row = await conn.fetchrow(
-                    """
-                    SELECT menu, created_at FROM locations
-                    WHERE org_id = $1
-                    ORDER BY id ASC LIMIT 1
-                    """,
-                    org_id,
-                )
-        menu_done = False
-        menu_at = None
-        if menu_row:
-            raw_menu = menu_row["menu"]
-            if isinstance(raw_menu, dict):
-                menu_done = bool(raw_menu)
-            elif isinstance(raw_menu, str):
-                try:
-                    import json as _json  # noqa: PLC0415
-                    parsed = _json.loads(raw_menu)
-                    menu_done = bool(parsed)
-                except Exception:
-                    menu_done = False
-    except Exception:
-        log.exception("onboarding.menu_check_failed", org_id=org_id)
-        menu_done = False
-        menu_at = None
-
-    stages.append({
-        "key":     "menu",
-        "name":    "Menú cargado",
-        "done":    menu_done,
-        "at":      menu_at,
-        "stalled": _stalled(menu_done, "menu"),
-    })
-
-    # Stage 3 — staff
-    try:
-        with bypass_tenant_scope("onboarding_check_staff"):
-            async with pool.acquire() as conn:
-                staff_row = await conn.fetchrow(
-                    "SELECT MIN(created_at) AS first_at FROM staff WHERE org_id = $1",
-                    org_id,
-                )
-        staff_done = bool(staff_row and staff_row["first_at"])
-        staff_at = staff_row["first_at"].isoformat() if staff_done and staff_row["first_at"] else None
-    except Exception:
-        log.exception("onboarding.staff_check_failed", org_id=org_id)
-        staff_done = False
-        staff_at = None
-
-    stages.append({
-        "key":     "staff",
-        "name":    "Personal configurado",
-        "done":    staff_done,
-        "at":      staff_at,
-        "stalled": _stalled(staff_done, "staff"),
-    })
-
-    # Stage 4 — billing (Wompi OR DIAN)
-    try:
-        features_raw = org.get("features") or {}
-        if isinstance(features_raw, str):
-            import json as _json  # noqa: PLC0415
-            try:
-                features_raw = _json.loads(features_raw)
-            except Exception:
-                features_raw = {}
-        wompi_pk = (features_raw.get("wompi") or {}).get("public_key") or ""
-        dian_on  = bool(features_raw.get("dian_enabled"))
-        billing_done = bool(wompi_pk) or dian_on
-        billing_detail: dict = {
-            "wompi": bool(wompi_pk),
-            "dian":  dian_on,
-        }
-    except Exception:
-        log.exception("onboarding.billing_check_failed", org_id=org_id)
-        billing_done = False
-        billing_detail = {}
-
-    stages.append({
-        "key":     "billing",
-        "name":    "Billing configurado",
-        "done":    billing_done,
-        "at":      None,
-        "stalled": _stalled(billing_done, "billing"),
-        "detail":  billing_detail,
-    })
-
-    # Stage 5 — first conversation
-    try:
-        with bypass_tenant_scope("onboarding_check_convo"):
-            async with pool.acquire() as conn:
-                convo_row = await conn.fetchrow(
-                    "SELECT MIN(created_at) AS first_at FROM conversations WHERE org_id = $1",
-                    org_id,
-                )
-        convo_done = bool(convo_row and convo_row["first_at"])
-        convo_at = convo_row["first_at"].isoformat() if convo_done and convo_row["first_at"] else None
-    except Exception:
-        log.exception("onboarding.convo_check_failed", org_id=org_id)
-        convo_done = False
-        convo_at = None
-
-    stages.append({
-        "key":     "first_convo",
-        "name":    "Primera conversación",
-        "done":    convo_done,
-        "at":      convo_at,
-        "stalled": _stalled(convo_done, "first_convo"),
-    })
-
-    done_count   = sum(1 for s in stages if s["done"])
-    stalled_count = sum(1 for s in stages if s.get("stalled"))
-    score        = round(done_count / len(stages) * 100)
-
+    required = [st for st in stages if not st["optional"]]
+    done_count = sum(1 for st in required if st["done"])
     return _ok({
-        "org_id":        org_id,
-        "stages":        stages,
-        "score":         score,
-        "done_count":    done_count,
-        "total_stages":  len(stages),
-        "stalled_count": stalled_count,
+        "org_id":          org_id,
+        "stages":          stages,
+        "score":           round(done_count / len(required) * 100),
+        "done_count":      done_count,
+        "total_stages":    len(required),
+        "stalled_count":   sum(1 for st in stages if st["stalled"]),
+        "trial_days_left": checklist.get("trial_days_left"),
     })

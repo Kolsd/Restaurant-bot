@@ -8,6 +8,7 @@ Uses _get_pool() directly (same pattern as crm_repo.py for internal tools).
 from __future__ import annotations
 
 from app.services import plans
+from app.services.live_demo import DEMO_SLUG
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
@@ -22,12 +23,15 @@ async def _get_pool():
 # One row per org with what it pays: plan, frozen founder price, trial/comp
 # window and how many active sedes it has (every org has at least its
 # primary one, so an org with no location row still counts one sede).
+# The live demo (/demo, "Casa Mesio") has no billing dates, so it read as a
+# hand-managed paying account and its Esencial price inflated MRR.
 _ORG_BILLING_SQL = """
     SELECT o.id, o.plan_code, o.founder_price_cop, o.created_at,
-           o.comp_until, o.paid_until,
+           o.comp_until, o.paid_until, o.subscription_status,
            GREATEST(1, (SELECT COUNT(*) FROM locations l
                          WHERE l.org_id = o.id AND l.active))::int AS sedes
     FROM organizations o
+    WHERE COALESCE(o.slug, '') <> $1
 """
 
 
@@ -36,7 +40,7 @@ def _org_mrr(row) -> int:
 
 
 def _status(row) -> str:
-    return plans.billing_status(row["comp_until"], row["paid_until"])
+    return plans.account_status(dict(row))
 
 
 def _billed(row) -> bool:
@@ -69,7 +73,7 @@ async def db_compute_mrr() -> dict:
     """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(_ORG_BILLING_SQL)
+        rows = await conn.fetch(_ORG_BILLING_SQL, DEMO_SLUG)
 
     by_plan = {
         code: {"plan_code": code, "monthly_price_cop": plans.PRICES_COP[code],
@@ -118,7 +122,8 @@ async def db_compute_mrr_delta() -> dict:
     pool = await _get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            _ORG_BILLING_SQL + " WHERE o.created_at < date_trunc('month', NOW())"
+            _ORG_BILLING_SQL + " AND o.created_at < date_trunc('month', NOW())",
+            DEMO_SLUG,
         )
     mrr_last_month_cop = sum(_org_mrr(r) for r in rows if _billed(r))
 

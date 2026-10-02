@@ -62,49 +62,16 @@ async def health_metrics(_: None = Depends(verify_superadmin)):
         log.exception("ops.metrics.scheduler_heartbeat_error", exc_type=type(exc).__name__)
         metrics["scheduler"] = {"last_tick_at": None, "last_tick_age_seconds": None, "healthy": False}
 
-    with bypass_tenant_scope("internal_ops_metrics_cross_tenant"):
-        # Orders created today
-        try:
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                metrics["orders_today"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM orders WHERE created_at::date = CURRENT_DATE"
-                )
-        except Exception as exc:
-            log.exception("ops.metrics.orders_today_error", exc_type=type(exc).__name__)
-            metrics["orders_today"] = None
-
-        # Open table sessions right now
-        try:
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                metrics["active_table_sessions"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM table_sessions WHERE closed_at IS NULL"
-                )
-        except Exception as exc:
-            log.exception("ops.metrics.active_table_sessions_error", exc_type=type(exc).__name__)
-            metrics["active_table_sessions"] = None
-
-        # Conversations with activity in last 30 minutes
-        try:
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                metrics["active_conversations"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM conversations WHERE updated_at > NOW() - INTERVAL '30 minutes'"
-                )
-        except Exception as exc:
-            log.exception("ops.metrics.active_conversations_error", exc_type=type(exc).__name__)
-            metrics["active_conversations"] = None
-
-        # Total restaurant count
-        try:
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                metrics["restaurants_total"] = await conn.fetchval(
-                    "SELECT COUNT(*) FROM restaurants"
-                )
-        except Exception as exc:
-            log.exception("ops.metrics.restaurants_total_error", exc_type=type(exc).__name__)
-            metrics["restaurants_total"] = None
+    # Business counts. They used a bare pool.acquire() on RLS tables, which as
+    # mesio_app (prod) reads zero rows: "0 orders today" every day.
+    from app.repositories.internal import platform_stats_repo  # noqa: PLC0415
+    from app.services.hq_snapshot import DEFAULT_TZ, local_day_start_utc  # noqa: PLC0415
+    try:
+        with bypass_tenant_scope("internal_ops_metrics_cross_tenant"):
+            metrics.update(await platform_stats_repo.db_ops_counts(local_day_start_utc(DEFAULT_TZ)))
+    except Exception as exc:
+        log.exception("ops.metrics.business_counts_error", exc_type=type(exc).__name__)
+        for key in ("orders_today", "active_table_sessions", "active_diners", "restaurants_total", "errors_1h"):
+            metrics[key] = None
 
     return metrics

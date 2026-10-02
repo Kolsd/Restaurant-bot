@@ -256,7 +256,7 @@ async def db_platform_margin_summary(
 ) -> dict[str, Any]:
     """Platform-wide revenue vs cost margin for [start_date, end_date].
 
-    Revenue = sum of monthly_price_cop for paying orgs that had spend in the period.
+    Revenue = current MRR prorated to the period (days / 30).
     Cost    = sum of estimated_cost_cop for all orgs.
     Requires bypass_tenant_scope("internal_cost_dashboard") at call site.
 
@@ -269,19 +269,19 @@ async def db_platform_margin_summary(
         "paying_orgs": int,
     }
     """
-    rows = await db_per_restaurant_costs(start_date, end_date, limit=500)
-    total_revenue = Decimal("0")
-    total_cost = Decimal("0")
-    paying_orgs = 0
+    from app.repositories.internal import mrr_repo  # noqa: PLC0415
 
-    for r in rows:
-        cost_cop = Decimal(str(r["estimated_cost_cop"]))
-        total_cost += cost_cop
-        plan = r["plan_code"]
-        price = r["monthly_price_cop"]
-        if plan not in ("comp", "free") and price > 0:
-            total_revenue += Decimal(str(price))
-            paying_orgs += 1
+    rows = await db_per_restaurant_costs(start_date, end_date, limit=500)
+    total_cost = sum((Decimal(str(r["estimated_cost_cop"])) for r in rows), Decimal("0"))
+
+    # Revenue is what Mesio actually bills (MRR: plan x active sedes, only
+    # activo/vencido accounts), prorated to the range. It summed the list
+    # price of orgs that had LLM spend — trials included, Esencial (no AI,
+    # no spend) never — so it matched neither MRR nor reality.
+    mrr = await mrr_repo.db_compute_mrr()
+    days = (end_date - start_date).days + 1
+    total_revenue = (Decimal(mrr["mrr_total_cop"]) * days / Decimal(30)).quantize(Decimal("1"))
+    paying_orgs = mrr["paying_count"]
 
     net = total_revenue - total_cost
     margin_pct = round(float(net / total_revenue) * 100, 1) if total_revenue > 0 else None

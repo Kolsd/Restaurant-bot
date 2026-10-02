@@ -446,17 +446,48 @@ async def test_mrr_bills_paid_and_overdue_orgs_not_trials_or_paused_ones(db_conn
 @needs_db
 @pytest.mark.asyncio
 async def test_mesio_hears_about_ending_trials_and_paused_accounts(db_conn):
-    from app.repositories.internal import notifications_repo
+    # Billing attention lives in the HQ health flags (and from there in
+    # hq_alerts + the action queue); the separate notifications source that
+    # duplicated them was removed 2026-10-02.
+    from app.services import hq_snapshot
+    from app.services.tenant_context import bypass_tenant_scope
 
     now = datetime.now(timezone.utc)
     ending = await _new_org(db_conn, comp_until=now + timedelta(days=1, hours=2))
     far = await _new_org(db_conn, comp_until=now + timedelta(days=10))
     paused = await _new_org(db_conn, comp_until=now - timedelta(days=1))
 
-    notes = {n["tenant_id"]: n["type"] for n in await notifications_repo._fetch_billing_attention()}
-    assert notes.get(ending) == "trial_ending"
-    assert far not in notes
-    assert notes.get(paused) == "account_paused"
+    async def codes(org_id):
+        with bypass_tenant_scope("test_billing_flags"):
+            snap = await hq_snapshot.build_org_snapshot(org_id, llm_cost={})
+        return {f["code"] for f in snap["flags"]}
+
+    assert "trial_ending" in await codes(ending)
+    assert not {"trial_ending", "suspended"} & await codes(far)
+    assert "suspended" in await codes(paused)
+
+
+@needs_db
+@pytest.mark.asyncio
+async def test_hq_suspension_closes_the_account_whatever_the_dates(db_conn):
+    # Superadmin › Suspender wrote subscription_status, which nothing read:
+    # a suspended account kept taking orders and kept counting in MRR.
+    from app.repositories.internal import mrr_repo
+    from app.services import plan_access, plans
+    from app.services.tenant_context import bypass_tenant_scope
+
+    now = datetime.now(timezone.utc)
+    org_id = await _new_org(db_conn, "esencial", paid_until=now + timedelta(days=20))
+    with bypass_tenant_scope("test_manual_suspend"):
+        assert await plan_access.org_is_open(org_id)
+        before = await mrr_repo.db_compute_mrr()
+        await db_conn.execute("SET LOCAL ROLE mesio_superadmin")
+        await db_conn.execute("UPDATE organizations SET subscription_status = 'suspended' WHERE id = $1", org_id)
+        await db_conn.execute("SET LOCAL ROLE mesio_app")
+        assert not await plan_access.org_is_open(org_id)
+        after = await mrr_repo.db_compute_mrr()
+    assert before["mrr_total_cop"] - after["mrr_total_cop"] == 119_000
+    assert plans.account_status({"subscription_status": "cancelled", "paid_until": now + timedelta(days=5)}) == plans.SUSPENDED
 
 
 @needs_db

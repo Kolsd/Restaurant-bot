@@ -47,7 +47,6 @@ def _tenant(org_id: int = 99, username: str = "juan@restaurante.com") -> Provisi
         location={"id": org_id + 1, "name": "Principal"},
         username=username,
         user_created=True,
-        temp_password=None,
         comp_until=datetime.now(tz=timezone.utc) + timedelta(days=15),
         welcome_email_sent=False,
     )

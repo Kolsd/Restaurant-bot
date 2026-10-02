@@ -2,10 +2,10 @@ import os
 import json
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from app.services import database as db
 from app.services import plans
 from app.repositories.internal import crm_repo
@@ -16,8 +16,6 @@ from app.services.provisioning import (
     ProvisioningError,
     TenantAlreadyExists,
     create_tenant,
-    generate_temp_password,
-    username_from,
 )
 
 log = get_logger(__name__)
@@ -47,6 +45,15 @@ class ProspectCreate(BaseModel):
     priority:        str = "medium"
     revenue_est:     int = 0
     tags:            List[str] = []
+    email:           str = ""
+    # The form sends "2026-10-05T10:00" (datetime-local) or "". It was
+    # accepted and silently dropped on create.
+    next_follow_up:  Optional[datetime] = None
+
+    @field_validator("next_follow_up", mode="before")
+    @classmethod
+    def _blank_follow_up(cls, v):
+        return None if v in ("", None) else v
 
 class ProspectUpdate(BaseModel):
     restaurant_name: Optional[str] = None
@@ -61,7 +68,10 @@ class ProspectUpdate(BaseModel):
     priority:        Optional[str] = None
     revenue_est:     Optional[int] = None
     tags:            Optional[List[str]] = None
-    next_follow_up:  Optional[str] = None
+    # A str went to asyncpg as-is for a `timestamp` column: every follow-up
+    # date saved from the CRM was a 500. "" clears it.
+    next_follow_up:  Optional[datetime] = None
+    email:           Optional[str] = None
     archived:        Optional[bool] = None
 
 class NoteCreate(BaseModel):
@@ -101,6 +111,7 @@ async def create_prospect(body: ProspectCreate, _: None = Depends(verify_superad
         category=body.category, instagram=body.instagram, google_maps=body.google_maps,
         source=body.source, stage=body.stage, priority=body.priority,
         revenue_est=body.revenue_est, tags=body.tags,
+        email=body.email.strip().lower(), next_follow_up=body.next_follow_up,
     )
     return {"success": True, "prospect": prospect}
 
@@ -113,6 +124,12 @@ async def check_updates(_: None = Depends(verify_superadmin)):
 @router.patch("/prospects/{pid}")
 async def update_prospect(pid: int, body: ProspectUpdate, _: None = Depends(verify_superadmin)):
     updates = body.model_dump(exclude_none=True)
+    if "next_follow_up" in body.model_fields_set and body.next_follow_up is None:
+        updates["next_follow_up"] = None  # the date was cleared
+    if updates.get("next_follow_up") is not None and updates["next_follow_up"].tzinfo is not None:
+        updates["next_follow_up"] = updates["next_follow_up"].astimezone(timezone.utc).replace(tzinfo=None)
+    if "email" in updates:
+        updates["email"] = updates["email"].strip().lower() or None
     if not updates:
         raise HTTPException(status_code=400, detail="Nada que actualizar")
     result = await crm_repo.db_update_prospect(pid, updates)
@@ -187,7 +204,8 @@ class ConvertProspectBody(BaseModel):
     plan_code:       str = "restaurante"    # CEO decision: default to Restaurante plan
     subscription_plan: str = "restaurante"  # legacy alias kept for compat
     features:        Optional[dict] = None
-    skip_welcome_message: bool = False      # founder option to skip the welcome send on convert
+    skip_welcome_message: bool = False      # ignored since 2026-10-02: the email carries the
+                                             # code the owner creates their password with
     trial_days:      int = DEFAULT_TRIAL_DAYS  # Closed product decision (docs/claude/status.md
                                              # #12, revised 2026-09-23): free days ON TOP of
                                              # the paid plan via organizations.comp_until —
@@ -197,13 +215,6 @@ class ConvertProspectBody(BaseModel):
                                              # services/provisioning and is not repeated here.
                                              # 0 disables the trial for a customer who is
                                              # already paying.
-
-
-# ── Temp password generator ───────────────────────────────────────────────────
-# One implementation, in services/provisioning, because both the CRM convert
-# and the self-serve signup hand out credentials. Re-exported under the old
-# private name so existing callers and tests keep working.
-_generate_temp_password = generate_temp_password
 
 
 @router.post("/prospects/{pid}/convert")
@@ -238,12 +249,14 @@ async def convert_prospect_to_restaurant(
         "location_id": int,
         "org": {...},
         "primary_location": {...},
-        "user": {"username": str, "temp_password": str},   # shown once to founder
-        "welcome_message_sent": bool,
+        "user": {"username": str},
+        "welcome_message_sent": bool,   # the set-your-password code really left
       }
 
-    Security note: temp_password is returned to the founder so they can relay
-    credentials if the welcome email fails. It is NOT logged to structlog or Sentry.
+    No password is created, shown or relayed: the owner's email is their
+    login and receives a code to create their own password (PM decision
+    2026-10-02: Mesio never sets or sees a password). If the email did not
+    leave, the ficha's "Enviar código" sends a new one.
     """
     prospect = await crm_repo.db_get_prospect_by_id(pid)
     if not prospect:
@@ -276,26 +289,27 @@ async def convert_prospect_to_restaurant(
     # bookkeeping below.
     prospect_email = (prospect.get("email") or "").strip().lower()
     dest_email = (body.owner_email or prospect_email or "").strip().lower()
+    if "@" not in dest_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Falta el email del dueño: es su usuario y por ahí le llega el código para crear su contraseña.",
+        )
 
     try:
         tenant = await create_tenant(
             restaurant_name=name,
-            # Local part of the email, or a slug of the restaurant name —
-            # the historical behaviour of this endpoint, kept because the
-            # founder reads the username out to the customer.
-            username=username_from(prospect_email, name),
-            # Generated and returned once, for the founder to relay.
+            # The owner's email IS the login, exactly like a self-serve
+            # signup; without one, a slug of the restaurant name.
+            username=dest_email,
+            # None = Mesio opens the account: unusable hash + emailed code.
             password=None,
             owner_email=dest_email,
             owner_name=(prospect.get("owner_name") or "").strip() or None,
             plan_code=plan,
             trial_days=body.trial_days,
             features=body.features or {},
-            send_welcome_email=not body.skip_welcome_message,
-            # A sales-assisted conversion must end with a working account
-            # even when the username is taken; the founder relays whatever
-            # it ended up being.
-            allow_username_suffix=True,
+            # An email already in use is refused ("x@y.com.6" is no login).
+            allow_username_suffix=False,
         )
     except TenantAlreadyExists as exc:
         log.warning("crm.convert.already_exists", prospect_id=pid, stage=exc.stage)
@@ -308,7 +322,6 @@ async def convert_prospect_to_restaurant(
     org            = tenant.org
     primary_loc    = tenant.location
     final_username = tenant.username
-    temp_password  = tenant.temp_password
     user_created   = tenant.user_created
     welcome_sent   = tenant.welcome_email_sent
     trial_until    = tenant.comp_until
@@ -328,7 +341,7 @@ async def convert_prospect_to_restaurant(
         note_content = (
             f"Convertido a org #{org['id']} ({name}). "
             f"Usuario: {final_username}. "
-            f"Bienvenida (email): {'enviada' if welcome_sent else 'no enviada'}."
+            f"Código para crear contraseña (email): {'enviado' if welcome_sent else 'NO enviado — reenviar desde la ficha'}."
         )
         await crm_repo.db_create_prospect_note(
             pid, author="system",
@@ -366,7 +379,6 @@ async def convert_prospect_to_restaurant(
         location_id=primary_loc.get("id"),
         user_created=user_created,
         welcome_sent=welcome_sent,
-        # temp_password intentionally omitted from logs
     )
 
     return {
@@ -377,10 +389,7 @@ async def convert_prospect_to_restaurant(
         "location_id":          primary_loc.get("id"),
         "org":                  org,
         "primary_location":     primary_loc,
-        "user":                 {
-            "username":     final_username,
-            "temp_password": temp_password,   # shown once to founder; NOT logged
-        } if user_created else None,
+        "user":                 {"username": final_username} if user_created else None,
         "welcome_message_sent": welcome_sent,
         # None when the founder passed trial_days=0 or the write failed — the
         # caller must be able to tell "no trial" from "trial started".

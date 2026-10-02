@@ -11,6 +11,8 @@
 :root{--brand:#1D9E75;--brand-dark:#0F6E56;--brand-light:#E1F5EE;} /* lint-allow: standalone page — tokens.css not loaded, inline token defs required */
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f0;color:#111;}
+/* hq-shell.css paints body.hq-ready dark with light ink; this page is light. */
+body.hq-ready{background:#f5f5f0;color:#111;}
 
 /* ── LOGIN ── */
 #login-overlay{position:fixed;inset:0;background:#f5f5f0;display:flex;align-items:center;justify-content:center;z-index:9999;}
@@ -26,7 +28,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 /* ── LAYOUT ── */
 #app{display:none;}
-.sidebar{width:220px;background:#fff;border-right:0.5px solid #e0e0d8;height:100vh;position:fixed;top:0;left:0;display:flex;flex-direction:column;padding:1.5rem 1rem;overflow-y:auto;}
+.sidebar{width:220px;background:#fff;border-right:0.5px solid #e0e0d8;height:calc(100vh - 52px);position:fixed;top:52px;left:0;display:flex;flex-direction:column;padding:1.5rem 1rem;overflow-y:auto;}
 .sidebar-logo{display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:0.5px solid #e0e0d8;}
 .logo-icon{width:36px;height:36px;background:var(--brand);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;}
 .logo-text{font-size:14px;font-weight:700;}
@@ -202,8 +204,10 @@ input:checked+.slider:before{transform:translateX(18px);}
     <button class="nav-item" id="nav-orgloc" onclick="showSection('orgloc',this)">🏗️ Organizaciones &amp; Sedes</button>
 
     <div class="nav-group-label">Herramientas</div>
-    <a class="nav-item" href="/crm" target="_blank" style="text-decoration:none;">📊 CRM Mesio ↗</a>
-    <a class="nav-item" href="/internal/monitoring" target="_blank" style="text-decoration:none;">🖥️ Monitoring ↗</a>
+    <a class="nav-item" href="/internal" style="text-decoration:none;">🏠 Inicio HQ</a>
+    <a class="nav-item" href="/internal/crm" style="text-decoration:none;">📊 CRM Mesio</a>
+    <a class="nav-item" href="/internal/costs" style="text-decoration:none;">💰 Costos</a>
+    <a class="nav-item" href="/internal/monitoring" style="text-decoration:none;">🖥️ Monitoring</a>
 
     <div class="nav-group-label">Financiero</div>
     <button class="nav-item" id="nav-dian" onclick="showSection('dian',this)">📄 DIAN &amp; Folios</button>
@@ -224,9 +228,9 @@ input:checked+.slider:before{transform:translateX(18px);}
     <!-- ══ RESUMEN ══════════════════════════════════════════════════════ -->
     <div id="resumen" class="section active">
       <div class="metrics" id="hq-metrics">
-        <div class="metric"><div class="metric-label">🍽️ Restaurantes</div><div class="metric-value" id="kpi-total">—</div><div class="metric-sub" id="kpi-active-sub"></div></div>
-        <div class="metric"><div class="metric-label">📦 Pedidos totales</div><div class="metric-value" id="kpi-orders">—</div><div class="metric-sub">histórico</div></div>
-        <div class="metric"><div class="metric-label">👥 Usuarios</div><div class="metric-value" id="kpi-users">—</div><div class="metric-sub">en todos los restaurantes</div></div>
+        <div class="metric"><div class="metric-label">🍽️ Clientes</div><div class="metric-value" id="kpi-total">—</div><div class="metric-sub" id="kpi-active-sub"></div></div>
+        <div class="metric"><div class="metric-label">📦 Pedidos totales</div><div class="metric-value" id="kpi-orders">—</div><div class="metric-sub">mesas + domicilios, histórico</div></div>
+        <div class="metric"><div class="metric-label">👥 Usuarios</div><div class="metric-value" id="kpi-users">—</div><div class="metric-sub">del panel, en todos los restaurantes</div></div>
         <div class="metric"><div class="metric-label">📄 Folios DIAN</div><div class="metric-value" id="kpi-invoices">—</div><div class="metric-sub" id="kpi-invoices-sub">últimos 30 días</div></div>
       </div>
 
@@ -423,14 +427,7 @@ input:checked+.slider:before{transform:translateX(18px);}
               <div style="color:#aaa;font-size:13px;text-align:center;padding:24px;">Cargando…</div>
             </div>
 
-            <!-- Actions -->
-            <div style="margin-top:1.25rem;padding-top:1rem;border-top:0.5px solid #e0e0d8;">
-              <div style="font-size:11px;color:#888;font-weight:600;margin-bottom:10px;">ACCIONES</div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button class="btn btn-secondary btn-sm" onclick="obMarkComplete()">✅ Marcar onboarding completo</button>
-              </div>
-              <div id="ob-action-feedback" style="font-size:12px;color:#888;margin-top:8px;"></div>
-            </div>
+            <div id="ob-action-feedback" style="font-size:12px;color:#888;margin-top:8px;">Es la misma lista que ve el dueño en su panel: se completa sola cuando el restaurante hace cada paso.</div>
           </div>
 
           <!-- Tab: Danger Zone -->
@@ -441,13 +438,14 @@ input:checked+.slider:before{transform:translateX(18px);}
             </div>
             <div style="display:flex;flex-direction:column;gap:10px;">
               <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:#fff;border:0.5px solid #e0e0d8;border-radius:10px;">
-                <div><div style="font-size:13px;font-weight:500;">Suspender / Activar</div><div style="font-size:12px;color:#888;margin-top:2px;">Cambiar estado de suscripción del restaurante</div></div>
+                <div><div style="font-size:13px;font-weight:500;">Suspender / Activar</div><div style="font-size:12px;color:#888;margin-top:2px;">Suspender cierra la cuenta ya: los comensales no pueden abrir mesa ni pedir y deja de contar en el MRR, sin importar el trial o el último pago. Activar devuelve la cuenta a su estado de pago.</div></div>
                 <div style="display:flex;gap:8px;">
                   <button class="btn btn-secondary btn-sm" onclick="setSubStatus('active')">✅ Activar</button>
                   <button class="btn btn-danger btn-sm" onclick="setSubStatus('suspended')">⛔ Suspender</button>
                 </div>
               </div>
               <div style="font-size:12px;color:#888;padding:0 4px;">Estado actual: <strong id="dp-current-status">—</strong></div>
+              <div style="font-size:12px;color:#888;padding:0 4px;">El trial y los pagos se manejan en la pestaña Plan.</div>
             </div>
           </div>
         </div>
@@ -458,7 +456,7 @@ input:checked+.slider:before{transform:translateX(18px);}
         <div class="search-bar">
           <input class="search-input" id="rest-search" placeholder="Buscar restaurante..." oninput="filterRestaurants()">
           <button class="filter-btn active" onclick="setRestFilter('all',this)">Todos</button>
-          <button class="filter-btn" onclick="setRestFilter('active',this)">Activos</button>
+          <button class="filter-btn" onclick="setRestFilter('active',this)">Abiertos</button>
           <button class="filter-btn" onclick="setRestFilter('suspended',this)">Suspendidos</button>
         </div>
         <div class="card" style="padding:0;overflow:hidden;">
@@ -467,7 +465,7 @@ input:checked+.slider:before{transform:translateX(18px);}
               <tr>
                 <th>Restaurante</th>
                 <th>Enlace</th>
-                <th>Módulos</th>
+                <th>Plan</th>
                 <th>Estado</th>
                 <th>ID</th>
                 <th></th>
@@ -484,8 +482,8 @@ input:checked+.slider:before{transform:translateX(18px);}
     <!-- ══ USERS ══════════════════════════════════════════════════════ -->
     <div id="usuarios" class="section">
       <div style="display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start;">
-        <d<div class="card">
-          <div class="card-title">Crear usuario</div>
+        <div class="card">
+          <div class="card-title">Crear usuario dueño</div>
           <div style="display:flex;flex-direction:column;gap:10px;">
             <div>
               <label class="field-label">Restaurante</label>
@@ -493,8 +491,8 @@ input:checked+.slider:before{transform:translateX(18px);}
                 <option value="">Selecciona un restaurante...</option>
               </select>
             </div>
-            <div><label class="field-label">Email / usuario</label><input id="u_email" class="field-input" placeholder="usuario@ejemplo.com"></div>
-            <div><label class="field-label">Contraseña</label><input id="u_pass" class="field-input" type="password" placeholder="Contraseña temporal"></div>
+            <div><label class="field-label">Email del dueño (será su usuario)</label><input id="u_email" class="field-input" type="email" placeholder="dueno@restaurante.com"></div>
+            <div style="font-size:12px;color:#888;">Le llega un código para crear su propia contraseña. Mesio nunca la pone ni la ve.</div>
             <button class="btn btn-primary" onclick="createUser()" style="width:100%;justify-content:center;">Crear usuario</button>
             <div class="feedback-msg" id="user-feedback"></div>
           </div>
@@ -714,6 +712,19 @@ input:checked+.slider:before{transform:translateX(18px);}
 // ADMIN_KEY is never stored in browser storage — we use a session token instead
 let ALL_RESTAURANTS = [];
 let _currentRestFilter = 'all';
+
+// The account state Mesio bills and gates by (plans.account_status): trial →
+// activo → vencido → suspendido. The list showed subscription_status, which
+// said "Activo" for an account paused for not paying.
+const BILLING_LABELS = {trial:['En prueba','badge-active'], activo:['Al día','badge-active'],
+  vencido:['Pago vencido','badge-suspended'], suspendido:['Suspendida','badge-suspended'],
+  demo:['Demo en vivo','badge-chip']};
+const PLAN_LABELS = {esencial:'Esencial', restaurante:'Restaurante', pro:'Pro', cadena:'Cadena'};
+function billingBadge(r) {
+  const [label, cls] = BILLING_LABELS[r.billing_status] || [r.billing_status || '—', 'badge-chip'];
+  return `<span class="badge ${cls}">${escHtml(label)}</span>`;
+}
+function isOpen(r) { return r.billing_status !== 'suspendido'; }
 let _currentDetailId = null;
 
 const MODULES_CONFIG = [
@@ -731,7 +742,10 @@ const MODULES_CONFIG = [
 const $ = id => document.getElementById(id);
 const fmtNum = n => new Intl.NumberFormat('es-CO').format(Number(n)||0);
 const fmtCOP = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(Number(n)||0);
-const escHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const escHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// Audit log, onboarding and reset-password used _escHtml (mesio-utils.js, not
+// loaded here): a ReferenceError made both tabs say "Error de conexión".
+const _escHtml = escHtml;
 const timeSince = iso => {
   if(!iso) return '—';
   const d = Math.floor((Date.now()-new Date(iso))/86400000);
@@ -815,12 +829,21 @@ window.addEventListener('DOMContentLoaded', async () => {
         $('app').style.display = 'block';
         renderKPIs(data);
         loadAll();
+        _openDeepLink();
         return;
       }
     } catch(e) {}
     sessionStorage.removeItem(SESSION_KEY);
   }
 });
+
+function _openDeepLink() {
+  const q = new URLSearchParams(window.location.search);
+  if (q.get('action') === 'new' || window.location.hash === '#new-org') {
+    showSection('orgloc', $('nav-orgloc'));
+    setTimeout(() => window.openOrgModal && window.openOrgModal(), 300);
+  }
+}
 
 // ── Section / nav ──────────────────────────────────────────────────
 const SECTION_TITLES = {
@@ -857,7 +880,7 @@ function renderKPIs(data) {
   $('kpi-total').textContent   = fmtNum(data.total_restaurants);
   $('kpi-orders').textContent  = fmtNum(data.total_orders);
   $('kpi-users').textContent   = fmtNum(data.total_users||'—');
-  $('kpi-active-sub').textContent = `${data.active_restaurants} activos`;
+  $('kpi-active-sub').textContent = `${fmtNum(data.total_sedes)} sedes · ${fmtNum(data.active_restaurants)} sin suspender`;
 }
 
 // ── Restaurants ──────────────────────────────────────────────────
@@ -886,30 +909,22 @@ function getFeatures(r) {
   catch(e){ return {}; }
 }
 
-function renderModuleChips(feats) {
-  const labels = {module_orders:'Dom',module_tables:'QR',module_pos:'POS',module_nps:'NPS',module_inventory:'Inv',wompi_active:'Wompi',dian_active:'DIAN'};
-  return Object.entries(labels).filter(([k])=>feats[k]===true||(feats[k]!==false&&['module_orders','module_tables','module_pos','module_reservations'].includes(k)))
-    .map(([k,v])=>`<span class="badge-chip">${v}</span>`).join('');
-}
-
 function renderRestaurantsTable(list) {
   const q = ($('rest-search')?.value||'').toLowerCase();
   const filtered = list.filter(r=>{
-    const matchFilter = _currentRestFilter==='all' || r.subscription_status===_currentRestFilter ||
-      (_currentRestFilter==='suspended' && r.subscription_status!=='active');
+    const matchFilter = _currentRestFilter==='all' ||
+      (_currentRestFilter==='active' && isOpen(r)) || (_currentRestFilter==='suspended' && !isOpen(r));
     const matchSearch = !q || r.name.toLowerCase().includes(q) || (r.slug||'').includes(q);
     return matchFilter && matchSearch;
   });
   const tbody = $('restaurants-tbody');
   if(!filtered.length){ tbody.innerHTML=`<tr><td colspan="6" class="empty-state">Sin resultados</td></tr>`; return; }
   tbody.innerHTML = filtered.map(r=>{
-    const feats = getFeatures(r);
-    const active = r.subscription_status==='active';
     return `<tr class="tr-link" onclick="openDetail(${r.id})">
       <td><strong>${escHtml(r.name)}</strong></td>
       <td style="font-size:12px;color:#888;">${escHtml(r.slug ? '/pedir/' + r.slug : '—')}</td>
-      <td>${renderModuleChips(feats)}</td>
-      <td><span class="badge ${active?'badge-active':'badge-suspended'}">${active?'Activo':'Suspendido'}</span></td>
+      <td><span class="badge-chip">${escHtml(PLAN_LABELS[r.plan_code] || r.plan_code || '—')}</span></td>
+      <td>${billingBadge(r)}</td>
       <td style="color:#aaa;font-size:12px;">#${r.id}</td>
       <td style="white-space:nowrap;"><a class="btn btn-primary btn-sm" href="/internal/org/${r.id}" onclick="event.stopPropagation()">Ficha</a> <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openDetail(${r.id})">Editar →</button></td>
     </tr>`;
@@ -930,23 +945,38 @@ function renderResumenRestaurants() {
   const top = ALL_RESTAURANTS.slice(0,8);
   if(!top.length){ el.innerHTML='<div class="empty-state">Sin restaurantes</div>'; return; }
   el.innerHTML = top.map(r=>{
-    const active = r.subscription_status==='active';
     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid #f0f0e8;">
       <div style="display:flex;align-items:center;gap:10px;">
         <div style="width:30px;height:30px;border-radius:8px;background:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:13px;">🍽️</div>
         <div><div style="font-size:13px;font-weight:500;">${escHtml(r.name)}</div><div style="font-size:11px;color:#888;">${escHtml(r.slug ? '/pedir/' + r.slug : '—')}</div></div>
       </div>
-      <span class="badge ${active?'badge-active':'badge-suspended'}">${active?'●&nbsp;Activo':'Suspendido'}</span>
+      <a class="badge" href="/internal/org/${r.id}" style="text-decoration:none;color:#0F6E56;background:#E1F5EE;">Ficha →</a>
+      ${billingBadge(r)}
     </div>`;
   }).join('');
-  // Activity
+  loadRecentActivity();
+}
+
+// What the Mesio team did lately (hq_audit_log): support fixes with their
+// reason, plan changes, payments recorded.
+async function loadRecentActivity() {
   const act = $('resumen-activity');
-  act.innerHTML = ALL_RESTAURANTS.slice(0,6).map(r=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid #f0f0e8;font-size:12px;color:#555;">
-      <span style="font-size:16px;">🍽️</span>
-      <span style="flex:1;">${escHtml(r.name)}</span>
-      <span style="color:#aaa;font-size:11px;">#${r.id}</span>
-    </div>`).join('');
+  try {
+    const r = await _hqFetch('/api/internal/admin/audit-log?limit=8');
+    if(!r.ok) { act.innerHTML = '<div class="empty-state">No se pudo cargar</div>'; return; }
+    const items = (await r.json()).items || [];
+    if(!items.length) { act.innerHTML = '<div class="empty-state">Sin acciones del equipo todavía</div>'; return; }
+    const orgName = id => (ALL_RESTAURANTS.find(x=>x.id===id)||{}).name || (id ? `Org #${id}` : 'Plataforma');
+    act.innerHTML = items.map(ev=>{
+      const reason = ev.payload && ev.payload.reason ? ev.payload.reason : '';
+      return `<div style="padding:7px 0;border-bottom:0.5px solid #f0f0e8;font-size:12px;color:#555;">
+        <div style="display:flex;gap:8px;"><span style="font-family:monospace;color:#1D9E75;">${escHtml(ev.action||'')}</span>
+          <span style="flex:1;">${escHtml(orgName(ev.org_id))}</span>
+          <span style="color:#aaa;font-size:11px;white-space:nowrap;">${escHtml(timeSince(ev.created_at))}</span></div>
+        ${reason ? `<div style="color:#888;margin-top:2px;">“${escHtml(reason)}”</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) { act.innerHTML = '<div class="empty-state">No se pudo cargar</div>'; }
 }
 
 // ── Detail panel ──────────────────────────────────────────────────
@@ -955,14 +985,15 @@ async function openDetail(id) {
   const r = ALL_RESTAURANTS.find(x=>x.id===id);
   if(!r) return;
   const feats = getFeatures(r);
-  const active = r.subscription_status==='active';
+  const [stLabel, stCls] = BILLING_LABELS[r.billing_status] || [r.billing_status||'—','badge-chip'];
 
   // Header
   $('dp-name').textContent = r.name;
   $('dp-sub').textContent  = r.slug ? '/pedir/' + r.slug : 'Sin enlace de pedidos';
-  $('dp-status-badge').textContent  = active ? '● Activo' : 'Suspendido';
-  $('dp-status-badge').className    = 'badge ' + (active?'badge-active':'badge-suspended');
-  $('dp-current-status').textContent = r.subscription_status;
+  $('dp-status-badge').textContent  = stLabel;
+  $('dp-status-badge').className    = 'badge ' + stCls;
+  $('dp-current-status').textContent = (r.subscription_status === 'suspended' ? 'Suspendida a mano por Mesio'
+    : r.subscription_status === 'cancelled' ? 'Dada de baja' : stLabel);
 
   // Info tab
   $('dp-name-input').value    = r.name||'';
@@ -997,7 +1028,7 @@ async function openDetail(id) {
         {label:'Pedidos 30d', value:fmtNum(s.orders_30d)},
         {label:'Ingresos 30d', value:fmtCOP(s.revenue_30d)},
         {label:'Pedidos hoy', value:fmtNum(s.orders_today)},
-        {label:'Conversaciones', value:fmtNum(s.active_convs)},
+        {label:'Chats con la IA', value:fmtNum(s.active_convs)},
         {label:'Folios DIAN', value:fmtNum(s.invoices_all)},
         {label:'Usuarios', value:fmtNum(s.users)},
       ].map(x=>`<div class="stat-mini-item"><div class="stat-mini-label">${x.label}</div><div class="stat-mini-value">${x.value}</div></div>`).join('');
@@ -1045,6 +1076,7 @@ async function loadAuditLog() {
         const detail = _escHtml([
           ev.target_type ? ev.target_type : '',
           ev.target_id   ? `#${ev.target_id}` : '',
+          ev.payload && ev.payload.reason ? `“${ev.payload.reason}”` : '',
           ev.payload && ev.payload.method ? ev.payload.method : '',
           ev.payload && ev.payload.status_code ? `HTTP ${ev.payload.status_code}` : '',
         ].filter(Boolean).join(' · '));
@@ -1067,7 +1099,6 @@ async function loadOnboarding() {
   const list = $('ob-stages-list');
   if(!list) return;
   list.innerHTML = '<div style="color:#aaa;font-size:13px;text-align:center;padding:24px;">Cargando…</div>';
-  $('ob-action-feedback').textContent = '';
   try {
     const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}/onboarding`);
     if(!r.ok) {
@@ -1094,44 +1125,19 @@ async function loadOnboarding() {
       const icon    = s.done ? '✅' : s.stalled ? '⚠️' : '⏳';
       const color   = s.done ? '#1D9E75' : s.stalled ? '#c0392b' : '#888';
       const atLabel = s.at ? timeSince(s.at) : '';
-      const detail  = s.detail
-        ? Object.entries(s.detail).map(([k,v]) => `${k}: ${v ? '✓' : '✗'}`).join(' · ')
-        : '';
+      const detail  = (s.detail || '') + (s.optional ? ' (opcional)' : '');
       return `<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:0.5px solid #f0f0e8;">
         <span style="font-size:18px;flex-shrink:0;">${icon}</span>
         <div style="flex:1;">
           <div style="font-size:13px;font-weight:500;color:#111;">${_escHtml(s.name)}</div>
           ${detail ? `<div style="font-size:11px;color:#888;margin-top:2px;">${_escHtml(detail)}</div>` : ''}
-          ${s.stalled ? `<div style="font-size:11px;color:#c0392b;margin-top:2px;">Sin actividad — revisar con el cliente</div>` : ''}
+          ${s.stalled ? `<div style="font-size:11px;color:#c0392b;margin-top:2px;">Atascado desde el registro — llamar al cliente</div>` : ''}
         </div>
         <div style="font-size:11px;color:${color};white-space:nowrap;">${atLabel ? _escHtml(atLabel) : (s.done ? '' : 'Pendiente')}</div>
       </div>`;
     }).join('');
   } catch(e) {
     list.innerHTML = '<div style="color:#e74c3c;font-size:13px;padding:12px;">Error de conexión al cargar onboarding.</div>';
-  }
-}
-
-async function obMarkComplete() {
-  if(!_currentDetailId) return;
-  const fb = $('ob-action-feedback');
-  fb.textContent = 'Registrando en audit log…';
-  try {
-    const r = await _hqFetch(`/api/internal/admin/audit-log`, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        action: 'org.onboarding_marked_complete',
-        target_type: 'organization',
-        target_id: String(_currentDetailId),
-        org_id: _currentDetailId,
-      }),
-    });
-    fb.textContent = 'Marcado como completo en audit log.';
-    fb.style.color = '#1D9E75';
-  } catch(e) {
-    fb.textContent = 'Error al registrar.';
-    fb.style.color = '#e74c3c';
   }
 }
 
@@ -1194,10 +1200,8 @@ async function setSubStatus(status) {
   const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}`, {method:'PATCH', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({subscription_status: status})});
   if(r.ok) {
-    const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
-    if(idx>=0) ALL_RESTAURANTS[idx].subscription_status = status;
+    await loadRestaurants();  // billing_status is computed server-side
     await openDetail(_currentDetailId);
-    renderRestaurantsTable(ALL_RESTAURANTS);
   }
 }
 
@@ -1249,18 +1253,12 @@ function renderUsersTable(users) {
 async function createUser() {
   const restId = $('u_rest_id').value;
   const email  = $('u_email').value.trim();
-  const pass   = $('u_pass').value.trim();
-  
-  if(!restId || !email || !pass){ 
-    showFeedback('user-feedback','❌ Todos los campos son requeridos', false); 
-    return; 
+  if(!restId || !email.includes('@')){
+    showFeedback('user-feedback','❌ Elige el restaurante y escribe el email del dueño', false);
+    return;
   }
-  
-  const payload = {
-    restaurant_id: parseInt(restId),
-    username: email,
-    password: pass
-  };
+
+  const payload = { restaurant_id: parseInt(restId), username: email };
 
   try {
     const r = await _hqFetch('/api/internal/admin/create-user',{
@@ -1272,8 +1270,10 @@ async function createUser() {
     const data = await r.json();
 
     if(r.ok){ 
-      showFeedback('user-feedback','✅ Usuario creado', true); 
-      $('u_email').value=''; $('u_pass').value=''; 
+      showFeedback('user-feedback', data.setup_email_sent
+        ? '✅ Usuario creado: le enviamos el código para crear su contraseña'
+        : '⚠️ Usuario creado, pero el email no salió (¿Resend configurado?). Usa "Enviar código" cuando esté.', !!data.setup_email_sent);
+      $('u_email').value='';
       loadUsers(); 
     } else { 
       // 🛡️ Improved logic to avoid [object Object]

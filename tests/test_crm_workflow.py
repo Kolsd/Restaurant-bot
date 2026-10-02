@@ -83,6 +83,7 @@ def _sample_prospect(*, pid: int = 99, with_tag: bool = False, name: str = "Sush
         "id":              pid,
         "restaurant_name": name,
         "owner_name":      "María López",
+        "email":           "maria@sushitokyo.com",
         "phone":            phone,
         "city":             "Bogotá",
         "neighborhood":     "Chapinero",
@@ -94,6 +95,11 @@ def _sample_prospect(*, pid: int = 99, with_tag: bool = False, name: str = "Sush
 
 
 class TestConvertProspect:
+
+    @pytest.fixture(autouse=True)
+    def _no_setup_email(self, monkeypatch):
+        """The set-your-password code email needs a DB row + a provider."""
+        monkeypatch.setattr("app.services.provisioning.send_account_setup", AsyncMock(return_value=True))
 
     def test_convert_success_returns_org_and_location(self, super_client, monkeypatch):
         from app.repositories.internal import crm_repo

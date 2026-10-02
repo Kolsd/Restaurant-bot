@@ -96,6 +96,8 @@ async def db_count_rescued_orders_global(
     (migration 0029); without that role switch a pooled connection would read
     under whatever org_id scope it last had set, not a real cross-tenant view.
     """
+    from app.services.live_demo import DEMO_SLUG  # noqa: PLC0415 — keeps repo imports light
+
     async with tenant_connection() as conn:
         rows = await conn.fetch(
             """
@@ -107,6 +109,7 @@ async def db_count_rescued_orders_global(
             FROM orders o
             JOIN organizations org ON org.id = o.org_id
             WHERE o.channel = ANY($1)
+              AND COALESCE(org.slug, '') <> $4
               AND o.created_at::date >= $2
               AND o.created_at::date <= $3
             GROUP BY o.org_id, org.name
@@ -121,11 +124,13 @@ async def db_count_rescued_orders_global(
             FROM table_orders to2
             JOIN organizations org ON org.id = to2.org_id
             WHERE to2.channel = ANY($1)
+              AND COALESCE(org.slug, '') <> $4
               AND to2.created_at::date >= $2
               AND to2.created_at::date <= $3
             GROUP BY to2.org_id, org.name
             """,
-            list(_CHANNELS), period_start, period_end,
+            # The live demo's self-served orders are not rescued sales.
+            list(_CHANNELS), period_start, period_end, DEMO_SLUG,
         )
 
     # Aggregate UNION results per org_id

@@ -73,7 +73,8 @@ class TestCostRunaway:
 
         _LIMITS = {"esencial": 50_000, "restaurante": 200_000, "pro": 400_000}
 
-        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        # The source reads through tenant_connection (subscription_usage has RLS).
+        with patch("app.services.tenant_db.tenant_connection", lambda: pool.acquire()):
             with patch(
                 "app.repositories.internal.notifications_repo._PLAN_DAILY_TOKEN_LIMITS",
                 _LIMITS,
@@ -115,7 +116,7 @@ class TestCostRunaway:
         original = getattr(cmr_stub, "_PLAN_DAILY_TOKEN_LIMITS", None)
         cmr_stub._PLAN_DAILY_TOKEN_LIMITS = _LIMITS
         try:
-            with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            with patch("app.services.tenant_db.tenant_connection", lambda: pool.acquire()):
                 result = await repo._fetch_cost_runaway()
         finally:
             if original is not None:
@@ -127,10 +128,10 @@ class TestCostRunaway:
     async def test_cost_runaway_db_error_returns_empty(self, monkeypatch):
         import app.repositories.internal.notifications_repo as repo
 
-        async def _boom():
+        def _boom():
             raise RuntimeError("DB down")
 
-        monkeypatch.setattr(repo, "_get_pool", _boom)
+        monkeypatch.setattr("app.services.tenant_db.tenant_connection", _boom)
         result = await repo._fetch_cost_runaway()
         assert result == []
 
@@ -233,7 +234,6 @@ class TestAggregatorSorting:
         monkeypatch.setattr(repo, "_fetch_cost_runaway", AsyncMock(return_value=[cost_notif]))
         monkeypatch.setattr(repo, "_fetch_churn_risk", AsyncMock(return_value=[churn_notif]))
         monkeypatch.setattr(repo, "_fetch_new_prospects", _empty)
-        monkeypatch.setattr(repo, "_fetch_suspended_tenants", _empty)
         monkeypatch.setattr(repo, "_fetch_plan_cap_warnings", _empty)
 
         result = await repo.db_get_notifications()
@@ -252,7 +252,6 @@ class TestAggregatorSorting:
         monkeypatch.setattr(repo, "_fetch_cost_runaway", _empty)
         monkeypatch.setattr(repo, "_fetch_churn_risk", _empty)
         monkeypatch.setattr(repo, "_fetch_new_prospects", _empty)
-        monkeypatch.setattr(repo, "_fetch_suspended_tenants", _empty)
         monkeypatch.setattr(repo, "_fetch_plan_cap_warnings", _empty)
 
         result = await repo.db_get_notifications()
@@ -283,7 +282,6 @@ class TestAggregatorSorting:
         monkeypatch.setattr(repo, "_fetch_cost_runaway", _broken_source)
         monkeypatch.setattr(repo, "_fetch_churn_risk", _broken_source)
         monkeypatch.setattr(repo, "_fetch_new_prospects", AsyncMock(return_value=[prospect_notif]))
-        monkeypatch.setattr(repo, "_fetch_suspended_tenants", _broken_source)
         monkeypatch.setattr(repo, "_fetch_plan_cap_warnings", _broken_source)
 
         result = await repo.db_get_notifications()

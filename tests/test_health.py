@@ -227,47 +227,29 @@ class TestHealthMetrics:
             resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer wrong-key"})
         assert resp.status_code == 403
 
-    def test_metrics_returns_data(self, client, monkeypatch):
-        """Valid auth → 200 with expected keys (infrastructure metrics)."""
-        monkeypatch.setenv("ADMIN_KEY", "test-key-123")
+    # Business counts come from platform_stats_repo (tenant_connection, table
+    # rounds + web orders — RLS-visible; tested on a real DB in
+    # tests/test_hq_review_2026_10_02.py). get_pool is only read for pool stats.
+    _COUNTS = {"orders_today": 42, "active_table_sessions": 3, "active_diners": 7,
+               "restaurants_total": 10, "errors_1h": 1}
 
-        # The metrics endpoint calls get_pool() five times:
-        #   1. pool stats (get_size / get_idle_size, no acquire)
-        #   2. orders_today
-        #   3. active_table_sessions
-        #   4. active_conversations
-        #   5. restaurants_total
-        def _make_conn_mock(return_value):
-            conn = AsyncMock()
-            conn.fetchval = AsyncMock(return_value=return_value)
-            acquire_cm = AsyncMock()
-            acquire_cm.__aenter__ = AsyncMock(return_value=conn)
-            acquire_cm.__aexit__ = AsyncMock(return_value=False)
-            pool = AsyncMock()
-            pool.acquire = MagicMock(return_value=acquire_cm)
-            return pool
-
+    def _get(self, client, counts):
         stats_pool = AsyncMock()
         stats_pool.get_size = MagicMock(return_value=20)
         stats_pool.get_idle_size = MagicMock(return_value=18)
+        with patch(_METRICS_PATCH_TARGET, AsyncMock(return_value=stats_pool)),              patch("app.repositories.internal.platform_stats_repo.db_ops_counts", counts):
+            return client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer test-key-123"})
 
-        get_pool_mock = AsyncMock(side_effect=[
-            stats_pool,
-            _make_conn_mock(42),  # orders_today
-            _make_conn_mock(3),   # active_table_sessions
-            _make_conn_mock(7),   # active_conversations
-            _make_conn_mock(10),  # restaurants_total
-        ])
-
-        with patch(_METRICS_PATCH_TARGET, get_pool_mock):
-            resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer test-key-123"})
-
+    def test_metrics_returns_data(self, client, monkeypatch):
+        """Valid auth → 200 with pool stats and the business counts."""
+        monkeypatch.setenv("ADMIN_KEY", "test-key-123")
+        resp = self._get(client, AsyncMock(return_value=dict(self._COUNTS)))
         assert resp.status_code == 200
         body = resp.json()
-        assert "db_pool_size" in body
-        assert "db_pool_free" in body
-        assert "db_pool_used" in body
+        assert body["db_pool_used"] == 2
         assert body["orders_today"] == 42
+        assert body["active_diners"] == 7
+        assert body["errors_1h"] == 1
         assert "inbox_queue_depth" not in body
 
     def test_metrics_pool_values_correct(self, client, monkeypatch):
@@ -312,79 +294,11 @@ class TestHealthMetrics:
         resp = client.get("/api/internal/ops/metrics")
         assert resp.status_code == 401
 
-    def test_metrics_business_counters(self, client, monkeypatch):
-        """Business metrics appear in response with correct values."""
-        monkeypatch.setenv("ADMIN_KEY", "test-key-123")
-
-        def _make_conn_mock(return_value):
-            conn = AsyncMock()
-            conn.fetchval = AsyncMock(return_value=return_value)
-            acquire_cm = AsyncMock()
-            acquire_cm.__aenter__ = AsyncMock(return_value=conn)
-            acquire_cm.__aexit__ = AsyncMock(return_value=False)
-            pool = AsyncMock()
-            pool.acquire = MagicMock(return_value=acquire_cm)
-            return pool
-
-        stats_pool = AsyncMock()
-        stats_pool.get_size = MagicMock(return_value=5)
-        stats_pool.get_idle_size = MagicMock(return_value=5)
-
-        get_pool_mock = AsyncMock(side_effect=[
-            stats_pool,
-            _make_conn_mock(17),   # orders_today
-            _make_conn_mock(6),    # active_table_sessions
-            _make_conn_mock(11),   # active_conversations
-            _make_conn_mock(3),    # restaurants_total
-        ])
-
-        with patch(_METRICS_PATCH_TARGET, get_pool_mock):
-            resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer test-key-123"})
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["orders_today"] == 17
-        assert body["active_table_sessions"] == 6
-        assert body["active_conversations"] == 11
-        assert body["restaurants_total"] == 3
-
     def test_metrics_business_counters_fallback_to_none_on_error(self, client, monkeypatch):
-        """If a business metric query fails, its value is None and other metrics still present."""
+        """If the counts fail, they are None and the pool stats still answer."""
         monkeypatch.setenv("ADMIN_KEY", "test-key-123")
-
-        def _make_conn_mock(return_value):
-            conn = AsyncMock()
-            conn.fetchval = AsyncMock(return_value=return_value)
-            acquire_cm = AsyncMock()
-            acquire_cm.__aenter__ = AsyncMock(return_value=conn)
-            acquire_cm.__aexit__ = AsyncMock(return_value=False)
-            pool = AsyncMock()
-            pool.acquire = MagicMock(return_value=acquire_cm)
-            return pool
-
-        def _make_error_pool():
-            pool = AsyncMock()
-            pool.acquire = MagicMock(side_effect=Exception("DB unavailable"))
-            return pool
-
-        stats_pool = AsyncMock()
-        stats_pool.get_size = MagicMock(return_value=5)
-        stats_pool.get_idle_size = MagicMock(return_value=5)
-
-        get_pool_mock = AsyncMock(side_effect=[
-            stats_pool,
-            _make_error_pool(),    # orders_today — fails
-            _make_conn_mock(2),    # active_table_sessions — ok
-            _make_conn_mock(3),    # active_conversations — ok
-            _make_conn_mock(5),    # restaurants_total — ok
-        ])
-
-        with patch(_METRICS_PATCH_TARGET, get_pool_mock):
-            resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer test-key-123"})
-
+        resp = self._get(client, AsyncMock(side_effect=RuntimeError("DB unavailable")))
         assert resp.status_code == 200
         body = resp.json()
-        assert body["orders_today"] is None          # failed → None
-        assert body["active_table_sessions"] == 2    # subsequent metrics still work
-        assert body["active_conversations"] == 3
-        assert body["restaurants_total"] == 5
+        assert body["orders_today"] is None and body["restaurants_total"] is None
+        assert body["db_pool_size"] == 20

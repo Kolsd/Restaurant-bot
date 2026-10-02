@@ -44,7 +44,7 @@ _QUICK_ACTIONS = [
     {
         "type": "action",
         "title": "Ver alertas",
-        "subtitle": "Sentry + cost runaway + churn",
+        "subtitle": "Errores de la plataforma y estado del servidor",
         "url": "/internal/monitoring",
         "keywords": ["alerta", "alert", "monitoring", "error", "sentry", "churn"],
     },
@@ -133,13 +133,7 @@ async def hq_search(
                     o.id,
                     o.name,
                     o.plan_code,
-                    o.slug,
-                    (
-                        SELECT MAX(ord.created_at)
-                        FROM orders ord
-                        INNER JOIN locations loc ON loc.org_id = o.id
-                        WHERE ord.org_id = o.id
-                    ) AS last_order_at
+                    o.slug
                 FROM organizations o
                 WHERE o.name ILIKE $1 OR o.slug ILIKE $1
                 ORDER BY o.name
@@ -148,8 +142,13 @@ async def hq_search(
                 pattern,
             )
 
+            # Table rounds count too, through tenant_connection: the old
+            # subquery read only web orders over this bare mesio_app
+            # connection, where RLS shows none — every tenant "sin actividad".
+            from app.repositories.internal import platform_stats_repo  # noqa: PLC0415
+            last_orders = await platform_stats_repo.db_last_order_at([int(r["id"]) for r in tenant_rows])
             for row in tenant_rows:
-                last_order = row["last_order_at"]
+                last_order = last_orders.get(int(row["id"]))
                 if last_order is not None:
                     activity = f"activo {_relative_time(last_order)}"
                 else:
@@ -193,14 +192,16 @@ async def hq_search(
             )
 
             for row in prospect_rows:
-                name = row["owner_name"] or row["restaurant_name"] or f"Prospecto #{row['id']}"
+                name = row["restaurant_name"] or row["owner_name"] or f"Prospecto #{row['id']}"
                 stage = (row["stage"] or "nuevo").replace("_", " ").capitalize()
                 city = row["city"] or ""
                 last_contact = _relative_time(row["last_contact_at"])
                 subtitle_parts = [stage]
+                if row["owner_name"] and row["restaurant_name"]:
+                    subtitle_parts.append(row["owner_name"])
                 if city:
                     subtitle_parts.append(city)
-                subtitle_parts.append(f"contactado {last_contact}")
+                subtitle_parts.append("sin contactar" if row["last_contact_at"] is None else f"contactado {last_contact}")
                 subtitle = " · ".join(subtitle_parts)
 
                 results.append({

@@ -52,6 +52,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([loadProspects(), loadStats()]);
   renderDashboard();
   startPoll();
+  // Ctrl+K prospect results link to /internal/crm#prospect=<id>.
+  const m = /prospect=(\d+)/.exec(window.location.hash);
+  if (m && S.prospects.some(p => p.id === Number(m[1]))) openDetail(Number(m[1]));
 });
 
 async function loadProspects() {
@@ -581,6 +584,7 @@ function renderDpOverview() {
     <div class="dp-field-group"><label>Restaurante</label><input id="dpe-name" value="${esc(p.restaurant_name)}"></div>
     <div class="dp-field-group"><label>Dueño / Contacto</label><input id="dpe-owner" value="${esc(p.owner_name||'')}"></div>
     <div class="dp-field-group"><label>Teléfono</label><input id="dpe-phone" value="${esc(p.phone||'')}"></div>
+    <div class="dp-field-group"><label>Email del dueño</label><input type="email" id="dpe-email" value="${esc(p.email||'')}"></div>
     <div class="dp-field-group"><label>Ciudad</label><input id="dpe-city" value="${esc(p.city||'')}"></div>
     <div class="dp-field-group"><label>Categoría</label><input id="dpe-cat" value="${esc(p.category||'')}"></div>
     <div class="dp-field-group"><label>Instagram</label><input id="dpe-ig" value="${esc(p.instagram||'')}"></div>
@@ -597,6 +601,7 @@ async function dpSave() {
     restaurant_name: document.getElementById('dpe-name')?.value.trim(),
     owner_name:      document.getElementById('dpe-owner')?.value.trim(),
     phone:           document.getElementById('dpe-phone')?.value.trim(),
+    email:           document.getElementById('dpe-email')?.value.trim(),
     city:            document.getElementById('dpe-city')?.value.trim(),
     category:        document.getElementById('dpe-cat')?.value.trim(),
     instagram:       document.getElementById('dpe-ig')?.value.trim(),
@@ -783,6 +788,7 @@ async function saveProspect() {
   const body = {
     restaurant_name: name, phone,
     owner_name:   document.getElementById('add-owner').value.trim(),
+    email:        document.getElementById('add-email').value.trim(),
     city:         document.getElementById('add-city').value.trim(),
     category:     document.getElementById('add-category').value.trim(),
     instagram:    document.getElementById('add-instagram').value.trim(),
@@ -800,7 +806,7 @@ async function saveProspect() {
     closeModal('modal-add');
     toast('Prospecto creado', 'ok');
     // clear form
-    ['add-name','add-phone','add-owner','add-city','add-category','add-instagram','add-gmaps','add-followup','add-revenue']
+    ['add-name','add-phone','add-owner','add-email','add-city','add-category','add-instagram','add-gmaps','add-followup','add-revenue']
       .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
   }
 }
@@ -904,11 +910,12 @@ function stageEmoji(s) {
 }
 
 // ── CONVERT PROSPECT TO RESTAURANT ────────────────────────────────────
-async function convertProspect(pid, planCode, skipWelcome) {
+async function convertProspect(pid, planCode, skipWelcome, ownerEmail) {
   const body = {
     plan_code:            planCode || 'restaurante',
     skip_welcome_message: !!skipWelcome,
   };
+  if (ownerEmail) body.owner_email = ownerEmail;
   const r = await fetch(`/api/internal/crm/prospects/${pid}/convert`, {
     method:  'POST',
     headers: H(),
@@ -947,10 +954,13 @@ async function openConvertModal(pid) {
           <option value="cadena">Cadena ($299K/sede)</option>
         </select>
       </div>
-      <div style="margin-bottom:1.25rem;">
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-          <input type="checkbox" id="cv-skip-wa"> Omitir el email de bienvenida
-        </label>
+      <div style="margin-bottom:10px;">
+        <label style="font-size:11px;color:#888;font-weight:600;display:block;margin-bottom:4px;">Email del dueño (será su usuario)</label>
+        <input type="email" id="cv-email" value="${esc(p.email||'')}" placeholder="dueno@restaurante.com" style="width:100%;padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+
+      </div>
+      <div style="margin-bottom:1.25rem;font-size:12px;color:#888;">
+        Le enviamos un código a ese email para que cree su propia contraseña. Mesio nunca la ve.
       </div>
       <div id="cv-result" style="margin-bottom:1rem;display:none;"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -965,13 +975,17 @@ async function doConvert(pid) {
   const btn    = document.getElementById('cv-btn');
   const result = document.getElementById('cv-result');
   const plan   = document.getElementById('cv-plan')?.value || 'restaurante';
-  const skip   = document.getElementById('cv-skip-wa')?.checked || false;
+  const email  = (document.getElementById('cv-email')?.value || '').trim().toLowerCase();
+  if (!email) {
+    toast('Escribe el email del dueño: es su usuario y su forma de recuperar la contraseña', 'err');
+    return;
+  }
 
   btn.disabled = true;
   btn.textContent = 'Convirtiendo…';
   result.style.display = 'none';
 
-  const data = await convertProspect(pid, plan, skip);
+  const data = await convertProspect(pid, plan, false, email);
 
   if (!data) {
     btn.disabled = false;
@@ -979,18 +993,17 @@ async function doConvert(pid) {
     return;
   }
 
-  // Success — show credentials to founder (shown once; not logged)
+  // Success — no password exists to show: the owner creates it with the code.
   const user = data.user || {};
   const welcomeSent = data.welcome_message_sent;
   result.style.display = 'block';
   result.innerHTML = `
     <div style="background:#E1F5EE;border-radius:8px;padding:12px 14px;font-size:13px;">
       <div style="font-weight:600;color:#0F6E56;margin-bottom:6px;">✅ Restaurante creado · Org #${data.org_id}</div>
-      ${user.username ? `
-        <div style="margin-bottom:4px;"><span style="color:#555;">Usuario:</span> <code style="background:#fff;padding:2px 6px;border-radius:4px;">${esc(user.username)}</code></div>
-        <div style="margin-bottom:4px;"><span style="color:#555;">Contraseña temp:</span> <code style="background:#fff;padding:2px 6px;border-radius:4px;">${esc(user.temp_password||'—')}</code> <span style="font-size:11px;color:#888;">(cópiala ya — no se muestra de nuevo)</span></div>
-      ` : '<div style="color:#888;font-size:12px;">Usuario no creado — hacerlo manualmente en Superadmin.</div>'}
-      <div style="margin-top:4px;font-size:12px;color:#555;">Email de bienvenida: ${welcomeSent ? '✅ enviado' : '⚠️ no enviado (reenviar manualmente)'}</div>
+      ${user.username ? `<div style="margin-bottom:4px;"><span style="color:#555;">Usuario:</span> <code style="background:#fff;padding:2px 6px;border-radius:4px;">${esc(user.username)}</code></div>` : ''}
+      <div style="margin-top:4px;font-size:12px;color:#555;">${welcomeSent
+        ? '✅ Le enviamos el código para crear su contraseña.'
+        : '⚠️ El código no salió (¿email configurado?). Reenvíalo desde la <a href="/internal/org/' + Number(data.org_id) + '">ficha</a> › Usuarios › Enviar código.'}</div>
     </div>`;
 
   btn.style.display = 'none';
@@ -999,6 +1012,7 @@ async function doConvert(pid) {
   const p = S.prospects.find(x => x.id === pid);
   if (p) {
     p.stage = 'cerrado';
+    p.email = email;
     applyFilters();
     if (S.view === 'pipeline') renderPipeline();
     renderDetailHeader();

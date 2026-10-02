@@ -43,8 +43,6 @@ document.getElementById('key-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('auth-btn').click();
 });
 
-if (_token) applyToken(_token);
-
 // ── API helper ────────────────────────────────────────────────────────────────
 function apiGet(path) {
   return fetch(path, { headers: { Authorization: `Bearer ${_token}` } })
@@ -609,3 +607,8 @@ function loadAll() {
 setInterval(() => {
   if (_token) loadAll();
 }, 60_000);
+
+// Last, once every `let` above exists: applyToken reads _start/_end, and
+// calling it from the top of the file threw a TDZ ReferenceError — the page
+// sat on "Loading…" forever for anyone already signed in.
+if (_token) applyToken(_token);

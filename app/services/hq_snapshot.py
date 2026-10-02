@@ -236,7 +236,14 @@ def _sede_flags(m: dict, active: bool, loc: dict | None = None) -> list[dict]:
     if (loc and orders_7d >= 10 and open_long_enough(loc.get("opening_hours"), loc.get("timezone"))
             and (last is None or last < datetime.utcnow() - timedelta(hours=3))):  # noqa: DTZ003 — naive UTC columns
         flags.append(_flag("quiet_during_hours"))
-    if not t["rounds_7d"] and not (w["last_order_at"] and w["last_order_at"] > datetime.utcnow() - timedelta(days=7)):  # noqa: DTZ003 — naive UTC column
+    # A sede opened this week has had no chance to sell for 7 days: flagging
+    # it put every new signup in the HQ queue as a churn risk on day one.
+    created = loc.get("created_at") if loc else None
+    if created is not None and created.tzinfo is not None:
+        created = created.astimezone(timezone.utc).replace(tzinfo=None)
+    old_enough = created is None or created <= datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
+    if (old_enough and not t["rounds_7d"]
+            and not (w["last_order_at"] and w["last_order_at"] > datetime.utcnow() - timedelta(days=7))):  # noqa: DTZ003 — naive UTC column
         flags.append(_flag("no_activity_7d"))
     if t["kitchen_samples"] >= 5 and _num(t["kitchen_p90_min"]) > 30:
         flags.append(_flag("kitchen_slow"))
@@ -320,7 +327,7 @@ async def build_org_snapshot(org_id: int, *, llm_cost: dict | None = None) -> di
         return None
     org = base["org"]
     features = _json(org.get("features"))
-    status = plans.billing_status(org["comp_until"], org["paid_until"])
+    status = plans.account_status(dict(org))
     active_sedes = [loc for loc in base["locations"] if loc["active"]]
     price = plans.monthly_price_per_sede(org["plan_code"], org["founder_price_cop"])
     billed = org["plan_code"] in plans.PAYING_PLANS and status in (plans.ACTIVE, plans.OVERDUE)

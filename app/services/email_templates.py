@@ -149,3 +149,55 @@ def render_welcome_email(
         f"— Mesio"
     )
     return subject, html, text
+
+
+def render_account_setup_email(restaurant_name: str, username: str, code: str, setup_url: str) -> tuple[str, str, str]:
+    """Welcome for an account Mesio opened (CRM convert, Superadmin › Usuarios).
+
+    Carries a set-your-password code instead of a password: Mesio never sets
+    or sees one (PM decision 2026-10-02). The code is the same one-time,
+    15-minute code as "¿Olvidaste tu contraseña?"; the page asks for a new
+    one when it has expired. Callers MUST NOT log `code`.
+    """
+    name = _esc(restaurant_name or "tu restaurante")
+    subject = "¡Bienvenido a Mesio! Crea tu contraseña"
+
+    body_html = f"""\
+      <p style="margin:0 0 16px;">¡Bienvenido a Mesio! 🎉</p>
+      <p style="margin:0 0 16px;">
+        La cuenta de <strong>{name}</strong> ya está lista. Tu usuario es
+        <strong>{_esc(username)}</strong>. Solo falta que crees tu contraseña con este código:
+      </p>
+      <div style="margin:24px 0;text-align:center;">
+        <span style="display:inline-block;background:{_BG_COLOR};border:1px solid #e5e7eb;border-radius:8px;
+                     padding:16px 24px;font-size:32px;font-weight:bold;letter-spacing:8px;color:{_BRAND_COLOR};">
+          {_esc(code)}
+        </span>
+      </div>
+      <div style="margin:24px 0;text-align:center;">
+        <a href="{_esc(setup_url)}"
+           style="display:inline-block;background:{_BRAND_COLOR};color:#ffffff;text-decoration:none;
+                  padding:12px 28px;border-radius:8px;font-weight:bold;font-size:14px;">
+          Crear mi contraseña
+        </a>
+      </div>
+      <p style="margin:0 0 16px;">
+        El código vence en <strong>15 minutos</strong>. Si se venció, en esa misma página
+        pide uno nuevo con tu correo ("¿Olvidaste tu contraseña?").
+      </p>
+      <p style="margin:0;color:{_MUTED_COLOR};">
+        Nadie de Mesio conoce tu contraseña ni te la va a pedir. No compartas este código.
+      </p>
+    """
+    html = _wrap_html("Tu cuenta Mesio ya está lista: crea tu contraseña", body_html)
+    text = (
+        f"¡Bienvenido a Mesio!\n\n"
+        f"La cuenta de {restaurant_name or 'tu restaurante'} ya está lista.\n"
+        f"Usuario: {username}\n\n"
+        f"Crea tu contraseña con este código (vence en 15 minutos): {code}\n"
+        f"Entra aquí: {setup_url}\n\n"
+        f"Si el código se venció, pide uno nuevo en esa página con tu correo.\n"
+        f"Nadie de Mesio conoce tu contraseña ni te la va a pedir.\n\n"
+        f"— Mesio"
+    )
+    return subject, html, text

@@ -129,10 +129,14 @@
       return;
     }
     const rows = orgs.map((o) => {
+      // The toggle acts on the manual flag; the badge shows the real account
+      // state (trial / al día / vencido / suspendida), like the list above.
       const active = o.subscription_status === "active";
-      const statusBadge = active
-        ? '<span class="badge badge-active">Activo</span>'
-        : '<span class="badge badge-suspended">' + escHtml(o.subscription_status || "—") + "</span>";
+      const statusLabels = { trial: ["En prueba", "badge-active"], activo: ["Al día", "badge-active"],
+        vencido: ["Pago vencido", "badge-suspended"], suspendido: ["Suspendida", "badge-suspended"],
+        demo: ["Demo en vivo", "badge-chip"] };
+      const st = statusLabels[o.billing_status] || [o.billing_status || "—", "badge-chip"];
+      const statusBadge = '<span class="badge ' + st[1] + '">' + escHtml(st[0]) + "</span>";
       const planBadge =
         '<span class="badge badge-chip plan-' +
         escHtml(o.plan_code || "esencial") +
