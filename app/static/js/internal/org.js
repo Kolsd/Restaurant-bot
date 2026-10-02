@@ -79,6 +79,63 @@
   }
   function showError(msg) { var b = $('org-error'); b.textContent = msg; b.hidden = false; }
 
+  // ── support actions ──────────────────────────────────────────────
+  function api(method, path, body) {
+    return fetch(path, {
+      method: method,
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) {
+          var d = j && j.detail;
+          throw new Error(typeof d === 'string' ? d : (Array.isArray(d) && d[0] && d[0].msg) || ('HTTP ' + r.status));
+        }
+        return j;
+      });
+    });
+  }
+
+  // One dialog for every action: says what will happen, asks the reason,
+  // runs `run(reason)`; errors stay in the dialog, success reloads the ficha.
+  function act(title, desc, run, okText) {
+    var dlg = $('org-action');
+    $('org-action-title').textContent = title;
+    $('org-action-desc').textContent = desc;
+    $('org-action-reason').value = '';
+    $('org-action-error').textContent = '';
+    $('org-action-ok').textContent = okText || 'Confirmar';
+    $('org-action-ok').disabled = false;
+    $('org-action-form').onsubmit = function (e) {
+      e.preventDefault();
+      var reason = $('org-action-reason').value.trim();
+      if (reason.length < 8) { $('org-action-error').textContent = 'Escribe el motivo (mínimo 8 caracteres).'; return; }
+      $('org-action-ok').disabled = true;
+      run(reason).then(function (msg) {
+        dlg.close();
+        if (msg) toast(msg);
+        load();
+      }).catch(function (err) {
+        $('org-action-ok').disabled = false;
+        $('org-action-error').textContent = err.message;
+      });
+    };
+    $('org-action-cancel').onclick = function () { dlg.close(); };
+    dlg.showModal();
+    $('org-action-reason').focus();
+  }
+  function toast(msg) {
+    if (typeof mesioToast === 'function') { mesioToast(msg, 'success'); return; }
+    $('org-updated').textContent = msg;
+  }
+  function supportUrl(action) { return '/api/internal/hq/support/' + orgId + '/' + action; }
+  function smallBtn(text, onClick, danger) {
+    var b = el('button', 'org-btn org-btn-sm' + (danger ? ' org-btn-danger' : ''), text);
+    b.type = 'button';
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
   // ── render ───────────────────────────────────────────────────────
   function render() {
     var o = data.org, b = data.business;
@@ -146,6 +203,15 @@
       var w = el('div'); w.appendChild(el('b', null, 'Dónde mirar: ')); w.appendChild(document.createTextNode(f.where));
       var fx = el('div'); fx.appendChild(el('b', null, 'Cómo resolverlo: ')); fx.appendChild(document.createTextNode(f.fix));
       body.appendChild(w); body.appendChild(fx);
+      if (f.code === 'paused') {
+        var row = el('div');
+        row.appendChild(smallBtn('Despausar restaurante', function () {
+          act('Despausar ' + data.org.name, 'Los comensales vuelven a poder pedir en todas las sedes. Hazlo solo si el dueño lo confirmó.',
+            function (reason) { return api('POST', supportUrl('unpause'), { reason: reason }).then(function () { return 'Restaurante reactivado'; }); },
+            'Despausar');
+        }));
+        body.appendChild(row);
+      }
       d.appendChild(body);
       box.appendChild(d);
     });
@@ -182,6 +248,126 @@
       tabs.appendChild(t);
     });
     renderSede(data.sedes.filter(function (s) { return s.id === currentSede; })[0]);
+    loadSupport(currentSede);
+  }
+
+  function loadSupport(sedeId) {
+    var box = clear($('org-support'));
+    box.appendChild(el('div', 'org-hint', 'Cargando…'));
+    api('GET', '/api/internal/hq/orgs/' + orgId + '/sedes/' + sedeId + '/support')
+      .then(function (sup) { if (sedeId === currentSede) renderSupport(sedeId, sup); })
+      .catch(function (e) { clear(box).appendChild(el('div', 'org-error', 'No se pudo cargar: ' + e.message)); });
+  }
+
+  function block(title, headBtn) {
+    var b = el('div', 'org-support-block');
+    var h = el('div', 'org-support-head');
+    h.appendChild(el('div', 'org-support-title', title));
+    if (headBtn) h.appendChild(headBtn);
+    b.appendChild(h);
+    return b;
+  }
+  function supRow(text, btn) {
+    var r = el('div', 'org-support-row');
+    r.appendChild(el('span', null, text));
+    if (btn) r.appendChild(btn);
+    return r;
+  }
+  function tableLabel(name, id) {
+    var n = name || id || '';
+    return /^\d+$/.test(n) ? 'Mesa ' + n : n;
+  }
+
+  function renderSupport(sedeId, sup) {
+    var box = clear($('org-support'));
+    var sede = data.sedes.filter(function (s) { return s.id === sedeId; })[0];
+    var sedeName = sede ? sede.name : '#' + sedeId;
+
+    var b1 = block('Mesas abiertas (' + sup.sittings.length + ')');
+    if (!sup.sittings.length) b1.appendChild(supRow('Ninguna.'));
+    sup.sittings.forEach(function (s) {
+      var label = tableLabel(s.table_name, s.table_id);
+      b1.appendChild(supRow(label + ' · abierta ' + ago(s.started_at) + ' · ' + money(s.rounds_total) + ' en rondas',
+        smallBtn('Cerrar mesa', function () {
+          act('Cerrar ' + label, 'Cierra la sesión de la mesa en ' + sedeName + '. Lo ya cobrado no cambia; los comensales tendrán que escanear de nuevo.',
+            function (reason) { return api('POST', supportUrl('close-sitting'), { session_id: s.id, reason: reason }).then(function () { return 'Mesa cerrada'; }); },
+            'Cerrar mesa');
+        }, true)));
+    });
+    box.appendChild(b1);
+
+    var b2 = block('Rondas de mesa atascadas (+45 min sin "listo")');
+    if (!sup.stuck_rounds.length) b2.appendChild(supRow('Ninguna.'));
+    sup.stuck_rounds.forEach(function (o) {
+      b2.appendChild(supRow(tableLabel(o.table_name) + ' · ' + o.status + ' · ' + money(o.total) + ' · ' + ago(o.created_at),
+        smallBtn('Cancelar ronda', function () {
+          act('Cancelar ronda', 'La ronda sale de cocina y de la cuenta de la mesa. Confírmalo con el restaurante antes.',
+            function (reason) { return api('POST', supportUrl('cancel-round'), { order_id: o.id, reason: reason }).then(function () { return 'Ronda cancelada'; }); },
+            'Cancelar ronda');
+        }, true)));
+    });
+    box.appendChild(b2);
+
+    var b3 = block('Domicilios / recoger atascados (+90 min)');
+    if (!sup.stuck_web_orders.length) b3.appendChild(supRow('Ninguno.'));
+    sup.stuck_web_orders.forEach(function (o) {
+      b3.appendChild(supRow((o.public_code || o.id) + ' · ' + o.order_type + ' · ' + o.status + ' · ' + money(o.total) + ' · ' + ago(o.created_at),
+        smallBtn('Cancelar pedido', function () {
+          act('Cancelar pedido ' + (o.public_code || ''), 'El pedido queda cancelado; el cliente lo verá en su seguimiento. Si ya pagó, el reembolso lo hace el restaurante.',
+            function (reason) { return api('POST', supportUrl('cancel-web-order'), { order_id: o.id, reason: reason }).then(function () { return 'Pedido cancelado'; }); },
+            'Cancelar pedido');
+        }, true)));
+    });
+    box.appendChild(b3);
+
+    var wa = sup.waiter_alerts || {};
+    var b4 = block('Alertas al mesero sin atender: ' + num(wa.open) + (wa.oldest ? ' · la más vieja ' + ago(wa.oldest) : ''),
+      wa.open ? smallBtn('Descartar las de más de 1 h', function () {
+        act('Descartar alertas viejas', 'Marca como atendidas las alertas al mesero de ' + sedeName + ' con más de una hora.',
+          function (reason) {
+            return api('POST', supportUrl('dismiss-alerts'), { location_id: sedeId, older_than_minutes: 60, reason: reason })
+              .then(function (r) { return r.dismissed + ' alertas descartadas'; });
+          }, 'Descartar');
+      }) : null);
+    box.appendChild(b4);
+
+    var b5 = block('Platos agotados (' + sup.sold_out.length + ')',
+      sup.sold_out.length > 1 ? smallBtn('Quitar todos', function () {
+        act('Quitar todos los agotados', 'Todos los platos agotados de ' + sedeName + ' vuelven a estar disponibles para pedir.',
+          function (reason) {
+            return api('POST', supportUrl('clear-sold-out'), { location_id: sedeId, dish_name: null, reason: reason })
+              .then(function (r) { return r.cleared + ' platos disponibles de nuevo'; });
+          }, 'Quitar agotados');
+      }) : null);
+    if (!sup.sold_out.length) b5.appendChild(supRow('Ninguno.'));
+    sup.sold_out.forEach(function (d) {
+      b5.appendChild(supRow(d.dish_name + ' · agotado ' + ago(d.updated_at), smallBtn('Disponible', function () {
+        act('Marcar disponible: ' + d.dish_name, 'Los comensales de ' + sedeName + ' podrán volver a pedirlo.',
+          function (reason) {
+            return api('POST', supportUrl('clear-sold-out'), { location_id: sedeId, dish_name: d.dish_name, reason: reason })
+              .then(function () { return d.dish_name + ' disponible'; });
+          }, 'Marcar disponible');
+      })));
+    });
+    box.appendChild(b5);
+
+    var b6 = block('Facturas DIAN sin aceptar (' + sup.dian_pending.length + ')');
+    if (!sup.dian_pending.length) b6.appendChild(supRow('Ninguna.'));
+    sup.dian_pending.forEach(function (f) {
+      b6.appendChild(supRow((f.prefix || '') + (f.invoice_number || '') + ' · pedido ' + f.order_id + ' · ' + f.dian_status + ' · ' + ago(f.created_at)));
+    });
+    if (sup.dian_pending.length) {
+      b6.appendChild(el('div', 'org-hint', 'El reintento desde el HQ llega cuando probemos DIAN en el sandbox de MATIAS (para no duplicar folios). Mientras tanto, revisa la respuesta del proveedor en billing_log.'));
+    }
+    box.appendChild(b6);
+
+    var b7 = block('Configurar operación', smallBtn('Volver a preguntar', function () {
+      act('Volver a preguntar "Configurar operación"', 'El dueño o admin verá otra vez el asistente de cocina, bar, domicilios y mesero la próxima vez que entre a la Staff App de ' + sedeName + '. Sus respuestas anteriores quedan como punto de partida.',
+        function (reason) { return api('POST', supportUrl('reask-ops'), { location_id: sedeId, reason: reason }).then(function () { return 'Se le volverá a preguntar'; }); },
+        'Volver a preguntar');
+    }));
+    b7.appendChild(supRow(sede && sede.adoption.ops_configured ? 'Configurada.' : 'Aún sin configurar.'));
+    box.appendChild(b7);
   }
 
   function renderSede(s) {
@@ -235,7 +421,7 @@
     if (!s.staff.length) { box.appendChild(el('div', 'org-hint', 'Sin personal creado en esta sede.')); return; }
     var wrap = el('div', 'org-table-wrap'), t = el('table', 'org-table');
     var hr = el('tr');
-    ['Nombre', 'Usuario', 'Roles', 'Estado', 'Último inicio de sesión'].forEach(function (h) { hr.appendChild(el('th', null, h)); });
+    ['Nombre', 'Usuario', 'Roles', 'Estado', 'Último inicio de sesión', ''].forEach(function (h) { hr.appendChild(el('th', null, h)); });
     t.appendChild(hr);
     s.staff.forEach(function (p) {
       var tr = el('tr');
@@ -244,6 +430,13 @@
       tr.appendChild(el('td', null, String(p.roles || '').split(',').map(function (r) { return ROLE[r.trim()] || r.trim(); }).join(', ')));
       var tdS = el('td'); tdS.appendChild(badge(p.active ? 'Activo' : 'Inactivo', p.active ? 'ok' : '')); tr.appendChild(tdS);
       tr.appendChild(el('td', null, ago(p.last_login)));
+      var tdA = el('td');
+      tdA.appendChild(smallBtn('Cerrar sesiones', function () {
+        act('Cerrar sesiones de ' + p.name, 'Saca a ' + p.name + ' de la Staff App en todos sus dispositivos. Podrá volver a entrar con su PIN.',
+          function (reason) { return api('POST', supportUrl('close-sessions'), { staff_id: p.id, reason: reason }).then(function (r) { return r.sessions_closed + ' sesiones cerradas'; }); },
+          'Cerrar sesiones');
+      }));
+      tr.appendChild(tdA);
       t.appendChild(tr);
     });
     wrap.appendChild(t); box.appendChild(wrap);
@@ -252,7 +445,7 @@
   function renderUsers() {
     var t = clear($('org-users'));
     var hr = el('tr');
-    ['Usuario', 'Nombre', 'Rol', 'Sede', 'Último inicio de sesión'].forEach(function (h) { hr.appendChild(el('th', null, h)); });
+    ['Usuario', 'Nombre', 'Rol', 'Sede', 'Último inicio de sesión', ''].forEach(function (h) { hr.appendChild(el('th', null, h)); });
     t.appendChild(hr);
     var sedeName = {};
     data.sedes.forEach(function (s) { sedeName[s.id] = s.name; });
@@ -263,6 +456,22 @@
       tr.appendChild(el('td', null, String(u.role || '').split(',').map(function (r) { return ROLE[r.trim()] || r.trim(); }).join(', ')));
       tr.appendChild(el('td', 'org-muted', u.location_id ? (sedeName[u.location_id] || '#' + u.location_id) : 'Todas'));
       tr.appendChild(el('td', null, ago(u.last_login)));
+      var tdA = el('td');
+      tdA.style.whiteSpace = 'nowrap';
+      if (u.username.indexOf('@') > 0) {
+        tdA.appendChild(smallBtn('Enviar código', function () {
+          act('Enviar código a ' + u.username, 'Le llega a su email el mismo código de "¿Olvidaste tu contraseña?". Mesio nunca pone ni ve la contraseña.',
+            function (reason) { return api('POST', supportUrl('password-reset'), { username: u.username, reason: reason }).then(function () { return 'Código enviado a ' + u.username; }); },
+            'Enviar código');
+        }));
+        tdA.appendChild(document.createTextNode(' '));
+      }
+      tdA.appendChild(smallBtn('Cerrar sesiones', function () {
+        act('Cerrar sesiones de ' + u.username, 'Saca a este usuario del panel en todos sus dispositivos.',
+          function (reason) { return api('POST', supportUrl('close-sessions'), { username: u.username, reason: reason }).then(function (r) { return r.sessions_closed + ' sesiones cerradas'; }); },
+          'Cerrar sesiones');
+      }));
+      tr.appendChild(tdA);
       t.appendChild(tr);
     });
   }

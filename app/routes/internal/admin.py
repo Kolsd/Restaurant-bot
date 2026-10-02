@@ -57,7 +57,6 @@ from app.services.logging import get_logger
 from app.services.tenant_context import bypass_tenant_scope
 from app.services.security import compare_secret
 from app.services.state_store import rate_limit_check
-from app.services.password_hash import hash_password as hash_pw
 
 log = get_logger(__name__)
 
@@ -201,17 +200,6 @@ class RecordPaymentRequest(BaseModel):
     def months_valid(cls, v: int) -> int:
         if v not in (1, 12):
             raise ValueError("months must be 1 or 12")
-        return v
-
-
-class ResetPasswordRequest(BaseModel):
-    new_password: str
-
-    @field_validator("new_password")
-    @classmethod
-    def pw_min_len(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("new_password must be at least 8 characters")
         return v
 
 
@@ -859,52 +847,6 @@ async def set_org_founder(
 
     log.info("set_org_founder", org_id=org_id, founder=body.founder, founder_price_cop=price)
     return _ok({"org_id": org_id, "founder": body.founder, "founder_price_cop": price})
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# User password reset
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@router.post("/users/{username}/reset-password")
-async def reset_user_password(
-    username: str,
-    body: ResetPasswordRequest,
-    request: Request,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    """Reset a user's password and invalidate all their existing sessions.
-
-    Uses username as the path parameter (it is the PK on the users table).
-    """
-    from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
-
-    # Verify user exists
-    user = await restaurant_repo.db_get_user(username)
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-
-    new_hash = hash_pw(body.new_password)
-    updated = await restaurant_repo.db_update_user_password(username, new_hash)
-    if not updated:
-        raise HTTPException(status_code=500, detail="Error al actualizar contraseña")
-
-    sessions_deleted = await sessions_repo.delete_sessions_for_user(username)
-
-    actor = request.headers.get("X-Superadmin-User", "superadmin")
-    ip = request.client.host if request.client else None
-    with bypass_tenant_scope("reset_user_password_audit"):
-        await db_log_audit_event(
-            actor=actor,
-            action="user.password_reset",
-            target_type="user",
-            target_id=username,
-            payload={"sessions_deleted": sessions_deleted},
-            request_ip=ip,
-        )
-
-    log.info("reset_user_password", username=username, sessions_deleted=sessions_deleted)
-    return _ok({"username": username, "sessions_deleted": sessions_deleted})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

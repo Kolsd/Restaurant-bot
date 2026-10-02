@@ -70,6 +70,7 @@ from app.routes.internal.costs import router as internal_costs_router
 from app.routes.internal.search import router as internal_search_router
 from app.routes.internal.notifications import router as internal_notifications_router
 from app.routes.internal.hq import router as internal_hq_router
+from app.routes.internal.hq_support import router as internal_hq_support_router
 from app.services import database as db  # ← FIX: import directo de db
 from app.services.logging import get_logger as _get_logger
 
@@ -400,6 +401,7 @@ app.include_router(internal_costs_router)
 app.include_router(internal_search_router)
 app.include_router(internal_notifications_router)
 app.include_router(internal_hq_router)
+app.include_router(internal_hq_support_router)
 app.include_router(live_demo_router)
 
 # ── Audit middleware (HQ compliance) ─────────────────────────────────────────

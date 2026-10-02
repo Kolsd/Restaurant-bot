@@ -159,6 +159,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
             return
         if method not in self._WRITE_METHODS:
             return
+        # Support actions write their own, richer row (reason + what changed):
+        # routes/internal/hq_support.py. One action, one audit row.
+        if path.startswith("/api/internal/hq/support/"):
+            return
         if response.status_code >= 400:
             return
 

@@ -44,6 +44,9 @@
         <div id="org-sede-tabs" class="org-tabs" role="tablist"></div>
       </div>
       <div id="org-sede"></div>
+      <h3 class="org-h3">Soporte en esta sede</h3>
+      <div class="org-hint">Arreglos que Mesio puede hacer. Cada uno pide un motivo y queda en el audit log. Nunca se tocan montos ni pagos.</div>
+      <div id="org-support" class="org-support"></div>
     </section>
 
     <section class="org-card">
@@ -58,6 +61,20 @@
       <div class="org-table-wrap"><table class="org-table" id="org-users"></table></div>
     </section>
   </main>
+
+  <dialog id="org-action" class="org-dialog" aria-labelledby="org-action-title">
+    <form method="dialog" id="org-action-form">
+      <h3 id="org-action-title" class="org-h2">Confirmar acción</h3>
+      <p id="org-action-desc" class="org-dialog-desc"></p>
+      <label class="org-dialog-label" for="org-action-reason">Motivo (queda en el audit log)</label>
+      <textarea id="org-action-reason" rows="3" maxlength="500" placeholder="Ej: el dueño llamó, la mesa 4 quedó abierta desde ayer"></textarea>
+      <div id="org-action-error" class="org-dialog-error"></div>
+      <div class="org-dialog-actions">
+        <button type="button" class="org-btn" id="org-action-cancel">Cancelar</button>
+        <button type="submit" class="org-btn org-btn-danger" id="org-action-ok">Confirmar</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/static/js/mesio-utils.js"></script>
   <script src="/static/js/internal/org.js"></script>

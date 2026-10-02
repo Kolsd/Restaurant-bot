@@ -264,7 +264,7 @@ def _sede_view(loc: dict, m: dict) -> dict:
         },
         "staff": [
             {
-                "name": s["name"], "username": s["username"], "active": bool(s["active"]),
+                "id": str(s["id"]), "name": s["name"], "username": s["username"], "active": bool(s["active"]),
                 "roles": s["roles"] or s["role"], "last_login": _iso(s["last_login"]),
             }
             for s in m["staff"]

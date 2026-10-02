@@ -1239,7 +1239,7 @@ function renderUsersTable(users) {
     <td><span class="badge-chip">${escHtml(u.role||'owner')}</span></td>
     <td style="color:#aaa;font-size:12px;">#${u.branch_id||'—'}</td>
     <td style="text-align:right;white-space:nowrap;display:flex;gap:6px;justify-content:flex-end;">
-      <button class="btn btn-secondary btn-sm" onclick="openResetPwModal('${escHtml(u.username)}')">Reset</button>
+      <button class="btn btn-secondary btn-sm" onclick="openResetPwModal('${escHtml(u.username)}', ${Number(u.org_id)||0})">Enviar código</button>
       <button class="btn btn-danger btn-sm" onclick="deleteGlobalUser('${escHtml(u.username)}')">Eliminar</button>
     </td>
   </tr>`).join('');
@@ -1439,10 +1439,11 @@ function _wireDeepLinks(r) {
 }
 
 // ── Reset password modal ──────────────────────────────────────────
-function openResetPwModal(username) {
+function openResetPwModal(username, orgId) {
   const modal = $('reset-pw-modal');
   if(!modal) return;
   $('reset-pw-username').value = username;
+  $('reset-pw-username').dataset.org = String(orgId || '');
   $('reset-pw-display').textContent = username;
   $('reset-pw-input').value = '';
   $('reset-pw-error').textContent = '';
@@ -1456,18 +1457,21 @@ function closeResetPwModal() {
 
 async function submitResetPw() {
   const username = $('reset-pw-username').value;
-  const newPw = $('reset-pw-input').value;
+  const orgId = $('reset-pw-username').dataset.org;
+  const reason = $('reset-pw-input').value.trim();
   const errEl = $('reset-pw-error');
-  if(!newPw || newPw.length < 8) { errEl.textContent = 'Mínimo 8 caracteres.'; return; }
+  if(!orgId) { errEl.textContent = 'Este usuario no tiene organización.'; return; }
+  if(reason.length < 8) { errEl.textContent = 'Escribe el motivo (mín. 8 caracteres): queda en el audit log.'; return; }
   try {
-    const r = await _hqFetch(`/api/internal/admin/users/${encodeURIComponent(username)}/reset-password`, {
+    // Mesio never sets a password: the owner gets their own reset code by email.
+    const r = await _hqFetch(`/api/internal/hq/support/${encodeURIComponent(orgId)}/password-reset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ new_password: newPw }),
+      body: JSON.stringify({ username: username, reason: reason }),
     });
     if(r.ok) {
       closeResetPwModal();
-      alert(`✅ Contraseña actualizada. Sesiones existentes cerradas.`);
+      alert(`✅ Código enviado a ${username}. Lo usa en "¿Olvidaste tu contraseña?".`);
     } else {
       const e = await r.json().catch(()=>({}));
       errEl.textContent = e.detail || 'Error al actualizar.';
@@ -1502,7 +1506,7 @@ async function deleteGlobalUser(username) {
 <div id="reset-pw-modal" class="hq-modal-overlay" style="display:none;">
   <div class="hq-modal-box">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
-      <strong style="font-size:16px;">Resetear contraseña</strong>
+      <strong style="font-size:16px;">Enviar código para restablecer contraseña</strong>
       <button onclick="closeResetPwModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&#x2715;</button>
     </div>
     <input type="hidden" id="reset-pw-username">
@@ -1510,17 +1514,17 @@ async function deleteGlobalUser(username) {
       Usuario: <strong id="reset-pw-display">—</strong>
     </div>
     <div style="background:#FFF8E6;border:1px solid #F0A500;border-radius:8px;padding:10px 14px;font-size:12px;color:#7A4F00;margin-bottom:1rem;">
-      ⚠️ Todas las sesiones activas de este usuario serán cerradas al guardar.
+      El usuario recibe en su email el mismo código de "¿Olvidaste tu contraseña?". Mesio nunca pone ni ve la contraseña.
     </div>
     <div style="margin-bottom:1rem;">
-      <label class="field-label">Nueva contraseña (mín. 8 caracteres)</label>
-      <input id="reset-pw-input" class="field-input" type="password" placeholder="Nueva contraseña"
+      <label class="field-label">Motivo (queda en el audit log)</label>
+      <input id="reset-pw-input" class="field-input" type="text" placeholder="Ej: el dueño llamó, no recuerda la contraseña"
              onkeydown="if(event.key==='Enter')submitResetPw()">
     </div>
     <div id="reset-pw-error" style="color:#C0392B;font-size:12px;margin-bottom:8px;"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button class="btn btn-secondary" onclick="closeResetPwModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="submitResetPw()">Confirmar</button>
+      <button class="btn btn-primary" onclick="submitResetPw()">Enviar código</button>
     </div>
   </div>
 </div>

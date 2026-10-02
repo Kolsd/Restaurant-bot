@@ -735,7 +735,7 @@ async def db_create_user(username: str, password_hash: str, restaurant_name: str
 async def db_get_all_users():
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT username, restaurant_name, role, branch_id, parent_user FROM users")
+        rows = await conn.fetch("SELECT username, restaurant_name, role, branch_id, parent_user, org_id FROM users")
         return [dict(r) for r in rows]
 
 

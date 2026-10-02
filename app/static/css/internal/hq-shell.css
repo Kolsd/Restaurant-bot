@@ -16,7 +16,7 @@ body.hq-ready {
     "sidebar content";
   min-height: 100vh;
   background: var(--dark, #111827);
-  color: var(--text, #e5e7eb);
+  color: #e5e7eb; /* HQ is dark; tokens.css --text is the light theme's dark ink */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
@@ -141,7 +141,7 @@ body.hq-ready.hq-no-sidebar {
   gap: 8px;
   padding: 10px 12px;
   font-size: 13px;
-  color: var(--text, #e5e7eb);
+  color: #e5e7eb; /* HQ is dark; tokens.css --text is the light theme's dark ink */
   cursor: pointer;
   transition: background 0.15s ease;
 }
