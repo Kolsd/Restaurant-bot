@@ -2082,8 +2082,14 @@ async def _call_llm_and_execute(
             tools=tools,
             max_tokens=MAX_TOKENS_SHORT,
         )
-    except Exception:
+    except Exception as exc:
         log.exception("call_llm_and_execute.claude_error", phone=_obfuscate_phone(user_phone), org_id=org_id)
+        # The diner only sees the apology; Mesio HQ sees which restaurant.
+        from app.services import error_log  # noqa: PLC0415
+        error_log.record_error(
+            source="bot", error_type=type(exc).__name__, message=str(exc),
+            org_id=org_id, location_id=location_id, route="agent.chat",
+        )
         return "Lo siento, tengo un problema técnico. Por favor intenta de nuevo en un momento.", {}
 
     reply = result["reply"]
@@ -2137,6 +2143,11 @@ async def _call_llm_and_execute(
 
     if not assistant_message.strip():
         log.warning("call_claude.empty_reply", org_id=org_id, phone=_obfuscate_phone(user_phone))
+        from app.services import error_log  # noqa: PLC0415
+        error_log.record_error(
+            source="bot", error_type="EmptyReply", message=f"tool={tool_name or '-'}",
+            org_id=org_id, location_id=location_id, route="agent.chat",
+        )
         assistant_message = "Disculpa, no te entendí bien. ¿Puedes repetirme lo que necesitas?"
 
     # ── Anti-conversational session nudge (CEO rule 2026-05-07) ──────────────

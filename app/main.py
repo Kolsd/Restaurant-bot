@@ -1,5 +1,6 @@
 import os
 import asyncio
+import uuid
 import logging
 import structlog
 from contextlib import asynccontextmanager
@@ -115,6 +116,10 @@ async def lifespan(app):
     yield
 
     # ── SHUTDOWN ──────────────────────────────────────────────────────
+    # Errors recorded in the last moments still reach Mesio HQ.
+    from app.services.error_log import drain as drain_error_log
+    await drain_error_log()
+
     from app.services.realtime import shutdown as realtime_shutdown
     await realtime_shutdown()
 
@@ -139,6 +144,51 @@ async def force_domain_middleware(request: Request, call_next):
         url = str(request.url).replace(host, APP_DOMAIN).replace("http://", "https://")
         return RedirectResponse(url, status_code=301)
     return await call_next(request)
+
+# ── ERROR CAPTURE (Mesio HQ, migration 0108) ─────────────────────────
+def _error_owner(request: Request) -> tuple[int | None, int | None]:
+    """The org/sede a failing request belonged to, from what deps already
+    resolved for it (never a new lookup on a request that is failing)."""
+    user = request.scope.get("mesio.user") or {}
+    org = request.scope.get("mesio.org") or {}
+    org_id = (user.get("org_id") if isinstance(user, dict) else None) or (
+        org.get("org_id") or org.get("id") if isinstance(org, dict) else None)
+    location_id = user.get("location_id") if isinstance(user, dict) else None
+    return org_id, location_id
+
+
+@app.middleware("http")
+async def error_capture_middleware(request: Request, call_next):
+    """Every unhandled exception and every 5xx goes to platform_errors with
+    its restaurant, so Mesio HQ shows it on the ficha. The response carries
+    X-Request-ID; the same id is in the process log line, for Railway."""
+    from app.services import error_log  # noqa: PLC0415
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    route = request.scope.get("route")
+    path = getattr(route, "path", None) or request.url.path
+    try:
+        response = await call_next(request)
+    except Exception as exc:  # noqa: BLE001 — recorded, then re-raised untouched
+        org_id, location_id = _error_owner(request)
+        _log.exception("http.unhandled", request_id=request_id, route=path, org_id=org_id)
+        error_log.record_error(
+            source="http", error_type=type(exc).__name__, message=str(exc),
+            org_id=org_id, location_id=location_id, route=path,
+            method=request.method, status=500, request_id=request_id,
+        )
+        raise
+    if response.status_code >= 500:
+        route = request.scope.get("route")
+        path = getattr(route, "path", None) or request.url.path
+        org_id, location_id = _error_owner(request)
+        error_log.record_error(
+            source="http", error_type=f"HTTP {response.status_code}", message=None,
+            org_id=org_id, location_id=location_id, route=path,
+            method=request.method, status=response.status_code, request_id=request_id,
+        )
+    response.headers["X-Request-ID"] = request_id
+    return response
+
 
 # ── SECURITY HEADERS MIDDLEWARE ───────────────────────────────────────
 @app.middleware("http")

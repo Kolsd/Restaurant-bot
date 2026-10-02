@@ -235,6 +235,18 @@ async def _run_conversation_cleanup() -> None:
         log.exception("scheduler.conversation_cleanup_failed")
 
 
+async def _run_error_log_purge() -> None:
+    """Daily — Mesio HQ's platform_errors keeps 90 days (migration 0108).
+    Runs inside the tick's bypass_tenant_scope."""
+    import asyncpg  # noqa: PLC0415
+    from app.repositories.internal import errors_repo  # noqa: PLC0415
+    try:
+        deleted = await errors_repo.db_purge_errors(older_than_days=90)
+        log.info("scheduler.error_log_purge_done", deleted=deleted)
+    except (asyncpg.PostgresError, OSError) as exc:
+        log.warning("scheduler.error_log_purge_failed", error=type(exc).__name__)
+
+
 async def _renew_or_abort(token: str, ttl_seconds: int = 90) -> bool:
     """
     Renew the scheduler leader lease.  Returns False if the lease was lost
@@ -323,6 +335,7 @@ async def _scheduler_loop():
             # Purge conversations older than 425-day retention window (daily)
             if _reminder_counter % 1440 == 0:
                 await _run_conversation_cleanup()
+                await _run_error_log_purge()
 
 
 async def start_scheduler():

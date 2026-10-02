@@ -96,6 +96,16 @@ RUNBOOK: dict[str, tuple[str, str, str, str]] = {
         "Ficha › sede: tiempo de cocina p50/p90 (7 días).",
         "Puede ser que marquen 'listo' tarde y no que cocinen lento. Revisar con el jefe de cocina cómo usan la pantalla.",
     ),
+    "bot_failing": (
+        "critical", "El bot está fallando: los comensales reciben 'tengo un problema técnico'",
+        "Ficha › Errores: fuente 'bot', tipo y mensaje (crédito de Anthropic, timeouts, límite de uso).",
+        "Si es crédito o API key: recargar/rotar en Anthropic y Railway. Si es un error de código: abrir el error, reproducir con su request id en los logs de Railway y corregir.",
+    ),
+    "errors_repeated": (
+        "warning", "Errores del servidor repetidos en las últimas 24 h",
+        "Ficha › Errores: ruta, tipo y request id; buscar ese id en los logs de Railway para ver el traceback.",
+        "Reproducir en local con la misma ruta; si bloquea al restaurante, avisarle mientras se corrige.",
+    ),
     "inventory_low": (
         "info", "Insumos por debajo del mínimo",
         "Panel › Inventario de la sede.",
@@ -284,6 +294,17 @@ async def build_org_snapshot(org_id: int, *, llm_cost: dict | None = None) -> di
     if status == plans.TRIAL and comp and comp - datetime.now(timezone.utc) <= timedelta(days=3):
         org_flags.append(_flag("trial_ending"))
 
+    from app.repositories.internal import errors_repo  # noqa: PLC0415
+    error_groups = await errors_repo.db_error_groups(org_id=org_id, days=7)
+    day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+    recent = [g for g in error_groups if g["last_at"] and g["last_at"] >= day_ago]
+    bot_24h = sum(g["count"] for g in recent if g["source"] == "bot")
+    http_24h = sum(g["count"] for g in recent if g["source"] != "bot")
+    if bot_24h >= 3:
+        org_flags.append(_flag("bot_failing", bot_24h))
+    if http_24h >= 5:
+        org_flags.append(_flag("errors_repeated", http_24h))
+
     sedes = []
     for loc in base["locations"]:
         metrics = await hq_repo.db_hq_location_metrics(
@@ -331,5 +352,14 @@ async def build_org_snapshot(org_id: int, *, llm_cost: dict | None = None) -> di
             "last_login": _iso(max(logins)) if logins else None,
         },
         "flags": sorted(all_flags, key=lambda f: _SEVERITY_ORDER[f["severity"]]),
+        "errors": [
+            {
+                "source": g["source"], "error_type": g["error_type"], "message": g["message"] or "",
+                "route": g["route"] or "", "method": g["method"], "status": g["status"],
+                "count": g["count"], "first_at": _iso(g["first_at"]), "last_at": _iso(g["last_at"]),
+                "location_id": g["location_id"], "request_id": g["last_request_id"],
+            }
+            for g in error_groups
+        ],
         "sedes": sedes,
     }

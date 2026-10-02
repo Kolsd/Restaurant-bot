@@ -102,7 +102,33 @@
     renderFlags();
     renderBusiness();
     renderSedeTabs();
+    renderErrors();
     renderUsers();
+  }
+
+  function renderErrors() {
+    var t = clear($('org-errors'));
+    var errs = data.errors || [];
+    if (!errs.length) {
+      var tr0 = el('tr'); var td0 = el('td', 'org-ok', '✓ Sin errores en los últimos 7 días.');
+      tr0.appendChild(td0); t.appendChild(tr0); return;
+    }
+    var sedeName = {};
+    data.sedes.forEach(function (s) { sedeName[s.id] = s.name; });
+    var hr = el('tr');
+    ['Último', 'Veces', 'Fuente', 'Sede', 'Dónde', 'Error', 'Request id'].forEach(function (h) { hr.appendChild(el('th', null, h)); });
+    t.appendChild(hr);
+    errs.forEach(function (e) {
+      var tr = el('tr');
+      tr.appendChild(el('td', null, ago(e.last_at)));
+      tr.appendChild(el('td', null, num(e.count)));
+      var src = el('td'); src.appendChild(badge(e.source === 'bot' ? 'Bot' : 'Servidor', e.source === 'bot' ? 'bad' : 'warn')); tr.appendChild(src);
+      tr.appendChild(el('td', 'org-muted', e.location_id ? (sedeName[e.location_id] || '#' + e.location_id) : '—'));
+      tr.appendChild(el('td', 'org-muted', [e.method, e.route].filter(Boolean).join(' ') || '—'));
+      tr.appendChild(el('td', null, e.error_type + (e.message ? ': ' + e.message : '')));
+      tr.appendChild(el('td', 'org-muted', e.request_id || '—'));
+      t.appendChild(tr);
+    });
   }
 
   function renderFlags() {
