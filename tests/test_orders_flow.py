@@ -63,7 +63,7 @@ def _mock_pool(monkeypatch, rows=None, fetchrow_result=None):
 # ─── fixtures ─────────────────────────────────────────────────────────────────
 
 _ORDER = {
-    "id": "ord-001", "restaurant_id": 1, "phone": "+573001111111",
+    "id": "ord-001", "org_id": 1, "location_id": 1, "phone": "+573001111111",
     "order_type": "domicilio", "status": "pendiente", "paid": False,
     "items": [{"name": "Pizza", "quantity": 1, "price": 35000}],
     "total": 35000, "address": "Calle 123", "created_at": "2026-04-08T10:00:00",

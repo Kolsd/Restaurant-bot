@@ -116,7 +116,8 @@ def test_create_table_passes_org_id_to_tenant_scope_not_location_id(
             p.stop()
 
     assert resp.status_code == 200, resp.text
-    assert captured == [ORG_ID], (
+    # Twice: resolving the sede, then creating the table — both by org id.
+    assert captured and set(captured) == {ORG_ID}, (
         f"tenant_scope must receive ORG_ID ({ORG_ID}) — got {captured}. "
         "If LOCATION_ID leaks here, RLS will filter by the wrong key."
     )

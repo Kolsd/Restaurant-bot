@@ -353,6 +353,9 @@ def _mock_auth(monkeypatch):
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
     monkeypatch.setattr("app.routes.tables.get_current_restaurant", mock_get_restaurant)
+    # Check endpoints first prove the order is the caller's (table_checks has no RLS).
+    monkeypatch.setattr("app.routes.tables.tr.db_get_table_orders_by_base_id",
+                        AsyncMock(side_effect=lambda oid, sede=None: [{"id": oid, "org_id": 1, "location_id": 1}]))
     return db_mod
 
 
@@ -486,6 +489,8 @@ def test_delete_check_endpoint_ok(client, monkeypatch):
     """DELETE /checks/{id} must return 200 if the check was open."""
     from app.services import database as db_mod
     db_mod = _mock_auth(monkeypatch)
+    # BASE-001-CHK-1 is one of BASE-001's checks.
+    monkeypatch.setattr(db_mod, "db_get_checks", AsyncMock(return_value=[{"id": "BASE-001-CHK-1"}]))
 
     async def mock_delete(check_id): return True
     monkeypatch.setattr(db_mod, "db_delete_open_check", mock_delete)
@@ -526,6 +531,7 @@ def test_get_check_ticket_endpoint(client, monkeypatch):
             "cufe": "a" * 96, "invoice_number": "FE0000001", "dian_status": "accepted",
         }
     monkeypatch.setattr(db_mod, "db_get_check_ticket", mock_get_ticket)
+    monkeypatch.setattr(db_mod, "db_get_checks", AsyncMock(return_value=[{"id": "BASE-001-CHK-1"}]))
 
     resp = client.get(
         "/api/table-orders/BASE-001/checks/BASE-001-CHK-1/ticket",
@@ -562,11 +568,16 @@ def _pay_check_mocks(monkeypatch, check_total: float):
     """
     from app.services import database as db_mod
 
+    # Check endpoints first prove the order is the caller's (table_checks has no RLS).
+    monkeypatch.setattr("app.routes.tables.tr.db_get_table_orders_by_base_id",
+                        AsyncMock(side_effect=lambda oid, sede=None: [{"id": oid, "org_id": 1, "location_id": 1}]))
+
     async def mock_verify_token(token: str):
         return "caja_user"
 
     async def mock_get_user(username: str):
-        return {"username": "caja_user", "branch_id": 1, "role": "caja", "restaurant_name": "R"}
+        return {"username": "caja_user", "branch_id": 1, "org_id": 1, "location_id": 1,
+                "role": "caja", "restaurant_name": "R"}
 
     async def mock_get_restaurant(request):
         # features={} → dian_active=False, currency=None

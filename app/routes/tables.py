@@ -78,11 +78,13 @@ async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict
     if final_org_id:
         final_org_id = int(final_org_id)
         asyncio.create_task(trigger_nps(phone, final_org_id, rest_name))
-        with bypass_tenant_scope("farewell_and_nps: mark session nps_pending by phone"):
+        # This restaurant's rows only: under bypass a phone's checkout data
+        # was wiped at every restaurant the same phone had used.
+        with tenant_scope(final_org_id):
             await db.db_mark_session_nps_pending(phone, final_org_id)
-
-    with bypass_tenant_scope("farewell_and_nps: cleanup checkout data by phone"):
-        await db.db_cleanup_after_checkout(phone)
+            await db.db_cleanup_after_checkout(phone)
+    else:
+        log.warning("tables.farewell_without_org", table_id=table_id)
 
 # ── TABLES ────────────────────────────────────────────────────────────
 
@@ -149,22 +151,21 @@ async def create_table(request: Request):
     #   - tenant_scope() expects org_id (sets app.org_id GUC for RLS)
     #   - db_auto_create_table() expects the sede / branch id (used as
     #     branch_id and location_id columns on restaurant_tables)
-    org_id = restaurant["id"]
-    branch_location_id = restaurant.get("location_id") or org_id
-
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and ("owner" in user.get("role", "") or "admin" in user.get("role", "")):
-        candidate = int(branch_header)
-        # P0 fix (2026-09): verify the candidate location actually belongs to
-        # the caller's own org before trusting it — previously ANY existing
-        # location id was accepted with no ownership check, letting an
-        # owner/admin create a table under a DIFFERENT tenant's location id
-        # while scoped under their own org (cross-tenant corruption).
-        branch_rest = await db.db_get_restaurant_by_location_id(candidate)
-        if branch_rest and branch_rest.get("org_id") == org_id:
-            # Header value is the location_id of the selected sede. The
-            # org_id stays the same — all branches of a Matriz share one org.
-            branch_location_id = candidate
+    org_id = int(restaurant["id"])
+    # The sede comes from the same rule as every staff screen (header for
+    # owner/admin, own sede otherwise, the only sede of a one-sede org). It
+    # used to fall back to the ORG id as a location id, so a table created
+    # with no sede picked landed on sede #org_id — another customer's.
+    from app.routes.staff_ops import resolve_ops_sede  # noqa: PLC0415
+    with tenant_scope(org_id):
+        branch_location_id = await resolve_ops_sede(request, user, org_id)
+    if branch_location_id:
+        # A header can name any number: it must be one of this org's sedes.
+        branch_rest = await db.db_get_restaurant_by_location_id(branch_location_id)
+        if not branch_rest or int(branch_rest.get("org_id") or 0) != org_id:
+            branch_location_id = None
+    if not branch_location_id:
+        raise HTTPException(status_code=422, detail="Elige en la barra lateral la sede donde va la mesa.")
 
     with tenant_scope(org_id):
         new_table = await db.db_auto_create_table(branch_location_id)
@@ -573,8 +574,14 @@ async def dismiss_waiter_alert(request: Request, alert_id: int):
 async def force_delete_conversation(request: Request, phone: str):
     """Permite al mesero limpiar un chat manualmente (ej. pruebas atascadas)"""
     username = await require_auth(request)
+    user = await get_current_user(request)
+    org_id = int(user.get("org_id") or 0)
+    if not org_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     try:
-        with bypass_tenant_scope("force_delete_conversation: manual cleanup by staff"):
+        # Own org only (RLS): under bypass it wiped this phone's chats,
+        # carts and open sittings at EVERY restaurant.
+        with tenant_scope(org_id):
             await tr.db_force_delete_conversation_data(phone, username)
     except Exception as e:
         log.error("tables.chat_cleanup_failed", error=str(e))
@@ -780,7 +787,9 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
         restaurant = await get_current_restaurant(request)
         org_id = restaurant.get("org_id") or restaurant.get("id")
     except HTTPException:
-        org_id = user.get("restaurant_id") or user.get("branch_id")
+        # Never users.branch_id: it holds a SEDE id for staff, and this runs
+        # under bypass — a sede id equal to another org id would act on it.
+        org_id = user.get("org_id")
 
     # Without an org_id the repo's `is_admin + no filters` branch returns
     # EVERY tenant's table orders (it runs under bypass_tenant_scope below).
@@ -917,9 +926,19 @@ async def update_order_status(request: Request, order_id: str):
     if not user_roles.intersection(allowed_roles):
         raise HTTPException(status_code=403, detail=f"Tu rol no puede cambiar el estado a '{status}'")
     
-    with bypass_tenant_scope("update_order_status: order lookup by ID across branches"):
+    # The caller's own org (RLS) and sede. Every step below used to run
+    # under bypass_tenant_scope with no ownership check: a cook from any
+    # restaurant could move, invoice or close another restaurant's order.
+    org_id = int(user.get("org_id") or 0)
+    if not org_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    sede = resolve_sede_filter(request, user)
+    with tenant_scope(org_id):
         order_record = await tr.db_get_table_order_record(order_id)
-    if not order_record:
+    if not order_record or int(order_record.get("org_id") or 0) != org_id:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+    _order_sede = order_record.get("location_id") or order_record.get("branch_id")
+    if sede is not None and _order_sede is not None and int(_order_sede) != int(sede):
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
     order = order_record
@@ -929,7 +948,7 @@ async def update_order_status(request: Request, order_id: str):
     session_data = None
     if phone and phone != "manual":
         try:
-            with bypass_tenant_scope("update_order_status: session lookup by phone"):
+            with tenant_scope(org_id):
                 session = await tr.db_get_open_table_session_by_phone(phone)
             if session:
                 session_data = session
@@ -938,13 +957,13 @@ async def update_order_status(request: Request, order_id: str):
 
     if status == "generar_factura":
         base_id = order.get("base_order_id") or order_id
-        with bypass_tenant_scope("update_order_status: mark factura generada by order ID"):
+        with tenant_scope(org_id):
             await db.db_mark_invoice_generated(base_id)
         return {"success": True, "order_id": order_id, "status": "factura_generada"}
 
     if status in ("cerrar_mesa", "factura_entregada"):
         base_id = order.get("base_order_id") or order_id
-        with bypass_tenant_scope("update_order_status: close table bill by order ID"):
+        with tenant_scope(org_id):
             await db.db_close_table_bill(base_id)
         if phone and phone != "manual":
             await _farewell_and_nps(phone, order.get("table_id"), session_data, username)
@@ -952,7 +971,7 @@ async def update_order_status(request: Request, order_id: str):
 
     # ── C. ESTADOS NORMALES (Prep, Listo, Entregado) ──
     else:
-        with bypass_tenant_scope("update_order_status: normal status update by order ID"):
+        with tenant_scope(org_id):
             await db.db_update_table_order_status(order_id, status)
         # The diner's chat says "listo"/"entregado" (SSE table_order.updated →
         # diner-chat.js announceKitchenProgress).
@@ -998,7 +1017,7 @@ class ManualOrderRequest(BaseModel):
     total:      Decimal
     notes:      str = ""
     station:    str = "all"
-    branch_id:  int = None  # 🛡️ Added branch_id to the model
+    branch_id:  int = None  # ignored: the table decides the sede
     
 @router.get("/api/pos/menu")
 async def get_pos_menu(request: Request):
@@ -1108,8 +1127,12 @@ async def confirm_table_real(request: Request, table_id: str):
         restaurant = await get_current_restaurant(request)
         org_id = restaurant.get("org_id") or restaurant.get("id")
     except HTTPException:
-        org_id = user.get("restaurant_id") or user.get("branch_id")
+        # Never users.branch_id: it holds a SEDE id for staff, and this runs
+        # under bypass — a sede id equal to another org id would act on it.
+        org_id = user.get("org_id")
 
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No se pudo resolver tu organización")
     with bypass_tenant_scope("confirm_table_real: release pending validation orders"):
         released = await tr.db_confirm_table_real(table_id, org_id, username)
 
@@ -1151,8 +1174,12 @@ async def mark_table_ghost(request: Request, table_id: str):
         restaurant = await get_current_restaurant(request)
         org_id = restaurant.get("org_id") or restaurant.get("id")
     except HTTPException:
-        org_id = user.get("restaurant_id") or user.get("branch_id")
+        # Never users.branch_id: it holds a SEDE id for staff, and this runs
+        # under bypass — a sede id equal to another org id would act on it.
+        org_id = user.get("org_id")
 
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No se pudo resolver tu organización")
     with bypass_tenant_scope("mark_table_ghost: cancel orders and close sessions"):
         result = await tr.db_mark_table_ghost(table_id, org_id, username)
 
@@ -1199,7 +1226,10 @@ async def mark_table_ghost(request: Request, table_id: str):
 async def adjust_table_bill(request: Request, base_order_id: str):
     """Adjusts an invoice's items and total before charging (discounts, tip, etc.)"""
     await require_auth(request)
-    import json as _json
+    user = await get_current_user(request)
+    org_id = int(user.get("org_id") or 0)
+    if not org_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     body = await request.json()
     adjusted_items = body.get("items", [])
@@ -1208,7 +1238,9 @@ async def adjust_table_bill(request: Request, base_order_id: str):
     if new_total < 0:
         raise HTTPException(status_code=400, detail="El total no puede ser negativo")
 
-    with bypass_tenant_scope("adjust_table_bill: lookup by order ID, branch resolved upstream"):
+    # The caller's own org (RLS): under bypass any login could rewrite
+    # another restaurant's bill by its order id.
+    with tenant_scope(org_id):
         found = await tr.db_adjust_table_bill(base_order_id, adjusted_items, new_total)
     if not found:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
@@ -1222,15 +1254,26 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
     await require_auth(request)
     user = await get_current_user(request)
     
-    # 🛡️ BRANCH RESOLUTION
-    # If it comes in the body we use it, otherwise use the user's (waiter/admin)
-    branch_id = body.branch_id or user.get("branch_id")
-    
+    # The table decides the sede, inside the caller's own org. This used to
+    # trust body.branch_id or user["branch_id"] (an ORG id for owners) under
+    # bypass_tenant_scope: the comanda went to sede #org_id's kitchen, and a
+    # table id from another org was accepted and billed there.
+    org_id = int(user.get("org_id") or 0)
+    if not org_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    sede = resolve_sede_filter(request, user)
+
     order_id = f"pos-{str(uuid.uuid4())[:8]}"
     phone = "manual"
     total_d = quantize_money(to_decimal(body.total))
 
-    with bypass_tenant_scope("pos_manual_order: branch scoped via body.branch_id"):
+    with tenant_scope(org_id):
+        table = await tr.db_get_table_by_id(body.table_id)
+        if not table or int(table.get("org_id") or 0) != org_id:
+            raise HTTPException(status_code=404, detail="Mesa no encontrada")
+        branch_id = table.get("location_id") or table.get("branch_id")
+        if sede is not None and branch_id is not None and int(branch_id) != int(sede):
+            raise HTTPException(status_code=404, detail="Mesa no encontrada")
         base_id = await db.db_get_base_order_id(body.table_id)
 
         if base_id:
@@ -1256,6 +1299,7 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
             "sub_number":      sub_num,
             "station":         body.station,
             "branch_id":       branch_id,
+            "org_id":          org_id,
             "channel":         "pos",
             "waiter_staff_id": _waiter_staff_id,
         }
@@ -1400,11 +1444,27 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
     return {"success": True, "checks": result}
 
 
+async def _own_table_order(request: Request, base_order_id: str) -> tuple[dict, int]:
+    """(user, org_id) once base_order_id is a table order of the caller's
+    own org and sede; 404 otherwise. table_checks has no RLS, so the check
+    endpoints that read or change checks by id must prove this first."""
+    user = await get_current_user(request)
+    org_id = int(user.get("org_id") or 0)
+    if not org_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    sede = resolve_sede_filter(request, user)
+    with tenant_scope(org_id):
+        rows = await tr.db_get_table_orders_by_base_id(base_order_id, sede)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+    return user, org_id
+
+
 @router.get("/api/table-orders/{base_order_id}/checks")
 async def get_checks(request: Request, base_order_id: str):
     """Lists all of a table's checks with their fiscal data."""
-    await get_current_user(request)
-    with bypass_tenant_scope("get_checks: checks lookup by order ID across branches"):
+    await _own_table_order(request, base_order_id)
+    with bypass_tenant_scope("get_checks: checks of an order verified as the caller's"):
         checks = await db.db_get_checks(base_order_id)
     return {"checks": checks}
 
@@ -1515,6 +1575,9 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         if not await state_store.rate_limit_check(rl_key, max_requests=3, window_seconds=10):
             raise HTTPException(status_code=429, detail="Demasiadas solicitudes de pago. Intenta de nuevo en unos segundos.")
         restaurant = await get_current_restaurant(request)
+        # table_checks has no RLS: prove the order is this org's (and sede's)
+        # before claiming one of its checks by id.
+        await _own_table_order(request, base_order_id)
 
         # Ambient scope for the ENTIRE payment flow — this used to be 8 separate
         # `with tenant_scope(...)` blocks sprinkled through the function, and the
@@ -1724,8 +1787,8 @@ async def attach_checkout_proof(
     body: CheckoutProofBody,
 ):
     """Attaches proof of payment to checks with an awaiting_proof proposal."""
-    await get_current_user(request)
-    with bypass_tenant_scope("attach_proof: proof attachment by order ID across branches"):
+    await _own_table_order(request, base_order_id)
+    with bypass_tenant_scope("attach_proof: order verified as the caller's"):
         updated = await db.db_attach_proof(base_order_id, body.customer_phone, body.media_url)
     if not updated:
         raise HTTPException(status_code=404, detail="No hay propuesta awaiting_proof para este teléfono")
@@ -1761,9 +1824,10 @@ async def cancel_checkout_proposal(base_order_id: str, request: Request):
 @router.get("/api/table-orders/{base_order_id}/checks/{check_id}/ticket")
 async def get_check_ticket(request: Request, base_order_id: str, check_id: str):
     """Returns the check data for thermal receipt printing."""
-    await get_current_user(request)
-    with bypass_tenant_scope("get_check_ticket: ticket lookup by check ID across branches"):
-        ticket = await db.db_get_check_ticket(check_id)
+    await _own_table_order(request, base_order_id)
+    with bypass_tenant_scope("get_check_ticket: check of an order verified as the caller's"):
+        own_ids = {str(c.get("id")) for c in (await db.db_get_checks(base_order_id) or [])}
+        ticket = await db.db_get_check_ticket(check_id) if str(check_id) in own_ids else None
     if not ticket:
         raise HTTPException(status_code=404, detail="Check no encontrado")
     return ticket
@@ -1772,9 +1836,10 @@ async def get_check_ticket(request: Request, base_order_id: str, check_id: str):
 @router.delete("/api/table-orders/{base_order_id}/checks/{check_id}")
 async def delete_check(request: Request, base_order_id: str, check_id: str):
     """Elimina un check en estado 'open'. No afecta checks ya cobrados."""
-    await get_current_user(request)
-    with bypass_tenant_scope("delete_check: check deletion by ID across branches"):
-        deleted = await db.db_delete_open_check(check_id)
+    await _own_table_order(request, base_order_id)
+    with bypass_tenant_scope("delete_check: check of an order verified as the caller's"):
+        own_ids = {str(c.get("id")) for c in (await db.db_get_checks(base_order_id) or [])}
+        deleted = await db.db_delete_open_check(check_id) if str(check_id) in own_ids else False
     if not deleted:
         raise HTTPException(
             status_code=400,

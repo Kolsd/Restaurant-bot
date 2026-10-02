@@ -52,7 +52,7 @@ def _make_pool(conn):
 @pytest.mark.asyncio
 async def test_1_tenant_scoped_fn_calls_set_config():
     """
-    db_save_restaurant_settings inside tenant_scope(5) must trigger
+    db_merge_restaurant_features inside tenant_scope(5) must trigger
     SELECT set_config('app.restaurant_id', '5', true) on the connection.
     """
     conn = _make_conn()
@@ -60,11 +60,8 @@ async def test_1_tenant_scoped_fn_calls_set_config():
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(5):
-            from app.repositories.restaurant_repo import db_save_restaurant_settings
-            await db_save_restaurant_settings(
-                restaurant_id=5,
-                features={"timezone": "America/Bogota"},
-            )
+            from app.repositories.restaurant_repo import db_merge_restaurant_features
+            await db_merge_restaurant_features(5, {"timezone": "America/Bogota"})
 
     set_config_calls = [
         c for c in conn.fetchval.call_args_list
@@ -83,7 +80,7 @@ async def test_1_tenant_scoped_fn_calls_set_config():
 @pytest.mark.asyncio
 async def test_2_no_scope_raises_tenant_not_set_error():
     """
-    db_save_restaurant_settings without any tenant context must raise
+    db_merge_restaurant_features without any tenant context must raise
     TenantNotSetError immediately — pool.acquire must NOT be called.
     """
     conn = _make_conn()
@@ -91,11 +88,8 @@ async def test_2_no_scope_raises_tenant_not_set_error():
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with pytest.raises(TenantNotSetError):
-            from app.repositories.restaurant_repo import db_save_restaurant_settings
-            await db_save_restaurant_settings(
-                restaurant_id=5,
-                features={"timezone": "America/Bogota"},
-            )
+            from app.repositories.restaurant_repo import db_merge_restaurant_features
+            await db_merge_restaurant_features(5, {"timezone": "America/Bogota"})
 
     # Pool must not have been acquired — error raised before any DB call
     pool.acquire.assert_not_called()

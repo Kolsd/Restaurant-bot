@@ -1221,18 +1221,19 @@ def get_adapter(provider: str) -> BillingAdapter:
 # ══════════════════════════════════════════════════════════════════════
 
 async def get_billing_config(restaurant_id: int) -> Optional[dict]:
-    """Reads the restaurant's billing config from the DB.
+    """Reads the organization's billing config (`organizations.billing_config`).
 
-    Queries `organizations.billing_config` (mirrored from restaurants in 0037c).
-    The `restaurant_id` param may be an org_id (Matriz) or a location_id
-    (Branch) — both resolve to the same org_id via the locations table.
+    `restaurant_id` is an ORG id — every caller passes one, and billing_log
+    rows are written with it as org_id. It used to also match "the org that
+    owns location #id": `organizations` has no RLS, so org 5 could read (and
+    save_billing_config overwrite) the DIAN credentials of whichever org owns
+    sede 5.
     """
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """SELECT o.billing_config
                FROM organizations o
-               WHERE o.id = $1
-                  OR o.id = (SELECT org_id FROM locations WHERE id = $1)""",
+               WHERE o.id = $1""",
             restaurant_id,
         )
         if not row or not row["billing_config"]:
@@ -1246,8 +1247,7 @@ async def save_billing_config(restaurant_id: int, config: dict) -> None:
         await conn.execute(
             """UPDATE organizations
                SET billing_config = $1::jsonb
-               WHERE id = $2
-                  OR id = (SELECT org_id FROM locations WHERE id = $2)""",
+               WHERE id = $2""",
             json.dumps(config), restaurant_id,
         )
 

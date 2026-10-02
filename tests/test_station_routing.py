@@ -184,8 +184,9 @@ def test_pos_order_station_default_all(client, monkeypatch):
     """POST /api/pos/order without station= must use station='all'."""
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value="admin_test"))
-    monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "role": "owner"}))
+    monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1, "location_id": 1, "role": "owner"}))
     mock_save = AsyncMock()
+    monkeypatch.setattr("app.routes.tables.tr.db_get_table_by_id", AsyncMock(side_effect=lambda tid: {"id": tid, "org_id": 1, "location_id": 1}))
     monkeypatch.setattr(tables_routes.db, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(tables_routes.db, "db_save_table_order", mock_save)
     monkeypatch.setattr(tables_routes.db, "db_get_next_sub_number", AsyncMock(return_value=1))
@@ -209,8 +210,9 @@ def test_pos_order_station_bar(client, monkeypatch):
     """POST /api/pos/order with station='bar' must save it as 'bar'."""
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value="admin_test"))
-    monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "role": "owner"}))
+    monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1, "location_id": 1, "role": "owner"}))
     mock_save = AsyncMock()
+    monkeypatch.setattr("app.routes.tables.tr.db_get_table_by_id", AsyncMock(side_effect=lambda tid: {"id": tid, "org_id": 1, "location_id": 1}))
     monkeypatch.setattr(tables_routes.db, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(tables_routes.db, "db_save_table_order", mock_save)
     monkeypatch.setattr(tables_routes.db, "db_get_next_sub_number", AsyncMock(return_value=1))
@@ -234,9 +236,10 @@ def test_pos_order_station_kitchen_message(client, monkeypatch):
     """POST /api/pos/order with station='kitchen' gives a kitchen message."""
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value="admin_test"))
-    monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "role": "owner"}))
+    monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1, "location_id": 1, "role": "owner"}))
     monkeypatch.setattr(tables_routes.db, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(tables_routes.db, "db_save_table_order", AsyncMock())
+    monkeypatch.setattr("app.routes.tables.tr.db_get_table_by_id", AsyncMock(side_effect=lambda tid: {"id": tid, "org_id": 1, "location_id": 1}))
     monkeypatch.setattr(tables_routes.db, "db_get_next_sub_number", AsyncMock(return_value=1))
 
     payload = {

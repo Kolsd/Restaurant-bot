@@ -359,3 +359,69 @@ def test_nps_formula_matches_the_nps_page():
 def test_accounting_setup_says_dian_is_pro(client, made):
     me = _owner(client, made)
     assert client.get("/api/billing/config", headers=me["headers"]).json()["dian_in_plan"] is False
+
+
+# ── DIAN config: never another tenant's ─────────────────────────────────────
+
+def test_billing_config_never_reads_or_writes_the_org_owning_sede_n(client, made):
+    """get/save_billing_config also matched "the org that owns location #id";
+    organizations has no RLS, so org N read and overwrote the DIAN
+    credentials of whichever org owns sede N."""
+    me = _owner(client, made, plan="Pro")
+    other = _owner(client, made)
+    org_id = me["org_id"]
+    holder = _run(_q("SELECT org_id FROM locations WHERE id = $1", org_id))
+    if not holder:
+        _run(_q("INSERT INTO locations (id, org_id, name, address) VALUES ($1, $2, 'Ajena', 'Calle ajena 1')",
+                org_id, other["org_id"], fetch="none"))
+        holder = {"org_id": other["org_id"]}
+    victim = int(holder["org_id"])
+    if victim == org_id:
+        pytest.fail("sede #org_id belongs to this org: the collision under test was not built")
+    _run(_q("UPDATE organizations SET billing_config = $1::jsonb WHERE id = $2",
+            json.dumps({"provider": "ajeno", "api_key": "secreto-ajeno"}), victim, fetch="none"))
+
+    seen = client.get("/api/billing/config", headers=me["headers"]).json()
+    assert seen["configured"] is False, "read another org's DIAN config"
+    saved = client.post("/api/billing/config", headers=me["headers"], json={"provider": "alegra"})
+    assert saved.status_code == 200, saved.text
+    mine = client.get("/api/billing/config", headers=me["headers"]).json()
+    assert mine["config"]["provider"] == "alegra"
+    theirs = _run(_q("SELECT billing_config FROM organizations WHERE id = $1", victim))["billing_config"]
+    theirs = theirs if isinstance(theirs, dict) else json.loads(theirs)
+    assert theirs["provider"] == "ajeno", "overwrote another org's DIAN config"
+
+
+def test_a_new_table_lands_on_the_owners_own_sede(client, made):
+    """POST /api/tables fell back to the ORG id as a location id when no sede
+    was picked: the table went to sede #org_id, another customer's."""
+    me = _owner(client, made)
+    resp = client.post("/api/tables", headers=me["headers"])
+    assert resp.status_code == 200, resp.text
+    row = _run(_q("SELECT location_id, branch_id, org_id FROM restaurant_tables WHERE id = $1",
+                  resp.json()["table_id"], org_id=me["org_id"]))
+    assert (row["location_id"], row["branch_id"], row["org_id"]) == (me["location_id"], me["location_id"], me["org_id"])
+
+    # A header naming another customer's sede is ignored, never trusted.
+    other = _owner(client, made)
+    hdrs = dict(me["headers"], **{"X-Branch-ID": str(other["location_id"])})
+    resp = client.post("/api/tables", headers=hdrs)
+    assert resp.status_code == 422, resp.text
+
+
+def test_an_order_is_readable_only_by_its_own_restaurant(client, made):
+    """GET /orders/{id} compared a column orders no longer has, so the check
+    never ran: any login read any restaurant's order, phone and address."""
+    me = _owner(client, made)
+    other = _owner(client, made)
+    order_id = f"o-{uuid.uuid4().hex[:10]}"
+    _run(_q(
+        "INSERT INTO orders (id, phone, items, order_type, subtotal, total, org_id, location_id, address) "
+        "VALUES ($1, '+573001112233', '[]'::jsonb, 'delivery', 10000, 10000, $2, $3, 'Calle privada 1')",
+        order_id, me["org_id"], me["location_id"], fetch="none", org_id=me["org_id"],
+    ))
+    mine = client.get(f"/api/orders/{order_id}", headers=me["headers"])
+    assert mine.status_code == 200, mine.text
+    assert mine.json()["address"] == "Calle privada 1"
+    theirs = client.get(f"/api/orders/{order_id}", headers=other["headers"])
+    assert theirs.status_code == 404, theirs.text

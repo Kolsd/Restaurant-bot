@@ -5,7 +5,7 @@ import os
 from fastapi import APIRouter, Request, HTTPException
 from app.services import database as db
 from app.services.orders import cart_summary
-from app.routes.deps import require_auth, get_current_restaurant, get_current_user
+from app.routes.deps import require_auth, get_current_restaurant, get_current_user, resolve_sede_filter
 from app.services.logging import get_logger
 from app.repositories.orders_repo import record_wompi_event
 from app.services.tenant_context import tenant_scope, bypass_tenant_scope
@@ -43,15 +43,20 @@ async def list_orders(request: Request):
 @router.get("/orders/{order_id}")
 async def get_single_order(request: Request, order_id: str):
     user = await get_current_user(request)
-    # Pre-resolve order's tenant, then scope-check against the authenticated user.
-    with bypass_tenant_scope("get_single_order: pre-resolve order tenant"):
+    # Read inside the caller's own org (orders has FORCE RLS). This used to
+    # read under bypass and compare order["restaurant_id"] — a column orders
+    # no longer has — so the check never ran and any login could read any
+    # restaurant's order, customer phone and address included.
+    org_id = int(user.get("org_id") or 0)
+    if not org_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    sede = resolve_sede_filter(request, user)
+    with tenant_scope(org_id):
         order = await db.db_get_order(order_id)
-    if not order:
+    if not order or int(order.get("org_id") or 0) != org_id:
         raise HTTPException(status_code=404, detail="Order not found")
-    order_rid = order.get("restaurant_id")
-    user_rid = user.get("branch_id") or user.get("restaurant_id")
-    if order_rid and user_rid and int(order_rid) != int(user_rid):
-        raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
+    if sede is not None and order.get("location_id") is not None and int(order["location_id"]) != int(sede):
+        raise HTTPException(status_code=404, detail="Order not found")
     return order
 
 @router.post("/payment/wompi-webhook")

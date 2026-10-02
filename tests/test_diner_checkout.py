@@ -236,6 +236,11 @@ def _mock_pay_auth(monkeypatch, org_id: int):
         return {"id": org_id, "name": "Test Org", "features": {}}
     monkeypatch.setattr("app.routes.tables.get_current_restaurant", mock_get_restaurant)
 
+    # pay_check first proves the order is the caller's org (table_checks has no RLS).
+    async def mock_get_user(request):
+        return {"username": "caja_test", "org_id": org_id, "role": "owner"}
+    monkeypatch.setattr("app.routes.tables.get_current_user", mock_get_user)
+
 
 def _pay_check(client, base_order_id: str, check_id: str, amount: float, tip_amount: float = 0.0):
     return _post(

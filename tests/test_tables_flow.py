@@ -28,6 +28,11 @@ def _auth(monkeypatch, features=None):
         features = {"staff_tips": True, "dian_active": False}
     r = patch_auth(monkeypatch, features=features)
     monkeypatch.setattr(db_mod, "db_check_module", AsyncMock(return_value=True))
+    # POS orders read the table (inside the caller's org) to learn its sede.
+    # Check endpoints first prove the order is the caller's (table_checks has no RLS).
+    monkeypatch.setattr("app.routes.tables.tr.db_get_table_orders_by_base_id",
+                        AsyncMock(side_effect=lambda oid, sede=None: [{"id": oid, "org_id": 1, "location_id": 1}]))
+    monkeypatch.setattr("app.routes.tables.tr.db_get_table_by_id", AsyncMock(side_effect=lambda tid: {"id": tid, "org_id": 1, "location_id": 1}))
     return r
 
 
@@ -226,15 +231,27 @@ def test_pos_order_missing_table_id(client, monkeypatch):
     assert r.status_code == 422
 
 
-def test_pos_order_branch_id_from_body(client, monkeypatch):
-    """branch_id from the body is used if present."""
+def test_pos_order_sede_comes_from_the_table_not_the_body(client, monkeypatch):
+    """A body branch_id is ignored: the comanda goes to the table's own sede."""
     _auth(monkeypatch)
     monkeypatch.setattr(db_mod, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(db_mod, "db_save_table_order", AsyncMock())
     r = client.post("/api/pos/order", json=_pos_body(branch_id=5), headers=_HEADERS)
     assert r.status_code == 200
     saved = db_mod.db_save_table_order.call_args[0][0]
-    assert saved["branch_id"] == 5
+    assert saved["branch_id"] == 1
+    assert saved["org_id"] == 1
+
+
+def test_pos_order_rejects_another_orgs_table(client, monkeypatch):
+    _auth(monkeypatch)
+    monkeypatch.setattr("app.routes.tables.tr.db_get_table_by_id",
+                        AsyncMock(return_value={"id": "TBL-001", "org_id": 99, "location_id": 7}))
+    save = AsyncMock()
+    monkeypatch.setattr(db_mod, "db_save_table_order", save)
+    r = client.post("/api/pos/order", json=_pos_body(), headers=_HEADERS)
+    assert r.status_code == 404
+    save.assert_not_called()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -320,8 +337,12 @@ def test_get_table_orders_branch_header(client, monkeypatch):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _mock_pool_for_status(monkeypatch, order_row=None):
-    """Mock pool that returns order_row in fetchrow and runs execute."""
+    """Mock pool that returns order_row in fetchrow and runs execute.
+    The order belongs to the caller's org/sede (1) unless the row says otherwise."""
+    if order_row:
+        order_row = {"org_id": 1, "location_id": 1, **order_row}
     conn = MagicMock()
+    conn.fetchval = AsyncMock(return_value=None)  # tenant_connection's set_config
     conn.fetchrow = AsyncMock(return_value=make_row(order_row) if order_row else None)
     conn.execute = AsyncMock()
     pool = make_pool(conn)
@@ -446,6 +467,28 @@ def test_get_checks_returns_list(client, monkeypatch):
     assert len(r.json()["checks"]) == 1
 
 
+def test_get_checks_of_another_orgs_order_is_404(client, monkeypatch):
+    """The order is not the caller's (RLS returns no row): no checks leak."""
+    _auth(monkeypatch)
+    monkeypatch.setattr("app.routes.tables.tr.db_get_table_orders_by_base_id", AsyncMock(return_value=[]))
+    checks = AsyncMock(return_value=[_CHECK])
+    monkeypatch.setattr(db_mod, "db_get_checks", checks)
+    r = client.get("/api/table-orders/MESA-AJENA/checks", headers=_HEADERS)
+    assert r.status_code == 404
+    checks.assert_not_called()
+
+
+def test_update_order_status_of_another_org_is_404(client, monkeypatch):
+    _auth(monkeypatch)
+    _mock_pool_for_status(monkeypatch, {"phone": "manual", "table_name": "Mesa 9",
+                                        "base_order_id": "X", "table_id": "T", "org_id": 99})
+    upd = AsyncMock()
+    monkeypatch.setattr(db_mod, "db_update_table_order_status", upd)
+    r = client.post("/api/table-orders/X/status", json={"status": "listo"}, headers=_HEADERS)
+    assert r.status_code == 404
+    upd.assert_not_called()
+
+
 def test_get_checks_empty(client, monkeypatch):
     """Without checks → empty list."""
     _auth(monkeypatch)
@@ -532,9 +575,21 @@ def test_pay_check_insufficient_payment(client, monkeypatch):
 def test_delete_check_success(client, monkeypatch):
     """DELETE /checks/{id} → 200."""
     _auth(monkeypatch)
+    monkeypatch.setattr(db_mod, "db_get_checks", AsyncMock(return_value=[_CHECK]))  # chk-001 is this order's
     monkeypatch.setattr(db_mod, "db_delete_open_check", AsyncMock(return_value=True))
     r = client.delete("/api/table-orders/MESA-AA3E4A/checks/chk-001", headers=_HEADERS)
     assert r.status_code == 200
+
+
+def test_delete_check_of_another_order_is_refused(client, monkeypatch):
+    """A check id that is not one of this order's checks is never deleted."""
+    _auth(monkeypatch)
+    monkeypatch.setattr(db_mod, "db_get_checks", AsyncMock(return_value=[_CHECK]))
+    delete = AsyncMock(return_value=True)
+    monkeypatch.setattr(db_mod, "db_delete_open_check", delete)
+    r = client.delete("/api/table-orders/MESA-AA3E4A/checks/chk-ajeno", headers=_HEADERS)
+    assert r.status_code == 400
+    delete.assert_not_called()
 
 
 def test_delete_check_not_found(client, monkeypatch):

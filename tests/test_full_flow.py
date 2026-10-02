@@ -26,6 +26,14 @@ from app.services import database as db
 from tests.conftest import make_pool, make_row, patch_auth
 
 
+@pytest.fixture(autouse=True)
+def _orders_are_the_callers(monkeypatch):
+    """Check endpoints first prove the order is the caller's org (table_checks
+    has no RLS); these mock-pool flows are all about the caller's own orders.
+    The refusal for another org's order is tested in test_tables_flow.py."""
+    monkeypatch.setattr("app.routes.tables._own_table_order", AsyncMock(return_value=({}, 1)))
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -109,6 +117,8 @@ def _mock_delivery_order(
         "status": status,
         "payment_method": "nequi",
         "created_at": datetime.now(timezone.utc),
+        "org_id": 1,          # patch_auth's org: the caller's own order
+        "location_id": None,
     }
 
 
@@ -182,6 +192,7 @@ class TestKDSFlows:
                 "table_name": "Mesa 1",
                 "base_order_id": "order-abc",
                 "table_id": "table-1",
+                "org_id": 1, "location_id": 1,
             }
         )
 
@@ -209,6 +220,7 @@ class TestKDSFlows:
                 "table_name": "Mesa 2",
                 "base_order_id": "order-xyz",
                 "table_id": "table-2",
+                "org_id": 1, "location_id": 1,
             }
         )
 
@@ -295,7 +307,7 @@ class TestKDSFlows:
         """Sending an invalid status string → 400."""
         patch_auth(monkeypatch, role="owner")
         order_row = make_row(
-            {"phone": "manual", "table_name": "Mesa 1", "base_order_id": "o1", "table_id": "t1"}
+            {"phone": "manual", "table_name": "Mesa 1", "base_order_id": "o1", "table_id": "t1", "org_id": 1, "location_id": 1}
         )
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value=order_row)
@@ -374,6 +386,7 @@ class TestWaiterFlows:
         monkeypatch.setattr(db, "db_get_base_order_id", AsyncMock(return_value=None))
         monkeypatch.setattr(db, "db_get_next_sub_number", AsyncMock(return_value=1))
         monkeypatch.setattr(db, "db_save_table_order", AsyncMock())
+        monkeypatch.setattr("app.routes.tables.tr.db_get_table_by_id", AsyncMock(side_effect=lambda tid: {"id": tid, "org_id": 1, "location_id": 1}))
 
         resp = client.post(
             "/api/pos/order",
@@ -882,6 +895,7 @@ class TestEndToEndTableFlow:
     def test_waiter_takes_order_kds_receives_it(self, client, monkeypatch):
         """Waiter creates a POS order → it appears in KDS (station=kitchen)."""
         patch_auth(monkeypatch, role="mesero")
+        monkeypatch.setattr("app.routes.tables.tr.db_get_table_by_id", AsyncMock(side_effect=lambda tid: {"id": tid, "org_id": 1, "location_id": 1}))
         monkeypatch.setattr(db, "db_get_base_order_id", AsyncMock(return_value=None))
         monkeypatch.setattr(db, "db_get_next_sub_number", AsyncMock(return_value=1))
         saved = {}
@@ -910,7 +924,7 @@ class TestEndToEndTableFlow:
         """KDS marks the order en_preparacion."""
         patch_auth(monkeypatch, role="owner")
         order_row = make_row(
-            {"phone": "manual", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new"}
+            {"phone": "manual", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new", "org_id": 1, "location_id": 1}
         )
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value=order_row)
@@ -930,7 +944,7 @@ class TestEndToEndTableFlow:
         """KDS marks the order listo."""
         patch_auth(monkeypatch, role="owner")
         order_row = make_row(
-            {"phone": "manual", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new"}
+            {"phone": "manual", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new", "org_id": 1, "location_id": 1}
         )
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value=order_row)
@@ -1000,7 +1014,7 @@ class TestEndToEndTableFlow:
         """After cerrar_mesa, table transitions back to free (no active orders)."""
         patch_auth(monkeypatch, role="owner")
         order_row = make_row(
-            {"phone": "573001234567", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new"}
+            {"phone": "573001234567", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new", "org_id": 1, "location_id": 1}
         )
         session_row = {"org_id": 1}
 
@@ -1034,7 +1048,7 @@ class TestEndToEndTableFlow:
         """After cerrar_mesa for a WhatsApp customer, NPS is triggered."""
         patch_auth(monkeypatch, role="owner")
         order_row = make_row(
-            {"phone": "573001234567", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new"}
+            {"phone": "573001234567", "table_name": "Mesa 5", "base_order_id": "o-new", "table_id": "t-new", "org_id": 1, "location_id": 1}
         )
         session_row = {"org_id": 1}
 

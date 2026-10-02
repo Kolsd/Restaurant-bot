@@ -8,7 +8,8 @@ def mock_db_pool(monkeypatch):
     class MockConnection:
         async def fetchrow(self, query, *args):
             if "table_orders" in query:
-                return {"phone": "573000000000", "table_name": "Mesa 1", "base_order_id": "MESA-TEST"}
+                return {"phone": "573000000000", "table_name": "Mesa 1", "base_order_id": "MESA-TEST",
+                        "org_id": 1, "location_id": 1}
             if "table_sessions" in query:
                 return {"bot_number": "15556293573"}
             if "restaurants" in query:
@@ -39,6 +40,8 @@ def mock_db_pool(monkeypatch):
             "username": "caja_user",
             "restaurant_name": "Test",
             "branch_id": 1,
+            "org_id": 1,
+            "location_id": 1,
             "role": "caja",
         }),
     )
