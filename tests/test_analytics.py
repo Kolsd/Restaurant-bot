@@ -32,7 +32,7 @@ AUTH_HEADER = {"Authorization": f"Bearer {ADMIN_KEY}"}
 def _mock_session(valid_token: str = ADMIN_KEY):
     """Return an async mock for sessions_repo.get_session that accepts valid_token as superadmin."""
     async def _get_session(token):
-        return "superadmin" if token == valid_token else None
+        return "mesio:superadmin" if token == valid_token else None
     return AsyncMock(side_effect=_get_session)
 
 

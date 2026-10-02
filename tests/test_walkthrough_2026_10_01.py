@@ -425,3 +425,45 @@ def test_an_order_is_readable_only_by_its_own_restaurant(client, made):
     assert mine.json()["address"] == "Calle privada 1"
     theirs = client.get(f"/api/orders/{order_id}", headers=other["headers"])
     assert theirs.status_code == 404, theirs.text
+
+
+def test_settings_shows_the_owner_their_order_link(client, made):
+    """/pedir/{slug} was shown nowhere but the superadmin panel."""
+    me = _owner(client, made)
+    slug = _run(_q("SELECT slug FROM organizations WHERE id = $1", me["org_id"]))["slug"]
+    link = client.get("/api/settings", headers=me["headers"]).json()["order_link"]
+    assert link == {"slug": slug, "in_plan": True}
+    assert client.get(f"/pedir/{slug}").status_code == 200
+
+    esencial = _owner(client, made, plan="Esencial")
+    # Past the trial (trial = at least Restaurante), paying for Esencial.
+    _run(_q("UPDATE organizations SET comp_until = NOW() - INTERVAL '1 day', "
+            "paid_until = NOW() + INTERVAL '30 days' WHERE id = $1", esencial["org_id"], fetch="none"))
+    assert client.get("/api/settings", headers=esencial["headers"]).json()["order_link"]["in_plan"] is False
+
+
+def test_a_team_member_named_superadmin_is_not_mesios_superadmin(client, made):
+    """The superadmin session identity was the bare word "superadmin": an
+    owner who created a team admin with that username got the HQ panel."""
+    me = _owner(client, made)
+    resp = client.post("/api/team/invite", headers=me["headers"], json={
+        "username": "superadmin", "password": _PASSWORD, "role": "admin",
+        "branch_id": me["location_id"],
+    })
+    if resp.status_code == 200:  # the attack, end to end, if the guard ever goes
+        _, usernames = made
+        usernames.append("superadmin")
+        login = client.post("/api/auth/login", json={"username": "superadmin", "password": _PASSWORD})
+        if login.status_code == 200:
+            hq = client.get("/api/internal/admin/stats",
+                            headers={"Authorization": "Bearer " + login.json()["token"]})
+            assert hq.status_code != 200, "a restaurant's team admin opened Mesio's HQ"
+    assert resp.status_code == 400, resp.text
+    # Even a row that already exists with that name (created before the
+    # rule) cannot log in to an identity that reads as Mesio's.
+    from app.repositories.sessions_repo import username_is_allowed  # noqa
+    for bad in ("superadmin", "SuperAdmin ", "staff:1234", "mesio:superadmin"):
+        assert not username_is_allowed(bad)
+    assert username_is_allowed("owner.x@ejemplo.com")
+    # Real superadmin endpoints refuse an owner's token.
+    assert client.get("/api/internal/admin/stats", headers=me["headers"]).status_code == 403

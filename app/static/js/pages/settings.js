@@ -33,11 +33,35 @@ async function loadSettings() {
   }
 }
 
+// ── Public delivery/pickup link ───────────────────────────────────
+function renderOrderLink(link) {
+  var box = document.getElementById('orderLinkBox');
+  var off = document.getElementById('orderLinkOff');
+  if (!box || !off) return;
+  var url = link.slug ? window.location.origin + '/pedir/' + encodeURIComponent(link.slug) : '';
+  box.hidden = !(link.in_plan && url);
+  off.hidden = !!link.in_plan;
+  if (!url) return;
+  document.getElementById('orderLinkInput').value = url;
+  document.getElementById('orderLinkOpen').href = url;
+  document.getElementById('orderLinkCopy').onclick = function () {
+    var input = document.getElementById('orderLinkInput');
+    var done = function () { mesioToast('Link copiado', 'success'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done, function () { input.select(); });
+    } else {
+      input.select();
+    }
+  };
+}
+
 // ── Populate form ─────────────────────────────────────────────────
 function renderSettings(r) {
   // Header
   var nameEls = document.querySelectorAll('.js-rest-name');
   nameEls.forEach(function (el) { el.textContent = r.name || 'Tu Restaurante'; });
+
+  renderOrderLink(r.order_link || {});
 
   // Restaurant section
   setVal('inputName', r.name);

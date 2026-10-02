@@ -41,6 +41,7 @@
         <nav class="set-nav" aria-label="Secciones de configuración">
           <div class="set-nav-sub">General</div>
           <a class="set-nav-item active" href="#restaurante">🏠 Restaurante</a>
+          <a class="set-nav-item" href="#link-pedidos">🛵 Link de pedidos</a>
           <a class="set-nav-item" href="#horarios">🕒 Horarios</a>
           <div class="set-nav-sub">Operación</div>
           <a class="set-nav-item" href="#pagos">💳 Transferencias</a>
@@ -117,6 +118,21 @@
           </section>
 
           <!-- Hours -->
+          <!-- Public delivery/pickup link -->
+          <section id="link-pedidos" class="card set-sec">
+            <h2>Link de pedidos</h2>
+            <div class="s-sub">Tus clientes piden a domicilio o para recoger desde este link. Ponlo en tu Instagram, Google Maps o WhatsApp.</div>
+            <div id="orderLinkBox" class="field-group" hidden>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <input id="orderLinkInput" class="input" type="text" readonly style="flex:1;min-width:220px;" aria-label="Link de pedidos">
+                <button type="button" class="btn" id="orderLinkCopy">Copiar</button>
+                <a class="btn ghost" id="orderLinkOpen" target="_blank" rel="noopener">Abrir</a>
+              </div>
+              <div class="s-sub" style="margin-top:8px;">Cada sede activa sus domicilios y su zona en <a href="/locations">Sedes</a>.</div>
+            </div>
+            <div id="orderLinkOff" class="s-sub" hidden>Los pedidos a domicilio y para recoger vienen desde el plan Restaurante. <a href="/billing">Ver planes</a></div>
+          </section>
+
           <section id="horarios" class="card set-sec">
             <h2>Horarios de atención</h2>
             <div class="s-sub">Define cuándo el restaurante acepta pedidos por QR y delivery.</div>

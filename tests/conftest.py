@@ -52,7 +52,7 @@ def mock_superadmin_session():
     from unittest.mock import AsyncMock, patch
 
     async def _get_session(token):
-        return "superadmin" if token else None
+        return "mesio:superadmin" if token else None  # sessions_repo.SUPERADMIN_IDENTITY
 
     with patch("app.repositories.sessions_repo.get_session", AsyncMock(side_effect=_get_session)):
         yield

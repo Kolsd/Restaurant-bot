@@ -226,7 +226,7 @@ async def admin_login(payload: AdminLoginRequest, request: Request):
         raise HTTPException(status_code=429, detail="Demasiados intentos, intenta más tarde")
     if not compare_secret(payload.key, os.getenv("ADMIN_KEY", "")):
         raise HTTPException(status_code=403, detail="Clave incorrecta")
-    token = await sessions_repo.create_session("superadmin")
+    token = await sessions_repo.create_session(sessions_repo.SUPERADMIN_IDENTITY)
     return {"token": token}
 
 

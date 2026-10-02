@@ -250,6 +250,9 @@ async def team_invite(request: Request, body: TeamInviteRequest):
     branch = branch_check
 
     if body.role in ("admin", "gerente"):
+        from app.repositories.sessions_repo import username_is_allowed  # noqa: PLC0415
+        if not username_is_allowed(body.username):
+            raise HTTPException(status_code=400, detail="Ese nombre de usuario no se puede usar.")
         if not body.password:
             raise HTTPException(status_code=400, detail="Contraseña requerida para administrador o gerente")
         success = await db.db_create_user(

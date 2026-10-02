@@ -28,6 +28,20 @@ def _hash_token(raw: str) -> bytes:
     return hashlib.sha256(raw.encode()).digest()
 
 
+# Session identities share one table: a user's is their username, a staff
+# member's is "staff:<uuid>", Mesio's superadmin is SUPERADMIN_IDENTITY. The
+# ':' keeps them apart — usernames may never contain one (USERNAME_FORBIDDEN).
+# The superadmin identity used to be the bare word "superadmin", so an owner
+# who created a team admin with that username got Mesio's superadmin panel.
+SUPERADMIN_IDENTITY = "mesio:superadmin"
+USERNAME_FORBIDDEN = (":",)
+
+
+def username_is_allowed(username: str) -> bool:
+    name = (username or "").strip().lower()
+    return bool(name) and not any(ch in name for ch in USERNAME_FORBIDDEN) and name != "superadmin"
+
+
 async def create_session(username: str) -> str:
     """Generate a new session token, persist only its hash, return the raw token."""
     raw = secrets.token_hex(32)

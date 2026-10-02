@@ -986,18 +986,6 @@ async def db_get_session_by_id(session_id: int) -> dict | None:
         return _serialize(dict(row)) if row else None
 
 
-async def db_reopen_session(session_id: int) -> dict | None:
-    """# Requires active tenant_scope() or bypass_tenant_scope()."""
-    async with tenant_connection() as conn:
-        target = await conn.fetchrow("SELECT * FROM table_sessions WHERE id=$1 AND status='closed'", session_id)
-        if not target: return None
-        phone = target["phone"]
-        org_id = target["org_id"]
-        await conn.execute("UPDATE table_sessions SET status='closed', closed_at=NOW(), closed_by='superseded', closed_by_username='' WHERE phone=$1 AND org_id=$2 AND status='active'", phone, org_id)
-        row = await conn.fetchrow("UPDATE table_sessions SET status='active', closed_at=NULL, closed_by='', closed_by_username='', inactivity_warned=FALSE, last_activity=NOW(), summary=jsonb_build_object('reopened',true) WHERE id=$1 RETURNING *", session_id)
-        return _serialize(dict(row)) if row else None
-
-
 # ── table_checks ──────────────────────────────────────────────────────────────
 
 async def db_init_table_checks():
@@ -2253,40 +2241,6 @@ async def db_get_closed_sessions(hours: int, org_id: int | None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-async def db_get_session_with_history(session_id: int) -> tuple[dict | None, list]:
-    """Return (session_dict, conversation_history) for a table session.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    import json as _json
-    async with tenant_connection() as conn:
-        session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
-        if not session:
-            return None, []
-        conv = await conn.fetchrow(
-            "SELECT history FROM conversations WHERE phone = $1", session["phone"]
-        )
-    history: list = []
-    if conv and conv["history"]:
-        try:
-            history = _json.loads(conv["history"]) if isinstance(conv["history"], str) else conv["history"]
-        except Exception:
-            pass
-    return dict(session), history
-
-
-async def db_reopen_session(session_id: int) -> None:
-    """Clear closed_at / closed_by fields to re-open a table session.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with tenant_connection() as conn:
-        await conn.execute(
-            "UPDATE table_sessions SET closed_at = NULL, closed_by = NULL, closed_by_username = NULL WHERE id = $1",
-            session_id,
-        )
-
-
 async def db_get_recent_table_orders_by_phone(
     org_id: int,
     phone: str,
@@ -2330,25 +2284,6 @@ async def db_get_recent_table_orders_by_phone(
             "source": "table",
         })
     return results
-
-
-async def db_session_alert_waiter(session_id: int, message: str) -> bool:
-    """
-    Look up the table session and insert a waiter alert for its table.
-    Returns True if the session was found, False otherwise.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with tenant_connection() as conn:
-        session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
-        if session:
-            await conn.execute(
-                "INSERT INTO waiter_alerts (table_id, table_name, message, status, org_id) "
-                "VALUES ($1, $2, $3, 'active', NULLIF(current_setting('app.org_id', true), '')::bigint)",
-                session["table_id"], session["table_name"], message,
-            )
-            return True
-    return False
 
 
 # ── Capa 3: Anti-impostor (pending_table_validation) ────────────────────────

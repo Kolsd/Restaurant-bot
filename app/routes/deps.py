@@ -34,7 +34,7 @@ async def verify_superadmin(request: Request) -> None:
     if not token:
         raise HTTPException(status_code=401, detail="Autenticación requerida")
     identity = await sessions_repo.get_session(token)
-    if identity != "superadmin":
+    if identity != sessions_repo.SUPERADMIN_IDENTITY:
         raise HTTPException(status_code=403, detail="Acceso exclusivo para el equipo Mesio")
 
 

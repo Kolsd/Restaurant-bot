@@ -714,6 +714,11 @@ async def db_create_user(username: str, password_hash: str, restaurant_name: str
     migrated to the explicit columns yet.
     """
     import asyncpg  # noqa: PLC0415
+    from app.repositories.sessions_repo import username_is_allowed  # noqa: PLC0415
+    # A username is a session identity: never one that reads as staff or as
+    # Mesio's superadmin (sessions_repo.SUPERADMIN_IDENTITY).
+    if not username_is_allowed(username):
+        return False
     pool = await _get_pool()
     async with pool.acquire() as conn:
         try:

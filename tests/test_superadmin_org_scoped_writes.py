@@ -106,7 +106,7 @@ def superadmin_session(monkeypatch):
     from app.repositories import sessions_repo
 
     async def _fake_get_session(token):
-        return "superadmin" if token else None
+        return "mesio:superadmin" if token else None  # sessions_repo.SUPERADMIN_IDENTITY
 
     monkeypatch.setattr(sessions_repo, "get_session", _fake_get_session)
 

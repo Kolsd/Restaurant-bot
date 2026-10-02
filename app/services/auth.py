@@ -169,6 +169,10 @@ async def login(username: str, password: str) -> dict:
         except Exception:
             _log.exception("auth.password.legacy_upgrade_failed", scope="user")
 
+    # Belt and braces for rows created before usernames were restricted: a
+    # user session must never carry a staff/superadmin-shaped identity.
+    if not sessions_repo.username_is_allowed(username):
+        return {"success": False, "error": _INVALID_CREDS}
     token = await sessions_repo.create_session(username.lower().strip())
 
     role = user.get("role", "owner")
