@@ -6,6 +6,8 @@ Mesio HQ — organization "ficha": the control-center view of one customer.
                                           flags with runbook, every sede
   GET /api/internal/hq/errors          → platform_errors by org (last N hours)
                                           + the newest groups across Mesio
+  GET /api/internal/hq/alerts          → hq_alerts (open first), ?status=&org_id=
+  POST /api/internal/hq/alerts/run     → evaluate the rules now ("Revisar ahora")
 
 Superadmin only. Read-only: support actions live in their own endpoints.
 """
@@ -62,3 +64,41 @@ async def platform_errors(hours: int = 24, _: None = Depends(verify_superadmin))
             for g in groups
         ],
     }
+
+
+def _alert_out(a: dict) -> dict:
+    from app.services import hq_snapshot  # noqa: PLC0415
+    _, _, where, fix = hq_snapshot.RUNBOOK.get(a["code"], ("", "", "", ""))
+    return {
+        "id": a["id"], "code": a["code"], "severity": a["severity"], "status": a["status"],
+        "title": a["title"], "count": a["count"], "where": where, "fix": fix,
+        "org_id": a["org_id"], "org_name": a.get("org_name"),
+        "location_id": a["location_id"], "location_name": a.get("location_name"),
+        "opened_at": a["opened_at"].isoformat() if a["opened_at"] else None,
+        "last_seen_at": a["last_seen_at"].isoformat() if a["last_seen_at"] else None,
+        "resolved_at": a["resolved_at"].isoformat() if a["resolved_at"] else None,
+        "emailed_at": a["emailed_at"].isoformat() if a["emailed_at"] else None,
+    }
+
+
+@router.get("/api/internal/hq/alerts")
+async def hq_alerts_list(status: str | None = None, org_id: int | None = None, limit: int = 100,
+                         _: None = Depends(verify_superadmin)):
+    from app.repositories.internal import hq_alerts_repo  # noqa: PLC0415
+    from app.services.email import delivers_for_real  # noqa: PLC0415
+    from app.services.hq_alerts import alert_email  # noqa: PLC0415
+    if status not in (None, "open", "resolved"):
+        raise HTTPException(status_code=422, detail="status debe ser open o resolved")
+    with bypass_tenant_scope("internal_hq: alert inbox across organizations"):
+        rows = await hq_alerts_repo.db_list_alerts(status=status, org_id=org_id, limit=max(1, min(limit, 500)))
+    return {
+        "alerts": [_alert_out(a) for a in rows],
+        "email": {"to": alert_email(), "configured": delivers_for_real()},
+    }
+
+
+@router.post("/api/internal/hq/alerts/run")
+async def hq_alerts_run(_: None = Depends(verify_superadmin)):
+    from app.services import hq_alerts  # noqa: PLC0415
+    with bypass_tenant_scope("internal_hq: evaluate alert rules on demand"):
+        return await hq_alerts.run_alert_rules()

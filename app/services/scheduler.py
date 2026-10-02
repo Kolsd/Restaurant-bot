@@ -235,6 +235,17 @@ async def _run_conversation_cleanup() -> None:
         log.exception("scheduler.conversation_cleanup_failed")
 
 
+async def _run_hq_alert_rules() -> None:
+    """Runs inside the tick's bypass_tenant_scope. A failure is logged and
+    the tick goes on: alerting must never stop the scheduler."""
+    import asyncpg  # noqa: PLC0415
+    from app.services import hq_alerts  # noqa: PLC0415
+    try:
+        await hq_alerts.run_alert_rules()
+    except (asyncpg.PostgresError, OSError) as exc:
+        log.warning("scheduler.hq_alerts_failed", error=type(exc).__name__)
+
+
 async def _run_error_log_purge() -> None:
     """Daily — Mesio HQ's platform_errors keeps 90 days (migration 0108).
     Runs inside the tick's bypass_tenant_scope."""
@@ -299,6 +310,14 @@ async def _scheduler_loop():
                 continue
 
             _reminder_counter += 1
+
+            # Mesio HQ alert rules every 5 minutes (services/hq_alerts.py):
+            # open / refresh / resolve hq_alerts, email new critical ones.
+            if _reminder_counter % 5 == 0:
+                await _run_hq_alert_rules()
+                if not await _renew_or_abort(leader_token):
+                    log.warning("scheduler.tick_aborted_after_hq_alerts")
+                    continue
 
             # Run deposit expiry every 10 minutes
             if _reminder_counter % 10 == 0:

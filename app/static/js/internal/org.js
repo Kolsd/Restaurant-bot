@@ -161,6 +161,42 @@
     renderSedeTabs();
     renderErrors();
     renderUsers();
+    loadAlerts();
+  }
+
+  function loadAlerts() {
+    api('GET', '/api/internal/hq/alerts?org_id=' + orgId + '&limit=30').then(function (res) {
+      var warn = $('org-alert-email');
+      if (!res.email.configured) {
+        warn.textContent = 'El email de alertas no está configurado (falta RESEND_API_KEY con EMAIL_BACKEND=resend): las críticas quedan pendientes y se envían a ' +
+          res.email.to + ' cuando se configure.';
+        warn.hidden = false;
+      } else {
+        warn.hidden = true;
+      }
+      var t = clear($('org-alerts'));
+      if (!res.alerts.length) {
+        var tr0 = el('tr'); tr0.appendChild(el('td', 'org-ok', '✓ Esta organización no ha tenido alertas.'));
+        t.appendChild(tr0); return;
+      }
+      var hr = el('tr');
+      ['Estado', 'Gravedad', 'Sede', 'Alerta', 'Abierta', 'Cerrada', 'Email'].forEach(function (h) { hr.appendChild(el('th', null, h)); });
+      t.appendChild(hr);
+      res.alerts.forEach(function (a) {
+        var tr = el('tr');
+        var st = el('td'); st.appendChild(badge(a.status === 'open' ? 'Abierta' : 'Resuelta', a.status === 'open' ? 'bad' : 'ok')); tr.appendChild(st);
+        var sev = SEVERITY[a.severity] || [a.severity, ''];
+        var sv = el('td'); sv.appendChild(badge(sev[0], sev[1])); tr.appendChild(sv);
+        tr.appendChild(el('td', 'org-muted', a.location_name || '—'));
+        tr.appendChild(el('td', null, a.title + (a.count ? ' (' + a.count + ')' : '')));
+        tr.appendChild(el('td', null, ago(a.opened_at)));
+        tr.appendChild(el('td', null, a.resolved_at ? ago(a.resolved_at) : '—'));
+        tr.appendChild(el('td', 'org-muted', a.emailed_at ? 'Enviado' : (a.severity === 'critical' ? 'Pendiente' : 'No aplica')));
+        t.appendChild(tr);
+      });
+    }).catch(function (e) {
+      clear($('org-alerts')).appendChild(el('tr')).appendChild(el('td', 'org-error', 'No se pudo cargar: ' + e.message));
+    });
   }
 
   function renderErrors() {
@@ -477,6 +513,15 @@
   }
 
   $('org-refresh').addEventListener('click', load);
+  $('org-alerts-run').addEventListener('click', function () {
+    var b = $('org-alerts-run');
+    b.disabled = true;
+    api('POST', '/api/internal/hq/alerts/run').then(function (r) {
+      toast('Revisado: ' + r.opened + ' nuevas, ' + r.resolved + ' resueltas');
+      load();
+    }).catch(function (e) { showError('No se pudieron revisar las alertas: ' + e.message); })
+      .then(function () { b.disabled = false; });
+  });
   load();
   setInterval(function () { if (!document.hidden) load(); }, 60000);
 })();

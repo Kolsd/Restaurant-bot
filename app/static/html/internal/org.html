@@ -34,6 +34,16 @@
     </section>
 
     <section class="org-card">
+      <div class="org-row-between">
+        <h2 class="org-h2">Historial de alertas</h2>
+        <button type="button" class="org-btn org-btn-sm" id="org-alerts-run">Revisar ahora</button>
+      </div>
+      <div class="org-hint">Las reglas corren cada 5 minutos: una alerta se abre cuando aparece el problema y se cierra sola cuando desaparece. Las críticas llegan por email una sola vez.</div>
+      <div id="org-alert-email" class="org-error" hidden></div>
+      <div class="org-table-wrap"><table class="org-table" id="org-alerts"></table></div>
+    </section>
+
+    <section class="org-card">
       <h2 class="org-h2">Negocio</h2>
       <div id="org-business" class="org-kpis"></div>
     </section>

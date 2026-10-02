@@ -81,6 +81,11 @@ RUNBOOK: dict[str, tuple[str, str, str, str]] = {
         "Staff App › Domicilios › Entregados.",
         "Marcar pagado (efectivo, tarjeta o transferencia); si no, esas ventas no salen en el dashboard.",
     ),
+    "quiet_during_hours": (
+        "critical", "Sede abierta sin pedidos hace 3 horas (normalmente vende)",
+        "Ficha › sede: último pedido, último comensal. Probar el QR de una mesa y /pedir desde el celular.",
+        "Llamar a la sede YA: ¿caída de internet, QR dañado, cerraron sin avisar, el personal dejó de usar Mesio? Si es la app, revisar Ficha › Errores.",
+    ),
     "no_activity_7d": (
         "warning", "La sede no ha tenido pedidos en 7 días",
         "Ficha › sede: último pedido, último comensal, últimos inicios de sesión del staff.",
@@ -173,7 +178,39 @@ def _flag(code: str, count: int | None = None) -> dict:
 _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 
 
-def _sede_flags(m: dict, active: bool) -> list[dict]:
+_DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _parse_hhmm(v) -> time | None:
+    try:
+        h, mi = str(v).split(":")[:2]
+        return time(int(h), int(mi))
+    except (ValueError, TypeError):
+        return None
+
+
+def open_long_enough(opening_hours, tz_name: str | None, now: datetime | None = None,
+                     hours: int = 3) -> bool:
+    """True when the sede's posted hours say it has been open at least
+    `hours` today (and is still open). Unknown/absent hours → False: the
+    rule never fires on a guess."""
+    hours_cfg = _json(opening_hours)
+    tz = _tz(tz_name)
+    local = (now or datetime.now(timezone.utc)).astimezone(tz)
+    day = hours_cfg.get(_DAYS[local.weekday()]) or {}
+    if not isinstance(day, dict) or day.get("closed"):
+        return False
+    start, end = _parse_hhmm(day.get("open")), _parse_hhmm(day.get("close"))
+    if not start or not end:
+        return False
+    opened = datetime.combine(local.date(), start, tzinfo=tz)
+    closes = datetime.combine(local.date(), end, tzinfo=tz)
+    if closes <= opened:  # closes after midnight
+        closes += timedelta(days=1)
+    return opened + timedelta(hours=hours) <= local < closes
+
+
+def _sede_flags(m: dict, active: bool, loc: dict | None = None) -> list[dict]:
     if not active:
         return []
     t, w, fl, ck, nps, mod = m["table"], m["web"], m["floor"], m["checks"], m["nps"], m["modules"]
@@ -194,6 +231,11 @@ def _sede_flags(m: dict, active: bool) -> list[dict]:
         flags.append(_flag("delivered_unpaid", w["delivered_unpaid"]))
     if not fl["tables"]:
         flags.append(_flag("no_tables"))
+    orders_7d = (t["rounds_7d"] or 0) + (w.get("orders_7d") or 0)
+    last = max([x for x in (t["last_round_at"], w["last_order_at"]) if x], default=None)
+    if (loc and orders_7d >= 10 and open_long_enough(loc.get("opening_hours"), loc.get("timezone"))
+            and (last is None or last < datetime.utcnow() - timedelta(hours=3))):  # noqa: DTZ003 — naive UTC columns
+        flags.append(_flag("quiet_during_hours"))
     if not t["rounds_7d"] and not (w["last_order_at"] and w["last_order_at"] > datetime.utcnow() - timedelta(days=7)):  # noqa: DTZ003 — naive UTC column
         flags.append(_flag("no_activity_7d"))
     if t["kitchen_samples"] >= 5 and _num(t["kitchen_p90_min"]) > 30:
@@ -223,7 +265,7 @@ def _sede_view(loc: dict, m: dict) -> dict:
         "timezone": loc.get("timezone") or DEFAULT_TZ,
         "address": loc.get("address") or "",
         "phone": loc.get("phone") or "",
-        "flags": _sede_flags(m, bool(loc["active"])),
+        "flags": _sede_flags(m, bool(loc["active"]), loc),
         "operation": {
             "orders_today": (t["rounds_today"] or 0) + (w["orders_today"] or 0),
             "sales_today": _num(t["sales_today"]) + _num(w["sales_today"]),       # JSON boundary

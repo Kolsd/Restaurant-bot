@@ -164,7 +164,9 @@ def test_close_sessions_of_a_user_and_of_a_staff_member(client, made, hq):
     assert r.json()["sessions_closed"] == 1
 
 
-def test_password_reset_sends_the_owner_their_own_code(client, made, hq):
+def test_password_reset_sends_the_owner_their_own_code(client, made, hq, monkeypatch):
+    from app.services import email as email_mod
+    monkeypatch.setattr(email_mod, "delivers_for_real", lambda: True)  # a real provider is configured
     me = _owner(client, made)
     org = me["org_id"]
     owner = _run(_q("SELECT username FROM users WHERE org_id = $1", org))["username"]
@@ -192,3 +194,13 @@ def test_every_action_needs_a_reason_and_superadmin(client, made, hq):
     r = client.post(f"/api/internal/hq/support/{me['org_id']}/unpause", json={"reason": REASON}, headers=me["headers"])
     assert r.status_code == 403
     assert _audit(me["org_id"], "unpause") == []
+
+
+def test_password_reset_says_so_when_email_is_not_configured(client, made, hq):
+    """Console backend = the code is only logged: the HQ must not claim it was sent."""
+    me = _owner(client, made)
+    owner = _run(_q("SELECT username FROM users WHERE org_id = $1", me["org_id"]))["username"]
+    r = _post(client, me["org_id"], "password-reset", {"username": owner, "reason": REASON})
+    assert r.status_code == 502
+    assert "RESEND_API_KEY" in r.json()["detail"]
+    assert _audit(me["org_id"], "password_reset")[0]["payload"]["email_sent"] is False

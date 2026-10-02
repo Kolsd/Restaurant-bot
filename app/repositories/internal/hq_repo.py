@@ -88,6 +88,7 @@ async def db_hq_location_metrics(org_id: int, location_id: int, today_start: dat
         web = await conn.fetchrow(
             """SELECT
                  COUNT(*) FILTER (WHERE created_at >= $3)                          AS orders_today,
+                 COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')   AS orders_7d,
                  COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')  AS orders_30d,
                  COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days' AND order_type ILIKE 'domicilio%') AS delivery_30d,
                  COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days' AND order_type NOT ILIKE 'domicilio%') AS pickup_30d,

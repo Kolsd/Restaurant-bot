@@ -142,6 +142,19 @@ async def _send_sendgrid(to: str, subject: str, html: str, text: "str | None") -
     return await _send_console(to, subject, html, text)
 
 
+def delivers_for_real() -> bool:
+    """True only when a real provider is configured with its key. The console
+    backend (and resend/sendgrid without a key, which fall back to it) only
+    LOGS the message and still returns True from send_email — callers that
+    must not claim "sent" (Mesio HQ alerts, the HQ password reset) check this."""
+    backend = os.getenv("EMAIL_BACKEND", "console").strip().lower()
+    if backend == "resend":
+        return bool(os.getenv("RESEND_API_KEY", ""))
+    if backend == "sendgrid":
+        return bool(os.getenv("SENDGRID_API_KEY", ""))
+    return False
+
+
 async def send_email(to: str, subject: str, html: str, text: "str | None" = None) -> bool:
     """Send a transactional email. Never raises — returns True/False.
 

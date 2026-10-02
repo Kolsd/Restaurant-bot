@@ -359,6 +359,36 @@ async def _fetch_plan_cap_warnings() -> list[dict]:
 
 # ── Aggregator ────────────────────────────────────────────────────────────────
 
+_HQ_ALERT_SEVERITY = {"critical": "critical", "warning": "high"}
+
+
+async def _fetch_hq_alerts() -> list[dict]:
+    """Open Mesio HQ alerts (migration 0109) — the restaurants' health flags
+    the scheduler keeps in step. Each one links to the org's ficha."""
+    try:
+        from app.repositories.internal.hq_alerts_repo import db_list_alerts  # noqa: PLC0415
+        rows = await db_list_alerts(status="open", org_id=None, limit=100)
+    except Exception:
+        log.exception("notifications_repo.hq_alerts_error")
+        return []
+    out = []
+    for a in rows:
+        org = a.get("org_name") or f"Org #{a['org_id']}"
+        sede = a.get("location_name")
+        out.append({
+            "id": f"hq_alert:{a['id']}",
+            "type": "hq_alert",
+            "severity": _HQ_ALERT_SEVERITY.get(a["severity"], "medium"),
+            "title": f"{org}{' · ' + sede if sede else ''}: {a['title']}",
+            "detail": a.get("detail") or "",
+            "url": f"/internal/org/{a['org_id']}",
+            "created_at": a["opened_at"].strftime("%Y-%m-%dT%H:%M:%SZ") if a.get("opened_at") else _now_iso(),
+            "count": a.get("count") or 1,
+            "tenant_id": a["org_id"],
+        })
+    return out
+
+
 async def db_get_notifications() -> list[dict]:
     """
     Aggregate operational notifications from all sources.
@@ -379,6 +409,7 @@ async def db_get_notifications() -> list[dict]:
         _fetch_suspended_tenants(),
         _fetch_plan_cap_warnings(),
         _fetch_billing_attention(),
+        _fetch_hq_alerts(),
         return_exceptions=False,  # each source already catches its own exceptions
     )
 
@@ -386,21 +417,12 @@ async def db_get_notifications() -> list[dict]:
     for source_list in results_per_source:
         combined.extend(source_list)
 
-    # Sort: severity priority first, then created_at descending (stable)
-    combined.sort(
-        key=lambda n: (
-            _SEVERITY_ORDER.get(n.get("severity", "low"), 99),
-            # negate string sort by making it negative index — just use reverse on second key
-            n.get("created_at", ""),
-        )
-    )
-    # created_at is ISO string so lexicographic sort is chronological;
-    # we want most recent first within the same severity — reverse the secondary key
-    combined.sort(
-        key=lambda n: (
-            _SEVERITY_ORDER.get(n.get("severity", "low"), 99),
-        )
-    )
+    # Newest first, then (stable sort) by severity: within each severity the
+    # most recent stays on top. The old code sorted twice by severity only,
+    # so the order followed the source list and a fresh critical alert could
+    # fall past the 50-item cap.
+    combined.sort(key=lambda n: n.get("created_at", ""), reverse=True)
+    combined.sort(key=lambda n: _SEVERITY_ORDER.get(n.get("severity", "low"), 99))
 
     return combined[:50]
 

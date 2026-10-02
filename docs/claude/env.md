@@ -39,6 +39,7 @@ Critical environment variables:
   EMAIL_BACKEND,                # (optional, default console) console|resend. console logs without sending; resend without RESEND_API_KEY falls back to console with a warning.
   RESEND_API_KEY,               # (optional) Transactional email provider (password reset, weekly report, CRM welcome).
   EMAIL_FROM,                   # (optional) Sender for transactional emails.
+  HQ_ALERT_EMAIL,               # (optional, default miguel@mesioai.com) Where Mesio HQ critical alerts go. Needs EMAIL_BACKEND=resend + RESEND_API_KEY: with the console backend alerts stay pending (never claimed sent).
   TURNSTILE_SECRET,             # (optional) Cloudflare Turnstile server-side secret, verified on POST /api/diner/session for order_mode delivery/pickup only (never the dine-in QR path). Unset = verification is a no-op (local/test); logged once at startup, not per request.
   TURNSTILE_SITE_KEY,           # (optional) Cloudflare Turnstile site key — used by the (not-yet-built) delivery/pickup checkout frontend to render the widget. Unused by the backend itself.
 ```
